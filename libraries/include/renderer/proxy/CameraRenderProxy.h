@@ -225,6 +225,7 @@ private:
 
     unsigned pending_sample_count_ = 0;
     unsigned cumulated_sample_count_ = 0;
+    unsigned next_cumulative_sample_ = 0;
     unsigned sub_pixel_count_;
     unsigned actual_sample_per_pixel_;
 

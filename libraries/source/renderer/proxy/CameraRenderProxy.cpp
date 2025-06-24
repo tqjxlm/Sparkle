@@ -316,8 +316,7 @@ void CameraRenderProxy::DenoisePass(const RenderConfig &config, const Vector2UIn
 
     const std::vector<std::vector<Vector4>> &pass_input = config.spatial_denoise ? ping_pong_buffer_ : gbuffer_.color;
 
-    auto next_cumulative_sample = cumulated_sample_count_ + pending_sample_count_;
-    auto moving_average = static_cast<float>(cumulated_sample_count_) / static_cast<float>(next_cumulative_sample);
+    auto moving_average = static_cast<float>(cumulated_sample_count_) / static_cast<float>(next_cumulative_sample_);
 
     // temporal denoise
     TaskManager::ParallelFor(0u, image_size_.y(), [this, &pass_input, moving_average](unsigned j) {
@@ -396,10 +395,11 @@ void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera,
     if (pixels_dirty_)
     {
         cumulated_sample_count_ = 0;
+        next_cumulative_sample_ = 0;
     }
 
-    cumulated_sample_count_ =
-        std::min(static_cast<unsigned>(config.max_sample_per_pixel), cumulated_sample_count_ + pending_sample_count_);
+    cumulated_sample_count_ = std::min(static_cast<unsigned>(config.max_sample_per_pixel), next_cumulative_sample_);
+    next_cumulative_sample_ = cumulated_sample_count_ + pending_sample_count_;
 
     pending_sample_count_ = 0;
 }
