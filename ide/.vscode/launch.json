@@ -1,0 +1,21 @@
+{
+    "configurations": [
+        {
+            "name": "(lldb) Launch",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/build_system/glfw/output/sparkle",
+            "args": [
+                "--pipeline",
+                "forward"
+            ],
+            "relativePathBase": "${workspaceFolder}/build_system/glfw/output",
+            "cwd": "${workspaceFolder}/build_system/glfw/output",
+            "initCommands": [
+                "breakpoint set -n abort",
+                "breakpoint set -n _exit"
+            ]
+        }
+    ],
+    "version": "2.0.0"
+}

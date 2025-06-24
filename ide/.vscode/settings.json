@@ -1,0 +1,37 @@
+{
+    "clangd.arguments": [
+        "--all-scopes-completion",
+        "--completion-style=detailed",
+        "--pch-storage=disk",
+        "--header-insertion=iwyu",
+        "--log=error",
+        "--j=8",
+        "--background-index",
+        "--compile-commands-dir=${workspaceFolder}/build_system/glfw/output/"
+        // "--compile-commands-dir=${workspaceFolder}/build_system/android/output/tools/debug/arm64-v8a"
+        // "--compile-commands-dir=${workspaceFolder}/build_system/macos/clangd/"
+        // "--compile-commands-dir=${workspaceFolder}/build_system/ios/clangd/"
+    ],
+    "clangd.path": "/opt/homebrew/opt/llvm/bin/clangd",
+    // "clangd.path": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clangd.exe",
+    "[cpp]": {
+        "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+    },
+    "[objective-cpp]": {
+        "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+    },
+    "[hlsl]": {
+        "editor.defaultFormatter": "seaube.clangformat"
+    },
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.autopep8"
+    },
+    "editor.formatOnSave": true,
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clang-format.executable": "/opt/homebrew/opt/llvm/bin/clang-format",
+    // "clang-format.executable": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-format.exe",
+    "C_Cpp.codeAnalysis.clangTidy.enabled": true,
+    "C_Cpp.codeAnalysis.clangTidy.path": "/opt/homebrew/opt/llvm/bin/clang-tidy",
+    // "C_Cpp.codeAnalysis.clangTidy.path": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-tidy.exe",
+    "C_Cpp.codeAnalysis.clangTidy.useBuildPath": true
+}

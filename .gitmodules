@@ -1,0 +1,57 @@
+[submodule "thirdparty/stb"]
+	path = thirdparty/stb
+	url = https://github.com/nothings/stb.git
+[submodule "thirdparty/argparse"]
+	path = thirdparty/argparse
+	url = https://github.com/p-ranav/argparse.git
+[submodule "thirdparty/bvh"]
+	path = thirdparty/bvh
+	url = https://github.com/madmann91/bvh.git
+[submodule "thirdparty/thread-pool"]
+	path = thirdparty/thread-pool
+	url = https://github.com/bshoshany/thread-pool.git
+[submodule "thirdparty/spdlog"]
+	path = thirdparty/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "thirdparty/vma"]
+	path = thirdparty/vma
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+[submodule "thirdparty/tinygltf"]
+	path = thirdparty/tinygltf
+	url = https://github.com/syoyo/tinygltf.git
+[submodule "thirdparty/eigen"]
+	path = thirdparty/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "thirdparty/volk"]
+	path = thirdparty/volk
+	url = https://github.com/zeux/volk.git
+[submodule "thirdparty/fast_float"]
+	path = thirdparty/fast_float
+	url = https://github.com/fastfloat/fast_float.git
+[submodule "thirdparty/json"]
+	path = thirdparty/json
+	url = https://github.com/nlohmann/json.git
+[submodule "thirdparty/imgui"]
+	path = thirdparty/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "thirdparty/spirv_reflect"]
+	path = thirdparty/spirv_reflect
+	url = https://github.com/KhronosGroup/SPIRV-Reflect.git
+[submodule "thirdparty/tracy"]
+	path = thirdparty/tracy
+	url = https://github.com/wolfpld/tracy.git
+[submodule "thirdparty/magic_enum"]
+	path = thirdparty/magic_enum
+	url = https://github.com/Neargye/magic_enum.git
+[submodule "thirdparty/mimalloc"]
+	path = thirdparty/mimalloc
+	url = https://github.com/microsoft/mimalloc.git
+[submodule "thirdparty/xoshiro_cpp"]
+	path = thirdparty/xoshiro_cpp
+	url = https://github.com/Reputeless/Xoshiro-cpp.git
+[submodule "thirdparty/hash-library"]
+	path = thirdparty/hash-library
+	url = https://github.com/lazy-eggplant/hash-library.git
+[submodule "thirdparty/tinyusdz"]
+	path = thirdparty/tinyusdz
+	url = https://github.com/lighttransport/tinyusdz.git

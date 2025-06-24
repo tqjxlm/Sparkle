@@ -1,0 +1,215 @@
+import os
+import sys
+import subprocess
+import shutil
+
+from build_system.utils import run_command_with_logging
+
+SCRIPT = os.path.abspath(__file__)
+SCRIPTPATH = os.path.dirname(SCRIPT)
+
+platform_args = "-DPLATFORM=OS64 -DCMAKE_SYSTEM_NAME=iOS -DDEPLOYMENT_TARGET=18.0 -DENABLE_BITCODE=FALSE"
+toolchain_args = f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"
+
+
+def clean_output_directory(output_dir):
+    """Clean the output directory if it exists."""
+    if os.path.exists(output_dir):
+        print(f"Cleaning output directory: {output_dir}")
+        shutil.rmtree(output_dir)
+
+
+def configure_for_clangd(args):
+    """
+    Configure CMake for clangd in 'clangd' directory for iOS.
+    """
+    output_dir = os.path.join(SCRIPTPATH, "clangd")
+
+    if args.get("clean", False):
+        clean_output_directory(output_dir)
+
+    os.makedirs(output_dir, exist_ok=True)
+    os.chdir(output_dir)
+
+    compiler_args = "-D CMAKE_C_COMPILER=/usr/bin/clang -D CMAKE_CXX_COMPILER=/usr/bin/clang++"
+    generator_args = f"-D CMAKE_BUILD_TYPE={args['config']}"
+
+    cmake_cmd = [
+        args["cmake_executable"],
+        "../../..",
+        generator_args,
+        toolchain_args,
+        args["cmake_options"],
+        compiler_args,
+        platform_args,
+    ]
+    cmake_cmd_flat = []
+    for part in cmake_cmd:
+        if part:
+            cmake_cmd_flat.extend(part.split())
+
+    print("Configuring CMake for clangd (iOS) with command:")
+    print(" ".join(cmake_cmd_flat))
+    result = subprocess.run(cmake_cmd_flat)
+    if result.returncode != 0:
+        print("CMake configure failed.")
+        sys.exit(1)
+
+    print(f"Configuration complete in {output_dir}")
+
+
+def generate_project(args):
+    """
+    Generate Xcode project for iOS in 'project' directory (no build).
+    """
+    output_dir = os.path.join(SCRIPTPATH, "project")
+
+    if args.get("clean", False):
+        clean_output_directory(output_dir)
+
+    os.makedirs(output_dir, exist_ok=True)
+    os.chdir(output_dir)
+
+    team_id = os.environ.get("APPLE_DEVELOPER_TEAM_ID")
+    if not team_id:
+        print("Error: APPLE_DEVELOPER_TEAM_ID environment variable is not set. The app will not be signed.")
+        print("Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
+        sys.exit(1)
+
+    generator_args = "-G Xcode"
+
+    cmake_cmd = [
+        args["cmake_executable"],
+        "../../..",
+        generator_args,
+        toolchain_args,
+        args["cmake_options"],
+        platform_args,
+    ]
+    cmake_cmd_flat = []
+    for part in cmake_cmd:
+        if part:
+            cmake_cmd_flat.extend(part.split())
+
+    print("Generating iOS Xcode project with command:")
+    print(" ".join(cmake_cmd_flat))
+    result = subprocess.run(cmake_cmd_flat)
+    if result.returncode != 0:
+        print("CMake project generation failed.")
+        sys.exit(1)
+
+    print(f"Xcode project is generated at {output_dir}. Open with command:")
+    print(f"open {output_dir}/sparkle.xcodeproj")
+
+    return output_dir
+
+
+def run_on_device(app_path):
+    # Install and run on device using xcrun devicectl
+    try:
+        # List connected devices
+        list_devices_cmd = ["xcrun", "devicectl", "list", "devices"]
+        result = subprocess.run(
+            list_devices_cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(
+                "Error: Failed to list devices. Make sure a device is connected and trusted.")
+            raise Exception("Failed to list devices")
+
+        # Parse device output to find connected devices
+        devices = []
+        for line in result.stdout.split('\n'):
+            if ('iPhone' in line or 'iPad' in line) and ('connected' in line):
+                # Extract device identifier
+                parts = line.split()
+                for part in parts:
+                    if len(part) == 36 and '-' in part:  # Device UDID format
+                        devices.append(part)
+                        break
+
+        if not devices:
+            print(
+                "No iOS devices found. Please connect and trust an iOS device.")
+            raise Exception("Failed to find devices")
+
+        device_id = devices[0]  # Use first available device
+        print(f"\nInstalling app on device: {device_id}")
+
+        # Install the app
+        install_cmd = ["xcrun", "devicectl", "device", "install", "app",
+                       "--device", device_id, app_path]
+
+        print(f"Installing app with command: {' '.join(install_cmd)}")
+        install_result = subprocess.run(
+            install_cmd, capture_output=True, text=True)
+        if install_result.returncode != 0:
+            print(f"Error installing app: {install_result.stderr}")
+            print(
+                "The app may already be installed or there may be signing issues.")
+            print("Try manually installing through Xcode.")
+            raise Exception("Failed to install app")
+
+        print("App installed successfully!")
+
+        # Launch the app
+        bundle_id = "io.tqjxlm.sparkle"
+        launch_cmd = ["xcrun", "devicectl", "device", "process", "launch",
+                      "--device", device_id, bundle_id]
+
+        print(f"Launching app with command: {' '.join(launch_cmd)}")
+        launch_result = subprocess.run(
+            launch_cmd, capture_output=True, text=True)
+
+        if launch_result.returncode != 0:
+            print(f"Error launching app: {launch_result.stderr}")
+            print("App was installed but failed to launch automatically.")
+            print("You can manually launch it from the device.")
+        else:
+            print("App launched successfully on device!")
+            print("For now, there's no built-in way to print logs to console. If you want to see app log, please open xcode project and run manually.")
+        return
+    except FileNotFoundError:
+        print("\nError: xcrun not found. Make sure Xcode command line tools are installed.")
+        print("Run: xcode-select --install")
+    except Exception as e:
+        print(f"\nError during device deployment: {e}")
+
+    # fallback to manual deployment
+    print("Please follow manual deployment instructions:")
+    print("1. Open the generated Xcode project")
+    print("2. Select your target device")
+    print("3. Build and run from Xcode")
+
+
+def build_and_run(args):
+    """
+    Build the iOS project and optionally install/run it.
+    Note: Running iOS apps requires a connected device or simulator.
+    """
+    output_dir = generate_project(args)
+
+    # Build
+    build_cmd = [args["cmake_executable"], "--build", ".", "--config",
+                 args["config"], "--target", "sparkle"]
+    log_file = os.path.join(output_dir, "build.log")
+
+    run_command_with_logging(build_cmd, log_file, "Building iOS project")
+
+    if args["run"]:
+        app_name = "sparkle.app"
+        if args["config"] == "Debug":
+            app_path = os.path.join(output_dir, "Debug-iphoneos", app_name)
+        else:
+            app_path = os.path.join(output_dir, "Release-iphoneos", app_name)
+
+        if os.path.exists(app_path):
+            print(f"\nBuilt app bundle is available at: {app_path}")
+
+            run_on_device(app_path)
+        else:
+            print(
+                f"\nWarning: App bundle not found at expected location: {app_path}")
+            print("Check the build output directory for the actual location.")
+
+    return output_dir

@@ -1,0 +1,8 @@
+* text=auto
+
+*.png binary
+*.ttf binary
+*.lib binary
+*.jpg binary
+*.bin binary
+*.hdr binary

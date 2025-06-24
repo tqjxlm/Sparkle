@@ -1,0 +1,333 @@
+# Sparkle
+
+Yet another cross-platform renderer with hardware ray-tracing support. Its main goal is to explore possibilities for rendering with newest hardware features on mobile devices.
+
+It is an experimental demo which aims to be simple and modern, rather than being rich in features or robust for production.
+
+![Failed to load image](https://ooo.0x0.ooo/2025/06/24/OVgDd1.jpg)
+
+## Features
+
+### Now implemented
+
+* CPU path tracer
+* GPU path tracer with bindless
+* rasterization-based renderers (forward and deferred)
+* RHI layer supporting Vulkan and Metal
+* shader cross compilation
+* platform-specific wrappers for Windows, Android, MacOS and iOS
+* fully-scripted building system based on CMake
+* data loaders for images(stb), meshes(glTF) and scenes(USD)
+* stacktrace support
+* logging system
+* config system
+* ui system
+* profiling system
+* native file/asset management
+
+### Not in the near future
+
+* editor
+* compatibility for older hardware, systems or compilers
+* gameplay (scripting, audio, network, physics, etc..)
+
+### Rendering Pipeline Support
+
+| pipeline | feature                                     |
+| -------- | ------------------------------------------- |
+| cpu      | Path tracer on CPU                          |
+| gpu      | Path tracer on raytracing hardware          |
+| forward  | Forward pipeline on rasterization hardware  |
+| deferred | Deferred pipeline on rasterization hardware |
+
+### Framework Support
+
+| framework | supported platforms | supported generators           |
+| --------- | ------------------- | ------------------------------ |
+| glfw      | windows, macos      | ninja, makefile, Visual Studio |
+| android   | android             | Android Studio                 |
+| macos     | macos               | Xcode                          |
+| ios       | ios                 | Xcode                          |
+
+### Graphics API Support
+
+| pipeline         | windows     | macos                    | ios       | android        |
+| ---------------- | ----------- | ------------------------ | --------- | -------------- |
+| cpu              | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
+| gpu              | vulkan-glfw | metal-macos              | metal-ios | vulkan-android |
+| forward/deferred | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
+
+## Dependencies
+
+### Compiler
+
+| framework | windows                 | macos              | ios                | android               |
+| --------- | ----------------------- | ------------------ | ------------------ | --------------------- |
+| glfw      | clang-cl (vs-installer) | llvm (homebrew)    | -                  | -                     |
+| glfw-sln  | msvc (Visual Studio)    | -                  | -                  | -                     |
+| macos     | -                       | apple-llvm (Xcode) | -                  | -                     |
+| ios       | -                       | -                  | apple-llvm (Xcode) | -                     |
+| android   | -                       | -                  | -                  | llvm (Android Studio) |
+
+### External Dependencies
+
+These libraries should be installed via an installer or package manager (apt, brew, vcpkg).
+
+* **Vulkan SDK**: 1.4.313.0+
+
+  ``` shell
+  https://vulkan.lunarg.com/sdk/home
+  ```
+
+* **GLFW** (required for glfw framework only)
+
+  ``` shell
+  brew install glfw # MacOS
+  vcpkg install glfw3:x64-windows # Windows
+  ```
+
+* **CMake**: 3.24+
+
+  ``` shell
+  brew install cmake # MacOS
+  https://cmake.org/download/ # Windows
+  ```
+
+### Internal Dependencies
+
+These libraries are managed by git submodules or CMake. They will be setup automatically when you run the build script. (see build.py)
+
+<details>
+
+<summary>Click to expand the list of internal dependencies. Many thanks to them!</summary>
+
+* [argparse](https://github.com/p-ranav/argparse.git)
+* [bvh](https://github.com/madmann91/bvh.git)
+* [cpptrace](https://github.com/jeremy-rifkin/cpptrace.git)
+* [eigen](https://gitlab.com/libeigen/eigen.git)
+* [fast_float](https://github.com/fastfloat/fast_float.git)
+* [hash-library](https://github.com/lazy-eggplant/hash-library.git)
+* [imgui](https://github.com/ocornut/imgui.git)
+* [json](https://github.com/nlohmann/json.git)
+* [magic_enum](https://github.com/Neargye/magic_enum.git)
+* [mimalloc](https://github.com/microsoft/mimalloc.git)
+* [spdlog](https://github.com/gabime/spdlog.git)
+* [spirv_reflect](https://github.com/KhronosGroup/SPIRV-Reflect.git)
+* [stb](https://github.com/nothings/stb.git)
+* [thread-pool](https://github.com/bshoshany/thread-pool.git)
+* [tinygltf](https://github.com/syoyo/tinygltf.git)
+* [tinyusdz](https://github.com/lighttransport/tinyusdz.git)
+* [tracy](https://github.com/wolfpld/tracy.git)
+* [vma](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+* [volk](https://github.com/zeux/volk.git)
+* [Xoshiro-cpp](https://github.com/Reputeless/Xoshiro-cpp.git)
+
+</details>
+
+### Resources
+
+Sample resources will be automatically setup during the first build. (see build.py)
+
+## Build & Run
+
+Before building, make sure you have installed all dependencies.
+
+The build system will try to find required tools and libraries automatically. If it fails, you may need to set some environment variables. See the table below for details.
+
+| variable             | description                        | valid for        | required?  (no means auto-detectable) |
+| -------------------- | ---------------------------------- | ---------------- | ------------------------------------- |
+| CMAKE_PATH           | Path to CMake executable           | all              | no                                    |
+| VULKAN_SDK           | Path to Vulkan SDK installation    | all              | yes                                   |
+| VS_PATH              | Path to Visual Studio installation | all windows      | no                                    |
+| LLVM                 | Path to LLVM installation          | non-windows glfw | no                                    |
+| APPLE_DEVELOPER_TEAM | Apple Developer Team ID            | ios              | yes                                   |
+| JAVA_HOME            | Path to JDK installation           | android          | no                                    |
+| ANDROID_SDK          | Path to Android SDK installation   | android          | no                                    |
+| ANDROID_NDK          | Path to Android NDK installation   | android          | no                                    |
+
+### Quick Start Example
+
+``` shell
+# make a GLFW (Windows/MacOS) release build
+python3 build.py --framework glfw --config Release
+
+# generate GLFW Windows solution, without building
+python3 build.py --framework glfw --generate_only
+
+# make an Android APK debug build apk and run on a connected device
+python3 build.py --framework android --run
+
+# generate MacOS Xcode project and build it
+python3 build.py --framework macos
+
+# generate an iOS Xcode project wihtout build
+python3 build.py --framework ios --generate_only
+
+# make an iOS release build and run on a connected device in ray tracing mode
+python3 build.py --framework ios --run --pipeline gpu
+```
+
+### Build via Script
+
+**All platforms:**
+
+``` shell
+python3 build.py --framework=<framework> [build-options] [run-options]
+```
+
+**Supported frameworks:**
+
+* `glfw` - Cross-platform GLFW build (Windows/MacOS)
+* `android` - Android APK with automatic environment setup
+* `macos` - Native MacOS application
+* `ios` - iOS application
+
+**Common build options:**
+
+* `--config=Release` - Release build (default: Debug).
+* `--generate_only` - Generate IDE project files without building.
+* `--setup-only` - Run setup only without building.
+* `--clangd` - Generate compile_commands.json for clangd intellisense support.
+* `--profile` - Enable Tracy profiler.
+* `--asan` - Enable AddressSanitizer.
+* `--clean` - Clean output directory before configure.
+* `--help` - Show all usage help.
+
+**Common run options:**
+
+* `--run` - Run after building. For mobile builds, it tries to run on a connected device.
+* `--pipeline` - Rendering pipeline to use (cpu, gpu, forward, deferred).
+* `--scene` - Scene to render. Empty for the standard testing scene. Other values for models under resources/models.
+* `--validation` - Enable graphics API validation.
+* `--max-spp` - Max sample per pixel.
+* `--thread` - Num threads to use for cpu pipeline.
+* `--help` - Show all usage help.
+
+### Configs
+
+#### How to use config
+
+* Default config: copied from resources/config/config.json to final package on every build.
+* User config: generated at [InternalStoragePath]/generated/config/config.json on first run of the built package. It overrides the default config.
+* Commandline arguments: given in command line if available. It overrides all config files. example:
+
+#### Important configs
+
+* pipeline: rendering pipeline to use (cpu, gpu, forward, forward_rt)
+* scene: scene to render. empty for the standard testing scene. other values for models under resources/models.
+* validation: enable graphics API validation.
+* max-spp: max sample per pixel
+* thread: num threads to use for cpu pipeline
+
+Search across the project for keyword "ConfigValue" for more available configs.
+
+## Work with IDE
+
+Sometimes you want better debugging or intellisense support from IDEs. Follow the instructions below to generate IDE project files.
+
+### Visual Studio / Rider / Clion (Only for glfw framework on Windows)
+
+``` shell
+python3 build.py --framework=glfw --generate_only
+start build_system/glfw/project/sparkle.sln
+select sparkle as start up project
+```
+
+### Xcode (Only for macos/ios framework on MacOS)
+
+``` shell
+python3 build.py --framework=macos --generate_only     # or --framework=ios
+open build_system/macos/project/sparkle.xcodeproj      # or build_system/ios/project/sparkle.xcodeproj
+select sparkle as start up target
+```
+
+### Android Studio (Only for android framework)
+
+* Open project folder `build_system/android` in Android Studio
+* Sync project with Gradle files
+* Select debug or release build in build configuration panel
+* Select "Run" or "Debug" to run on your device
+
+### Visual Studio Code (All platforms)
+
+This project is configured to work with VSCode perfectly (I use it heavily when developing this project). There are some steps to setup.
+
+#### Intellisense
+
+1. **Install toolchain**: For MacOS and iOS, install llvm via homebrew. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
+2. **Generate project configuration**:
+
+   ``` shell
+   # a compile_commands.json file will be generated under the project build directory.
+   python3 build.py --framework=<platform> --clangd
+   ```
+
+3. **Install VSCode extensions**: C/C++, clangd.
+4. **Copy IDE config**: Copy `ide/.vscode/settings.json` to `.vscode/settings.json` in project root.
+5. **Configure paths**: Modify paths in `.vscode/settings.json` to match your environment.
+6. **Choose compile commands**: Select one of the "--compile-commands-dir" options and comment out others.
+7. **Reload VSCode**: Reload window for full intellisense support.
+
+#### Debugging
+
+1. **Install toolchain**: For MacOS and iOS, install llvm via homebrew. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
+2. **Install VSCode extensions**: CodeLLDB.
+3. **Copy IDE config**: Copy `ide/.vscode/launch.json` to `.vscode/launch.json` in project root.
+4. **Configure paths**: Modify paths in `.vscode/launch.json` to match your environment.
+5. **Start debugging session**: Follow [vscode documentation](<https://code.visualstudio.com/docs/cpp/launch-json-reference>)
+
+## Todo list
+
+### CI/CD
+
+* [ ] submission & building pipeline
+* [ ] unit test pipeline
+* [ ] behavioural test pipeline
+* [ ] performance test pipeline
+* [ ] desktop CI/CD
+* [ ] mobile CI/CD
+
+### Path Tracing Renderers
+
+* [ ] ReSTIR
+* [ ] dynamic scene
+
+### Rasterization Renderers
+
+* [ ] CSM
+* [ ] PCSS
+* [ ] AO
+* [ ] ray traced shadow
+* [ ] ray traced AO
+* [ ] ray traced reflection
+
+### RHI
+
+* [ ] msaa
+* [ ] render target pooling
+* [ ] render graph
+* [ ] subpass
+
+### IO
+
+* [ ] full USD support (current one is far from complete)
+* [ ] external data loader interface
+
+### Cook
+
+* [ ] standalone cooker bake resources
+* [ ] built-in shader compiler
+* [ ] texture compression
+
+### Build
+
+* [ ] auto setup VulkanSDK
+* [ ] auto setup prerequisites
+* [ ] auto setup clangd
+* [ ] Linux support
+
+### Infrastructure
+
+* [ ] modularize core libraries
+* [ ] rhi thread
+* [ ] event based input handling

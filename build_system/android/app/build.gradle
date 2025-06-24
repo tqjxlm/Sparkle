@@ -1,0 +1,109 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+    compileSdk 35
+    ndkVersion '28.1.13356709'
+    
+    defaultConfig {
+        applicationId 'io.tqjxlm.sparkle'
+        minSdk 31
+        targetSdk 35
+        externalNativeBuild {
+            cmake {
+                def fixedArgs = [
+                    "-DANDROID_ABI=arm64-v8a"
+                    , "-DANDROID_PLATFORM=35"
+                    , "-DANDROID=TRUE"
+                    , "-DCPPTRACE_GET_SYMBOLS_WITH_LIBDL=ON"
+                    ]
+
+                arguments = fixedArgs + (project.hasProperty('cmakeArgs') ? Arrays.asList(project.cmakeArgs.split(' ')) : [])
+                abiFilters "arm64-v8a"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = true
+            proguardFiles getDefaultProguardFile('proguard-android.txt')
+            ndk {
+                //noinspection ChromeOsAbiSupport
+                abiFilters "arm64-v8a"
+            }
+            signingConfig signingConfigs.debug
+        }
+        debug {
+            ndk {
+                //noinspection ChromeOsAbiSupport
+                abiFilters "arm64-v8a"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path '../../../CMakeLists.txt'
+            buildStagingDirectory "${rootProject.projectDir}/output"
+        }
+    }
+
+    buildFeatures {
+        prefab true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs = ['src/main/assets']
+        }
+    }
+    
+    namespace 'io.tqjxlm.sparkle'
+}
+
+// keep assets in sync with the output directory
+tasks.register('copyAssets', Copy) {
+    from "${rootProject.projectDir}/output/assets"
+    into "${project.projectDir}/src/main/assets"
+
+    doFirst {
+        def destDir = file("${project.projectDir}/src/main/assets")
+        if (destDir.exists()) {
+            println "Clearing target directory: ${destDir}"
+            destDir.deleteDir()
+        }
+    }
+
+    dependsOn(lintVitalAnalyzeRelease)
+    dependsOn(generateReleaseLintVitalReportModel)
+
+    inputs.dir "${rootProject.projectDir}/output/assets"
+    outputs.dir "${project.projectDir}/src/main/assets"
+}
+
+// make sure copyAssets runs before the mergeAssets task and after the externalNativeBuild task
+android.applicationVariants.configureEach { variant ->
+    tasks.named("copyAssets").configure {
+       dependsOn tasks.named("externalNativeBuild${variant.name.capitalize()}")
+    }
+    tasks.named("merge${variant.name.capitalize()}Assets").configure {
+        dependsOn tasks.named("copyAssets")
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.games:games-activity:4.0.0'
+}
+
