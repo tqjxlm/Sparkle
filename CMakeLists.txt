@@ -332,6 +332,7 @@ elseif(IOS)
         "-framework MetalKit"
         "-framework Metal"
         "-framework GameController"
+        "-framework MetalPerformanceShaders"
     )
 
     if(DEFINED ENV{APPLE_DEVELOPER_TEAM_ID})

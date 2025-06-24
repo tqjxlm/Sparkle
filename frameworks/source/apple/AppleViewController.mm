@@ -7,6 +7,7 @@
 #include "application/AppFramework.h"
 #include "core/CoreStates.h"
 #include "core/Exception.h"
+#include "core/Logger.h"
 
 @implementation AppleViewController
 {
