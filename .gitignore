@@ -50,3 +50,5 @@ __pycache__/
 *.pyc
 
 .claude/
+
+build_cache/

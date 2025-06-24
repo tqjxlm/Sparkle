@@ -8,8 +8,10 @@ from build_system.utils import run_command_with_logging
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
 
-platform_args = "-DPLATFORM=OS64 -DCMAKE_SYSTEM_NAME=iOS -DDEPLOYMENT_TARGET=18.0 -DENABLE_BITCODE=FALSE"
-toolchain_args = f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"
+platform_args = ["-DPLATFORM=OS64", "-DCMAKE_SYSTEM_NAME=iOS",
+                 "-DDEPLOYMENT_TARGET=18.0", "-DENABLE_BITCODE=FALSE"]
+toolchain_args = [
+    f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"]
 
 
 def clean_output_directory(output_dir):
@@ -31,26 +33,17 @@ def configure_for_clangd(args):
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
 
-    compiler_args = "-D CMAKE_C_COMPILER=/usr/bin/clang -D CMAKE_CXX_COMPILER=/usr/bin/clang++"
-    generator_args = f"-D CMAKE_BUILD_TYPE={args['config']}"
+    compiler_args = ["-DCMAKE_C_COMPILER=/usr/bin/clang",
+                     "-DCMAKE_CXX_COMPILER=/usr/bin/clang++"]
+    generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
 
     cmake_cmd = [
         args["cmake_executable"],
         "../../..",
-        generator_args,
-        toolchain_args,
-        args["cmake_options"],
-        compiler_args,
-        platform_args,
-    ]
-    cmake_cmd_flat = []
-    for part in cmake_cmd:
-        if part:
-            cmake_cmd_flat.extend(part.split())
+    ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args
 
-    print("Configuring CMake for clangd (iOS) with command:")
-    print(" ".join(cmake_cmd_flat))
-    result = subprocess.run(cmake_cmd_flat)
+    print("Configuring CMake for clangd (iOS) with command:", " ".join(cmake_cmd))
+    result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake configure failed.")
         sys.exit(1)
@@ -76,24 +69,15 @@ def generate_project(args):
         print("Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
         sys.exit(1)
 
-    generator_args = "-G Xcode"
+    generator_args = ["-G Xcode"]
 
     cmake_cmd = [
         args["cmake_executable"],
         "../../..",
-        generator_args,
-        toolchain_args,
-        args["cmake_options"],
-        platform_args,
-    ]
-    cmake_cmd_flat = []
-    for part in cmake_cmd:
-        if part:
-            cmake_cmd_flat.extend(part.split())
+    ] + generator_args + toolchain_args + args["cmake_options"] + platform_args
 
-    print("Generating iOS Xcode project with command:")
-    print(" ".join(cmake_cmd_flat))
-    result = subprocess.run(cmake_cmd_flat)
+    print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
+    result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake project generation failed.")
         sys.exit(1)

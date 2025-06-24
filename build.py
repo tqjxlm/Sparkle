@@ -2,14 +2,18 @@ import os
 import subprocess
 import sys
 import argparse
-import shutil
+
+from build_system.prerequisites import find_cmake, find_and_set_vulkan_sdk
+
+SCRIPT = os.path.abspath(__file__)
+SCRIPTPATH = os.path.dirname(SCRIPT)
 
 
 def construct_additional_cmake_options(parsed_args):
     profile_settings = "-DENABLE_PROFILER=ON" if parsed_args.profile else "-DENABLE_PROFILER=OFF"
     shader_debug_settings = "-DSHADER_DEBUG=ON" if parsed_args.shader_debug else "-DSHADER_DEBUG=OFF"
     asan_settings = "-DENABLE_ASAN=ON" if parsed_args.asan else "-DENABLE_ASAN=OFF"
-    cmake_options = f"{profile_settings} {shader_debug_settings} {asan_settings}"
+    cmake_options = [profile_settings, shader_debug_settings, asan_settings]
 
     return cmake_options
 
@@ -34,8 +38,6 @@ def parse_args(args=None):
                         help="Generate compile_commands.json for clangd")
     parser.add_argument("--run", action="store_true",
                         help="Run the built executable after building")
-    parser.add_argument("--vcpkg_path", default="D:/SDKs/vcpkg",
-                        help="Windows-only: vcpkg installation root path for external dependencies")
     parser.add_argument("--setup-only", action="store_true",
                         help="Run setup only without building")
     parser.add_argument("--clean", action="store_true",
@@ -50,7 +52,6 @@ def parse_args(args=None):
         "run": parsed_args.run,
         "cmake_options": construct_additional_cmake_options(parsed_args),
         "unknown_args": unknown_args,
-        "vcpkg_path": parsed_args.vcpkg_path,
         "generate_only": parsed_args.generate_only,
         "setup_only": parsed_args.setup_only,
         "clangd": parsed_args.clangd,
@@ -58,66 +59,20 @@ def parse_args(args=None):
     }
 
 
-def check_cmake():
-    """Check if CMake is available in PATH or CMAKE_PATH environment variable."""
-    cmake_path = os.environ.get("CMAKE_PATH")
-
-    if cmake_path:
-        # Check if CMAKE_PATH points to cmake executable or directory containing cmake
-        if os.path.isfile(cmake_path):
-            cmake_executable = cmake_path
-        else:
-            cmake_executable = os.path.join(cmake_path, "cmake")
-            if sys.platform == "win32":
-                cmake_executable += ".exe"
-
-        if os.path.isfile(cmake_executable) and os.access(cmake_executable, os.X_OK):
-            return cmake_executable
-        else:
-            print(
-                f"Error: CMAKE_PATH is set to '{cmake_path}' but cmake executable not found or not executable.")
-            print(
-                "Please ensure CMAKE_PATH points to the cmake executable or directory containing cmake.")
-            sys.exit(1)
-    else:
-        # Check if cmake is in system PATH
-        cmake_executable = shutil.which("cmake")
-        if cmake_executable:
-            return cmake_executable
-        else:
-            print("Error: CMake not found in system PATH.")
-            print(
-                "Please install CMake and ensure it's in your PATH, or set the CMAKE_PATH environment variable.")
-            print("CMAKE_PATH can point to:")
-            print("  - The cmake executable directly: export CMAKE_PATH=/path/to/cmake")
-            print(
-                "  - The directory containing cmake: export CMAKE_PATH=/path/to/cmake/bin")
-            sys.exit(1)
-
-
 def check_environment(args):
     # Check CMake availability (skip for Android as it uses NDK's built-in CMake)
-    cmake_executable = None
     if args["framework"] != "android":
-        cmake_executable = check_cmake()
+        cmake_executable = find_cmake()
         print(f"Using CMake: {cmake_executable}")
+        args["cmake_executable"] = cmake_executable
 
-    VULKAN_SDK = os.environ.get("VULKAN_SDK")
-    if not VULKAN_SDK:
-        print("Error: VULKAN_SDK environment variable is not set.")
-        sys.exit(1)
-
-    if not os.path.exists(VULKAN_SDK):
-        print(f"Error: VULKAN_SDK path {VULKAN_SDK} does not exist.")
-        sys.exit(1)
+    find_and_set_vulkan_sdk()
 
     # Exit if framework is macos or ios but not running on macOS
     if args["framework"] in ("macos", "ios") and sys.platform != "darwin":
         print(
             f"Error: Framework '{args['framework']}' requires macOS, but current system is not macOS.")
         sys.exit(1)
-
-    return cmake_executable
 
 
 def run_git_submodule_update():
@@ -128,11 +83,14 @@ def run_git_submodule_update():
     )
 
 
-def setup(script_dir):
+def setup():
     from resources.setup import setup_resources
+    from ide.setup import setup_ide
 
     run_git_submodule_update()
-    setup_resources(script_dir)
+    setup_resources()
+    setup_ide()
+
     print("Setup complete.")
 
 
@@ -181,22 +139,20 @@ def build_project(args):
 
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    os.chdir(SCRIPTPATH)
 
     args = parse_args()
 
     try:
         # Always run setup first
-        setup(script_dir)
+        setup()
 
         # If --setup-only flag is used, exit after setup
         if args["setup_only"]:
             print("Setup-only mode: Skipping build.")
             return
 
-        # Check environment before building
-        args["cmake_executable"] = check_environment(args)
+        check_environment(args)
 
         # Run build process
         build_project(args)

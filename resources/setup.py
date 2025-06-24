@@ -1,10 +1,12 @@
 import os
 from build_system.utils import download_file, extract_zip
 
-def setup_resources(script_dir):
-    resources_dir = os.path.join(script_dir, "resources")
-    packed_dir = os.path.join(resources_dir, "packed")
-    zip_path = os.path.join(resources_dir, "resources.zip")
+SCRIPT = os.path.abspath(__file__)
+SCRIPTPATH = os.path.dirname(SCRIPT)
+
+def setup_resources():
+    packed_dir = os.path.join(SCRIPTPATH, "packed")
+    zip_path = os.path.join(SCRIPTPATH, "resources.zip")
     url = "https://www.dropbox.com/scl/fo/q973wvw155dsrdf6wfkqt/ALzcfn5n44756u4NDKLJHl8?rlkey=l9kyje6xkf1tf6zsiv4bx98lj&st=wzo7vcll&dl=1"
 
     if os.path.exists(zip_path):

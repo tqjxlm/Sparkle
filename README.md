@@ -73,6 +73,14 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 These libraries should be installed via an installer or package manager (apt, brew, vcpkg).
 
+* **Package Manager**
+
+  ``` shell
+  homebrew # MacOS
+  vcpkg # Windows
+  apt # Linux
+  ```
+
 * **Vulkan SDK**: 1.4.313.0+
 
   ``` shell
@@ -108,6 +116,7 @@ These libraries are managed by git submodules or CMake. They will be setup autom
 * [fast_float](https://github.com/fastfloat/fast_float.git)
 * [hash-library](https://github.com/lazy-eggplant/hash-library.git)
 * [imgui](https://github.com/ocornut/imgui.git)
+* [ios-cmake](https://github.com/leetal/ios-cmake.git)
 * [json](https://github.com/nlohmann/json.git)
 * [magic_enum](https://github.com/Neargye/magic_enum.git)
 * [mimalloc](https://github.com/microsoft/mimalloc.git)
@@ -132,38 +141,69 @@ Sample resources will be automatically setup during the first build. (see build.
 
 Before building, make sure you have installed all dependencies.
 
-The build system will try to find required tools and libraries automatically. If it fails, you may need to set some environment variables. See the table below for details.
+The build system will try to find prerequisites automatically.
 
-| variable             | description                        | valid for        | required?  (no means auto-detectable) |
-| -------------------- | ---------------------------------- | ---------------- | ------------------------------------- |
-| CMAKE_PATH           | Path to CMake executable           | all              | no                                    |
-| VULKAN_SDK           | Path to Vulkan SDK installation    | all              | yes                                   |
-| VS_PATH              | Path to Visual Studio installation | all windows      | no                                    |
-| LLVM                 | Path to LLVM installation          | non-windows glfw | no                                    |
-| APPLE_DEVELOPER_TEAM | Apple Developer Team ID            | ios              | yes                                   |
-| JAVA_HOME            | Path to JDK installation           | android          | no                                    |
-| ANDROID_SDK          | Path to Android SDK installation   | android          | no                                    |
-| ANDROID_NDK          | Path to Android NDK installation   | android          | no                                    |
+If it fails, it will try to install when possible.
 
-### Quick Start Example
+Otherwise,you need to specify them via environment variables. See the table below for details.
+
+| variable             | example                                                     | valid for        | auto-installable                |
+| -------------------- | ----------------------------------------------------------- | ---------------- | ------------------------------- |
+| VULKAN_SDK           | /Users/username/VulkanSDK/1.4.313.0                         | all              | yes (requires admin on windows) |
+| CMAKE_PATH           | /opt/homebrew/bin/cmake                                     | all              | yes                             |
+| VCPKG_PATH           | D:/SDKs/vcpkg                                               | all windows      | yes                             |
+| LLVM                 | /opt/homebrew/opt/llvm                                      | non-windows glfw | yes                             |
+| ANDROID_HOME         | /Users/username/AndroidSDK                                  | android          | no (Android Studio)             |
+| JAVA_HOME            | /Applications/Android Studio.app/Contents/jbr/Contents/Home | android          | no (Android Studio)             |
+| VS_PATH              | C:/Program Files/Microsoft Visual Studio/2022/Community     | all windows      | no (vs-installer)               |
+| APPLE_DEVELOPER_TEAM | ABC123DEF4                                                  | ios              | no (Apple Developer)            |
+
+### Quick Start Examples
 
 ``` shell
-# make a GLFW (Windows/MacOS) release build
+# make a GLFW Windows release build with clang-cl toolchain
+$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.313.0'
+$env:VCPKG_PATH='D:/SDKs/vcpkg'
 python3 build.py --framework glfw --config Release
+```
 
-# generate GLFW Windows solution, without building
+``` shell
+# make a GLFW MacOS debug build with llvm toolchain
+export VULKAN_SDK=D:/SDKs/VulkanSDK/1.4.313.0
+python3 build.py --framework glfw
+```
+
+``` shell
+# generate GLFW Visual Studio solution with msvc toolchain, without building
+$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.313.0'
+$env:VCPKG_PATH='D:/SDKs/vcpkg'
 python3 build.py --framework glfw --generate_only
+```
 
-# make an Android APK debug build apk and run on a connected device
+``` shell
+# make an Android APK debug apk and run on a connected device
+$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.313.0'
+$env:ANDROID_HOME='D:/SDKs/AndroidSDK'
 python3 build.py --framework android --run
+```
 
-# generate MacOS Xcode project and build it
+``` shell
+# generate a MacOS Xcode project and build in debug mode
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
 python3 build.py --framework macos
+```
 
-# generate an iOS Xcode project wihtout build
+``` shell
+# generate an iOS Xcode project wihtout building
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
+export APPLE_DEVELOPER_TEAM=ABC123DEF4
 python3 build.py --framework ios --generate_only
+```
 
+``` shell
 # make an iOS release build and run on a connected device in ray tracing mode
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
+export APPLE_DEVELOPER_TEAM=ABC123DEF4
 python3 build.py --framework ios --run --pipeline gpu
 ```
 
@@ -321,13 +361,15 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 
 ### Build
 
-* [ ] auto setup VulkanSDK
-* [ ] auto setup prerequisites
-* [ ] auto setup clangd
 * [ ] Linux support
+* [ ] make all prerequisites auto-installable
 
 ### Infrastructure
 
 * [ ] modularize core libraries
 * [ ] rhi thread
 * [ ] event based input handling
+
+## Know Issues
+
+* [ ] ImGui scrolling not working on android and ios

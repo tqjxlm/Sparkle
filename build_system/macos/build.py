@@ -28,24 +28,17 @@ def configure_for_clangd(args):
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
 
-    compiler_args = "-D CMAKE_C_COMPILER=/usr/bin/clang -D CMAKE_CXX_COMPILER=/usr/bin/clang++"
-    generator_args = f"-DCMAKE_BUILD_TYPE={args['config']}"
+    compiler_args = ["-DCMAKE_C_COMPILER=/usr/bin/clang",
+                     "-DCMAKE_CXX_COMPILER=/usr/bin/clang++"]
+    generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
 
     cmake_cmd = [
         args["cmake_executable"],
         "../../..",
-        generator_args,
-        compiler_args,
-        args["cmake_options"],
-    ]
-    cmake_cmd_flat = []
-    for part in cmake_cmd:
-        if part:
-            cmake_cmd_flat.extend(part.split())
+    ] + generator_args + compiler_args + args["cmake_options"]
 
-    print("Configuring CMake for clangd with command:")
-    print(" ".join(cmake_cmd_flat))
-    result = subprocess.run(cmake_cmd_flat)
+    print("Configuring CMake for clangd with command:", " ".join(cmake_cmd))
+    result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake configure failed.")
         sys.exit(1)
@@ -65,22 +58,15 @@ def generate_project(args):
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
 
-    generator_args = "-G Xcode"
+    generator_args = ["-G Xcode"]
 
     cmake_cmd = [
         args["cmake_executable"],
         "../../..",
-        generator_args,
-        args["cmake_options"],
-    ]
-    cmake_cmd_flat = []
-    for part in cmake_cmd:
-        if part:
-            cmake_cmd_flat.extend(part.split())
+    ] + generator_args + args["cmake_options"]
 
-    print("Generating Xcode project with command:")
-    print(" ".join(cmake_cmd_flat))
-    result = subprocess.run(cmake_cmd_flat)
+    print("Generating Xcode project with command:", " ".join(cmake_cmd))
+    result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake project generation failed.")
         sys.exit(1)
