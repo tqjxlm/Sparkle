@@ -180,6 +180,10 @@ void AndroidNativeView::TickUiSystem()
     if (can_render_)
     {
         ImGui_ImplAndroid_NewFrame();
+
+        ImGuiIO &io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(static_cast<float>(app_->GetRenderConfig().image_width),
+                                static_cast<float>(app_->GetRenderConfig().image_height));
     }
 }
 
@@ -387,14 +391,11 @@ void AndroidNativeView::HandleInputEvents()
     //        auto &event = input_buffer->keyEvents[i];
     //    }
 
-    if (main_app->GetRenderConfig().render_ui)
+    // handle gui first, as it may consume the input events
+    for (auto i = 0u; i < input_buffer->motionEventsCount; i++)
     {
-        // handle gui first, as it may consume the input events
-        for (auto i = 0u; i < input_buffer->motionEventsCount; i++)
-        {
-            auto &event = input_buffer->motionEvents[i];
-            ImGuiHandleAndroidInputEvent(&event, gui_scale_);
-        }
+        auto &event = input_buffer->motionEvents[i];
+        ImGuiHandleAndroidInputEvent(&event, gui_scale_);
     }
 
     // handle motion events
