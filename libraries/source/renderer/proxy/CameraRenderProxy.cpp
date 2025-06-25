@@ -332,7 +332,9 @@ void CameraRenderProxy::DenoisePass(const RenderConfig &config, const Vector2UIn
 
     [[unlikely]] if (debug_point.x() < image_size_.x() && debug_point.y() < image_size_.y())
     {
-        Log(Info, "frame buffer {}", utilities::VectorToString(frame_buffer_[debug_point.y()][debug_point.x()]));
+        Log(Info, "frame buffer {}. new pixel {}",
+            utilities::VectorToString(frame_buffer_[debug_point.y()][debug_point.x()]),
+            utilities::VectorToString(pass_input[debug_point.y()][debug_point.x()]));
     }
 }
 
@@ -398,6 +400,11 @@ void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera,
         next_cumulative_sample_ = 0;
     }
 
+    if (config.IsCPURenderMode())
+    {
+        pending_sample_count_ = actual_sample_per_pixel_;
+    }
+
     cumulated_sample_count_ = std::min(static_cast<unsigned>(config.max_sample_per_pixel), next_cumulative_sample_);
     next_cumulative_sample_ = cumulated_sample_count_ + pending_sample_count_;
 
@@ -417,8 +424,6 @@ void CameraRenderProxy::RenderCPU(const SceneRenderProxy &scene, const RenderCon
     BasePass(scene, config, debug_point);
 
     DenoisePass(config, debug_point);
-
-    AccumulateSample(actual_sample_per_pixel_);
 
     total_frame_++;
 }
