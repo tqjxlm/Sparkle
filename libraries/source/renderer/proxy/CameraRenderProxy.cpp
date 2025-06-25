@@ -15,9 +15,6 @@
 #include "renderer/resource/View.h"
 #include "rhi/RHI.h"
 
-// RR improves performance but causes too much noise, disable for now
-#define RUSSIAN_ROULETTE 0
-
 namespace sparkle
 {
 CameraRenderProxy::SampleResult CameraRenderProxy::SamplePixel(const SceneRenderProxy &scene,
@@ -110,25 +107,6 @@ CameraRenderProxy::SampleResult CameraRenderProxy::SamplePixel(const SceneRender
         // core procedure: radiance decay every bounce
         throughput = throughput.cwiseProduct(this_throughput);
 
-#if RUSSIAN_ROULETTE
-        // russian roulette
-        auto discard_probabiity = throughput.norm();
-        auto discard_roll = sampler::RandomUnit();
-        if (discard_roll > discard_probabiity)
-        {
-            break;
-        }
-
-        throughput /= discard_probabiity;
-#else
-        // terminal condition: early out
-        if (throughput.squaredNorm() < Eps)
-        {
-            result.valid_flag = -1.f;
-            break;
-        }
-#endif
-
         [[unlikely]] if (ray.IsDebug())
         {
             Log(Warn, "Hit bounce {}. This throughput {}. Throughput {}. Next direction {}", bounce,
@@ -137,6 +115,13 @@ CameraRenderProxy::SampleResult CameraRenderProxy::SamplePixel(const SceneRender
             ray.Print();
             intersection.Print();
             material->PrintSample(tex_coord);
+        }
+
+        // terminal condition: early out
+        if (throughput.squaredNorm() < Eps)
+        {
+            result.valid_flag = -1.f;
+            break;
         }
 
         // Russian roulette
@@ -285,7 +270,7 @@ static void SpatialDenoisePixel(unsigned i, unsigned j, unsigned width, unsigned
 
         output_buffer[new_j][new_i].head<3>() = color;
 
-        // now assume this pixel has a valid value
+        // this channel is reserved for future use
         output_buffer[new_j][new_i].w() = 1.f;
 
         break;
