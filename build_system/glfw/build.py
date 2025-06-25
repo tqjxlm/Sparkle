@@ -50,12 +50,12 @@ def get_cmd_with_vcvars(vs_path, cmake_cmd):
     return f'CALL "{vcvars_path}" && ' + guarded_cmake_cmd
 
 
-def configure(args, is_project):
+def configure(args, is_generate_sln):
     """Configure CMake project with appropriate settings for the platform."""
 
     install_glfw()
 
-    if is_project:
+    if is_generate_sln:
         output_dir = os.path.join(SCRIPTPATH, "project")
     else:
         output_dir = os.path.join(SCRIPTPATH, "output")
@@ -66,11 +66,17 @@ def configure(args, is_project):
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
 
-    if is_windows:
+    if is_generate_sln:
+        # If using sln, compilers are determined by Visual Studio
+        compiler_args = []
+        # Use the native default generator for project generation
+        generator_args = []
+    elif is_windows:
         # Windows: use MSVC environment and bundled clang-cl
         compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl",
                          "-DCMAKE_C_COMPILER=clang-cl"]
-        generator_args = ["-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}"]
+        generator_args = ["-G Ninja",
+                          f"-DCMAKE_BUILD_TYPE={args['config']}"]
     else:
         # Non-Windows: find LLVM installation
         LLVM = find_llvm_path()
@@ -90,33 +96,27 @@ def configure(args, is_project):
             f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
         generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
 
-    # Use the native default generator for project generation
-    if is_project:
-        generator_args = []
-
     # Build CMake command
     cmake_cmd = [
         args["cmake_executable"],
         "../../..",
     ] + generator_args + args["cmake_options"] + compiler_args + framework_args + get_toolchain_args()
 
-    if is_windows:
-        # On Windows, activate MSVC environment first
+    if is_windows and not is_generate_sln:
+        # for clang-cl builds, activate MSVC environment first
         vs_path = find_visual_studio_path()
         if not vs_path:
             print("Error: Could not find Visual Studio 2022 installation.")
             print("Please ensure Visual Studio 2022 is installed with C++ tools.")
             sys.exit(1)
 
-        # Check clang-cl only for builds (not project generation)
-        if not is_project:
-            clang_cl_path = os.path.join(
-                vs_path, "VC", "Tools", "Llvm", "x64", "bin", "clang-cl.exe")
-            if not os.path.exists(clang_cl_path):
-                print(f"Error: clang-cl.exe not found in Visual Studio installation.")
-                print(
-                    "Please install 'C++ Clang Compiler for Windows' component in Visual Studio Installer.")
-                sys.exit(1)
+        clang_cl_path = os.path.join(
+            vs_path, "VC", "Tools", "Llvm", "x64", "bin", "clang-cl.exe")
+        if not os.path.exists(clang_cl_path):
+            print(f"Error: clang-cl.exe not found in Visual Studio installation.")
+            print(
+                "Please install 'C++ Clang Compiler for Windows' component in Visual Studio Installer.")
+            sys.exit(1)
 
         shell_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
 
@@ -167,6 +167,11 @@ def build(args):
 
 def generate_project(args):
     """Generate IDE project files using CMake."""
+    if not is_windows:
+        print(
+            "Project generation for glfw is only supported on Windows with Visual Studio.")
+        sys.exit(1)
+
     output_dir = configure(args, True)
 
     print(
