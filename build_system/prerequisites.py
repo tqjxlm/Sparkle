@@ -512,7 +512,7 @@ def install_vcpkg(build_cache_dir):
     vcpkg_exe_path = os.path.join(vcpkg_dir, vcpkg_executable)
 
     if os.path.exists(vcpkg_exe_path):
-        print(f"vcpkg already installed in build_cache.")
+        print("vcpkg already installed in build_cache.")
         return vcpkg_dir
 
     try:
@@ -562,28 +562,31 @@ def install_vcpkg(build_cache_dir):
 
 
 def find_vcpkg():
+    vcpkg_executable = "vcpkg.exe" if is_windows else "vcpkg"
+
+    # Check for user override first
     vcpkg_path = os.environ.get("VCPKG_PATH")
     if vcpkg_path:
-        if os.path.exists(vcpkg_path):
+        if os.path.exists(os.path.join(vcpkg_dir, vcpkg_executable)):
             return vcpkg_path
         print(
-            f"VCPKG_PATH is set to '{vcpkg_path}' but path does not exist.")
+            f"VCPKG_PATH is set to '{vcpkg_path}' but path does not exist. try auto-detecting...")
+
+    # Check if already installed in build_cache
+    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
+    vcpkg_dir = os.path.join(build_cache_dir, "vcpkg")
+    if os.path.exists(os.path.join(vcpkg_dir, vcpkg_executable)):
+        print("Use locally cached vcpkg installation.")
+        return vcpkg_dir
 
     # Check for vcpkg in common system locations
-    vcpkg_executable = "vcpkg.exe" if is_windows else "vcpkg"
     system_vcpkg = shutil.which(vcpkg_executable)
     if system_vcpkg:
-        # Return the directory containing vcpkg executable
         return os.path.dirname(system_vcpkg)
 
-    # VCPKG_PATH not set or invalid - try to install locally
+    # Still no? Try to install locally
     print("vcpkg not found. Installing locally to build_cache/vcpkg...")
-
-    # Create build_cache directory if it doesn't exist
-    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
     os.makedirs(build_cache_dir, exist_ok=True)
-
-    # Install vcpkg to build_cache
     vcpkg_install_path = install_vcpkg(build_cache_dir)
 
     return vcpkg_install_path
