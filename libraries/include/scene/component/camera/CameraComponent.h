@@ -8,31 +8,18 @@ class CameraComponent : public RenderableComponent
 {
 public:
     // values that have physical meaning (reflects real camera attributes)
-    struct CameraAttribute
+    struct Attribute
     {
         float focal_length = 0.035f;  // 35mm
         float sensor_height = 0.024f; // full frame
         float aperture = 22.0f;
         float exposure = 1.f;
+        float focus_distance = 1.f;
 
         void Print() const;
     };
 
-    // values calculated from physical attributes and used for rendering
-    struct CameraState
-    {
-        float vertical_fov = 0.0f;
-        float focus_distance = 0.0f;
-        float image_distance = 0.0f;
-        float exposure = 1.f;
-        float aperture_radius = 0.0f;
-
-        void Update(const CameraAttribute &attribute);
-
-        void Print() const;
-    };
-
-    explicit CameraComponent(const CameraAttribute &attribute);
+    explicit CameraComponent(const Attribute &attribute);
 
     ~CameraComponent() override;
 
@@ -42,7 +29,7 @@ public:
 
 #pragma region Attributes
 
-    [[nodiscard]] const CameraAttribute &GetAttribute() const
+    [[nodiscard]] auto GetAttribute() const
     {
         return attribute_;
     }
@@ -85,7 +72,6 @@ protected:
     std::unique_ptr<RenderProxy> CreateRenderProxy() override;
 
 private:
-    CameraAttribute attribute_;
-    CameraState state_;
+    Attribute attribute_;
 };
 } // namespace sparkle

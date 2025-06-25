@@ -8,7 +8,7 @@
 
 namespace sparkle
 {
-CameraComponent::CameraComponent(const CameraAttribute &attribute) : attribute_(attribute)
+CameraComponent::CameraComponent(const Attribute &attribute) : attribute_(attribute)
 {
 }
 
@@ -18,7 +18,6 @@ void CameraComponent::SetExposure(float exposure)
 {
     // TODO(tqjxlm): exposure as in photography terminology
     attribute_.exposure = exposure;
-    state_.exposure = attribute_.exposure;
 
     UpdateRenderData();
 }
@@ -33,28 +32,33 @@ void CameraComponent::SetAperture(float aperture)
 
     attribute_.aperture = new_aperture;
 
-    state_.Update(attribute_);
-
     UpdateRenderData();
 }
 
 void CameraComponent::SetFocusDistance(float focus_distance)
 {
     // assume fixed focal length
-    state_.focus_distance = focus_distance;
-
-    state_.Update(attribute_);
+    attribute_.focus_distance = focus_distance;
 
     UpdateRenderData();
+}
+
+// translate physical attributes to render attributes
+static auto CalculateRenderAttribute(const CameraComponent::Attribute &attribute)
+{
+    return CameraRenderProxy::Attribute{
+        .vertical_fov = 2.f * std::atan(attribute.sensor_height / (2.f * attribute.focal_length)),
+        .focus_distance = attribute.focus_distance,
+        .exposure = attribute.exposure,
+        .aperture_radius = attribute.focal_length / attribute.aperture * 0.5f,
+    };
 }
 
 std::unique_ptr<RenderProxy> CameraComponent::CreateRenderProxy()
 {
     auto proxy = std::make_unique<CameraRenderProxy>();
 
-    state_.Update(attribute_);
-
-    proxy->SetData(state_);
+    proxy->UpdateAttribute(CalculateRenderAttribute(attribute_));
 
     node_->GetScene()->GetRenderProxy()->SetCamera(proxy.get());
 
@@ -70,31 +74,18 @@ void CameraComponent::OnAttach()
 
 void CameraComponent::UpdateRenderData()
 {
-    state_.Update(attribute_);
+    auto render_attrib = CalculateRenderAttribute(attribute_);
 
     if (GetRenderProxy())
     {
         TaskManager::RunInRenderThread(
-            [this, state = state_]() { GetRenderProxy()->As<CameraRenderProxy>()->SetData(state); });
+            [this, render_attrib]() { GetRenderProxy()->As<CameraRenderProxy>()->UpdateAttribute(render_attrib); });
     }
 }
 
-void CameraComponent::CameraState::Print() const
-{
-    Log(Info, "camera state: vertical_fov {} focus_distance {} image_distance {} aperture_radius {}", vertical_fov,
-        focus_distance, image_distance, aperture_radius);
-}
-
-void CameraComponent::CameraAttribute::Print() const
+void CameraComponent::Attribute::Print() const
 {
     Log(Info, "camera attribute: focal_length {} sensor_height {} aperture {} exposure {}", focal_length, sensor_height,
         aperture, exposure);
-}
-
-void CameraComponent::CameraState::Update(const CameraAttribute &attribute)
-{
-    vertical_fov = 2.f * std::atan(attribute.sensor_height / (2.f * attribute.focal_length));
-    aperture_radius = attribute.focal_length / attribute.aperture * 0.5f;
-    image_distance = 1.f / (1.f / attribute.focal_length - 1.f / focus_distance);
 }
 } // namespace sparkle

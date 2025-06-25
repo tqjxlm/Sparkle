@@ -211,7 +211,7 @@ void ForwardMeshPass::UpdateFrameData(const RenderConfig &config, SceneRenderPro
 
     ForwardPixelShaderBase::UniformBufferData ubo{.sky_light = {},
                                                   .dir_light = {},
-                                                  .view_pos = camera->GetTranslation(),
+                                                  .view_pos = camera->GetPosture().position,
                                                   .render_config = pbr_config,
                                                   .ssao_config = {}};
 

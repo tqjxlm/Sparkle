@@ -84,7 +84,7 @@ void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneR
     DirectionalLightingPassPixelShader::UniformBufferData ubo{
         .sky_light = sky_light ? sky_light->GetRenderData() : SkyRenderProxy::UniformBufferData{},
         .dir_light = dir_light ? dir_light->GetRenderData() : DirectionalLightRenderProxy::UniformBufferData{},
-        .view_pos = camera->GetTranslation(),
+        .view_pos = camera->GetPosture().position,
         .render_config = pbr_config,
         .ssao_config = {}};
 

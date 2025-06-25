@@ -93,7 +93,7 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
     float aperture = 22.f;
     render_camera->verticalAperture.get_value().get(0, &aperture);
 
-    auto camera = std::make_shared<OrbitCameraComponent>(CameraComponent::CameraAttribute{
+    auto camera = std::make_shared<OrbitCameraComponent>(CameraComponent::Attribute{
         .focal_length = focal_length * 0.001f, // convert mm to m
         .aperture = aperture,
     });

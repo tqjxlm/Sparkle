@@ -72,7 +72,7 @@ void SceneManager::GenerateRandomSpheres(Scene &scene, unsigned count)
 
 static std::shared_ptr<OrbitCameraComponent> CreateDefaultCamera()
 {
-    CameraComponent::CameraAttribute camera_attribute;
+    CameraComponent::Attribute camera_attribute;
 
     return std::make_shared<OrbitCameraComponent>(camera_attribute);
 }
