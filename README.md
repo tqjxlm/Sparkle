@@ -57,6 +57,14 @@ It is an experimental demo which aims to be simple and modern, rather than being
 | gpu              | vulkan-glfw | metal-macos              | metal-ios | vulkan-android |
 | forward/deferred | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
 
+### Tested on Devices
+
+| platform | windows          | android          | macos        | ios       |
+| -------- | ---------------- | ---------------- | ------------ | --------- |
+| system   | windows 11       | android 13       | macos 15.5   | ios 18.5  |
+| cpu      | Ryzen 5975WX     | Snapdragon 8Gen2 | Apple M3 Pro | Apple A18 |
+| gpu      | GeForce RTX 4080 | Adreno 740       | Apple M3 Pro | Apple A18 |
+
 ## Dependencies
 
 ### Compiler
