@@ -21,14 +21,8 @@ def download_file(url, dest):
             with open(dest, 'wb') as f:
                 f.write(response.read())
     except urllib.error.HTTPError as e:
-        if e.code == 403:
-            print(
-                f"HTTP 403 Forbidden - The download URL may have changed or requires authentication")
-            print(
-                f"Please download the Vulkan SDK manually from: https://vulkan.lunarg.com/sdk/home")
-            raise e
-        else:
-            raise e
+        print(f"HTTP request failed. error code: {e.code}")
+        raise e
 
 
 def extract_zip(zip_path, extract_to):
