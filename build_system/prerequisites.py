@@ -6,7 +6,7 @@ import os
 import sys
 import subprocess
 
-from build_system.utils import download_file, extract_zip, extract_archive
+from build_system.utils import download_file, extract_archive
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -71,7 +71,7 @@ def install_cmake():
         print(
             f"Error: Unsupported platform '{system}' for automatic CMake installation.")
         print("Please install CMake manually using a package manager or download from: https://cmake.org/download/")
-        sys.exit(1)
+        raise Exception()
 
     try:
         download_path = os.path.join(build_cache_dir, filename)
@@ -102,11 +102,10 @@ def install_cmake():
         else:
             print(
                 f"Error: Expected directory not found after extraction: {extracted_dir}")
-            sys.exit(1)
+            raise Exception()
 
-        # Clean up
+        # Clean up download file
         os.remove(download_path)
-        shutil.rmtree(tmp_dir)
 
         # Verify installation
         if os.path.exists(cmake_executable):
@@ -115,12 +114,12 @@ def install_cmake():
         else:
             print(
                 f"Error: CMake executable not found after installation: {cmake_executable}")
-            sys.exit(1)
+            raise Exception()
 
     except Exception as e:
         print(f"Error installing CMake: {e}")
         print("Please install CMake manually from: https://cmake.org/download/")
-        sys.exit(1)
+        raise Exception()
 
 
 def find_cmake():
@@ -143,7 +142,7 @@ def find_cmake():
                 f"Error: CMAKE_PATH is set to '{cmake_path}' but cmake executable not found or not executable.")
             print(
                 "Please ensure CMAKE_PATH points to the cmake executable or directory containing cmake.")
-            sys.exit(1)
+            raise Exception()
     else:
         # Check if cmake is in system PATH
         cmake_executable = shutil.which("cmake")
@@ -192,7 +191,7 @@ def get_latest_vulkan_sdk_version(system, platform_name):
 
     if not versions:
         print("Error: No Vulkan SDK versions found.")
-        sys.exit(1)
+        raise Exception()
 
     # The JSON structure might be different than expected
     # Try different approaches to get the version
@@ -216,13 +215,24 @@ def get_latest_vulkan_sdk_version(system, platform_name):
             else:
                 print("Error: Could not determine Vulkan SDK version from response.")
                 print(f"Response: {response_data}")
-                sys.exit(1)
+                raise Exception()
     else:
         print("Error: Unexpected JSON response format.")
         print(f"Response: {response_data}")
-        sys.exit(1)
+        raise Exception()
 
     return latest_version
+
+
+def validate_vulkan_sdk(vulkan_sdk_path):
+    # Verify it's a complete installation
+    if is_macos:
+        vulkan_include = os.path.join(
+            vulkan_sdk_path, "macOS", "include", "vulkan", "vulkan.h")
+    else:
+        vulkan_include = os.path.join(
+            vulkan_sdk_path, "include", "vulkan", "vulkan.h")
+    return os.path.exists(vulkan_include)
 
 
 def install_vulkan_sdk(build_cache_dir):
@@ -239,7 +249,7 @@ def install_vulkan_sdk(build_cache_dir):
     else:
         print(
             f"Error: Unsupported platform '{system}' for automatic Vulkan SDK installation.")
-        sys.exit(1)
+        raise Exception()
 
     tmp_dir = os.path.join(build_cache_dir, "tmp")
 
@@ -250,11 +260,9 @@ def install_vulkan_sdk(build_cache_dir):
         # Check if already installed in build_cache
         vulkan_sdk_path = os.path.join(
             build_cache_dir, "VulkanSDK", latest_version)
+
         if os.path.exists(vulkan_sdk_path):
-            # Verify it's a complete installation
-            vulkan_include = os.path.join(
-                vulkan_sdk_path, "include", "vulkan", "vulkan.h")
-            if os.path.exists(vulkan_include):
+            if validate_vulkan_sdk(vulkan_sdk_path):
                 print(
                     f"Vulkan SDK {latest_version} already installed in build_cache.")
                 return vulkan_sdk_path
@@ -276,7 +284,7 @@ def install_vulkan_sdk(build_cache_dir):
         else:
             print(
                 f"Error: Unsupported platform '{platform_name}' for download.")
-            sys.exit(1)
+            raise Exception()
 
         download_path = os.path.join(build_cache_dir, filename)
 
@@ -319,10 +327,6 @@ def install_vulkan_sdk(build_cache_dir):
             if not os.path.exists(vulkan_include):
                 raise Exception(
                     f"Vulkan SDK installation verification failed: {vulkan_include} not found")
-
-            # Clean up temp directory
-            if os.path.exists(tmp_dir):
-                shutil.rmtree(tmp_dir)
 
         elif platform_name == "mac":
             print("Extracting Vulkan SDK...")
@@ -388,9 +392,9 @@ def install_vulkan_sdk(build_cache_dir):
     except Exception as e:
         print(f"Error installing Vulkan SDK: {e}")
 
-    print("Please install the Vulkan SDK manually from:")
-    print("https://vulkan.lunarg.com/sdk/home")
-    sys.exit(1)
+        print("Please install the Vulkan SDK manually from: https://vulkan.lunarg.com/sdk/home")
+
+        raise Exception()
 
 
 def find_llvm_path():
@@ -608,9 +612,8 @@ def install_vcpkg(build_cache_dir):
 
     except Exception as e:
         print(f"Error installing vcpkg: {e}")
-        print("Please install vcpkg manually from:")
-        print("https://github.com/Microsoft/vcpkg")
-        sys.exit(1)
+        print("Please install vcpkg manually from: https://github.com/Microsoft/vcpkg")
+        raise Exception()
 
 
 def find_vcpkg():
@@ -620,12 +623,12 @@ def find_vcpkg():
     vcpkg_executable = "vcpkg.exe" if is_windows else "vcpkg"
 
     # Check for user override first
-    vcpkg_path = os.environ.get("VCPKG_PATH")
-    if vcpkg_path:
+    vcpkg_dir = os.environ.get("VCPKG_PATH")
+    if vcpkg_dir:
         if os.path.exists(os.path.join(vcpkg_dir, vcpkg_executable)):
-            return vcpkg_path
+            return vcpkg_dir
         print(
-            f"VCPKG_PATH is set to '{vcpkg_path}' but path does not exist. try auto-detecting...")
+            f"VCPKG_PATH is set to '{vcpkg_dir}' but path does not exist. try auto-detecting...")
 
     # Check if already installed in build_cache
     build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
@@ -659,11 +662,11 @@ def install_glfw():
                 install_cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 print(f"Failed to install GLFW via vcpkg: {result.stderr}")
-                sys.exit(1)
+                raise Exception()
             print("GLFW installed successfully via vcpkg!")
         else:
             print("Failed to install GLFW via vcpkg. vcpkg not found.")
-            sys.exit(1)
+            raise Exception()
     elif is_macos:
         print("Installing GLFW via Homebrew...")
         try:

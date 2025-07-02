@@ -91,7 +91,7 @@ def configure(args, is_generate_sln):
                     "Please install LLVM via your package manager or set the LLVM environment variable.")
                 print("  Ubuntu/Debian: sudo apt install clang")
                 print("  Fedora: sudo dnf install clang")
-            sys.exit(1)
+            raise Exception()
         compiler_args = [
             f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
         generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
@@ -108,7 +108,7 @@ def configure(args, is_generate_sln):
         if not vs_path:
             print("Error: Could not find Visual Studio 2022 installation.")
             print("Please ensure Visual Studio 2022 is installed with C++ tools.")
-            sys.exit(1)
+            raise Exception()
 
         clang_cl_path = os.path.join(
             vs_path, "VC", "Tools", "Llvm", "x64", "bin", "clang-cl.exe")
@@ -116,7 +116,7 @@ def configure(args, is_generate_sln):
             print(f"Error: clang-cl.exe not found in Visual Studio installation.")
             print(
                 "Please install 'C++ Clang Compiler for Windows' component in Visual Studio Installer.")
-            sys.exit(1)
+            raise Exception()
 
         shell_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
 
@@ -128,7 +128,7 @@ def configure(args, is_generate_sln):
 
     if result.returncode != 0:
         print("CMake configure failed.")
-        sys.exit(1)
+        raise Exception()
 
     return output_dir
 
@@ -150,7 +150,7 @@ def build(args):
         if not vs_path:
             print("Error: Could not find Visual Studio 2022 installation.")
             print("Please ensure Visual Studio 2022 is installed with C++ tools.")
-            sys.exit(1)
+            raise Exception()
 
         shell_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
 
@@ -162,7 +162,7 @@ def build(args):
 
     if result.returncode != 0:
         print("Build failed.")
-        sys.exit(1)
+        raise Exception()
 
 
 def generate_project(args):
@@ -170,7 +170,7 @@ def generate_project(args):
     if not is_windows:
         print(
             "Project generation for glfw is only supported on Windows with Visual Studio.")
-        sys.exit(1)
+        raise Exception()
 
     output_dir = configure(args, True)
 

@@ -46,7 +46,7 @@ def configure_for_clangd(args):
     result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake configure failed.")
-        sys.exit(1)
+        raise Exception()
 
     print(f"Configuration complete in {output_dir}")
 
@@ -67,7 +67,7 @@ def generate_project(args):
     if not team_id:
         print("Error: APPLE_DEVELOPER_TEAM_ID environment variable is not set. The app will not be signed.")
         print("Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
-        sys.exit(1)
+        raise Exception()
 
     generator_args = ["-G Xcode"]
 
@@ -80,7 +80,7 @@ def generate_project(args):
     result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake project generation failed.")
-        sys.exit(1)
+        raise Exception()
 
     print(f"Xcode project is generated at {output_dir}. Open with command:")
     print(f"open {output_dir}/sparkle.xcodeproj")

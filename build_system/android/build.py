@@ -41,7 +41,7 @@ def setup_android_validation(script_dir):
         # Clean up downloaded file
         if os.path.exists(zip_path):
             os.remove(zip_path)
-        sys.exit(1)
+        raise Exception()
 
     # Flatten directory structure (move all subdirs/files up one level)
     # Find the first subdirectory in jniLibs
@@ -81,7 +81,7 @@ def download_gradle_wrapper():
     if not os.path.exists(properties_path):
         print(
             f"Error: gradle-wrapper.properties not found at {properties_path}")
-        sys.exit(1)
+        raise Exception()
 
     # Extract gradle version from properties
     gradle_version = None
@@ -97,7 +97,7 @@ def download_gradle_wrapper():
 
     if not gradle_version:
         print("Error: Could not determine Gradle version from gradle-wrapper.properties")
-        sys.exit(1)
+        raise Exception()
 
     # Download gradle-wrapper.jar
     wrapper_url = f"https://raw.githubusercontent.com/gradle/gradle/v{gradle_version}/gradle/wrapper/gradle-wrapper.jar"
@@ -111,7 +111,7 @@ def download_gradle_wrapper():
     except Exception as e:
         print(f"Failed to download gradle-wrapper.jar: {e}")
         print("Please download it manually or ensure internet connection.")
-        sys.exit(1)
+        raise Exception()
 
 
 def clean_output_directory(output_dir):
@@ -170,7 +170,7 @@ def prepare_environment(args=None):
         if platform.system() == "Darwin":
             print(
                 "   Example: export JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home'")
-        sys.exit(1)
+        raise Exception()
 
     # Ensure gradle-wrapper.jar exists
     download_gradle_wrapper()
@@ -180,7 +180,7 @@ def prepare_environment(args=None):
         SCRIPTPATH, "gradlew" if platform.system() != "Windows" else "gradlew.bat")
     if not os.path.exists(gradlew_path):
         print(f"Error: gradlew not found at {gradlew_path}")
-        sys.exit(1)
+        raise Exception()
 
     # Make sure gradlew is executable on Unix systems
     if platform.system() != "Windows":
@@ -233,7 +233,7 @@ def build_apk(args):
 
     except Exception as e:
         print(f"Build failed with exception: {e}")
-        sys.exit(1)
+        raise Exception()
 
 
 def install_and_run_apk(apk_path):

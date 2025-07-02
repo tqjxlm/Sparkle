@@ -41,7 +41,7 @@ def configure_for_clangd(args):
     result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake configure failed.")
-        sys.exit(1)
+        raise Exception()
 
     print(f"Configuration complete in {output_dir}")
 
@@ -69,7 +69,7 @@ def generate_project(args):
     result = subprocess.run(cmake_cmd)
     if result.returncode != 0:
         print("CMake project generation failed.")
-        sys.exit(1)
+        raise Exception()
 
     print(f"Xcode project is generated at {output_dir}. Open with command:")
     print(f"open {output_dir}/sparkle.xcodeproj")
@@ -107,9 +107,9 @@ def build_and_run(args):
                 subprocess.run(run_cmd)
             else:
                 print(f"Error: Executable not found at {executable_path}")
-                sys.exit(1)
+                raise Exception()
         else:
             print(f"Error: Application bundle not found at {app_path}")
-            sys.exit(1)
+            raise Exception()
 
     return output_dir

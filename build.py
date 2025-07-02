@@ -72,7 +72,7 @@ def check_environment(args):
     if args["framework"] in ("macos", "ios") and sys.platform != "darwin":
         print(
             f"Error: Framework '{args['framework']}' requires macOS, but current system is not macOS.")
-        sys.exit(1)
+        raise Exception()
 
 
 def run_git_submodule_update():
@@ -143,23 +143,18 @@ def main():
 
     args = parse_args()
 
-    try:
-        # Always run setup first
-        setup()
+    # Always run setup first
+    setup()
 
-        # If --setup-only flag is used, exit after setup
-        if args["setup_only"]:
-            print("Setup-only mode: Skipping build.")
-            return
+    # If --setup-only flag is used, exit after setup
+    if args["setup_only"]:
+        print("Setup-only mode: Skipping build.")
+        return
 
-        check_environment(args)
+    check_environment(args)
 
-        # Run build process
-        build_project(args)
-
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+    # Run build process
+    build_project(args)
 
 
 if __name__ == "__main__":

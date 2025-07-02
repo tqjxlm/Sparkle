@@ -36,17 +36,14 @@ def extract_zip(zip_path, extract_to):
 
             target_path = os.path.join(extract_to, member.filename)
 
-            # Ensure the target path is within the extraction directory
-            if not target_path.startswith(os.path.abspath(extract_to)):
-                continue
-
-            # If file exists and is read-only, make it writable
+            # remove destination to avoid permission issues
             if os.path.exists(target_path):
                 if os.path.isdir(target_path):
-                    os.chmod(target_path, stat.S_IRWXU | stat.S_IRGRP |
-                             stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                    robust_rmtree(target_path)
                 else:
-                    os.chmod(target_path, stat.S_IWRITE | stat.S_IREAD)
+                    os.remove(target_path)
+
+        # Extract all files
         zip_ref.extractall(extract_to)
 
 
@@ -102,14 +99,14 @@ def run_command_with_logging(cmd, log_file_path, description):
 
         if return_code != 0:
             print(f"{description} failed! Check {log_file_path} for details.")
-            sys.exit(1)
+            raise Exception()
 
         print(f"{description} completed successfully!")
         return return_code
 
     except Exception as e:
         print(f"{description} failed with exception: {e}")
-        sys.exit(1)
+        raise Exception()
 
 
 def force_remove_readonly(func, path, exc_info):
