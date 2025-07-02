@@ -2,9 +2,9 @@ import os
 import sys
 import subprocess
 import platform
-import shutil
 
 from build_system.prerequisites import find_llvm_path, find_visual_studio_path, find_vcpkg, install_glfw
+from build_system.utils import robust_rmtree
 
 # Determine script directory
 SCRIPT = os.path.abspath(__file__)
@@ -36,7 +36,7 @@ def clean_output_directory(output_dir):
     """Clean the output directory if it exists."""
     if os.path.exists(output_dir):
         print(f"Cleaning output directory: {output_dir}")
-        shutil.rmtree(output_dir)
+        robust_rmtree(output_dir)
 
 
 def get_cmd_with_vcvars(vs_path, cmake_cmd):

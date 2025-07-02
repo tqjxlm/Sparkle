@@ -5,6 +5,9 @@ import os
 import stat
 import subprocess
 import sys
+import shutil
+import platform
+import time
 
 
 def download_file(url, dest):
@@ -84,3 +87,69 @@ def run_command_with_logging(cmd, log_file_path, description):
     except Exception as e:
         print(f"{description} failed with exception: {e}")
         sys.exit(1)
+
+
+def force_remove_readonly(func, path, exc_info):
+    """
+    Error handler for Windows readonly file removal.
+    """
+    if os.path.exists(path):
+        # Make the file writable and try again
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+        func(path)
+
+
+def robust_rmtree(path, max_retries=3, retry_delay=1.0):
+    """
+    Robustly remove a directory tree, handling Windows file permission issues.
+
+    Args:
+        path: Path to directory to remove
+        max_retries: Maximum number of retry attempts
+        retry_delay: Delay between retries in seconds
+    """
+    if not os.path.exists(path):
+        return
+
+    is_windows = platform.system() == "Windows"
+
+    for attempt in range(max_retries):
+        try:
+            if is_windows:
+                # On Windows, use onexc callback to handle readonly files
+                shutil.rmtree(path, onexc=force_remove_readonly)
+            else:
+                shutil.rmtree(path)
+            return
+        except (OSError, PermissionError) as e:
+            if attempt < max_retries - 1:
+                print(
+                    f"Retry {attempt + 1}/{max_retries}: Failed to remove {path}, retrying in {retry_delay}s...")
+                print(f"Error: {e}")
+                time.sleep(retry_delay)
+
+                # On Windows, try additional cleanup strategies
+                if is_windows:
+                    try:
+                        # Try to reset file attributes recursively
+                        for root, dirs, files in os.walk(path, topdown=False):
+                            for name in files:
+                                file_path = os.path.join(root, name)
+                                try:
+                                    os.chmod(
+                                        file_path, stat.S_IWRITE | stat.S_IREAD)
+                                except:
+                                    pass
+                            for name in dirs:
+                                dir_path = os.path.join(root, name)
+                                try:
+                                    os.chmod(dir_path, stat.S_IWRITE |
+                                             stat.S_IREAD | stat.S_IEXEC)
+                                except:
+                                    pass
+                    except:
+                        pass
+            else:
+                print(
+                    f"Failed to remove {path} after {max_retries} attempts: {e}")
+                raise
