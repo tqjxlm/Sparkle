@@ -201,8 +201,6 @@ if(ENABLE_VULKAN)
         target_compile_definitions(sparkle PRIVATE VK_USE_PLATFORM_IOS_MVK)
     elseif(ANDROID)
         target_compile_definitions(sparkle PRIVATE VK_USE_PLATFORM_ANDROID_KHR)
-    elseif(UNIX)
-        target_compile_definitions(sparkle PRIVATE VK_USE_PLATFORM_XLIB_KHR)
     endif()
     
     if (ANDROID)

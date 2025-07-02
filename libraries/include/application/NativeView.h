@@ -2,6 +2,8 @@
 
 #include "core/math/Types.h"
 
+#include <memory>
+
 namespace sparkle
 {
 class AppFramework;

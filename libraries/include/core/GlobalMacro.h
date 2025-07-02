@@ -46,9 +46,6 @@
 #endif
 
 #if (defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__))
-#if !(FRAMEWORK_ANDROID)
-#error "PLATFORM_LINUX only supports: FRAMEWORK_ANDROID"
-#endif
 #define PLATFORM_LINUX 1
 #else
 #define PLATFORM_LINUX 0

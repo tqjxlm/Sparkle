@@ -6,11 +6,12 @@ import os
 import sys
 import subprocess
 
-from build_system.utils import download_file, extract_zip
+from build_system.utils import download_file, extract_zip, extract_archive
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
 is_windows = platform.system() == "Windows"
+is_macos = platform.system() == "Darwin"
 
 
 def install_cmake():
@@ -69,7 +70,7 @@ def install_cmake():
     else:
         print(
             f"Error: Unsupported platform '{system}' for automatic CMake installation.")
-        print("Please install CMake manually from: https://cmake.org/download/")
+        print("Please install CMake manually using a package manager or download from: https://cmake.org/download/")
         sys.exit(1)
 
     try:
@@ -82,7 +83,7 @@ def install_cmake():
 
         print("Extracting CMake...")
         tmp_dir = os.path.join(build_cache_dir, "tmp")
-        extract_zip(download_path, tmp_dir)
+        extract_archive(download_path, tmp_dir)
 
         # Find the extracted cmake directory
         if system == "darwin":
@@ -233,6 +234,8 @@ def install_vulkan_sdk(build_cache_dir):
         platform_name = "mac"
     elif system == "windows":
         platform_name = "windows"
+    elif system == "linux":
+        platform_name = "linux"
     else:
         print(
             f"Error: Unsupported platform '{system}' for automatic Vulkan SDK installation.")
@@ -248,9 +251,17 @@ def install_vulkan_sdk(build_cache_dir):
         vulkan_sdk_path = os.path.join(
             build_cache_dir, "VulkanSDK", latest_version)
         if os.path.exists(vulkan_sdk_path):
-            print(
-                f"Vulkan SDK {latest_version} already installed in build_cache.")
-            return vulkan_sdk_path
+            # Verify it's a complete installation
+            vulkan_include = os.path.join(
+                vulkan_sdk_path, "include", "vulkan", "vulkan.h")
+            if os.path.exists(vulkan_include):
+                print(
+                    f"Vulkan SDK {latest_version} already installed in build_cache.")
+                return vulkan_sdk_path
+            else:
+                print(
+                    f"Incomplete Vulkan SDK installation found. Removing {vulkan_sdk_path}")
+                shutil.rmtree(vulkan_sdk_path)
 
         # Determine download info based on platform
         if platform_name == "mac":
@@ -259,6 +270,9 @@ def install_vulkan_sdk(build_cache_dir):
         elif platform_name == "windows":
             filename = f"vulkansdk-windows-X64-{latest_version}.exe"
             download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/windows/{filename}"
+        elif platform_name == "linux":
+            filename = f"vulkansdk-linux-x86_64-{latest_version}.tar.xz"
+            download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/linux/{filename}"
         else:
             print(
                 f"Error: Unsupported platform '{platform_name}' for download.")
@@ -269,16 +283,50 @@ def install_vulkan_sdk(build_cache_dir):
         print(f"Downloading Vulkan SDK {latest_version}...")
         print(f"URL: {download_url}")
 
-        download_file(download_url, download_path)
+        # download if not exists
+        if os.path.exists(download_path):
+            # TODO: check hash
+            print(f"Vulkan SDK {latest_version} already downloaded.")
+        else:
+            download_file(download_url, download_path)
 
         # Extract/Install SDK
         if platform_name == "linux":
             print("Extracting Vulkan SDK...")
-            extract_zip(download_path, tmp_dir)
+            extract_archive(download_path, tmp_dir)
+
+            # Find the extracted directory structure: tmp/{SDKVERSION}/x86_64
+            extracted_dir = os.path.join(tmp_dir, latest_version)
+            if os.path.exists(extracted_dir):
+                x86_64_dir = os.path.join(extracted_dir, "x86_64")
+                if os.path.exists(x86_64_dir):
+                    # Move contents from x86_64 directory to target SDK path
+                    os.makedirs(vulkan_sdk_path, exist_ok=True)
+                    for item in os.listdir(x86_64_dir):
+                        src = os.path.join(x86_64_dir, item)
+                        dst = os.path.join(vulkan_sdk_path, item)
+                        shutil.copytree(src, dst)
+                else:
+                    raise Exception(
+                        f"Expected x86_64 directory not found in {extracted_dir}")
+            else:
+                raise Exception(
+                    f"Extraction failed. Expected path is {tmp_dir}")
+
+            # Verify installation by checking for key files
+            vulkan_include = os.path.join(
+                vulkan_sdk_path, "include", "vulkan", "vulkan.h")
+            if not os.path.exists(vulkan_include):
+                raise Exception(
+                    f"Vulkan SDK installation verification failed: {vulkan_include} not found")
+
+            # Clean up temp directory
+            if os.path.exists(tmp_dir):
+                shutil.rmtree(tmp_dir)
 
         elif platform_name == "mac":
             print("Extracting Vulkan SDK...")
-            extract_zip(download_path, tmp_dir)
+            extract_archive(download_path, tmp_dir)
 
             # Install SDK components
             print("Installing Vulkan SDK core and iOS components...")
@@ -339,9 +387,10 @@ def install_vulkan_sdk(build_cache_dir):
 
     except Exception as e:
         print(f"Error installing Vulkan SDK: {e}")
-        print("Please install the Vulkan SDK manually from:")
-        print("https://vulkan.lunarg.com/sdk/home")
-        sys.exit(1)
+
+    print("Please install the Vulkan SDK manually from:")
+    print("https://vulkan.lunarg.com/sdk/home")
+    sys.exit(1)
 
 
 def find_llvm_path():
@@ -410,24 +459,27 @@ def find_llvm_path():
             return llvm_path
 
     # Still no? try to install it
-    print("LLVM not found. Attempting to install via Homebrew...")
-    try:
-        result = subprocess.run(
-            ["brew", "install", "llvm"], capture_output=True, text=True, timeout=300)
-        if result.returncode == 0:
-            print("Successfully installed LLVM via Homebrew")
-            # Re-check Homebrew paths after installation
-            for llvm_path in homebrew_paths:
-                clang_path = os.path.join(llvm_path, "bin", "clang")
-                clangpp_path = os.path.join(llvm_path, "bin", "clang++")
-                if os.path.exists(clang_path) and os.path.exists(clangpp_path):
-                    print(f"Found LLVM via Homebrew at: {llvm_path}")
-                    return llvm_path
-        else:
-            print(f"Failed to install LLVM via Homebrew: {result.stderr}")
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-        print("Failed to install LLVM via Homebrew (brew command not found or failed)")
-        pass
+    if is_macos:
+        print("LLVM not found. Attempting to install via Homebrew...")
+        try:
+            result = subprocess.run(
+                ["brew", "install", "llvm"], capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                print("Successfully installed LLVM via Homebrew")
+                # Re-check Homebrew paths after installation
+                for llvm_path in homebrew_paths:
+                    clang_path = os.path.join(llvm_path, "bin", "clang")
+                    clangpp_path = os.path.join(llvm_path, "bin", "clang++")
+                    if os.path.exists(clang_path) and os.path.exists(clangpp_path):
+                        print(f"Found LLVM via Homebrew at: {llvm_path}")
+                        return llvm_path
+            else:
+                raise Exception(result.stderr)
+        except Exception as e:
+            print("Failed to install LLVM via Homebrew. Please install manually.")
+            print(f"Error: {e}")
+    else:
+        print("LLVM auto-installation not supported on this platform. Please make sure it is installed manually, preferably via a native package manager.")
 
     return None
 
@@ -562,6 +614,9 @@ def install_vcpkg(build_cache_dir):
 
 
 def find_vcpkg():
+    if not is_windows:
+        return None
+
     vcpkg_executable = "vcpkg.exe" if is_windows else "vcpkg"
 
     # Check for user override first
@@ -609,7 +664,7 @@ def install_glfw():
         else:
             print("Failed to install GLFW via vcpkg. vcpkg not found.")
             sys.exit(1)
-    else:
+    elif is_macos:
         print("Installing GLFW via Homebrew...")
         try:
             result = subprocess.run(
@@ -617,9 +672,10 @@ def install_glfw():
             if result.returncode == 0:
                 print("Successfully installed GLFW via Homebrew")
             else:
-                print(f"Failed to install GLFW via Homebrew: {result.stderr}")
-                sys.exit(1)
-        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+                raise Exception(result.stderr)
+        except Exception as e:
             print(
-                "Failed to install GLFW via Homebrew (brew command not found or failed)")
-            sys.exit(1)
+                "Failed to install GLFW via Homebrew. Please make sure it is installed manually.")
+            print(f"Error: {e}")
+    else:
+        print("GLFW auto-installation not supported on this platform. Please make sure it is installed manually, preferably via a native package manager.")

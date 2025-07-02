@@ -1,6 +1,7 @@
 import urllib.request
 import urllib.error
 import zipfile
+import tarfile
 import os
 import stat
 import subprocess
@@ -47,6 +48,34 @@ def extract_zip(zip_path, extract_to):
                 else:
                     os.chmod(target_path, stat.S_IWRITE | stat.S_IREAD)
         zip_ref.extractall(extract_to)
+
+
+def extract_archive(archive_path, extract_to):
+    """Extract various archive formats (zip, tar.gz, tar.xz, tar.bz2) to destination."""
+    print(f"Extracting {archive_path} to {extract_to} ...")
+
+    # Create extraction directory if it doesn't exist
+    os.makedirs(extract_to, exist_ok=True)
+
+    # Determine archive type by extension
+    archive_path_lower = archive_path.lower()
+
+    if archive_path_lower.endswith('.zip'):
+        extract_zip(archive_path, extract_to)
+    elif archive_path_lower.endswith(('.tar.gz', '.tgz')):
+        with tarfile.open(archive_path, 'r:gz') as tar_ref:
+            tar_ref.extractall(extract_to)
+    elif archive_path_lower.endswith(('.tar.xz', '.txz')):
+        with tarfile.open(archive_path, 'r:xz') as tar_ref:
+            tar_ref.extractall(extract_to)
+    elif archive_path_lower.endswith(('.tar.bz2', '.tbz2')):
+        with tarfile.open(archive_path, 'r:bz2') as tar_ref:
+            tar_ref.extractall(extract_to)
+    elif archive_path_lower.endswith('.tar'):
+        with tarfile.open(archive_path, 'r') as tar_ref:
+            tar_ref.extractall(extract_to)
+    else:
+        raise ValueError(f"Unsupported archive format: {archive_path}")
 
 
 def run_command_with_logging(cmd, log_file_path, description):
