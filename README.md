@@ -329,7 +329,7 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 ### CI/CD
 
 * [ ] format and style check on CI
-* [ ] macOS and iOS archving and signing
+* [ ] macOS and iOS archiving and signing
 * [ ] unit test pipeline
 * [ ] behavioural test pipeline
 * [ ] performance test pipeline

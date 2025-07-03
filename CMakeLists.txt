@@ -388,7 +388,7 @@ if (MSVC)
     set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT sparkle)
 endif()
 
-# separate build and generation for ninja
+# separate build and generation for ninja as it is a single configuration generator
 if(CMAKE_GENERATOR STREQUAL "Ninja")
     set_target_properties(sparkle PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PRODUCT_OUTPUT_DIRECTORY})
 endif()

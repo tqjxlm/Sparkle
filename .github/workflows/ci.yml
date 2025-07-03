@@ -28,6 +28,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup C++ Environment
+        if: matrix.framework != 'android'
         uses: aminya/setup-cpp@v1
         with:
           compiler: llvm

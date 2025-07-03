@@ -1,4 +1,5 @@
 import os
+import platform
 import subprocess
 import sys
 import argparse
@@ -103,7 +104,14 @@ def copy_build_products(product_archive_path, args):
 
     os.makedirs(product_dir, exist_ok=True)
 
-    system_name = "windows" if os.name == "nt" else "linux" if os.name == "posix" else "macos"
+    if platform.system() == "Windows":
+        system_name = "windows"
+    elif platform.system() == "Linux":
+        system_name = "linux"
+    elif platform.system() == "Darwin":
+        system_name = "macos"
+    else:
+        raise Exception()
     extension = ''.join(Path(product_archive_path).suffixes)
     product_final_name = f"{system_name}-{args['framework']}-{args['config']}{extension}"
 
