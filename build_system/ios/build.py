@@ -1,9 +1,7 @@
 import os
-import sys
 import subprocess
-import shutil
 
-from build_system.utils import run_command_with_logging
+from build_system.utils import run_command_with_logging, robust_rmtree
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -14,13 +12,6 @@ toolchain_args = [
     f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"]
 
 
-def clean_output_directory(output_dir):
-    """Clean the output directory if it exists."""
-    if os.path.exists(output_dir):
-        print(f"Cleaning output directory: {output_dir}")
-        shutil.rmtree(output_dir)
-
-
 def configure_for_clangd(args):
     """
     Configure CMake for clangd in 'clangd' directory for iOS.
@@ -28,7 +19,7 @@ def configure_for_clangd(args):
     output_dir = os.path.join(SCRIPTPATH, "clangd")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
@@ -58,7 +49,7 @@ def generate_project(args):
     output_dir = os.path.join(SCRIPTPATH, "project")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)

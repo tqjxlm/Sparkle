@@ -31,13 +31,6 @@ def get_toolchain_args():
     return []
 
 
-def clean_output_directory(output_dir):
-    """Clean the output directory if it exists."""
-    if os.path.exists(output_dir):
-        print(f"Cleaning output directory: {output_dir}")
-        robust_rmtree(output_dir)
-
-
 def get_cmd_with_vcvars(vs_path, cmake_cmd):
     vcvars_path = os.path.join(
         vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
@@ -60,7 +53,7 @@ def configure(args, is_generate_sln):
         output_dir = os.path.join(SCRIPTPATH, "output")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)

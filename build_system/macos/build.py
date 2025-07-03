@@ -1,19 +1,10 @@
 import os
-import sys
 import subprocess
-import shutil
 
-from build_system.utils import compress_zip, run_command_with_logging
+from build_system.utils import compress_zip, run_command_with_logging, robust_rmtree
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
-
-
-def clean_output_directory(output_dir):
-    """Clean the output directory if it exists."""
-    if os.path.exists(output_dir):
-        print(f"Cleaning output directory: {output_dir}")
-        shutil.rmtree(output_dir)
 
 
 def configure_for_clangd(args):
@@ -23,7 +14,7 @@ def configure_for_clangd(args):
     output_dir = os.path.join(SCRIPTPATH, "clangd")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
@@ -53,7 +44,7 @@ def generate_project(args):
     output_dir = os.path.join(SCRIPTPATH, "project")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
