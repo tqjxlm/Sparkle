@@ -2,7 +2,7 @@ import os
 import subprocess
 import platform
 
-from build_system.prerequisites import find_llvm_path, find_visual_studio_path, find_vcpkg, install_glfw
+from build_system.prerequisites import find_llvm_path, find_or_install_ninja, find_visual_studio_path, find_vcpkg, install_glfw
 from build_system.utils import compress_zip, robust_rmtree
 
 # Determine script directory
@@ -65,9 +65,11 @@ def configure(args, is_generate_sln):
         generator_args = []
     elif is_windows:
         # Windows: use MSVC environment and bundled clang-cl
+        ninja_path = find_or_install_ninja()
         compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl",
                          "-DCMAKE_C_COMPILER=clang-cl"]
-        generator_args = ["-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}"]
+        generator_args = [
+            "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
     else:
         # Non-Windows: find LLVM installation
         LLVM = find_llvm_path()
@@ -85,7 +87,8 @@ def configure(args, is_generate_sln):
             raise Exception()
         compiler_args = [
             f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
-        generator_args = ["-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}"]
+        generator_args = [
+            "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
 
     # Build CMake command
     cmake_cmd = [

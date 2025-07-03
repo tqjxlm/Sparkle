@@ -650,6 +650,80 @@ def find_vcpkg():
     return vcpkg_install_path
 
 
+def find_or_install_ninja():
+    """Find ninja executable in PATH or install it to build_cache and return the path."""
+    
+    # Check if ninja is already in PATH
+    ninja_executable = shutil.which("ninja")
+    if ninja_executable:
+        return ninja_executable
+    
+    # Ninja not found in PATH, try to install to build_cache
+    ninja_version = "1.12.1"
+    
+    # Create build_cache directory if it doesn't exist
+    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
+    os.makedirs(build_cache_dir, exist_ok=True)
+    
+    # Check if already installed in build_cache
+    ninja_dir = os.path.join(build_cache_dir, "ninja")
+    ninja_exe_path = os.path.join(ninja_dir, "ninja")
+    if is_windows:
+        ninja_exe_path += ".exe"
+    
+    if os.path.exists(ninja_exe_path):
+        print("Ninja already installed in build_cache.")
+        return ninja_exe_path
+    
+    # Determine download URL based on platform
+    system = platform.system().lower()
+    
+    if system == "windows":
+        filename = f"ninja-win.zip"
+        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
+    elif system == "darwin":
+        filename = f"ninja-mac.zip"
+        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
+    elif system == "linux":
+        filename = f"ninja-linux.zip"
+        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
+    else:
+        print(f"Error: Unsupported platform '{system}' for automatic Ninja installation.")
+        print("Please install Ninja manually from: https://github.com/ninja-build/ninja/releases")
+        raise Exception()
+    
+    try:
+        download_path = os.path.join(build_cache_dir, filename)
+        
+        print(f"Downloading Ninja {ninja_version}...")
+        print(f"URL: {download_url}")
+        
+        download_file(download_url, download_path)
+        
+        print("Extracting Ninja...")
+        extract_archive(download_path, ninja_dir)
+        
+        # Make ninja executable on Unix systems
+        if not is_windows:
+            os.chmod(ninja_exe_path, 0o755)
+        
+        # Clean up download file
+        os.remove(download_path)
+        
+        # Verify installation
+        if os.path.exists(ninja_exe_path):
+            print(f"Ninja {ninja_version} installed successfully!")
+            return ninja_exe_path
+        else:
+            print(f"Error: Ninja executable not found after installation: {ninja_exe_path}")
+            raise Exception()
+            
+    except Exception as e:
+        print(f"Error installing Ninja: {e}")
+        print("Please install Ninja manually from: https://github.com/ninja-build/ninja/releases")
+        raise Exception()
+
+
 def install_glfw():
     if is_windows:
         print("Installing GLFW via vcpkg...")
