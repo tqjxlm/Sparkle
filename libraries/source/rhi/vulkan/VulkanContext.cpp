@@ -88,51 +88,6 @@ static void DestroyDebugUtilsMessengerExt(VkInstance instance, VkDebugUtilsMesse
     }
 }
 
-static void GetVMAFunctions(VmaVulkanFunctions &functions)
-{
-    // Vulkan 1.0
-    functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
-    functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
-    functions.vkGetPhysicalDeviceProperties = vkGetPhysicalDeviceProperties;
-    functions.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties;
-    functions.vkAllocateMemory = vkAllocateMemory;
-    functions.vkFreeMemory = vkFreeMemory;
-    functions.vkMapMemory = vkMapMemory;
-    functions.vkUnmapMemory = vkUnmapMemory;
-    functions.vkFlushMappedMemoryRanges = vkFlushMappedMemoryRanges;
-    functions.vkInvalidateMappedMemoryRanges = vkInvalidateMappedMemoryRanges;
-    functions.vkBindBufferMemory = vkBindBufferMemory;
-    functions.vkBindImageMemory = vkBindImageMemory;
-    functions.vkGetBufferMemoryRequirements = vkGetBufferMemoryRequirements;
-    functions.vkGetImageMemoryRequirements = vkGetImageMemoryRequirements;
-    functions.vkCreateBuffer = vkCreateBuffer;
-    functions.vkDestroyBuffer = vkDestroyBuffer;
-    functions.vkCreateImage = vkCreateImage;
-    functions.vkDestroyImage = vkDestroyImage;
-    functions.vkCmdCopyBuffer = vkCmdCopyBuffer;
-
-    // Vulkan 1.1
-#if VMA_VULKAN_VERSION >= 1001000
-    if constexpr (ApiVersion >= VK_API_VERSION_1_1)
-    {
-        functions.vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2;
-        functions.vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2;
-        functions.vkBindBufferMemory2KHR = vkBindBufferMemory2;
-        functions.vkBindImageMemory2KHR = vkBindImageMemory2;
-        functions.vkGetPhysicalDeviceMemoryProperties2KHR = vkGetPhysicalDeviceMemoryProperties2;
-    }
-#endif
-
-    // Vulkan 1.3
-#if VMA_VULKAN_VERSION >= 1003000
-    if constexpr (ApiVersion >= VK_API_VERSION_1_3)
-    {
-        functions.vkGetDeviceBufferMemoryRequirements = vkGetDeviceBufferMemoryRequirements;
-        functions.vkGetDeviceImageMemoryRequirements = vkGetDeviceImageMemoryRequirements;
-    }
-#endif
-}
-
 static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<const char *> &device_extensions)
 {
     uint32_t extension_count;
@@ -640,7 +595,7 @@ void VulkanContext::SetupMemoryAllocator()
 #if VULKAN_USE_VOLK
     VmaVulkanFunctions functions;
     // function pointers have been fetched by volk, just use them
-    GetVMAFunctions(functions);
+    vmaImportVulkanFunctionsFromVolk(&allocator_info, &functions);
     allocator_info.pVulkanFunctions = &functions;
 #endif
     vmaCreateAllocator(&allocator_info, &allocator_);

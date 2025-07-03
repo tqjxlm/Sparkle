@@ -5,6 +5,8 @@
 #pragma clang diagnostic ignored "-Wnullability-completeness"
 #endif
 
+#include "VulkanMemory.h"
+
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
