@@ -219,7 +219,7 @@ def build_apk(args):
     build_cmd = [
         gradlew_path,
         gradle_task,
-        f"-PcmakeArgs={" ".join(cmake_args)}",
+        f"-PcmakeArgs={' '.join(cmake_args)}",
         "--info"
     ]
 
