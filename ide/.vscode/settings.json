@@ -20,8 +20,8 @@
     "[objective-cpp]": {
         "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
     },
-    "[hlsl]": {
-        "editor.defaultFormatter": "seaube.clangformat"
+    "[slang]": {
+        "editor.defaultFormatter": "shader-slang.slang-language-extension"
     },
     "[python]": {
         "editor.defaultFormatter": "ms-python.autopep8"
@@ -33,5 +33,11 @@
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.codeAnalysis.clangTidy.path": "/opt/homebrew/opt/llvm/bin/clang-tidy",
     // "C_Cpp.codeAnalysis.clangTidy.path": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-tidy.exe",
-    "C_Cpp.codeAnalysis.clangTidy.useBuildPath": true
+    "C_Cpp.codeAnalysis.clangTidy.useBuildPath": true,
+    "slang.additionalSearchPaths": [
+        "${workspaceFolder}/shaders/include"
+    ],
+    "slang.format.clangFormatLocation": "/opt/homebrew/opt/llvm/bin/clang-format",
+    //"slang.format.clangFormatLocation": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-format.exe",
+    "slang.slangdLocation": "D:/SDKs/VulkanSDK/1.4.313.0/Bin/slangd.exe"
 }

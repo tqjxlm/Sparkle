@@ -366,6 +366,7 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 * [ ] standalone cooker bake resources
 * [ ] built-in shader compiler
 * [ ] texture compression
+* [ ] slang support for metal
 
 ### Build
 

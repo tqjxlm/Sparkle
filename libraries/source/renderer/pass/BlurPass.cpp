@@ -7,7 +7,7 @@ namespace sparkle
 {
 class BlurPixelShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(BlurPixelShader, RHIShaderStage::Pixel, "shaders/screen/blur.ps.hlsl", "main")
+    REGISTGER_SHADER(BlurPixelShader, RHIShaderStage::Pixel, "shaders/screen/blur.ps.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

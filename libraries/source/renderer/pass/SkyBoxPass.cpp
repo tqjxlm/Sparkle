@@ -12,7 +12,7 @@ namespace sparkle
 {
 class SkyBoxVertexShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(SkyBoxVertexShader, RHIShaderStage::Vertex, "shaders/standard/sky_box.vs.hlsl", "main")
+    REGISTGER_SHADER(SkyBoxVertexShader, RHIShaderStage::Vertex, "shaders/standard/sky_box.vs.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
@@ -29,7 +29,7 @@ class SkyBoxVertexShader : public RHIShaderInfo
 
 class SkyLightPixelShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(SkyLightPixelShader, RHIShaderStage::Pixel, "shaders/screen/sky_light.ps.hlsl", "main")
+    REGISTGER_SHADER(SkyLightPixelShader, RHIShaderStage::Pixel, "shaders/screen/sky_light.ps.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
@@ -40,7 +40,7 @@ class SkyLightPixelShader : public RHIShaderInfo
 
 class SkyBoxPixelShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(SkyBoxPixelShader, RHIShaderStage::Pixel, "shaders/standard/sky_box.ps.hlsl", "main")
+    REGISTGER_SHADER(SkyBoxPixelShader, RHIShaderStage::Pixel, "shaders/standard/sky_box.ps.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

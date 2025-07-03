@@ -6,7 +6,7 @@ namespace sparkle
 {
 class DepthOnlyVertexShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(DepthOnlyVertexShader, RHIShaderStage::Vertex, "shaders/standard/depth_only.vs.hlsl", "main")
+    REGISTGER_SHADER(DepthOnlyVertexShader, RHIShaderStage::Vertex, "shaders/standard/depth_only.vs.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
@@ -18,7 +18,7 @@ class DepthOnlyVertexShader : public RHIShaderInfo
 
 class StandardVertexShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(StandardVertexShader, RHIShaderStage::Vertex, "shaders/standard/mesh.vs.hlsl", "main")
+    REGISTGER_SHADER(StandardVertexShader, RHIShaderStage::Vertex, "shaders/standard/mesh.vs.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
     USE_SHADER_RESOURCE(view, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)

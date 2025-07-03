@@ -8,7 +8,7 @@ namespace sparkle
 {
 class IBLSpecularMapComputeShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(IBLSpecularMapComputeShader, RHIShaderStage::Compute, "shaders/screen/ibl_specular.cs.hlsl",
+    REGISTGER_SHADER(IBLSpecularMapComputeShader, RHIShaderStage::Compute, "shaders/screen/ibl_specular.cs.slang",
                      "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)

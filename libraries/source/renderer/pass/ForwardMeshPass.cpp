@@ -62,7 +62,7 @@ public:
 
 class ForwardPixelShader : public ForwardPixelShaderBase
 {
-    REGISTGER_SHADER(ForwardPixelShader, RHIShaderStage::Pixel, "shaders/standard/forward.ps.hlsl", "main")
+    REGISTGER_SHADER(ForwardPixelShader, RHIShaderStage::Pixel, "shaders/standard/forward.ps.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(ForwardPixelShaderBase::ResourceTable)
 

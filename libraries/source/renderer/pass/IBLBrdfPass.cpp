@@ -7,7 +7,7 @@ namespace sparkle
 {
 class IBLBrdfComputeShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(IBLBrdfComputeShader, RHIShaderStage::Compute, "shaders/screen/ibl_brdf.cs.hlsl", "main")
+    REGISTGER_SHADER(IBLBrdfComputeShader, RHIShaderStage::Compute, "shaders/screen/ibl_brdf.cs.slang", "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
