@@ -3,7 +3,7 @@ import sys
 import subprocess
 import shutil
 
-from build_system.utils import run_command_with_logging
+from build_system.utils import compress_zip, run_command_with_logging
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -90,14 +90,14 @@ def build_and_run(args):
 
     run_command_with_logging(build_cmd, log_file, "Building macOS project")
 
+    app_name = "sparkle.app"
+    if args["config"] == "Debug":
+        app_path = os.path.join(output_dir, "Debug", app_name)
+    else:
+        app_path = os.path.join(output_dir, "Release", app_name)
+
     # Run if requested
     if args["run"]:
-        app_name = "sparkle.app"
-        if args["config"] == "Debug":
-            app_path = os.path.join(output_dir, "Debug", app_name)
-        else:
-            app_path = os.path.join(output_dir, "Release", app_name)
-
         if os.path.exists(app_path):
             executable_path = os.path.join(
                 app_path, "Contents", "MacOS", "sparkle")
@@ -112,4 +112,9 @@ def build_and_run(args):
             print(f"Error: Application bundle not found at {app_path}")
             raise Exception()
 
-    return output_dir
+    # TODO: archive and sign
+
+    archive_path = os.path.join(output_dir, "product.zip")
+    compress_zip(app_path, archive_path)
+
+    return archive_path

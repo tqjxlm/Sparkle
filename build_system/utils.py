@@ -47,6 +47,29 @@ def extract_zip(zip_path, extract_to):
         zip_ref.extractall(extract_to)
 
 
+def compress_zip(source_path, zip_path):
+    """Compress a folder or file into a zip archive."""
+    print(f"Compressing {source_path} to {zip_path} ...")
+    
+    # Ensure the destination directory exists
+    os.makedirs(os.path.dirname(zip_path), exist_ok=True)
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
+        if os.path.isfile(source_path):
+            # Single file
+            zip_ref.write(source_path, os.path.basename(source_path))
+        elif os.path.isdir(source_path):
+            # Directory - recursively add all files
+            for root, dirs, files in os.walk(source_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Calculate relative path from source_path
+                    arcname = os.path.relpath(file_path, source_path)
+                    zip_ref.write(file_path, arcname)
+        else:
+            raise ValueError(f"Source path does not exist: {source_path}")
+
+
 def extract_archive(archive_path, extract_to):
     """Extract various archive formats (zip, tar.gz, tar.xz, tar.bz2) to destination."""
     print(f"Extracting {archive_path} to {extract_to} ...")

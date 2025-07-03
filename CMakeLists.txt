@@ -68,6 +68,7 @@ message("Compiler: ${CMAKE_CXX_COMPILER_ID}")
 message("Compiler simulate: ${CMAKE_CXX_SIMULATE_ID}")
 
 set(OUTPUT_ROOT ${CMAKE_SOURCE_DIR}/build_system/${READABLE_PLATFORM_NAME}/output)
+set(PRODUCT_OUTPUT_DIRECTORY ${OUTPUT_ROOT}/build)
 
 # ------------------ source files ------------------
 
@@ -236,7 +237,7 @@ add_custom_target(cook-resources)
 if (ANDROID)
     set(PROJECT_RESOURCE_DIRECTORY "${CMAKE_SOURCE_DIR}/build_system/${READABLE_PLATFORM_NAME}/output/assets/packed")
 else()
-    set(PROJECT_RESOURCE_DIRECTORY "${PROJECT_BINARY_DIR}/packed")
+    set(PROJECT_RESOURCE_DIRECTORY "${PRODUCT_OUTPUT_DIRECTORY}/packed")
 endif()
 
 add_custom_target(copy-resources
@@ -385,6 +386,11 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty
 
 if (MSVC)
     set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT sparkle)
+endif()
+
+# separate build and generation for ninja
+if(CMAKE_GENERATOR STREQUAL "Ninja")
+    set_target_properties(sparkle PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PRODUCT_OUTPUT_DIRECTORY})
 endif()
 
 # ------------------ final output ------------------

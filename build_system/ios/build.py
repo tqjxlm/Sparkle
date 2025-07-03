@@ -180,13 +180,13 @@ def build_and_run(args):
 
     run_command_with_logging(build_cmd, log_file, "Building iOS project")
 
-    if args["run"]:
-        app_name = "sparkle.app"
-        if args["config"] == "Debug":
-            app_path = os.path.join(output_dir, "Debug-iphoneos", app_name)
-        else:
-            app_path = os.path.join(output_dir, "Release-iphoneos", app_name)
+    app_name = "sparkle.app"
+    if args["config"] == "Debug":
+        app_path = os.path.join(output_dir, "Debug-iphoneos", app_name)
+    else:
+        app_path = os.path.join(output_dir, "Release-iphoneos", app_name)
 
+    if args["run"]:
         if os.path.exists(app_path):
             print(f"\nBuilt app bundle is available at: {app_path}")
 
@@ -196,4 +196,6 @@ def build_and_run(args):
                 f"\nWarning: App bundle not found at expected location: {app_path}")
             print("Check the build output directory for the actual location.")
 
-    return output_dir
+    # TODO: archive and sign
+
+    return app_path

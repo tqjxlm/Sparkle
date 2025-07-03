@@ -1,10 +1,9 @@
 import os
-import sys
 import subprocess
 import platform
 
 from build_system.prerequisites import find_llvm_path, find_visual_studio_path, find_vcpkg, install_glfw
-from build_system.utils import robust_rmtree
+from build_system.utils import compress_zip, robust_rmtree
 
 # Determine script directory
 SCRIPT = os.path.abspath(__file__)
@@ -75,8 +74,7 @@ def configure(args, is_generate_sln):
         # Windows: use MSVC environment and bundled clang-cl
         compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl",
                          "-DCMAKE_C_COMPILER=clang-cl"]
-        generator_args = ["-G Ninja",
-                          f"-DCMAKE_BUILD_TYPE={args['config']}"]
+        generator_args = ["-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}"]
     else:
         # Non-Windows: find LLVM installation
         LLVM = find_llvm_path()
@@ -94,7 +92,7 @@ def configure(args, is_generate_sln):
             raise Exception()
         compiler_args = [
             f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
-        generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
+        generator_args = ["-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}"]
 
     # Build CMake command
     cmake_cmd = [
@@ -182,7 +180,7 @@ def generate_project(args):
 def run(args):
     exe_name = "sparkle.exe" if is_windows else "sparkle"
 
-    exe_path = os.path.join(".", exe_name)
+    exe_path = os.path.join("build", exe_name)
     run_cmd = [exe_path] + args["unknown_args"]
     print(f"Running executable: {run_cmd}")
     subprocess.run(run_cmd)
@@ -190,9 +188,14 @@ def run(args):
 
 def build_and_run(args):
     """Build and optionally run the project."""
-    configure(args, False)
+    output_dir = configure(args, False)
 
     build(args)
 
     if args["run"]:
         run(args)
+
+    archive_path = os.path.join(output_dir, "product.zip")
+    compress_zip(os.path.join(output_dir, "build"), archive_path)
+
+    return archive_path

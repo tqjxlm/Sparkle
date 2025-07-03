@@ -2,6 +2,8 @@ import os
 import subprocess
 import sys
 import argparse
+import shutil
+from pathlib import Path
 
 from build_system.prerequisites import find_cmake, find_and_set_vulkan_sdk
 
@@ -94,6 +96,26 @@ def setup():
     print("Setup complete.")
 
 
+def copy_build_products(product_archive_path, args):
+    """Copy build products to the product directory for the specified framework."""
+    product_dir = os.path.join(
+        SCRIPTPATH, "build_system", args['framework'], "product")
+
+    os.makedirs(product_dir, exist_ok=True)
+
+    system_name = "windows" if os.name == "nt" else "linux" if os.name == "posix" else "macos"
+    extension = ''.join(Path(product_archive_path).suffixes)
+    product_final_name = f"{system_name}-{args['framework']}-{args['config']}{extension}"
+
+    product_final_path = os.path.join(product_dir, product_final_name)
+
+    if os.path.exists(product_final_path):
+        os.remove(product_final_path)
+
+    shutil.copy(product_archive_path, product_final_path)
+    print(f"Build products copied to {product_final_path}")
+
+
 def build_project(args):
     """Build the project after setup is complete."""
     print("Starting build process...")
@@ -106,7 +128,8 @@ def build_project(args):
         elif args["generate_only"]:
             builder.generate_project(args)
         else:
-            builder.build_and_run(args)
+            product_path = builder.build_and_run(args)
+            copy_build_products(product_path, args)
 
     elif args["framework"] == "macos":
         import build_system.macos.build as builder
@@ -116,7 +139,8 @@ def build_project(args):
         elif args["generate_only"]:
             builder.generate_project(args)
         else:
-            builder.build_and_run(args)
+            product_path = builder.build_and_run(args)
+            copy_build_products(product_path, args)
 
     elif args["framework"] == "ios":
         import build_system.ios.build as builder
@@ -126,7 +150,8 @@ def build_project(args):
         elif args["generate_only"]:
             builder.generate_project(args)
         else:
-            builder.build_and_run(args)
+            product_path = builder.build_and_run(args)
+            copy_build_products(product_path, args)
 
     elif args["framework"] == "android":
         import build_system.android.build as builder
@@ -135,7 +160,8 @@ def build_project(args):
             # gradle sync will do both in the same time
             builder.sync_only(args)
         else:
-            builder.build_and_run(args)
+            product_path = builder.build_and_run(args)
+            copy_build_products(product_path, args)
 
 
 def main():

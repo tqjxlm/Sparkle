@@ -225,6 +225,8 @@ def build_apk(args):
 
     log_file = os.path.join(output_dir, "build.log")
 
+    apk_path = os.path.join(SCRIPTPATH, apk_path)
+
     # Run Gradle build with logging
     try:
         run_command_with_logging(build_cmd, log_file, "Building Android APK")
@@ -313,3 +315,5 @@ def build_and_run(args):
 
     if args["run"]:
         install_and_run_apk(apk_path)
+
+    return apk_path
