@@ -177,6 +177,9 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
             case SceneRenderProxy::PrimitiveChangeType::Remove:
             case SceneRenderProxy::PrimitiveChangeType::Update:
                 break;
+            default:
+                UnImplemented(type);
+                break;
             }
         }
 

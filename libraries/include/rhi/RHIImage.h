@@ -246,6 +246,9 @@ public:
             return GetStorageSizePerLayer();
         case ImageType::Image2DCube:
             return GetStorageSizePerLayer() * 6;
+        default:
+            UnImplemented(attributes_.type);
+            return 0;
         }
     }
 

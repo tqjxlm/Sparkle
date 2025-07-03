@@ -117,6 +117,7 @@ else()
         -Wno-c++20-compat               # we are targeting c++20
         -Wno-extra-semi-stmt            # not that necessary
         -Wno-unused-macros              # too much false alerts
+        -Wno-covered-switch-default     # -Wswitch-default has already provided enough protection
         -Wno-switch-enum                # it is not always possible to list all enums (especially for vulkan enums)
         -Wno-cast-function-type-strict  # TODO: remove later
         -Wno-unsafe-buffer-usage        # TODO: remove later

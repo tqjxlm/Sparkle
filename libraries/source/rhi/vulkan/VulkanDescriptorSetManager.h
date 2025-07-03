@@ -29,8 +29,10 @@ inline VkDescriptorType GetVulkanDescriptorType(RHIShaderResourceReflection::Res
         return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     case RHIShaderResourceReflection::ResourceType::AccelerationStructure:
         return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    default:
+        UnImplemented(type);
+        break;
     }
-    UnImplemented(type);
     return VK_DESCRIPTOR_TYPE_MAX_ENUM;
 }
 

@@ -220,6 +220,9 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
         }
         sky_box_pass_->OverrideSkyMap(ibl_->GetSpecularMap());
         return true;
+    default:
+        UnImplemented(mode);
+        return false;
     }
 }
 
@@ -292,6 +295,9 @@ void ForwardRenderer::HandleSceneChanges()
                 break;
             case SceneRenderProxy::PrimitiveChangeType::Update:
                 primitives_to_update.insert(to);
+                break;
+            default:
+                UnImplemented(type);
                 break;
             }
         }

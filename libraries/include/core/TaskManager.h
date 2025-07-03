@@ -36,6 +36,9 @@ public:
             return render_thread_tasks_.AddTask(std::move(task));
         case ThreadName::Worker:
             return worker_thread_pool_->submit_task(std::move(task));
+        default:
+            UnImplemented(thread_name);
+            return std::future<void>();
         }
     }
 

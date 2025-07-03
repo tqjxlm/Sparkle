@@ -20,6 +20,8 @@ inline VkBlendFactor GetVulkanBlendFactor(RHIPipelineState::BlendFactor factor)
         return VK_BLEND_FACTOR_SRC_ALPHA;
     case RHIPipelineState::BlendFactor::OneMinusSrcAlpha:
         return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    default:
+        UnImplemented(factor);
     }
 }
 
@@ -33,6 +35,8 @@ inline VkBlendOp GetVulkanBlendOp(RHIPipelineState::BlendOp op)
         return VK_BLEND_OP_MIN;
     case RHIPipelineState::BlendOp::Max:
         return VK_BLEND_OP_MAX;
+    default:
+        UnImplemented(op);
     }
 }
 
@@ -62,6 +66,8 @@ inline VkCullModeFlags GetFaceCullMode(RHIPipelineState::FaceCullMode mode)
         return VK_CULL_MODE_BACK_BIT;
     case RHIPipelineState::FaceCullMode::None:
         return VK_CULL_MODE_NONE;
+    default:
+        UnImplemented(mode);
     }
 }
 
@@ -76,6 +82,8 @@ inline VkPolygonMode GetPolygonMode(RHIPipelineState::PolygonMode mode)
         return VK_POLYGON_MODE_LINE;
     case RHIPipelineState::PolygonMode::Point:
         return VK_POLYGON_MODE_POINT;
+    default:
+        UnImplemented(mode);
     }
 }
 
@@ -97,6 +105,8 @@ inline VkCompareOp GetDepthCompareOp(const RHIPipelineState::DepthState &depth_s
         return VK_COMPARE_OP_GREATER;
     case RHIPipelineState::DepthTestState::GreaterEqual:
         return VK_COMPARE_OP_GREATER_OR_EQUAL;
+    default:
+        UnImplemented(depth_state.test_state);
     }
 }
 

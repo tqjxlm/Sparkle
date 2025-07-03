@@ -16,6 +16,8 @@ inline VkAttachmentLoadOp GetAttachmentLoadOp(RHIRenderPass::LoadOp op)
         return VK_ATTACHMENT_LOAD_OP_LOAD;
     case RHIRenderPass::LoadOp::Clear:
         return VK_ATTACHMENT_LOAD_OP_CLEAR;
+    default:
+        UnImplemented(op);
     }
 }
 
@@ -27,6 +29,8 @@ inline VkAttachmentStoreOp GetAttachmentStoreOp(RHIRenderPass::StoreOp op)
         return VK_ATTACHMENT_STORE_OP_DONT_CARE;
     case RHIRenderPass::StoreOp::Store:
         return VK_ATTACHMENT_STORE_OP_STORE;
+    default:
+        UnImplemented(op);
     }
 }
 

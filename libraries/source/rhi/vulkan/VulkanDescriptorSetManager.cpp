@@ -119,6 +119,9 @@ static void CollectDescriptorUpdate(const RHIShaderResourceBinding *binding, uns
                     ->WriteDescriptor(slot, descriptor_set, descriptor_type, out_set_write);
                 break;
             }
+            default:
+                UnImplemented(binding->GetType());
+                break;
             }
         }
     }
@@ -307,7 +310,8 @@ void VulkanDescriptorSetManager::CreateDescriptorPool()
 
     if (context->SupportsHardwareRayTracing())
     {
-        pool_sizes.push_back({VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MaxTotalBindlessResources});
+        pool_sizes.push_back(
+            {.type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, .descriptorCount = MaxTotalBindlessResources});
     }
 
     VkDescriptorPoolCreateInfo pool_info{};

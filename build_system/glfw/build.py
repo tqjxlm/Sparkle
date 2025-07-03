@@ -176,8 +176,9 @@ def generate_project(args):
 def run(args):
     exe_name = "sparkle.exe" if is_windows else "sparkle"
 
-    exe_path = os.path.join("build", exe_name)
-    run_cmd = [exe_path] + args["unknown_args"]
+    os.chdir("build")
+
+    run_cmd = [exe_name] + args["unknown_args"]
     print(f"Running executable: {run_cmd}")
     subprocess.run(run_cmd)
 
@@ -188,10 +189,10 @@ def build_and_run(args):
 
     build(args)
 
-    if args["run"]:
-        run(args)
-
     archive_path = os.path.join(output_dir, "product.zip")
     compress_zip(os.path.join(output_dir, "build"), archive_path)
+
+    if args["run"]:
+        run(args)
 
     return archive_path

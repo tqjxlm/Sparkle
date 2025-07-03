@@ -41,6 +41,9 @@ void TaskManager::ConsumeThreadTasks(ThreadName thread_name)
     case ThreadName::Worker:
         worker_thread_pool_->wait();
         break;
+    default:
+        UnImplemented(thread_name);
+        break;
     }
 }
 
@@ -73,8 +76,8 @@ std::future<void> TaskManager::ThreadTaskQueue::AddTask(std::function<void()> ta
     auto task_promise = std::make_shared<std::promise<void>>();
 
     std::lock_guard<std::mutex> lock(mutex);
-    tasks.emplace_back([task = std::move(task), task_promise] {
-        task();
+    tasks.emplace_back([task_moved = std::move(task), task_promise] {
+        task_moved();
         task_promise->set_value();
     });
     return task_promise->get_future();

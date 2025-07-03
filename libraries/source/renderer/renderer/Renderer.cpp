@@ -31,6 +31,9 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
     case RenderConfig::Pipeline::deferred:
         renderer = std::make_unique<DeferredRenderer>(render_config, rhi_context, scene_render_proxy);
         break;
+    default:
+        UnImplemented(render_config.pipeline);
+        break;
     }
 
     rhi_context->BeginCommandBuffer();

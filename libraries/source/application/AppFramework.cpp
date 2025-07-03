@@ -128,8 +128,8 @@ bool AppFramework::Init()
 
         auto scene_loaded_event = SceneManager::LoadScene(main_scene_.get(), app_config_.scene).share();
 
-        TaskManager::RunInWorkerThread([this, scene_loaded_event = std::move(scene_loaded_event)]() {
-            scene_loaded_event.wait();
+        TaskManager::RunInWorkerThread([this, event = std::move(scene_loaded_event)]() {
+            event.wait();
 
             TaskManager::RunInMainThread([this]() {
                 if (app_config_.default_skybox && !main_scene_->GetSkyLight())

@@ -38,9 +38,9 @@ std::future<void> SceneDataFactory::Load(
 
     if (async)
     {
-        TaskManager::RunInWorkerThread([loader = std::move(loader), scene, path, task_promise,
+        TaskManager::RunInWorkerThread([loader_moved = std::move(loader), scene, path, task_promise,
                                         on_loaded_fn = std::move(on_loaded_fn_main_thread)]() {
-            auto loaded_root = loader->Load(path, scene);
+            auto loaded_root = loader_moved->Load(path, scene);
 
             // successful or not, we will mark the task as finished
 
@@ -48,11 +48,11 @@ std::future<void> SceneDataFactory::Load(
             {
                 Log(Debug, "Async model load ok: {}", path);
                 // callback functions must run in main thread
-                TaskManager::RunInMainThread(
-                    [task_promise, on_loaded_fn = std::move(on_loaded_fn), model_node = std::move(loaded_root)]() {
-                        on_loaded_fn(model_node);
-                        task_promise->set_value();
-                    });
+                TaskManager::RunInMainThread([task_promise, on_loaded_fn_moved = std::move(on_loaded_fn),
+                                              model_node = std::move(loaded_root)]() {
+                    on_loaded_fn_moved(model_node);
+                    task_promise->set_value();
+                });
             }
             else
             {
