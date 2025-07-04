@@ -260,6 +260,7 @@ void SceneRenderProxy::UpdateBVH()
             break;
         case PrimitiveChangeType::Update:
             // TODO(tqjxlm): dynamic primitives
+        default:
             UnImplemented(type);
             break;
         }

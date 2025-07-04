@@ -158,8 +158,8 @@ static std::future<void> LoadTestScene(Scene *scene)
     async_tasks.emplace_back(boom_box_task.share());
 
     // a lot of random spheres
-    return TaskManager::RunInWorkerThread([scene, async_tasks = std::move(async_tasks)]() {
-        for (const auto &async_task : async_tasks)
+    return TaskManager::RunInWorkerThread([scene, tasks = std::move(async_tasks)]() {
+        for (const auto &async_task : tasks)
         {
             async_task.wait();
         }

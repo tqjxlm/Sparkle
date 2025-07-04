@@ -68,6 +68,7 @@ message("Compiler: ${CMAKE_CXX_COMPILER_ID}")
 message("Compiler simulate: ${CMAKE_CXX_SIMULATE_ID}")
 
 set(OUTPUT_ROOT ${CMAKE_SOURCE_DIR}/build_system/${READABLE_PLATFORM_NAME}/output)
+set(PRODUCT_OUTPUT_DIRECTORY ${OUTPUT_ROOT}/build)
 
 # ------------------ source files ------------------
 
@@ -116,6 +117,7 @@ else()
         -Wno-c++20-compat               # we are targeting c++20
         -Wno-extra-semi-stmt            # not that necessary
         -Wno-unused-macros              # too much false alerts
+        -Wno-covered-switch-default     # -Wswitch-default has already provided enough protection
         -Wno-switch-enum                # it is not always possible to list all enums (especially for vulkan enums)
         -Wno-cast-function-type-strict  # TODO: remove later
         -Wno-unsafe-buffer-usage        # TODO: remove later
@@ -236,7 +238,7 @@ add_custom_target(cook-resources)
 if (ANDROID)
     set(PROJECT_RESOURCE_DIRECTORY "${CMAKE_SOURCE_DIR}/build_system/${READABLE_PLATFORM_NAME}/output/assets/packed")
 else()
-    set(PROJECT_RESOURCE_DIRECTORY "${PROJECT_BINARY_DIR}/packed")
+    set(PROJECT_RESOURCE_DIRECTORY "${PRODUCT_OUTPUT_DIRECTORY}/packed")
 endif()
 
 add_custom_target(copy-resources
@@ -385,6 +387,11 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty
 
 if (MSVC)
     set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT sparkle)
+endif()
+
+# separate build and generation for ninja as it is a single configuration generator
+if(CMAKE_GENERATOR STREQUAL "Ninja")
+    set_target_properties(sparkle PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PRODUCT_OUTPUT_DIRECTORY})
 endif()
 
 # ------------------ final output ------------------

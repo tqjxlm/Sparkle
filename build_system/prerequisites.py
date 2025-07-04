@@ -154,12 +154,25 @@ def find_cmake():
             return install_cmake()
 
 
+def validate_vulkan_sdk(vulkan_sdk_path):
+    vulkan_include = os.path.join(
+        vulkan_sdk_path, "include", "vulkan", "vulkan.h")
+    return os.path.exists(vulkan_include)
+
+
 def find_and_set_vulkan_sdk():
     VULKAN_SDK = os.environ.get("VULKAN_SDK")
 
     # If VULKAN_SDK is set and exists, we're good
     if VULKAN_SDK and os.path.exists(VULKAN_SDK):
-        return
+        if validate_vulkan_sdk(VULKAN_SDK):
+            return
+        else:
+            VULKAN_SDK = os.path.join(VULKAN_SDK, "macOS")
+            if validate_vulkan_sdk(VULKAN_SDK):
+                os.environ["VULKAN_SDK"] = VULKAN_SDK
+                print(f"VULKAN_SDK set to: {VULKAN_SDK}")
+                return
 
     # If VULKAN_SDK is set but doesn't exist, show error
     if VULKAN_SDK and not os.path.exists(VULKAN_SDK):
@@ -224,17 +237,6 @@ def get_latest_vulkan_sdk_version(system, platform_name):
     return latest_version
 
 
-def validate_vulkan_sdk(vulkan_sdk_path):
-    # Verify it's a complete installation
-    if is_macos:
-        vulkan_include = os.path.join(
-            vulkan_sdk_path, "macOS", "include", "vulkan", "vulkan.h")
-    else:
-        vulkan_include = os.path.join(
-            vulkan_sdk_path, "include", "vulkan", "vulkan.h")
-    return os.path.exists(vulkan_include)
-
-
 def install_vulkan_sdk(build_cache_dir):
     """Install Vulkan SDK to build_cache directory and return the path."""
 
@@ -266,6 +268,10 @@ def install_vulkan_sdk(build_cache_dir):
                 print(
                     f"Vulkan SDK {latest_version} already installed in build_cache.")
                 return vulkan_sdk_path
+            elif is_macos and validate_vulkan_sdk(os.path.join(vulkan_sdk_path, "macOS")):
+                print(
+                    f"Vulkan SDK {latest_version} already installed in build_cache.")
+                return os.path.join(vulkan_sdk_path, "macOS")
             else:
                 print(
                     f"Incomplete Vulkan SDK installation found. Removing {vulkan_sdk_path}")
@@ -345,7 +351,6 @@ def install_vulkan_sdk(build_cache_dir):
                 installer_path,
                 "install",
                 "com.lunarg.vulkan.core",
-                "com.lunarg.vulkan.ios",
                 "--root", vulkan_sdk_path,
                 "--accept-licenses",
                 "--default-answer",
@@ -385,6 +390,9 @@ def install_vulkan_sdk(build_cache_dir):
 
         # Clean up download file
         os.remove(download_path)
+
+        if is_macos:
+            vulkan_sdk_path = os.path.join(vulkan_sdk_path, "macOS")
 
         print(f"Vulkan SDK {latest_version} installed successfully!")
         return vulkan_sdk_path
@@ -648,6 +656,82 @@ def find_vcpkg():
     vcpkg_install_path = install_vcpkg(build_cache_dir)
 
     return vcpkg_install_path
+
+
+def find_or_install_ninja():
+    """Find ninja executable in PATH or install it to build_cache and return the path."""
+
+    # Check if ninja is already in PATH
+    ninja_executable = shutil.which("ninja")
+    if ninja_executable:
+        return ninja_executable
+
+    # Ninja not found in PATH, try to install to build_cache
+    ninja_version = "1.12.1"
+
+    # Create build_cache directory if it doesn't exist
+    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
+    os.makedirs(build_cache_dir, exist_ok=True)
+
+    # Check if already installed in build_cache
+    ninja_dir = os.path.join(build_cache_dir, "ninja")
+    ninja_exe_path = os.path.join(ninja_dir, "ninja")
+    if is_windows:
+        ninja_exe_path += ".exe"
+
+    if os.path.exists(ninja_exe_path):
+        print("Ninja already installed in build_cache.")
+        return ninja_exe_path
+
+    # Determine download URL based on platform
+    system = platform.system().lower()
+
+    if system == "windows":
+        filename = f"ninja-win.zip"
+        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
+    elif system == "darwin":
+        filename = f"ninja-mac.zip"
+        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
+    elif system == "linux":
+        filename = f"ninja-linux.zip"
+        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
+    else:
+        print(
+            f"Error: Unsupported platform '{system}' for automatic Ninja installation.")
+        print("Please install Ninja manually from: https://github.com/ninja-build/ninja/releases")
+        raise Exception()
+
+    try:
+        download_path = os.path.join(build_cache_dir, filename)
+
+        print(f"Downloading Ninja {ninja_version}...")
+        print(f"URL: {download_url}")
+
+        download_file(download_url, download_path)
+
+        print("Extracting Ninja...")
+        extract_archive(download_path, ninja_dir)
+
+        # Make ninja executable on Unix systems
+        if not is_windows:
+            os.chmod(ninja_exe_path, 0o755)
+
+        # Clean up download file
+        os.remove(download_path)
+
+        # Verify installation
+        if os.path.exists(ninja_exe_path):
+            print(f"Ninja {ninja_version} installed successfully!")
+            return ninja_exe_path
+        else:
+            print(
+                f"Error: Ninja executable not found after installation: {ninja_exe_path}")
+            raise Exception()
+
+    except Exception as e:
+        print(f"Error installing Ninja: {e}")
+        print("Please install Ninja manually from: https://github.com/ninja-build/ninja/releases")
+        raise Exception()
 
 
 def install_glfw():

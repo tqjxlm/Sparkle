@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        build_type: [Debug, Release]
+        # TODO: ios
+        framework: [glfw, android, macos]
+        exclude:
+          - os: windows-latest
+            framework: macos
+          - os: macos-latest
+            framework: android
+      max-parallel: 16
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup C++ Environment (glfw only)
+        if: matrix.framework == 'glfw'
+        uses: aminya/setup-cpp@v1
+        with:
+          compiler: llvm
+          vcvarsall: ${{ contains(matrix.os, 'windows') }}
+          cmake: true
+          ninja: true
+          ccache: true
+
+      - name: Set up JDK 17 (android only)
+        if: matrix.framework == 'android'
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK (android only)
+        if: matrix.framework == 'android'
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Xcode (macOS only)
+        uses: maxim-lobanov/setup-xcode@v1
+        if: matrix.os == 'macos-latest'
+        with:
+          xcode-version: latest-stable
+
+      - name: Install dependencies (macOS only)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install glfw
+
+      - name: Build
+        run: python3 build.py --framework ${{matrix.framework}} --config ${{matrix.build_type}}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ matrix.os }}-${{ matrix.framework }}-${{ matrix.build_type }}
+          path: build_system/${{matrix.framework}}/product

@@ -336,6 +336,9 @@ static std::shared_ptr<SceneNode> LoadNode(const tinyusdz::tydra::Node &node, co
         case tinyusdz::tydra::NodeType::EnvmapLight:
             Log(Warn, "USDLoader: Skipped unsupported node type {}", Enum2Str(node.nodeType));
             return nullptr;
+        default:
+            UnImplemented(child.nodeType);
+            return nullptr;
         }
     }
 

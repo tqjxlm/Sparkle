@@ -99,6 +99,7 @@ void VulkanImage::TransitionLayout(VkCommandBuffer command_buffer, const Transit
             barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
             break;
         case PixelFormat::Count:
+        default:
             UnImplemented(attributes_.format);
             break;
         }
@@ -420,6 +421,9 @@ VulkanImageView::VulkanImageView(Attribute attribute, RHIImage *image) : RHIImag
         break;
     case ImageViewType::Image2DArray:
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        break;
+    default:
+        UnImplemented(attribute_.type);
         break;
     }
 

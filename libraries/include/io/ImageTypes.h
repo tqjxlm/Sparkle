@@ -42,6 +42,7 @@ constexpr unsigned GetFormatChannelCount(PixelFormat format)
     case PixelFormat::R32_FLOAT:
         return 1;
     case PixelFormat::Count:
+    default:
         break;
     }
     UnImplemented(format);
@@ -68,6 +69,7 @@ constexpr unsigned GetPixelSize(PixelFormat format)
     case PixelFormat::RGBAFloat16:
         return sizeof(Half) * 4;
     case PixelFormat::Count:
+    default:
         break;
     }
     UnImplemented(format);
@@ -93,6 +95,7 @@ constexpr bool IsSRGBFormat(PixelFormat pixel_format)
     case PixelFormat::RGBAUInt32:
         return false;
     case PixelFormat::Count:
+    default:
         break;
     }
     UnImplemented(pixel_format);
@@ -118,6 +121,7 @@ constexpr bool IsSwizzeldFormat(PixelFormat pixel_format)
     case PixelFormat::RGBAUInt32:
         return false;
     case PixelFormat::Count:
+    default:
         break;
     }
     UnImplemented(pixel_format);

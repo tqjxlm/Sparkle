@@ -111,6 +111,9 @@ RHIResourceRef<RHIImageView> RHIImage::GetDefaultView(RHIContext *rhi)
                                 .mip_level_count = attributes_.mip_levels,
                                 .array_layer_count = 6,
                             });
+    default:
+        UnImplemented(attributes_.type);
+        return nullptr;
     }
 }
 } // namespace sparkle

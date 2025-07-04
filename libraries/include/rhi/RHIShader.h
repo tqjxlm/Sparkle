@@ -32,6 +32,7 @@ struct RHIShaderStageUsage
         case RHIShaderStage::Compute:
             return Compute;
         case RHIShaderStage::Count:
+        default:
             UnImplemented(stage);
         }
         return false;

@@ -292,6 +292,8 @@ RHIResourceRef<RHIPipelineState> VulkanRHI::CreatePipelineState(RHIPipelineState
         return CreateResource<VulkanForwardPipelineState>(type, name);
     case RHIPipelineState::PipelineType::Compute:
         return CreateResource<VulkanComputePipelineState>(type, name);
+    default:
+        UnImplemented(type);
     }
 }
 

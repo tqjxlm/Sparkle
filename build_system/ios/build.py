@@ -1,9 +1,7 @@
 import os
-import sys
 import subprocess
-import shutil
 
-from build_system.utils import run_command_with_logging
+from build_system.utils import run_command_with_logging, robust_rmtree
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -14,13 +12,6 @@ toolchain_args = [
     f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"]
 
 
-def clean_output_directory(output_dir):
-    """Clean the output directory if it exists."""
-    if os.path.exists(output_dir):
-        print(f"Cleaning output directory: {output_dir}")
-        shutil.rmtree(output_dir)
-
-
 def configure_for_clangd(args):
     """
     Configure CMake for clangd in 'clangd' directory for iOS.
@@ -28,7 +19,7 @@ def configure_for_clangd(args):
     output_dir = os.path.join(SCRIPTPATH, "clangd")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
@@ -43,7 +34,7 @@ def configure_for_clangd(args):
     ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args
 
     print("Configuring CMake for clangd (iOS) with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake configure failed.")
         raise Exception()
@@ -58,7 +49,7 @@ def generate_project(args):
     output_dir = os.path.join(SCRIPTPATH, "project")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
@@ -77,7 +68,7 @@ def generate_project(args):
     ] + generator_args + toolchain_args + args["cmake_options"] + platform_args
 
     print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake project generation failed.")
         raise Exception()
@@ -94,7 +85,7 @@ def run_on_device(app_path):
         # List connected devices
         list_devices_cmd = ["xcrun", "devicectl", "list", "devices"]
         result = subprocess.run(
-            list_devices_cmd, capture_output=True, text=True)
+            list_devices_cmd, capture_output=True, text=True, env=os.environ.copy())
 
         if result.returncode != 0:
             print(
@@ -126,7 +117,7 @@ def run_on_device(app_path):
 
         print(f"Installing app with command: {' '.join(install_cmd)}")
         install_result = subprocess.run(
-            install_cmd, capture_output=True, text=True)
+            install_cmd, capture_output=True, text=True, env=os.environ.copy())
         if install_result.returncode != 0:
             print(f"Error installing app: {install_result.stderr}")
             print(
@@ -143,7 +134,7 @@ def run_on_device(app_path):
 
         print(f"Launching app with command: {' '.join(launch_cmd)}")
         launch_result = subprocess.run(
-            launch_cmd, capture_output=True, text=True)
+            launch_cmd, capture_output=True, text=True, env=os.environ.copy())
 
         if launch_result.returncode != 0:
             print(f"Error launching app: {launch_result.stderr}")
@@ -180,13 +171,13 @@ def build_and_run(args):
 
     run_command_with_logging(build_cmd, log_file, "Building iOS project")
 
-    if args["run"]:
-        app_name = "sparkle.app"
-        if args["config"] == "Debug":
-            app_path = os.path.join(output_dir, "Debug-iphoneos", app_name)
-        else:
-            app_path = os.path.join(output_dir, "Release-iphoneos", app_name)
+    app_name = "sparkle.app"
+    if args["config"] == "Debug":
+        app_path = os.path.join(output_dir, "Debug-iphoneos", app_name)
+    else:
+        app_path = os.path.join(output_dir, "Release-iphoneos", app_name)
 
+    if args["run"]:
         if os.path.exists(app_path):
             print(f"\nBuilt app bundle is available at: {app_path}")
 
@@ -196,4 +187,6 @@ def build_and_run(args):
                 f"\nWarning: App bundle not found at expected location: {app_path}")
             print("Check the build output directory for the actual location.")
 
-    return output_dir
+    # TODO: archive and sign
+
+    return app_path

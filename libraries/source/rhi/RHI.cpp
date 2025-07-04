@@ -34,6 +34,7 @@ std::unique_ptr<RHIContext> RHIContext::CreateRHI(const RHIConfig &config)
         break;
 #endif
     case RHIConfig::ApiPlatform::None:
+    default:
         UnImplemented(config.api_platform);
     }
 

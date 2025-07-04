@@ -150,8 +150,10 @@ inline VkPipelineStageFlags GetVulkanPipelineStage(RHIPipelineStage stage)
         return VK_PIPELINE_STAGE_TRANSFER_BIT;
     case RHIPipelineStage::Bottom:
         return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    default:
+        UnImplemented(stage);
+        break;
     }
-    UnImplemented(stage);
     return VK_PIPELINE_STAGE_NONE_KHR;
 };
 
@@ -267,7 +269,10 @@ inline VkImageLayout GetVulkanImageLayout(RHIImageLayout rhi_layout)
         return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     case RHIImageLayout::DepthStencilOutput:
         return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    default:
+        break;
     }
+    UnImplemented(rhi_layout);
 
     return VK_IMAGE_LAYOUT_UNDEFINED;
 };

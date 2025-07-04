@@ -27,6 +27,9 @@ void MeshPass::UpdateFrameData(const RenderConfig &, SceneRenderProxy *scene)
             case SceneRenderProxy::PrimitiveChangeType::Update:
                 HandleUpdatedPrimitive(to);
                 break;
+            default:
+                UnImplemented(type);
+                break;
             }
         }
     }

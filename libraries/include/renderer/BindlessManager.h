@@ -40,6 +40,8 @@ public:
             return vertex_buffer_array_;
         case BindlessResourceType::VertexAttributeBuffer:
             return vertex_attribute_buffer_array_;
+        default:
+            UnImplemented(type);
         }
     }
 

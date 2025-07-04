@@ -1,12 +1,11 @@
 import os
-import sys
 import subprocess
 import platform
 from pathlib import Path
 import os
 import shutil
 
-from build_system.utils import run_command_with_logging, download_file, extract_zip
+from build_system.utils import run_command_with_logging, download_file, extract_zip, robust_rmtree
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -114,13 +113,6 @@ def download_gradle_wrapper():
         raise Exception()
 
 
-def clean_output_directory(output_dir):
-    """Clean the output directory if it exists."""
-    if os.path.exists(output_dir):
-        print(f"Cleaning output directory: {output_dir}")
-        shutil.rmtree(output_dir)
-
-
 def prepare_environment(args=None):
     """Check if Android development environment is properly set up."""
 
@@ -190,7 +182,7 @@ def prepare_environment(args=None):
     output_dir = os.path.join(SCRIPTPATH, "output")
 
     if args and args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -219,11 +211,13 @@ def build_apk(args):
     build_cmd = [
         gradlew_path,
         gradle_task,
-        f"-PcmakeArgs={" ".join(cmake_args)}",
+        f"-PcmakeArgs={' '.join(cmake_args)}",
         "--info"
     ]
 
     log_file = os.path.join(output_dir, "build.log")
+
+    apk_path = os.path.join(SCRIPTPATH, apk_path)
 
     # Run Gradle build with logging
     try:
@@ -313,3 +307,5 @@ def build_and_run(args):
 
     if args["run"]:
         install_and_run_apk(apk_path)
+
+    return apk_path

@@ -1,19 +1,10 @@
 import os
-import sys
 import subprocess
-import shutil
 
-from build_system.utils import run_command_with_logging
+from build_system.utils import compress_zip, run_command_with_logging, robust_rmtree
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
-
-
-def clean_output_directory(output_dir):
-    """Clean the output directory if it exists."""
-    if os.path.exists(output_dir):
-        print(f"Cleaning output directory: {output_dir}")
-        shutil.rmtree(output_dir)
 
 
 def configure_for_clangd(args):
@@ -23,7 +14,7 @@ def configure_for_clangd(args):
     output_dir = os.path.join(SCRIPTPATH, "clangd")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
@@ -38,7 +29,7 @@ def configure_for_clangd(args):
     ] + generator_args + compiler_args + args["cmake_options"]
 
     print("Configuring CMake for clangd with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake configure failed.")
         raise Exception()
@@ -53,7 +44,7 @@ def generate_project(args):
     output_dir = os.path.join(SCRIPTPATH, "project")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
@@ -66,7 +57,7 @@ def generate_project(args):
     ] + generator_args + args["cmake_options"]
 
     print("Generating Xcode project with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake project generation failed.")
         raise Exception()
@@ -90,21 +81,21 @@ def build_and_run(args):
 
     run_command_with_logging(build_cmd, log_file, "Building macOS project")
 
+    app_name = "sparkle.app"
+    if args["config"] == "Debug":
+        app_path = os.path.join(output_dir, "Debug", app_name)
+    else:
+        app_path = os.path.join(output_dir, "Release", app_name)
+
     # Run if requested
     if args["run"]:
-        app_name = "sparkle.app"
-        if args["config"] == "Debug":
-            app_path = os.path.join(output_dir, "Debug", app_name)
-        else:
-            app_path = os.path.join(output_dir, "Release", app_name)
-
         if os.path.exists(app_path):
             executable_path = os.path.join(
                 app_path, "Contents", "MacOS", "sparkle")
             if os.path.exists(executable_path):
                 print(f"Running application: {executable_path}")
                 run_cmd = [executable_path] + args["unknown_args"]
-                subprocess.run(run_cmd)
+                subprocess.run(run_cmd, env=os.environ.copy())
             else:
                 print(f"Error: Executable not found at {executable_path}")
                 raise Exception()
@@ -112,4 +103,9 @@ def build_and_run(args):
             print(f"Error: Application bundle not found at {app_path}")
             raise Exception()
 
-    return output_dir
+    # TODO: archive and sign
+
+    archive_path = os.path.join(output_dir, "product.zip")
+    compress_zip(app_path, archive_path)
+
+    return archive_path

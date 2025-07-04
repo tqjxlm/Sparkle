@@ -328,12 +328,11 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 
 ### CI/CD
 
-* [ ] submission & building pipeline
+* [ ] format and style check on CI
+* [ ] macOS and iOS archiving and signing
 * [ ] unit test pipeline
 * [ ] behavioural test pipeline
 * [ ] performance test pipeline
-* [ ] desktop CI/CD
-* [ ] mobile CI/CD
 
 ### Path Tracing Renderers
 
@@ -358,6 +357,7 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 
 ### IO
 
+* [ ] allow loading scene from UI
 * [ ] full USD support (current one is far from complete)
 * [ ] external data loader interface
 

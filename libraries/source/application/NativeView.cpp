@@ -17,6 +17,9 @@ Mat2 NativeView::GetRotationMatrix(WindowRotation rotation)
         return Eigen::Rotation2D<Scalar>(utilities::ToRadian(180.f)).matrix();
     case NativeView::WindowRotation::ReverseLandscape:
         return Eigen::Rotation2D<Scalar>(utilities::ToRadian(270.f)).matrix();
+    default:
+        UnImplemented(rotation);
+        return Mat2::Identity();
     }
 }
 

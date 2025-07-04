@@ -231,6 +231,9 @@ void GPURenderer::Update()
         case SceneRenderProxy::PrimitiveChangeType::Update:
             primitives_to_update.insert(to);
             break;
+        default:
+            UnImplemented(type);
+            break;
         }
     }
 

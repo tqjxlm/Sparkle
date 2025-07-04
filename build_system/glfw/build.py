@@ -1,10 +1,9 @@
 import os
-import sys
 import subprocess
 import platform
 
-from build_system.prerequisites import find_llvm_path, find_visual_studio_path, find_vcpkg, install_glfw
-from build_system.utils import robust_rmtree
+from build_system.prerequisites import find_llvm_path, find_or_install_ninja, find_visual_studio_path, find_vcpkg, install_glfw
+from build_system.utils import compress_zip, robust_rmtree
 
 # Determine script directory
 SCRIPT = os.path.abspath(__file__)
@@ -32,13 +31,6 @@ def get_toolchain_args():
     return []
 
 
-def clean_output_directory(output_dir):
-    """Clean the output directory if it exists."""
-    if os.path.exists(output_dir):
-        print(f"Cleaning output directory: {output_dir}")
-        robust_rmtree(output_dir)
-
-
 def get_cmd_with_vcvars(vs_path, cmake_cmd):
     vcvars_path = os.path.join(
         vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
@@ -61,7 +53,7 @@ def configure(args, is_generate_sln):
         output_dir = os.path.join(SCRIPTPATH, "output")
 
     if args.get("clean", False):
-        clean_output_directory(output_dir)
+        robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
@@ -73,10 +65,11 @@ def configure(args, is_generate_sln):
         generator_args = []
     elif is_windows:
         # Windows: use MSVC environment and bundled clang-cl
+        ninja_path = find_or_install_ninja()
         compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl",
                          "-DCMAKE_C_COMPILER=clang-cl"]
-        generator_args = ["-G Ninja",
-                          f"-DCMAKE_BUILD_TYPE={args['config']}"]
+        generator_args = [
+            "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
     else:
         # Non-Windows: find LLVM installation
         LLVM = find_llvm_path()
@@ -92,9 +85,11 @@ def configure(args, is_generate_sln):
                 print("  Ubuntu/Debian: sudo apt install clang")
                 print("  Fedora: sudo dnf install clang")
             raise Exception()
+        ninja_path = find_or_install_ninja()
         compiler_args = [
             f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
-        generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
+        generator_args = [
+            "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
 
     # Build CMake command
     cmake_cmd = [
@@ -124,7 +119,7 @@ def configure(args, is_generate_sln):
         result = subprocess.run(shell_cmd, shell=True)
     else:
         print("Running CMake configure:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd)
+        result = subprocess.run(cmake_cmd, env=os.environ.copy())
 
     if result.returncode != 0:
         print("CMake configure failed.")
@@ -158,7 +153,7 @@ def build(args):
         result = subprocess.run(shell_cmd, shell=True)
     else:
         print("Running build:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd)
+        result = subprocess.run(cmake_cmd, env=os.environ.copy())
 
     if result.returncode != 0:
         print("Build failed.")
@@ -179,20 +174,25 @@ def generate_project(args):
     print(f"start {output_dir}/sparkle.sln")
 
 
-def run(args):
+def run(args, output_dir):
     exe_name = "sparkle.exe" if is_windows else "sparkle"
 
-    exe_path = os.path.join(".", exe_name)
-    run_cmd = [exe_path] + args["unknown_args"]
+    run_cmd = [os.path.join(output_dir, "build", exe_name)
+               ] + args["unknown_args"]
     print(f"Running executable: {run_cmd}")
-    subprocess.run(run_cmd)
+    subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"), env=os.environ.copy())
 
 
 def build_and_run(args):
     """Build and optionally run the project."""
-    configure(args, False)
+    output_dir = configure(args, False)
 
     build(args)
 
+    archive_path = os.path.join(output_dir, "product.zip")
+    compress_zip(os.path.join(output_dir, "build"), archive_path)
+
     if args["run"]:
-        run(args)
+        run(args, output_dir)
+
+    return archive_path

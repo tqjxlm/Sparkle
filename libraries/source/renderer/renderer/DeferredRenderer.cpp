@@ -9,7 +9,6 @@
 #include "renderer/pass/SkyBoxPass.h"
 #include "renderer/pass/ToneMappingPass.h"
 #include "renderer/pass/UiPass.h"
-#include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
@@ -210,9 +209,9 @@ bool DeferredRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
         }
         sky_box_pass_->OverrideSkyMap(ibl_->GetSpecularMap());
         return true;
+    default:
+        return false;
     }
-
-    return false;
 }
 
 void DeferredRenderer::Update()
