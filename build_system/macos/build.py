@@ -29,7 +29,7 @@ def configure_for_clangd(args):
     ] + generator_args + compiler_args + args["cmake_options"]
 
     print("Configuring CMake for clangd with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake configure failed.")
         raise Exception()
@@ -57,7 +57,7 @@ def generate_project(args):
     ] + generator_args + args["cmake_options"]
 
     print("Generating Xcode project with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake project generation failed.")
         raise Exception()
@@ -95,7 +95,7 @@ def build_and_run(args):
             if os.path.exists(executable_path):
                 print(f"Running application: {executable_path}")
                 run_cmd = [executable_path] + args["unknown_args"]
-                subprocess.run(run_cmd)
+                subprocess.run(run_cmd, env=os.environ.copy())
             else:
                 print(f"Error: Executable not found at {executable_path}")
                 raise Exception()

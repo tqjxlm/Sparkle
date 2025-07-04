@@ -34,7 +34,7 @@ def configure_for_clangd(args):
     ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args
 
     print("Configuring CMake for clangd (iOS) with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake configure failed.")
         raise Exception()
@@ -68,7 +68,7 @@ def generate_project(args):
     ] + generator_args + toolchain_args + args["cmake_options"] + platform_args
 
     print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd)
+    result = subprocess.run(cmake_cmd, env=os.environ.copy())
     if result.returncode != 0:
         print("CMake project generation failed.")
         raise Exception()
@@ -85,7 +85,7 @@ def run_on_device(app_path):
         # List connected devices
         list_devices_cmd = ["xcrun", "devicectl", "list", "devices"]
         result = subprocess.run(
-            list_devices_cmd, capture_output=True, text=True)
+            list_devices_cmd, capture_output=True, text=True, env=os.environ.copy())
 
         if result.returncode != 0:
             print(
@@ -117,7 +117,7 @@ def run_on_device(app_path):
 
         print(f"Installing app with command: {' '.join(install_cmd)}")
         install_result = subprocess.run(
-            install_cmd, capture_output=True, text=True)
+            install_cmd, capture_output=True, text=True, env=os.environ.copy())
         if install_result.returncode != 0:
             print(f"Error installing app: {install_result.stderr}")
             print(
@@ -134,7 +134,7 @@ def run_on_device(app_path):
 
         print(f"Launching app with command: {' '.join(launch_cmd)}")
         launch_result = subprocess.run(
-            launch_cmd, capture_output=True, text=True)
+            launch_cmd, capture_output=True, text=True, env=os.environ.copy())
 
         if launch_result.returncode != 0:
             print(f"Error launching app: {launch_result.stderr}")

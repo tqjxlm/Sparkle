@@ -119,7 +119,7 @@ def configure(args, is_generate_sln):
         result = subprocess.run(shell_cmd, shell=True)
     else:
         print("Running CMake configure:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd)
+        result = subprocess.run(cmake_cmd, env=os.environ.copy())
 
     if result.returncode != 0:
         print("CMake configure failed.")
@@ -153,7 +153,7 @@ def build(args):
         result = subprocess.run(shell_cmd, shell=True)
     else:
         print("Running build:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd)
+        result = subprocess.run(cmake_cmd, env=os.environ.copy())
 
     if result.returncode != 0:
         print("Build failed.")
@@ -180,7 +180,7 @@ def run(args, output_dir):
     run_cmd = [os.path.join(output_dir, "build", exe_name)
                ] + args["unknown_args"]
     print(f"Running executable: {run_cmd}")
-    subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"))
+    subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"), env=os.environ.copy())
 
 
 def build_and_run(args):
