@@ -59,12 +59,13 @@ def compress_zip(source_path, zip_path):
             # Single file
             zip_ref.write(source_path, os.path.basename(source_path))
         elif os.path.isdir(source_path):
-            # Directory - recursively add all files
+            # Directory - recursively add all files including top-level directory
+            base_name = os.path.basename(source_path)
             for root, dirs, files in os.walk(source_path):
                 for file in files:
                     file_path = os.path.join(root, file)
-                    # Calculate relative path from source_path
-                    arcname = os.path.relpath(file_path, source_path)
+                    # Calculate relative path from parent of source_path to include top-level directory
+                    arcname = os.path.join(base_name, os.path.relpath(file_path, source_path))
                     zip_ref.write(file_path, arcname)
         else:
             raise ValueError(f"Source path does not exist: {source_path}")

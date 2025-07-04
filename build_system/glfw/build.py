@@ -85,6 +85,7 @@ def configure(args, is_generate_sln):
                 print("  Ubuntu/Debian: sudo apt install clang")
                 print("  Fedora: sudo dnf install clang")
             raise Exception()
+        ninja_path = find_or_install_ninja()
         compiler_args = [
             f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
         generator_args = [
@@ -173,14 +174,13 @@ def generate_project(args):
     print(f"start {output_dir}/sparkle.sln")
 
 
-def run(args):
+def run(args, output_dir):
     exe_name = "sparkle.exe" if is_windows else "sparkle"
 
-    os.chdir("build")
-
-    run_cmd = [exe_name] + args["unknown_args"]
+    run_cmd = [os.path.join(output_dir, "build", exe_name)
+               ] + args["unknown_args"]
     print(f"Running executable: {run_cmd}")
-    subprocess.run(run_cmd)
+    subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"))
 
 
 def build_and_run(args):
@@ -193,6 +193,6 @@ def build_and_run(args):
     compress_zip(os.path.join(output_dir, "build"), archive_path)
 
     if args["run"]:
-        run(args)
+        run(args, output_dir)
 
     return archive_path
