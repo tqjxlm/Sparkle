@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'ide/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'ide/**'
+      - 'LICENSE'
 
 jobs:
   build:
