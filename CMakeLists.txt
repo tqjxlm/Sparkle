@@ -366,6 +366,16 @@ else()
     message(FATAL_ERROR "No valid platform is specified. Valid options: [GLFW, MacOS, iOS, Android]")
 endif()
 
+if (MACOS)
+    target_compile_definitions(sparkle PRIVATE PLATFORM_MACOS=1)
+elseif (IOS)
+    target_compile_definitions(sparkle PRIVATE PLATFORM_IOS=1)
+elseif (ANDROID)
+    target_compile_definitions(sparkle PRIVATE PLATFORM_ANDROID=1)
+elseif (WIN32)
+    target_compile_definitions(sparkle PRIVATE PLATFORM_WINDOWS=1)
+endif()
+
 # ------------------ third party libraries ------------------
 
 add_subdirectory(thirdparty)
