@@ -153,7 +153,7 @@ class GlfwBuilder(FrameworkBuilder):
         output_dir = get_output_dir(True)
 
         print(
-            f"Visutal Studio sln is generated at {output_dir}. Open with command:")
+            f"Visual Studio sln is generated at {output_dir}. Open with command:")
         print(f"start {output_dir}/sparkle.sln")
 
     def build(self, args):
