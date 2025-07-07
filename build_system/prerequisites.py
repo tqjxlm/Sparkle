@@ -160,18 +160,72 @@ def validate_vulkan_sdk(vulkan_sdk_path):
     return os.path.exists(vulkan_include)
 
 
+def set_vulkan_layer_path(vulkan_sdk_path):
+    """Set VK_LAYER_PATH environment variable for validation layers."""
+    layer_path = os.path.join(vulkan_sdk_path, "share",
+                              "vulkan", "explicit_layer.d")
+
+    # Check if the layer directory exists
+    if os.path.exists(layer_path):
+        # Get existing VK_LAYER_PATH if any
+        existing_layer_path = os.environ.get("VK_LAYER_PATH")
+
+        if existing_layer_path:
+            # Add to existing path if not already present
+            if layer_path not in existing_layer_path.split(os.pathsep):
+                os.environ["VK_LAYER_PATH"] = f"{layer_path}{os.pathsep}{existing_layer_path}"
+        else:
+            # Set new path
+            os.environ["VK_LAYER_PATH"] = layer_path
+
+        print(f"VK_LAYER_PATH set to include: {layer_path}")
+    else:
+        print(f"Warning: Validation layer directory not found at {layer_path}")
+
+
+def set_vulkan_icd_filenames(vulkan_sdk_path):
+    """Set VK_ICD_FILENAMES environment variable for driver discovery."""
+    # For macOS, we specifically look for MoltenVK
+    if not is_macos:
+        return
+
+    icd_path = os.path.join(vulkan_sdk_path, "share",
+                            "vulkan", "icd.d", "MoltenVK_icd.json")
+
+    # Check if the ICD file exists
+    if os.path.exists(icd_path):
+        # Get existing VK_ICD_FILENAMES if any
+        existing_icd_filenames = os.environ.get("VK_ICD_FILENAMES")
+
+        if existing_icd_filenames:
+            # Add to existing path if not already present
+            if icd_path not in existing_icd_filenames.split(os.pathsep):
+                os.environ["VK_ICD_FILENAMES"] = f"{icd_path}{os.pathsep}{existing_icd_filenames}"
+        else:
+            # Set new path
+            os.environ["VK_ICD_FILENAMES"] = icd_path
+
+        print(f"VK_ICD_FILENAMES set to include: {icd_path}")
+    else:
+        print(f"Warning: MoltenVK ICD file not found at {icd_path}")
+
+
 def find_and_set_vulkan_sdk():
     VULKAN_SDK = os.environ.get("VULKAN_SDK")
 
     # If VULKAN_SDK is set and exists, we're good
     if VULKAN_SDK and os.path.exists(VULKAN_SDK):
         if validate_vulkan_sdk(VULKAN_SDK):
+            set_vulkan_layer_path(VULKAN_SDK)
+            set_vulkan_icd_filenames(VULKAN_SDK)
             return
         else:
             VULKAN_SDK = os.path.join(VULKAN_SDK, "macOS")
             if validate_vulkan_sdk(VULKAN_SDK):
                 os.environ["VULKAN_SDK"] = VULKAN_SDK
                 print(f"VULKAN_SDK set to: {VULKAN_SDK}")
+                set_vulkan_layer_path(VULKAN_SDK)
+                set_vulkan_icd_filenames(VULKAN_SDK)
                 return
 
     # If VULKAN_SDK is set but doesn't exist, show error
@@ -193,6 +247,12 @@ def find_and_set_vulkan_sdk():
     print(f"VULKAN_SDK set to: {vulkan_sdk_path}")
     print("Note: This is temporary for this session. To make it permanent, add to your shell profile:")
     print(f"export VULKAN_SDK={vulkan_sdk_path}")
+
+    # Set VK_LAYER_PATH for validation layers
+    set_vulkan_layer_path(vulkan_sdk_path)
+
+    # Set VK_ICD_FILENAMES for driver discovery
+    set_vulkan_icd_filenames(vulkan_sdk_path)
 
 
 def get_latest_vulkan_sdk_version(system, platform_name):
