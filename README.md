@@ -382,3 +382,21 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 ## Know Issues
 
 * [ ] ImGui scrolling not working on android and ios
+
+## Contribute
+
+### CI
+
+* A CI pipeline is setup in github [actions](https://github.com/tqjxlm/Sparkle/actions) at .github/workflows/ci.yml
+* All PRs are required to pass CI before merging.
+* For now, there's only building test. Unit test, functional test, performance test and style check will be added later.
+* Built artifacts will be uploaded once pipelines run successful. You can download them from the [actions](https://github.com/tqjxlm/Sparkle/actions) page.
+* macOS/iOS artifacts are not yet signed and notarized. So you won't be able to run them on your machine. If you want to run them, build on your local machine with your own developer account.
+
+### Coding Style
+
+Please follow the coding style already used in the codebase.
+
+* c++/objc/slang: .clang-format (clang-format)
+* markdown: .markdownlint.json (markdownlint)
+* python: PEP8 (autopep8)
