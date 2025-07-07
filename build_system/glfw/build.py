@@ -4,6 +4,7 @@ import platform
 
 from build_system.prerequisites import find_llvm_path, find_or_install_ninja, find_visual_studio_path, find_vcpkg, install_glfw
 from build_system.utils import compress_zip, robust_rmtree
+from build_system.builder_interface import FrameworkBuilder
 
 # Determine script directory
 SCRIPT = os.path.abspath(__file__)
@@ -42,15 +43,19 @@ def get_cmd_with_vcvars(vs_path, cmake_cmd):
     return f'CALL "{vcvars_path}" && ' + guarded_cmake_cmd
 
 
+def get_output_dir(is_generate_sln):
+    if is_generate_sln:
+        return os.path.join(SCRIPTPATH, "project")
+    else:
+        return os.path.join(SCRIPTPATH, "output")
+
+
 def configure(args, is_generate_sln):
     """Configure CMake project with appropriate settings for the platform."""
 
     install_glfw()
 
-    if is_generate_sln:
-        output_dir = os.path.join(SCRIPTPATH, "project")
-    else:
-        output_dir = os.path.join(SCRIPTPATH, "output")
+    output_dir = get_output_dir(is_generate_sln)
 
     if args.get("clean", False):
         robust_rmtree(output_dir)
@@ -125,74 +130,79 @@ def configure(args, is_generate_sln):
         print("CMake configure failed.")
         raise Exception()
 
-    return output_dir
 
+class GlfwBuilder(FrameworkBuilder):
+    """GLFW framework builder implementation."""
 
-def build(args):
-    """Build the project using CMake."""
+    def __init__(self):
+        super().__init__("glfw")
 
-    if is_windows:
-        build_threads = "64"
-    else:
-        build_threads = "16"
+    def configure_for_clangd(self, args):
+        """Configure CMake for clangd support."""
+        configure(args, False)
 
-    cmake_cmd = [args["cmake_executable"], "--build", ".", "-j",
-                 build_threads, "--config", args["config"]]
-
-    if is_windows:
-        # On Windows, activate MSVC environment first
-        vs_path = find_visual_studio_path()
-        if not vs_path:
-            print("Error: Could not find Visual Studio 2022 installation.")
-            print("Please ensure Visual Studio 2022 is installed with C++ tools.")
+    def generate_project(self, args):
+        """Generate IDE project files."""
+        if not is_windows:
+            print(
+                "Project generation for glfw is only supported on Windows with Visual Studio.")
             raise Exception()
 
-        shell_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
+        configure(args, True)
 
-        print("Running build:", shell_cmd)
-        result = subprocess.run(shell_cmd, shell=True)
-    else:
-        print("Running build:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd, env=os.environ.copy())
+        output_dir = get_output_dir(True)
 
-    if result.returncode != 0:
-        print("Build failed.")
-        raise Exception()
-
-
-def generate_project(args):
-    """Generate IDE project files using CMake."""
-    if not is_windows:
         print(
-            "Project generation for glfw is only supported on Windows with Visual Studio.")
-        raise Exception()
+            f"Visutal Studio sln is generated at {output_dir}. Open with command:")
+        print(f"start {output_dir}/sparkle.sln")
 
-    output_dir = configure(args, True)
+    def build(self, args):
+        """Build the project."""
+        configure(args, False)
 
-    print(
-        f"Visutal Studio sln is generated at {output_dir}. Open with command:")
-    print(f"start {output_dir}/sparkle.sln")
+        if is_windows:
+            build_threads = "64"
+        else:
+            build_threads = "16"
 
+        cmake_cmd = [args["cmake_executable"], "--build", ".", "-j",
+                     build_threads, "--config", args["config"]]
 
-def run(args, output_dir):
-    exe_name = "sparkle.exe" if is_windows else "sparkle"
+        if is_windows:
+            # On Windows, activate MSVC environment first
+            vs_path = find_visual_studio_path()
+            if not vs_path:
+                print("Error: Could not find Visual Studio 2022 installation.")
+                print("Please ensure Visual Studio 2022 is installed with C++ tools.")
+                raise Exception()
 
-    run_cmd = [os.path.join(output_dir, "build", exe_name)
-               ] + args["unknown_args"]
-    print(f"Running executable: {run_cmd}")
-    subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"), env=os.environ.copy())
+            shell_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
 
+            print("Running build:", shell_cmd)
+            result = subprocess.run(shell_cmd, shell=True)
+        else:
+            print("Running build:", " ".join(cmake_cmd))
+            result = subprocess.run(cmake_cmd, env=os.environ.copy())
 
-def build_and_run(args):
-    """Build and optionally run the project."""
-    output_dir = configure(args, False)
+        if result.returncode != 0:
+            print("Build failed.")
+            raise Exception()
 
-    build(args)
+    def archive(self, args):
+        """Archive the built project."""
+        output_dir = get_output_dir(False)
+        archive_path = os.path.join(output_dir, "product.zip")
+        compress_zip(os.path.join(output_dir, "build"), archive_path)
+        return archive_path
 
-    archive_path = os.path.join(output_dir, "product.zip")
-    compress_zip(os.path.join(output_dir, "build"), archive_path)
+    def run(self, args):
+        """Run the built project."""
+        exe_name = "sparkle.exe" if is_windows else "sparkle"
 
-    if args["run"]:
-        run(args, output_dir)
+        output_dir = get_output_dir(False)
 
-    return archive_path
+        run_cmd = [os.path.join(output_dir, "build", exe_name)
+                   ] + args["unknown_args"]
+        print(f"Running executable: {run_cmd}")
+        subprocess.run(args=run_cmd, cwd=os.path.join(
+            output_dir, "build"), env=os.environ.copy())

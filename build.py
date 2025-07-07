@@ -22,11 +22,13 @@ def construct_additional_cmake_options(parsed_args):
 
 
 def parse_args(args=None):
+    from build_system.builder_factory import get_supported_frameworks
+
     parser = argparse.ArgumentParser(
         description="Parse build arguments for sparkle.")
 
     parser.add_argument("--framework", default="glfw",
-                        choices=["glfw", "macos", "ios", "android"], help="Build framework")
+                        choices=get_supported_frameworks(), help="Build framework")
     parser.add_argument("--config", default="Debug",
                         choices=["Release", "Debug"], help="Build configuration")
     parser.add_argument("--asan", action="store_true",
@@ -126,50 +128,29 @@ def copy_build_products(product_archive_path, args):
 
 def build_project(args):
     """Build the project after setup is complete."""
-    print("Starting build process...")
 
-    if args["framework"] == "glfw":
-        import build_system.glfw.build as builder
+    from build_system.builder_factory import create_builder
 
-        if args["clangd"]:
-            builder.configure(args, False)
-        elif args["generate_only"]:
-            builder.generate_project(args)
-        else:
-            product_path = builder.build_and_run(args)
-            copy_build_products(product_path, args)
+    builder = create_builder(args["framework"])
 
-    elif args["framework"] == "macos":
-        import build_system.macos.build as builder
+    if args["clangd"]:
+        print("Configuring...")
+        builder.configure_for_clangd(args)
+    elif args["generate_only"]:
+        print("Generating project...")
+        builder.generate_project(args)
+    else:
+        print("Building...")
+        builder.build(args)
 
-        if args["clangd"]:
-            builder.configure_for_clangd(args)
-        elif args["generate_only"]:
-            builder.generate_project(args)
-        else:
-            product_path = builder.build_and_run(args)
-            copy_build_products(product_path, args)
+        # archiving is mandatory for now. make it optional later if necessary.
+        print("Archiving...")
+        archive_path = builder.archive(args)
+        copy_build_products(archive_path, args)
 
-    elif args["framework"] == "ios":
-        import build_system.ios.build as builder
-
-        if args["clangd"]:
-            builder.configure_for_clangd(args)
-        elif args["generate_only"]:
-            builder.generate_project(args)
-        else:
-            product_path = builder.build_and_run(args)
-            copy_build_products(product_path, args)
-
-    elif args["framework"] == "android":
-        import build_system.android.build as builder
-
-        if args["clangd"] or args["generate_only"]:
-            # gradle sync will do both in the same time
-            builder.sync_only(args)
-        else:
-            product_path = builder.build_and_run(args)
-            copy_build_products(product_path, args)
+        if args["run"]:
+            print("Running...")
+            builder.run(args)
 
 
 def main():
