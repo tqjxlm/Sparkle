@@ -1,7 +1,8 @@
 import os
 import subprocess
 
-from build_system.utils import run_command_with_logging, robust_rmtree
+from build_system.utils import compress_zip, run_command_with_logging, robust_rmtree
+from build_system.builder_interface import FrameworkBuilder
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -12,71 +13,8 @@ toolchain_args = [
     f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"]
 
 
-def configure_for_clangd(args):
-    """
-    Configure CMake for clangd in 'clangd' directory for iOS.
-    """
-    output_dir = os.path.join(SCRIPTPATH, "clangd")
-
-    if args.get("clean", False):
-        robust_rmtree(output_dir)
-
-    os.makedirs(output_dir, exist_ok=True)
-    os.chdir(output_dir)
-
-    compiler_args = ["-DCMAKE_C_COMPILER=/usr/bin/clang",
-                     "-DCMAKE_CXX_COMPILER=/usr/bin/clang++"]
-    generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
-
-    cmake_cmd = [
-        args["cmake_executable"],
-        "../../..",
-    ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args
-
-    print("Configuring CMake for clangd (iOS) with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd, env=os.environ.copy())
-    if result.returncode != 0:
-        print("CMake configure failed.")
-        raise Exception()
-
-    print(f"Configuration complete in {output_dir}")
-
-
-def generate_project(args):
-    """
-    Generate Xcode project for iOS in 'project' directory (no build).
-    """
-    output_dir = os.path.join(SCRIPTPATH, "project")
-
-    if args.get("clean", False):
-        robust_rmtree(output_dir)
-
-    os.makedirs(output_dir, exist_ok=True)
-    os.chdir(output_dir)
-
-    team_id = os.environ.get("APPLE_DEVELOPER_TEAM_ID")
-    if not team_id:
-        print("Error: APPLE_DEVELOPER_TEAM_ID environment variable is not set. The app will not be signed.")
-        print("Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
-        raise Exception()
-
-    generator_args = ["-G Xcode"]
-
-    cmake_cmd = [
-        args["cmake_executable"],
-        "../../..",
-    ] + generator_args + toolchain_args + args["cmake_options"] + platform_args
-
-    print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
-    result = subprocess.run(cmake_cmd, env=os.environ.copy())
-    if result.returncode != 0:
-        print("CMake project generation failed.")
-        raise Exception()
-
-    print(f"Xcode project is generated at {output_dir}. Open with command:")
-    print(f"open {output_dir}/sparkle.xcodeproj")
-
-    return output_dir
+def get_output_dir():
+    return os.path.join(SCRIPTPATH, "project")
 
 
 def run_on_device(app_path):
@@ -157,36 +95,117 @@ def run_on_device(app_path):
     print("3. Build and run from Xcode")
 
 
-def build_and_run(args):
-    """
-    Build the iOS project and optionally install/run it.
-    Note: Running iOS apps requires a connected device or simulator.
-    """
-    output_dir = generate_project(args)
-
-    # Build
-    build_cmd = [args["cmake_executable"], "--build", ".", "--config",
-                 args["config"], "--target", "sparkle"]
-    log_file = os.path.join(output_dir, "build.log")
-
-    run_command_with_logging(build_cmd, log_file, "Building iOS project")
-
+def get_app_path(args):
+    output_dir = get_output_dir()
     app_name = "sparkle.app"
     if args["config"] == "Debug":
         app_path = os.path.join(output_dir, "Debug-iphoneos", app_name)
     else:
         app_path = os.path.join(output_dir, "Release-iphoneos", app_name)
+    return app_path
 
-    if args["run"]:
+
+class IosBuilder(FrameworkBuilder):
+    """iOS framework builder implementation."""
+
+    def __init__(self):
+        super().__init__("ios")
+
+    def configure_for_clangd(self, args):
+        """Configure CMake for clangd support."""
+        output_dir = os.path.join(SCRIPTPATH, "clangd")
+
+        if args.get("clean", False):
+            robust_rmtree(output_dir)
+
+        os.makedirs(output_dir, exist_ok=True)
+        os.chdir(output_dir)
+
+        compiler_args = ["-DCMAKE_C_COMPILER=/usr/bin/clang",
+                         "-DCMAKE_CXX_COMPILER=/usr/bin/clang++"]
+        generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
+
+        cmake_cmd = [
+            args["cmake_executable"],
+            "../../..",
+        ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args
+
+        print("Configuring CMake for clangd (iOS) with command:",
+              " ".join(cmake_cmd))
+        result = subprocess.run(cmake_cmd, env=os.environ.copy())
+        if result.returncode != 0:
+            print("CMake configure failed.")
+            raise Exception()
+
+        print(f"Configuration complete in {output_dir}")
+
+    def generate_project(self, args):
+        """Generate Xcode project files."""
+        output_dir = get_output_dir()
+
+        if args.get("clean", False):
+            robust_rmtree(output_dir)
+
+        os.makedirs(output_dir, exist_ok=True)
+        os.chdir(output_dir)
+
+        team_id = os.environ.get("APPLE_DEVELOPER_TEAM_ID")
+        if not team_id:
+            print(
+                "Error: APPLE_DEVELOPER_TEAM_ID environment variable is not set. The app will not be signed.")
+            print("Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
+            raise Exception()
+
+        generator_args = ["-G Xcode"]
+
+        cmake_cmd = [
+            args["cmake_executable"],
+            "../../..",
+        ] + generator_args + toolchain_args + args["cmake_options"] + platform_args
+
+        print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
+        result = subprocess.run(cmake_cmd, env=os.environ.copy())
+        if result.returncode != 0:
+            print("CMake project generation failed.")
+            raise Exception()
+
+        print(
+            f"Xcode project is generated at {output_dir}. Open with command:")
+        print(f"open {output_dir}/sparkle.xcodeproj")
+
+    def build(self, args):
+        """Build the project."""
+        self.generate_project(args)
+
+        # Build
+        build_cmd = [args["cmake_executable"], "--build", ".", "--config",
+                     args["config"], "--target", "sparkle"]
+
+        output_dir = get_output_dir()
+        log_file = os.path.join(output_dir, "build.log")
+
+        run_command_with_logging(build_cmd, log_file, "Building iOS project")
+
+    def archive(self, args):
+        """Archive the built project."""
+        output_dir = get_output_dir()
+        app_path = get_app_path(args)
+        archive_path = os.path.join(output_dir, "product.zip")
+
+        # TODO: archive and sign
+        compress_zip(app_path, archive_path)
+
+        return archive_path
+
+    def run(self, args):
+        """Run the built project."""
+        app_path = get_app_path(args)
+
         if os.path.exists(app_path):
             print(f"\nBuilt app bundle is available at: {app_path}")
-
             run_on_device(app_path)
         else:
             print(
                 f"\nWarning: App bundle not found at expected location: {app_path}")
             print("Check the build output directory for the actual location.")
-
-    # TODO: archive and sign
-
-    return app_path
+            raise Exception("App bundle not found")

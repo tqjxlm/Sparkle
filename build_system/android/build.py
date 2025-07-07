@@ -6,6 +6,7 @@ import os
 import shutil
 
 from build_system.utils import run_command_with_logging, download_file, extract_zip, robust_rmtree
+from build_system.builder_interface import FrameworkBuilder
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -192,48 +193,20 @@ def prepare_environment(args=None):
     return gradlew_path, output_dir
 
 
-def build_apk(args):
-    """Build Android APK using Gradle."""
-    gradlew_path, output_dir = prepare_environment(args)
-
-    # Prepare Gradle command
+def get_apk_path(args):
+    """Get the path to the APK based on build configuration."""
     config = args["config"]
-    cmake_args = args["cmake_options"]
-
     if config == "Debug":
-        gradle_task = "assembleDebug"
-        apk_path = "./app/build/outputs/apk/debug/app-debug.apk"
+        return os.path.join(SCRIPTPATH, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
     else:
-        gradle_task = "assembleRelease"
-        apk_path = "./app/build/outputs/apk/release/app-release.apk"
-
-    # Build command
-    build_cmd = [
-        gradlew_path,
-        gradle_task,
-        f"-PcmakeArgs={' '.join(cmake_args)}",
-        "--info"
-    ]
-
-    log_file = os.path.join(output_dir, "build.log")
-
-    apk_path = os.path.join(SCRIPTPATH, apk_path)
-
-    # Run Gradle build with logging
-    try:
-        run_command_with_logging(build_cmd, log_file, "Building Android APK")
-        print(f"Build successful! APK created at: {apk_path}")
-        return apk_path
-
-    except Exception as e:
-        print(f"Build failed with exception: {e}")
-        raise Exception()
+        return os.path.join(SCRIPTPATH, "app", "build", "outputs", "apk", "release", "app-release.apk")
 
 
-def install_and_run_apk(apk_path):
+def run_on_device(args):
     """Install APK and run the application."""
     package_name = "io.tqjxlm.sparkle"
     activity_name = f"{package_name}/{package_name}.VulkanActivity"
+    apk_path = get_apk_path(args)
 
     print("Installing APK...")
     install_cmd = ["adb", "install", apk_path]
@@ -289,23 +262,66 @@ def sync_only(args):
     log_file = os.path.join(output_dir, "sync.log")
 
     # Run Gradle sync with logging
-    try:
-        run_command_with_logging(sync_cmd, log_file, "Syncing Android project")
-        print("Gradle sync successful! CMake files generated.")
-        return True
-
-    except Exception as e:
-        print(f"Gradle sync failed with exception: {e}")
-        return False
+    run_command_with_logging(sync_cmd, log_file, "Syncing Android project")
+    print("Gradle sync successful! CMake files generated.")
 
 
-def build_and_run(args):
-    """Build Android APK and optionally run it."""
-    setup_android_validation(SCRIPTPATH)
+class AndroidBuilder(FrameworkBuilder):
+    """Android framework builder implementation."""
 
-    apk_path = build_apk(args)
+    def __init__(self):
+        super().__init__("android")
 
-    if args["run"]:
-        install_and_run_apk(apk_path)
+    def configure_for_clangd(self, args):
+        """Configure project for clangd (via Gradle sync)."""
+        sync_only(args)
 
-    return apk_path
+    def generate_project(self, args):
+        """Generate IDE project files (via Gradle sync)."""
+        sync_only(args)
+
+    def build(self, args):
+        """Build the project."""
+        setup_android_validation(SCRIPTPATH)
+
+        gradlew_path, output_dir = prepare_environment(args)
+
+        # Prepare Gradle command
+        config = args["config"]
+        cmake_args = args["cmake_options"]
+
+        if config == "Debug":
+            gradle_task = "assembleDebug"
+        else:
+            gradle_task = "assembleRelease"
+
+        # Build command
+        build_cmd = [
+            gradlew_path,
+            gradle_task,
+            f"-PcmakeArgs={' '.join(cmake_args)}",
+            "--info"
+        ]
+
+        log_file = os.path.join(output_dir, "build.log")
+
+        # Run Gradle build with logging
+        try:
+            run_command_with_logging(
+                build_cmd, log_file, "Building Android APK")
+
+            apk_path = get_apk_path(args)
+            print(f"Build successful! APK created at: {apk_path}")
+
+        except Exception as e:
+            print(f"Build failed with exception: {e}")
+            raise Exception()
+
+    def archive(self, args):
+        """Archive the built project."""
+        # For Android, the archive is the APK itself
+        return get_apk_path(args)
+
+    def run(self, args):
+        """Run the built project."""
+        run_on_device(args)
