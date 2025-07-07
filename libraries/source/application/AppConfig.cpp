@@ -13,16 +13,16 @@ static ConfigValue<bool> config_render_thread("render_thread", "enable render th
 
 void AppConfig::Init()
 {
-#if FRAMEWORK_MACOS
+#if PLATFORM_MACOS
     platform = NativePlatform::MacOS;
-#elif FRAMEWORK_IOS
+#elif PLATFORM_IOS
     platform = NativePlatform::iOS;
-#elif FRAMEWORK_ANDROID
+#elif PLATFORM_ANDROID
     platform = NativePlatform::Android;
 #elif PLATFORM_WINDOWS
     platform = NativePlatform::Windows;
 #else
-#pragma error
+    static_assert(false, "No valid platform is provided.");
 #endif
 
     ConfigCollectionHelper::RegisterConfig(this, config_max_thread, max_threads);
