@@ -379,7 +379,7 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 * [ ] rhi thread
 * [ ] event based input handling
 
-## Know Issues
+## Known Issues
 
 * [ ] ImGui scrolling not working on android and ios
 

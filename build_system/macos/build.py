@@ -86,7 +86,6 @@ class MacosBuilder(FrameworkBuilder):
         """Build the project."""
         self.generate_project(args)
 
-        # Build specific target instead of ALL_BUILD
         build_cmd = [args["cmake_executable"], "--build", ".", "--config",
                      args["config"], "--target", "sparkle"]
 
