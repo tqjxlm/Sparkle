@@ -30,16 +30,6 @@ float2 UnitDisk()
     return float2(x, y);
 }
 
-float3 SampleCosineWeightedHemisphere()
-{
-    float2 unit_disk = UnitDisk();
-
-    // Project z up to the unit hemisphere
-    float z = sqrt(1.0f - dot(unit_disk, unit_disk));
-
-    return normalize(float3(unit_disk, z));
-}
-
 // initial random number considering the pixel position and a seed (usually time)
 void InitRandomBase(uint x, uint y, uint seed)
 {

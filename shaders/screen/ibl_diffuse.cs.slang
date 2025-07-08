@@ -39,7 +39,7 @@
     float3 u, v, w;
     GetLocalAxisFromNormal(w_n, u, v, w);
 
-    float3 local_w_i = SampleCosineWeightedHemisphere();
+    float3 local_w_i = CosineWeightedHemisphere::Sample();
 
     // back to world space
     float3 w_i = normalize(TransformBasisToWorld(local_w_i, u, v, w));

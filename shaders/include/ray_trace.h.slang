@@ -74,8 +74,11 @@ SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
         else
         {
             // Non-metal: Fresnel tells how much is specular
-            const float r0 = 0.04f;
-            float fresnel = FresnelSchlick(o_dot_m, r0);
+
+            // F0: the base reflectance when light hits a surface straight on
+            // this value is empirical and widely adopted.
+            const float F0 = 0.04f;
+            float fresnel = FresnelSchlick(o_dot_m, F0);
 
             fresnel_color = float3(1.0, 1.0, 1.0);
 
@@ -101,25 +104,29 @@ SampleResult BxdfLambertian(float3 local_w_o, MaterialParameters mat_param)
 {
     SampleResult result;
     result.is_valid = true;
-    result.local_w_i = SampleCosineWeightedHemisphere();
-    result.throughput = mat_param.baseColor; // Lambertian diffuse reflectance
+    result.local_w_i = CosineWeightedHemisphere::Sample();
+    result.throughput = mat_param.baseColor;
 
     return result;
 }
 
 float3 BxdfMetal(float3 w_o, out float3 w_i, MaterialParameters mat_param, Intersection intersection)
 {
-    // Convert world space direction to local (tangent) space
+    // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
 
+    // try specular first. it may be the result of
+    // 1. all metal reflection
+    // 2. part of non-metal reflection (governed by frenel)
     SampleResult result = BxdfSpecular(local_w_o, mat_param);
 
+    // if this light does not go specular, it must be diffuse.
     if (!result.is_valid)
     {
         result = BxdfLambertian(local_w_o, mat_param);
     }
 
-    // Convert the local direction back to world space
+    // back to world space
     w_i = normalize(TransformBasisToWorld(result.local_w_i, intersection.normal, intersection.tangent.xyz));
 
     return result.throughput;
@@ -127,7 +134,7 @@ float3 BxdfMetal(float3 w_o, out float3 w_i, MaterialParameters mat_param, Inter
 
 float3 BxdfDieletric(float3 w_o, out float3 w_i, MaterialParameters mat_param, Intersection intersection)
 {
-    // Convert world space direction to local (tangent) space
+    // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
     float3 local_w_i;
 
@@ -149,7 +156,7 @@ float3 BxdfDieletric(float3 w_o, out float3 w_i, MaterialParameters mat_param, I
         local_w_i = Refract(local_w_o, eta_i_over_eta_t);
     }
 
-    // Convert the local direction back to world space
+    // back to world space
     w_i = normalize(TransformBasisToWorld(local_w_i, intersection.normal, intersection.tangent.xyz));
 
     return mat_param.baseColor;
