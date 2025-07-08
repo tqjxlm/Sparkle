@@ -55,7 +55,8 @@ float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttri
     float NDF = DistributionGGX::Evaluate(N, H, surface.roughness);
     float G = SmithGGX(NdotV, NdotL, surface.roughness);
 
-    // metallic workflow
+    // F0: the base reflectance when light hits a surface straight on
+    // this value is empirical and widely adopted.
     float3 F0 = (float3)0.04;
     F0 = lerp(F0, surface.albedo, surface.metallic);
 

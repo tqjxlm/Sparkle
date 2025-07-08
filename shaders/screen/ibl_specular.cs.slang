@@ -56,7 +56,7 @@
         // back to world space
         float3 w_i = normalize(TransformBasisToWorld(local_w_i, u, v, w));
 
-        float pdf = DistributionVn::Pdf(roughness, local_w_o, local_w_m);
+        float pdf = DistributionGGX::Pdf(roughness, local_w_o, local_w_m);
         float sa_texel = 4.0 * Pi / (6.0 * resolution.x * resolution.y);
         float sa_sample = 1.0 / (max_sample * pdf + Eps);
         float mip_level = roughness < Eps ? 0.0 : 0.5 * log2(sa_sample / sa_texel);

@@ -5,6 +5,15 @@
 #include "random.h.slang"
 #include "tangent_space.h.slang"
 
+float GeometrySchlickGGX(float cos_theta, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+
+    float tan2_v = (1.f - cos_theta * cos_theta) / (cos_theta * cos_theta + Eps);
+    return 2.f / (1.f + sqrt(1.f + a2 * tan2_v));
+}
+
 namespace DistributionGGX
 {
 float Evaluate(float3 N, float3 H, float roughness)
@@ -21,25 +30,6 @@ float Evaluate(float3 N, float3 H, float roughness)
     return num / denom;
 }
 
-float3 Sample(float roughness)
-{
-    float eta_1 = RandomUnit();
-    float eta_2 = RandomUnit();
-
-    float a = roughness * roughness;
-    float a2 = a * a;
-
-    float theta = acos(sqrt((1.f - eta_1) / ((a2 - 1.f) * eta_1 + 1.f)));
-    float cos_theta = cos(theta);
-    float sin_theta = sin(theta);
-
-    float phi = 2.f * Pi * eta_2;
-    float sin_phi = sin(phi);
-    float cos_phi = cos(phi);
-
-    return float3(cos_phi * sin_theta, sin_phi * sin_theta, cos_theta);
-}
-
 float Ndf(float cos_theta, float roughness)
 {
     float a = roughness * roughness;
@@ -50,27 +40,10 @@ float Ndf(float cos_theta, float roughness)
     return a2 / (Pi * d * d);
 }
 
-float Pdf(float3 w_m, float roughness)
-{
-    float cos_theta = CosTheta(w_m);
-
-    return cos_theta * Ndf(cos_theta, roughness);
-}
-} // namespace DistributionGGX
-
-float GeometrySchlickGGX(float cos_theta, float roughness)
-{
-    float a = roughness * roughness;
-    float a2 = a * a;
-
-    float tan2_v = (1.f - cos_theta * cos_theta) / (cos_theta * cos_theta + Eps);
-    return 2.f / (1.f + sqrt(1.f + a2 * tan2_v));
-}
-
-namespace DistributionVn
-{
 float3 Sample(float3 w_o, float roughness)
 {
+    // VNDF sampling
+
     float a = roughness * roughness;
 
     float u1 = RandomUnit();
@@ -95,11 +68,31 @@ float3 Sample(float3 w_o, float roughness)
 
 float Pdf(float roughness, float3 w_o, float3 w_m)
 {
+    // VNDF sampling
+
     float G = GeometrySchlickGGX(w_o.z, roughness);
-    float D = DistributionGGX::Ndf(w_m.z, roughness);
+    float D = Ndf(w_m.z, roughness);
     return G * D * SaturateDot(w_o, w_m) / (w_o.z + Eps);
 }
-} // namespace DistributionVn
+} // namespace DistributionGGX
+
+namespace CosineWeightedHemisphere
+{
+float3 Sample()
+{
+    float2 unit_disk = UnitDisk();
+
+    // Project z up to the unit hemisphere
+    float z = sqrt(1.0f - dot(unit_disk, unit_disk));
+
+    return normalize(float3(unit_disk, z));
+}
+
+float Pdf(float3 w_m)
+{
+    return AbsCosTheta(w_m) * InvPi;
+}
+}
 
 float SmithGGX(float cos_o, float cos_i, float roughness)
 {
@@ -158,14 +151,9 @@ float FresnelDielectric(float cos_theta_i, float eta_i, float eta_t)
     return FresnelSchlick(cos_theta_i, r0);
 }
 
-float3 SampleMicroFacetNormal(float roughness)
-{
-    return DistributionGGX::Sample(roughness);
-}
-
 float3 SampleMicroFacetNormal(float3 w_o, float roughness)
 {
-    return DistributionVn::Sample(w_o, roughness);
+    return DistributionGGX::Sample(w_o, roughness);
 }
 
 #endif // SAMPLER_H_
