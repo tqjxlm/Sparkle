@@ -12,6 +12,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(USE_GLFW "Use GLFW instead of the native window system" OFF)
 option(ENABLE_PROFILER "Build with profiler support" OFF)
+option(ENABLE_APPLE_AUTO_SIGN "Configure xcode project to manage signing automatically" OFF)
 
 macro(assign_bool var)
      if(${ARGN})
@@ -337,8 +338,13 @@ elseif(IOS)
 
     if(DEFINED ENV{APPLE_DEVELOPER_TEAM_ID})
         set(DEVELOPER_ID_CONFIG XCODE_ATTRIBUTE_DEVELOPMENT_TEAM $ENV{APPLE_DEVELOPER_TEAM_ID})
+    endif()
+
+    if(ENABLE_APPLE_AUTO_SIGN)
+        set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic)
     else()
-        set(DEVELOPER_ID_CONFIG XCODE_ATTRIBUTE_DEVELOPMENT_TEAM -)
+        set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGN_STYLE Manual)
+        set(PROVISIONING_CONFIG XCODE_ATTRIBUTE_PROVISIONING_PROFILE_SPECIFIER "SparkleTestProfile")
     endif()
 
     set_target_properties(sparkle PROPERTIES
@@ -348,7 +354,8 @@ elseif(IOS)
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
         XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos"
         ${DEVELOPER_ID_CONFIG}
-        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        ${CODE_SIGN_STYLE}
+        ${PROVISIONING_CONFIG}
         XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
         XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym"
         XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"

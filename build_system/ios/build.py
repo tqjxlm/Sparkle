@@ -149,19 +149,24 @@ class IosBuilder(FrameworkBuilder):
         os.makedirs(output_dir, exist_ok=True)
         os.chdir(output_dir)
 
-        team_id = os.environ.get("APPLE_DEVELOPER_TEAM_ID")
-        if not team_id:
-            print(
-                "Error: APPLE_DEVELOPER_TEAM_ID environment variable is not set. The app will not be signed.")
-            print("Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
-            raise Exception()
+        sign_args = []
+        if args.get("apple_auto_sign", False):
+            # Require a team id to sign automatically. It will be used by cmake later.
+            team_id = os.environ.get("APPLE_DEVELOPER_TEAM_ID")
+            if team_id:
+                sign_args = ["-DENABLE_APPLE_AUTO_SIGN=ON"]
+            else:
+                print(
+                    "Error: APPLE_DEVELOPER_TEAM_ID environment variable is not set."
+                    "Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
+                raise Exception()
 
         generator_args = ["-G Xcode"]
 
         cmake_cmd = [
             args["cmake_executable"],
             "../../..",
-        ] + generator_args + toolchain_args + args["cmake_options"] + platform_args
+        ] + generator_args + toolchain_args + args["cmake_options"] + sign_args + platform_args
 
         print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
         result = subprocess.run(cmake_cmd, env=os.environ.copy())

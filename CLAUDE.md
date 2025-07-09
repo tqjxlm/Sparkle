@@ -64,7 +64,7 @@ python build.py --framework=ios --generate_only    # Generate iOS Xcode project 
 python build.py --framework=glfw --generate_only   # Generate native project only
 
 # Setup and development
-python build.py --setup-only                    # Run setup only (no build)
+python build.py --setup_only                    # Run setup only (no build)
 python build.py --framework=glfw --clangd       # Generate compile_commands.json for clangd
 
 # Build configuration options

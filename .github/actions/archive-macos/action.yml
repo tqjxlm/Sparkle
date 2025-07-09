@@ -1,0 +1,66 @@
+name: "Archive macOS App Bundle"
+description: "Archives a macOS app bundle for distribution"
+inputs:
+  certificate-p12-base64:
+    description: "Base64 encoded P12 certificate"
+    required: true
+  certificate-password:
+    description: "Password for P12 certificate"
+    required: true
+  signing-identity:
+    description: "Apple signing identity"
+    required: true
+  notarization-username:
+    description: "Apple notarization username"
+    required: true
+  notarization-password:
+    description: "Apple notarization password"
+    required: true
+  team-id:
+    description: "Apple Developer Team ID"
+    required: true
+  app-path:
+    description: "Path to app bundle zip"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Import Code-Signing Certificates
+      uses: Apple-Actions/import-codesign-certs@v3
+      with:
+        p12-file-base64: ${{ inputs.certificate-p12-base64 }}
+        p12-password: ${{ inputs.certificate-password }}
+
+    - name: Extract archive
+      shell: bash
+      run: |
+        ditto -x -k "${{ inputs.app-path }}" "$RUNNER_TEMP/build"
+
+    - name: Sign app bundle
+      shell: bash
+      run: |
+        codesign --force --options runtime --sign "${{ inputs.signing-identity }}" "$RUNNER_TEMP/build/sparkle.app"
+
+    - name: Create archive for notarization
+      shell: bash
+      run: |
+        ditto -c -k --keepParent "$RUNNER_TEMP/build/sparkle.app" "$RUNNER_TEMP/sparkle.zip"
+
+    - name: Submit for notarization
+      shell: bash
+      run: |
+        xcrun notarytool submit "$RUNNER_TEMP/sparkle.zip" \
+          --apple-id "${{ inputs.notarization-username }}" \
+          --password "${{ inputs.notarization-password }}" \
+          --team-id "${{ inputs.team-id }}" \
+          --wait
+
+    - name: Staple notarization ticket
+      shell: bash
+      run: |
+        xcrun stapler staple "$RUNNER_TEMP/build/sparkle.app"
+
+    - name: Create final distribution archive
+      shell: bash
+      run: |
+        ditto -c -k --keepParent "$RUNNER_TEMP/build/sparkle.app" "${{ inputs.app-path }}"
