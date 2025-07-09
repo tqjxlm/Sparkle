@@ -43,10 +43,13 @@ def parse_args(args=None):
                         help="Generate compile_commands.json for clangd")
     parser.add_argument("--run", action="store_true",
                         help="Run the built executable after building")
-    parser.add_argument("--setup-only", action="store_true",
+    parser.add_argument("--setup_only", action="store_true",
                         help="Run setup only without building")
     parser.add_argument("--clean", action="store_true",
                         help="Clean output directory before configure")
+    parser.add_argument("--apple_auto_sign", action="store_true",
+                        help="Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set."
+                        "See https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
 
     # Unknown args will be used for --run the built executable
     parsed_args, unknown_args = parser.parse_known_args(args)
@@ -61,6 +64,7 @@ def parse_args(args=None):
         "setup_only": parsed_args.setup_only,
         "clangd": parsed_args.clangd,
         "clean": parsed_args.clean,
+        "apple_auto_sign": parsed_args.apple_auto_sign,
     }
 
 
@@ -161,7 +165,7 @@ def main():
     # Always run setup first
     setup()
 
-    # If --setup-only flag is used, exit after setup
+    # If --setup_only flag is used, exit after setup
     if args["setup_only"]:
         print("Setup-only mode: Skipping build.")
         return

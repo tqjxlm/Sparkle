@@ -1,0 +1,42 @@
+name: "Set up iOS Certificates"
+description: "Sets up code signing certificates for iOS builds"
+inputs:
+  certificate-p12-base64:
+    description: "Base64 encoded P12 certificate"
+    required: true
+  certificate-password:
+    description: "Password for P12 certificate"
+    required: true
+  team-id:
+    description: "Apple Developer Team ID"
+    required: true
+  appstore-issuer-id:
+    description: "App Store Connect Issuer ID"
+    required: true
+  appstore-key-id:
+    description: "App Store Connect Key ID"
+    required: true
+  appstore-private-key:
+    description: "App Store Connect Private Key"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Import Code-Signing Certificates
+      uses: Apple-Actions/import-codesign-certs@v3
+      with:
+        p12-file-base64: ${{ inputs.certificate-p12-base64 }}
+        p12-password: ${{ inputs.certificate-password }}
+
+    - name: Download Provisioning Profiles
+      uses: Apple-Actions/download-provisioning-profiles@v4
+      with:
+        bundle-id: io.tqjxlm.sparkle
+        profile-type: "IOS_APP_DEVELOPMENT"
+        issuer-id: ${{ inputs.appstore-issuer-id }}
+        api-key-id: ${{ inputs.appstore-key-id }}
+        api-private-key: ${{ inputs.appstore-private-key }}
+
+    - name: Set APPLE_DEVELOPER_TEAM_ID
+      shell: bash
+      run: echo "APPLE_DEVELOPER_TEAM_ID=${{ inputs.team-id }}" >> $GITHUB_ENV

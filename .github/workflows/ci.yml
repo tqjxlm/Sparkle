@@ -22,57 +22,56 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
+        framework: [glfw, android, macos, ios]
         build_type: [Debug, Release]
-        # TODO: ios
-        framework: [glfw, android, macos]
         exclude:
           - os: windows-latest
             framework: macos
-          - os: macos-latest
+          - os: windows-latest
             framework: android
+          - os: windows-latest
+            framework: ios
       max-parallel: 16
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup C++ Environment (glfw only)
-        if: matrix.framework == 'glfw'
-        uses: aminya/setup-cpp@v1
+      - name: Setup Environment
+        id: setup-environment
+        uses: ./.github/actions/setup-environment
         with:
-          compiler: llvm
-          vcvarsall: ${{ contains(matrix.os, 'windows') }}
-          cmake: true
-          ninja: true
-          ccache: true
+          framework: ${{ matrix.framework }}
+          os: ${{ matrix.os }}
 
-      - name: Set up JDK 17 (android only)
-        if: matrix.framework == 'android'
-        uses: actions/setup-java@v3
+      - name: Setup Signing Certificates (iOS)
+        if: matrix.framework == 'ios'
+        uses: ./.github/actions/setup-certs-ios
         with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK (android only)
-        if: matrix.framework == 'android'
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Xcode (macOS only)
-        uses: maxim-lobanov/setup-xcode@v1
-        if: matrix.os == 'macos-latest'
-        with:
-          xcode-version: latest-stable
-
-      - name: Install dependencies (macOS only)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install glfw
+          certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
       - name: Build
-        run: python3 build.py --framework ${{matrix.framework}} --config ${{matrix.build_type}}
+        run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} ${{ steps.setup-environment.outputs.build-args }}
+
+      - name: Archive App Bundle (macOS)
+        if: matrix.framework == 'macos'
+        uses: ./.github/actions/archive-macos
+        with:
+          certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          app-path: build_system/${{ matrix.framework }}/product/${{ matrix.framework }}-macos-${{ matrix.build_type }}.zip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts-${{ matrix.os }}-${{ matrix.framework }}-${{ matrix.build_type }}
-          path: build_system/${{matrix.framework}}/product
+          name: ${{ matrix.framework }}-${{ matrix.os }}-${{ matrix.build_type }}
+          path: build_system/${{ matrix.framework }}/product
