@@ -47,6 +47,7 @@ class RayTracingComputeShader : public RHIShaderInfo
         float output_limit = CameraRenderProxy::OutputLimit;
         uint32_t total_sample_count;
         uint32_t spp;
+        uint32_t enable_nee;
     };
 };
 
@@ -300,6 +301,7 @@ void GPURenderer::Update()
         .time_seed = time_seed,
         .total_sample_count = camera->GetCumulatedSampleCount(),
         .spp = spp,
+        .enable_nee = render_config_.enable_nee ? 1u : 0,
     };
 
     camera->AccumulateSample(spp);

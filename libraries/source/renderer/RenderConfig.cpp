@@ -33,6 +33,7 @@ static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial 
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
+static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
 
 void RenderConfig::Init()
 {
@@ -53,6 +54,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
     ConfigCollectionHelper::RegisterConfig(this, config_gpu_budget_ratio, gpu_time_budget_ratio);
+    ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
 
     Validate();
 }

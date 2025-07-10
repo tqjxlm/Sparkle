@@ -31,6 +31,7 @@ struct Camera
     float output_limit;
     uint total_sample_count;
     uint spp;
+    uint enable_nee;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
@@ -295,14 +296,17 @@ float3 SamplePixel(RayDesc ray_desc)
         float bsdf_pdf = 1.f;
         float3 this_throughput = SampleSurface(intersection, mat_param, -ray_desc.Direction, next_direction, bsdf_pdf);
 
-        // next event estimation: explicitly sample light sources every bounce
-        float light_pdf = 0.f;
-        float3 nee_radiance = SampleLights(intersection, mat_param, -ray_desc.Direction, light_pdf);
-        float light_mis_weight = GetMISWeight(light_pdf, bsdf_pdf);
-        pixel_color += nee_radiance * throughput * light_mis_weight;
+        if (enable_nee != 0)
+        {
+            // next event estimation: explicitly sample light sources every bounce
+            float light_pdf = 0.f;
+            float3 nee_radiance = SampleLights(intersection, mat_param, -ray_desc.Direction, light_pdf);
+            float light_mis_weight = GetMISWeight(light_pdf, bsdf_pdf);
+            pixel_color += nee_radiance * throughput * light_mis_weight;
 
-        // update mis weight for next bounce
-        bsdf_mis_weight = GetMISWeight(bsdf_pdf, GetLightPdf(intersection.normal, next_direction));
+            // update mis weight for next bounce
+            bsdf_mis_weight = GetMISWeight(bsdf_pdf, GetLightPdf(intersection.normal, next_direction));
+        }
 
         // terminal condition: debug output
         switch (camera.mode)
