@@ -5,24 +5,12 @@
 #include "random.h.slang"
 #include "sampler.h.slang"
 #include "tangent_space.h.slang"
+#include "standard.h.slang"
 
 struct Ray
 {
     float3 origin;
     float3 direction;
-};
-
-struct MaterialParameters
-{
-    float3 baseColor;
-    int baseColorTextureId;
-    float3 emissiveColor;
-    int emissiveTextureId;
-    float metallic;
-    float roughness;
-    int metallicRoughnessTextureId;
-    int normalTextureId;
-    float eta;
 };
 
 struct VertexAttribute
@@ -48,12 +36,15 @@ struct SampleResult
     bool is_valid;
     float3 throughput;
     float3 local_w_i;
+    float pdf;
 };
 
 SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
 {
     SampleResult result;
     result.is_valid = false;
+    result.pdf = 0.0f;
+    
     float3 local_w_m = SampleMicroFacetNormal(local_w_o, mat_param.roughness);
     float3 local_w_i = reflect(-local_w_o, local_w_m);
 
@@ -69,7 +60,7 @@ SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
         {
             // Metal: all specular, Fresnel lerp between light color and albedo
             result.is_valid = true;
-            fresnel_color = FresnelSchlick(o_dot_m, mat_param.baseColor);
+            fresnel_color = FresnelSchlick(o_dot_m, mat_param.base_color);
         }
         else
         {
@@ -95,6 +86,7 @@ SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
         float normalizer = GeometrySchlickGGX(o_dot_m, mat_param.roughness) + Eps;
         result.throughput = fresnel_color * occlusion / normalizer;
         result.local_w_i = local_w_i;
+        result.pdf = DistributionGGX::Pdf(mat_param.roughness, local_w_o, local_w_m) / (4.0f * o_dot_m + Eps);
     }
 
     return result;
@@ -105,12 +97,13 @@ SampleResult BxdfLambertian(float3 local_w_o, MaterialParameters mat_param)
     SampleResult result;
     result.is_valid = true;
     result.local_w_i = CosineWeightedHemisphere::Sample();
-    result.throughput = mat_param.baseColor;
+    result.throughput = mat_param.base_color;
+    result.pdf = CosineWeightedHemisphere::Pdf(result.local_w_i);
 
     return result;
 }
 
-float3 BxdfMetal(float3 w_o, out float3 w_i, MaterialParameters mat_param, Intersection intersection)
+float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, MaterialParameters mat_param, Intersection intersection)
 {
     // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
@@ -128,11 +121,12 @@ float3 BxdfMetal(float3 w_o, out float3 w_i, MaterialParameters mat_param, Inter
 
     // back to world space
     w_i = normalize(TransformBasisToWorld(result.local_w_i, intersection.normal, intersection.tangent.xyz));
+    out_pdf = result.pdf;
 
     return result.throughput;
 }
 
-float3 BxdfDieletric(float3 w_o, out float3 w_i, MaterialParameters mat_param, Intersection intersection)
+float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, MaterialParameters mat_param, Intersection intersection)
 {
     // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
@@ -147,19 +141,23 @@ float3 BxdfDieletric(float3 w_o, out float3 w_i, MaterialParameters mat_param, I
 
     if (behaviour_probability < fresnel)
     {
+        // Reflection
         local_w_i = Reflect(local_w_o);
+        out_pdf = fresnel;  // Probability of reflection
     }
     else
     {
+        // Refraction
         bool is_entering = CosTheta(local_w_o) > 0;
         float eta_i_over_eta_t = is_entering ? eta_i_ / eta_t_ : eta_t_ / eta_i_;
         local_w_i = Refract(local_w_o, eta_i_over_eta_t);
+        out_pdf = 1.0f - fresnel;  // Probability of refraction
     }
 
     // back to world space
     w_i = normalize(TransformBasisToWorld(local_w_i, intersection.normal, intersection.tangent.xyz));
 
-    return mat_param.baseColor;
+    return mat_param.base_color;
 }
 
 #endif // RAY_TRACE_H_
