@@ -52,6 +52,7 @@ void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera,
     if (pixels_dirty_)
     {
         cumulated_sample_count_ = 0;
+        pending_sample_count_ = 0;
     }
 
     cumulated_sample_count_ =

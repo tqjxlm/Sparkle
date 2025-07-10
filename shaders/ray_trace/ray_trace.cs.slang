@@ -426,14 +426,14 @@ float3 SamplePixel(RayDesc ray_desc)
 
         float3 this_pixel = SamplePixel(ray_desc);
 
-        // a hard limit to remove noise. will introduce a small bias, though.
+        // firefly removal
         this_pixel = min(this_pixel, output_limit);
 
         this_samples += this_pixel;
     }
 
-    float inv_next_sample_count = 1.f / (total_sample_count + spp);
-    all_samples = total_sample_count * inv_next_sample_count * all_samples + inv_next_sample_count * this_samples;
+    float moving_average = (float)total_sample_count / (total_sample_count + spp);
+    all_samples = lerp(this_samples, all_samples, moving_average);
 
     // output
     imageData[pixel] = float4(all_samples, 1.f);
