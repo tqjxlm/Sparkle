@@ -84,6 +84,7 @@ struct RenderConfig : public ConfigCollection
     bool use_vsync;
     bool render_ui = false;
     bool use_dynamic_spp;
+    bool enable_nee;
     float target_framerate;
     float gpu_time_budget_ratio;
 
