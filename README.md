@@ -232,6 +232,7 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 **Common build options:**
 
 * `--config=Release` - Release build (default: Debug).
+* `--archive` - Archive the app for distribution. Not required if you test the build locally. The archived app is located in `build_system/<framework>/product`.
 * `--generate_only` - Generate IDE project files without building.
 * `--clangd` - Generate compile_commands.json for clangd intellisense support.
 * `--profile` - Enable Tracy profiler.

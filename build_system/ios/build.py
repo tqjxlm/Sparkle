@@ -195,9 +195,8 @@ class IosBuilder(FrameworkBuilder):
         """Archive the built project."""
         output_dir = get_output_dir()
         app_path = get_app_path(args)
-        archive_path = os.path.join(output_dir, "product.zip")
+        archive_path = os.path.join(output_dir, "sparkle.ipa")
 
-        # TODO: archive and sign
         compress_zip(app_path, archive_path)
 
         return archive_path

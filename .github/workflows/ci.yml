@@ -56,7 +56,7 @@ jobs:
           appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
       - name: Build
-        run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} ${{ steps.setup-environment.outputs.build-args }}
+        run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --archive ${{ steps.setup-environment.outputs.build-args }}
 
       - name: Archive App Bundle (macOS)
         if: matrix.framework == 'macos'

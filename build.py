@@ -31,6 +31,8 @@ def parse_args(args=None):
                         choices=get_supported_frameworks(), help="Build framework")
     parser.add_argument("--config", default="Debug",
                         choices=["Release", "Debug"], help="Build configuration")
+    parser.add_argument("--archive", action="store_true",
+                        help="Archive the app for distribution")
     parser.add_argument("--asan", action="store_true",
                         help="Enable AddressSanitizer")
     parser.add_argument("--profile", action="store_true",
@@ -57,6 +59,7 @@ def parse_args(args=None):
     return {
         "framework": parsed_args.framework,
         "config": parsed_args.config,
+        "archive": parsed_args.archive,
         "run": parsed_args.run,
         "cmake_options": construct_additional_cmake_options(parsed_args),
         "unknown_args": unknown_args,
@@ -147,10 +150,10 @@ def build_project(args):
         print("Building...")
         builder.build(args)
 
-        # archiving is mandatory for now. make it optional later if necessary.
-        print("Archiving...")
-        archive_path = builder.archive(args)
-        copy_build_products(archive_path, args)
+        if args["archive"]:
+            print("Archiving...")
+            archive_path = builder.archive(args)
+            copy_build_products(archive_path, args)
 
         if args["run"]:
             print("Running...")
