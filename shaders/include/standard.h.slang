@@ -1,12 +1,6 @@
 #ifndef STANDARD_H_
 #define STANDARD_H_
 
-struct Camera
-{
-    float3 position;
-    float3 direction;
-};
-
 struct MaterialParameters
 {
     float3 base_color;

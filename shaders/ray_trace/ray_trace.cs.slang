@@ -4,6 +4,7 @@
 #include "directional_light.h.slang"
 #include "random.h.slang"
 #include "sky_light.h.slang"
+#include "pbr.h.slang"
 
 struct Camera
 {
@@ -67,23 +68,98 @@ float3 SampleEmissive(inout Intersection intersection, MaterialParameters mat_pa
     float2 tex_coord = intersection.texCoord;
 
     float3 emissive_color_sampled =
-        mat_param.emissiveTextureId >= 0
-            ? textures[mat_param.emissiveTextureId].SampleLevel(materialTextureSampler, tex_coord, 0).rgb
+        mat_param.emissive_texture >= 0
+            ? textures[mat_param.emissive_texture].SampleLevel(materialTextureSampler, tex_coord, 0).rgb
             : float3(1, 1, 1);
-    return emissive_color_sampled * mat_param.emissiveColor;
+    return emissive_color_sampled * mat_param.emissive_color;
 }
 
-float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i)
+float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i, out float out_pdf)
 {
     if (mat_param.eta > 0)
     {
-        return BxdfDieletric(w_o, w_i, mat_param, intersection);
+        return BxdfDieletric(w_o, w_i, out_pdf, mat_param, intersection);
     }
     else
     {
-        return BxdfMetal(w_o, w_i, mat_param, intersection);
+        return BxdfMetal(w_o, w_i, out_pdf, mat_param, intersection);
     }
 }
+
+bool IsRayOccluded(RayDesc ray_desc)
+{
+    RayQuery<RAY_FLAG_NONE> ray_query;
+    ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray_desc);
+    while (ray_query.Proceed())
+    {
+    }
+
+    return ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+}
+
+float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf)
+{
+    // TODO(tqjxlm): sample direction according to luminance distribution
+    float3 sample_direction = CosineWeightedHemisphere::Sample();
+
+    float3 w_i = TransformBasisToWorld(sample_direction, intersection.normal, intersection.tangent.xyz);
+
+    // shadow ray
+    RayDesc ray_desc;
+    ray_desc.Origin = intersection.position;
+    ray_desc.Direction = w_i;
+    ray_desc.TMin = Tolerance;
+    ray_desc.TMax = 1000.0;
+    if (IsRayOccluded(ray_desc))
+    {
+        // do not sample
+        out_pdf = 0;
+        return 0;
+    }
+
+    out_pdf = CosineWeightedHemisphere::Pdf(sample_direction);
+
+    float3 light_sample = skyMap.SampleLevel(skyMapSampler, w_i, 0).rgb;
+
+    SurfaceAttributes surface;
+    surface.normal = intersection.normal;
+    surface.albedo = mat_param.base_color;
+    surface.roughness = mat_param.roughness;
+    surface.metallic = mat_param.metallic;
+    surface.emissive = mat_param.emissive_color;
+
+    // evaluate brdf
+    float3 radiance = CalculateDirectLighting(w_o, w_i, light_sample, surface);
+
+    float cosine_theta = SaturateDot(w_i, intersection.normal);
+
+    return radiance * cosine_theta / (out_pdf + Eps);
+}
+
+float3 SampleLights(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf)
+{
+    // only consider sky light for now
+    return SampleSkyLight(intersection, mat_param, w_o, out_pdf);
+}
+
+float GetLightPdf(float3 normal, float3 w_i)
+{
+    // only consider sky light for now
+    return CosineWeightedHemisphere::Pdf(normal, w_i);
+}
+
+float GetMISWeight(float current_pdf, float compensation_pdf)
+{
+    if (current_pdf < Eps || compensation_pdf < Eps)
+    {
+        return 1.f;
+    }
+
+    float current_pdf_sqr = current_pdf * current_pdf;
+    float compensation_pdf_sqr = compensation_pdf * compensation_pdf;
+    return current_pdf_sqr / (compensation_pdf_sqr + current_pdf_sqr + Eps);
+}
+
 
 MaterialParameters GetMaterial(inout Intersection intersection)
 {
@@ -96,9 +172,9 @@ MaterialParameters GetMaterial(inout Intersection intersection)
 
     // Normal mapping
     float3 surface_normal;
-    if (mat_param.normalTextureId >= 0)
+    if (mat_param.normal_texture >= 0)
     {
-        float3 tangent_normal = SampleNormal(mat_param.normalTextureId, tex_coord);
+        float3 tangent_normal = SampleNormal(mat_param.normal_texture, tex_coord);
         float3 bi_tangent = cross(geometry_normal, tangent.xyz) * tangent.w;
         surface_normal = normalize(TransformBasisToWorld(tangent_normal, tangent.xyz, bi_tangent, geometry_normal));
     }
@@ -111,19 +187,19 @@ MaterialParameters GetMaterial(inout Intersection intersection)
     intersection.tangent.xyz = TransformDirection(tangent.xyz, (float3x3)intersection.inv_transform);
 
     float4 metallic_roughness_sampled =
-        (mat_param.metallicRoughnessTextureId >= 0)
-            ? textures[mat_param.metallicRoughnessTextureId].SampleLevel(materialTextureSampler, tex_coord, 0)
+        (mat_param.metallic_roughness_texture >= 0)
+            ? textures[mat_param.metallic_roughness_texture].SampleLevel(materialTextureSampler, tex_coord, 0)
             : float4(1, 1, 1, 1);
 
     mat_param.roughness = metallic_roughness_sampled.y * mat_param.roughness;
     mat_param.metallic = metallic_roughness_sampled.z * mat_param.metallic;
 
     float3 base_color_sampled =
-        (mat_param.baseColorTextureId >= 0)
-            ? textures[mat_param.baseColorTextureId].SampleLevel(materialTextureSampler, tex_coord, 0).rgb
+        (mat_param.base_color_texture >= 0)
+            ? textures[mat_param.base_color_texture].SampleLevel(materialTextureSampler, tex_coord, 0).rgb
             : float3(1, 1, 1);
 
-    mat_param.baseColor = mat_param.baseColor * base_color_sampled;
+    mat_param.base_color = mat_param.base_color * base_color_sampled;
 
     return mat_param;
 }
@@ -143,7 +219,7 @@ float3 GetVertex(uint instance_id, uint index)
                   vertexBuffers[instance_id][index * 3 + 2]);
 }
 
-void GetIntersection(RayDesc ray, RayQuery<RAY_FLAG_NONE> ray_query, out Intersection intersection)
+void GetIntersection(RayDesc ray_desc, RayQuery<RAY_FLAG_NONE> ray_query, out Intersection intersection)
 {
     const float2 intersection_uv = ray_query.CommittedTriangleBarycentrics();
     const uint instance_id = ray_query.CommittedInstanceIndex();
@@ -172,7 +248,7 @@ void GetIntersection(RayDesc ray, RayQuery<RAY_FLAG_NONE> ray_query, out Interse
     intersection.primitiveId = instance_id;
 }
 
-float3 SamplePixel(RayDesc ray)
+float3 SamplePixel(RayDesc ray_desc)
 {
     RayQuery<RAY_FLAG_NONE> ray_query;
     Intersection intersection;
@@ -180,11 +256,14 @@ float3 SamplePixel(RayDesc ray)
     float3 pixel_color = float3(0, 0, 0);
     float3 throughput = float3(1, 1, 1);
     int bounce;
+    
+    // When we introduce NEE, non-NEE paths should be weighted down
+    float bsdf_mis_weight = 1.f;
 
     [loop] for (bounce = 0; bounce <= camera.max_bounce; bounce++)
     {
         // initialize ray query
-        ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+        ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray_desc);
 
         // wait for ray query completion
         while (ray_query.Proceed())
@@ -194,26 +273,36 @@ float3 SamplePixel(RayDesc ray)
         // terminal condition: hit sky
         if (ray_query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
         {
-            float3 sky_light = SampleSkyLight(ray.Direction);
-            pixel_color += sky_light * throughput;
+            float3 sky_light = SampleSkyLight(ray_desc.Direction);
+            pixel_color += sky_light * throughput * bsdf_mis_weight;
             break;
         }
 
         // get intersection details
-        GetIntersection(ray, ray_query, intersection);
+        GetIntersection(ray_desc, ray_query, intersection);
         MaterialParameters mat_param = GetMaterial(intersection);
 
         // terminal condition: emissive
         float3 emissive_color = SampleEmissive(intersection, mat_param);
         if (length(emissive_color) > Eps)
         {
-            pixel_color += emissive_color * throughput;
+            pixel_color += emissive_color * throughput * bsdf_mis_weight;
             break;
         }
 
         // core function: surface sampling
         float3 next_direction;
-        float3 this_throughput = SampleSurface(intersection, mat_param, -ray.Direction, next_direction);
+        float bsdf_pdf = 1.f;
+        float3 this_throughput = SampleSurface(intersection, mat_param, -ray_desc.Direction, next_direction, bsdf_pdf);
+
+        // next event estimation: explicitly sample light sources every bounce
+        float light_pdf = 0.f;
+        float3 nee_radiance = SampleLights(intersection, mat_param, -ray_desc.Direction, light_pdf);
+        float light_mis_weight = GetMISWeight(light_pdf, bsdf_pdf);
+        pixel_color += nee_radiance * throughput * light_mis_weight;
+
+        // update mis weight for next bounce
+        bsdf_mis_weight = GetMISWeight(bsdf_pdf, GetLightPdf(intersection.normal, next_direction));
 
         // terminal condition: debug output
         switch (camera.mode)
@@ -227,12 +316,12 @@ float3 SamplePixel(RayDesc ray)
         case 8:
             return ((float3)1) * mat_param.roughness;
         case 9:
-            return mat_param.baseColor;
+            return mat_param.base_color;
         case 10:
             return emissive_color;
         case 11: {
             float3 front = normalize(cross(camera.max_v, camera.max_u));
-            return ((float3)1) * dot(intersection.position - camera.position, front) / ray.TMax;
+            return ((float3)1) * dot(intersection.position - camera.position, front) / ray_desc.TMax;
         }
         default:
             break;
@@ -264,8 +353,8 @@ float3 SamplePixel(RayDesc ray)
         }
 
         // next ray
-        ray.Origin = intersection.position;
-        ray.Direction = next_direction;
+        ray_desc.Origin = intersection.position;
+        ray_desc.Direction = next_direction;
     }
 
     // debug output
@@ -329,13 +418,13 @@ float3 SamplePixel(RayDesc ray)
         float3 lens_offset = lens_noise.x * normalize(camera.max_u) + lens_noise.y * normalize(camera.max_v);
 
         // setup the initial ray
-        RayDesc ray;
-        ray.Origin = camera.position + lens_offset;
-        ray.Direction = normalize(camera.lowerLeft + uv.x * camera.max_u + uv.y * camera.max_v - ray.Origin);
-        ray.TMin = Tolerance;
-        ray.TMax = 1000.0f;
+        RayDesc ray_desc;
+        ray_desc.Origin = camera.position + lens_offset;
+        ray_desc.Direction = normalize(camera.lowerLeft + uv.x * camera.max_u + uv.y * camera.max_v - ray_desc.Origin);
+        ray_desc.TMin = Tolerance;
+        ray_desc.TMax = 1000.0f;
 
-        float3 this_pixel = SamplePixel(ray);
+        float3 this_pixel = SamplePixel(ray_desc);
 
         // a hard limit to remove noise. will introduce a small bias, though.
         this_pixel = min(this_pixel, output_limit);

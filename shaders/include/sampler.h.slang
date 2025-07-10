@@ -37,7 +37,14 @@ float Ndf(float cos_theta, float roughness)
 
     float d = (a2 - 1.f) * cos_theta * cos_theta + 1.f;
 
-    return a2 / (Pi * d * d);
+    // Handle the limiting case where roughness approaches 0
+    // For perfect mirrors (roughness = 0), return a large value instead of 0
+    if (a2 < Eps)
+    {
+        return 1.0f / (Pi * Eps);
+    }
+
+    return a2 / (Pi * d * d + Eps);
 }
 
 float3 Sample(float3 w_o, float roughness)
@@ -91,6 +98,11 @@ float3 Sample()
 float Pdf(float3 w_m)
 {
     return AbsCosTheta(w_m) * InvPi;
+}
+
+float Pdf(float3 normal, float3 w_i)
+{
+    return SaturateDot(normal, w_i) * InvPi;
 }
 }
 
