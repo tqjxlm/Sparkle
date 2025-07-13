@@ -46,10 +46,11 @@ private:
     clock::time_point start_point_;
 };
 
-template <class T> class TimerCaller
+class TimerCaller
 {
 public:
-    TimerCaller(float interval_seconds, bool run_now, T &&func) : func_(std::move(func)), interval_(interval_seconds)
+    TimerCaller(float interval_seconds, bool run_now, std::function<void(float)> &&func)
+        : func_(std::move(func)), interval_(interval_seconds)
     {
         if (run_now)
         {
@@ -71,12 +72,9 @@ public:
     }
 
 private:
-    T func_;
+    std::function<void(float)> func_;
     float interval_;
     Timer timer_;
 };
-
-// to suppress -Wctad-maybe-unsupported
-template <class T> TimerCaller(float, bool, T &&) -> TimerCaller<T>;
 
 } // namespace sparkle

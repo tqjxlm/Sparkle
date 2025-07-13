@@ -53,7 +53,8 @@ class RayTracingComputeShader : public RHIShaderInfo
 
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy)
-    : Renderer(render_config, rhi_context, scene_render_proxy)
+    : Renderer(render_config, rhi_context, scene_render_proxy),
+      spp_logger_(1.f, false, [this](float) { MeasurePerformance(); })
 {
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::gpu);
 
@@ -328,8 +329,7 @@ void GPURenderer::Update()
 
     last_second_total_spp_ += spp;
 
-    static TimerCaller spp_logger(1.f, false, [this](float) { MeasurePerformance(); });
-    spp_logger.Tick();
+    spp_logger_.Tick();
 }
 
 void GPURenderer::MeasurePerformance()

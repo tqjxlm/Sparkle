@@ -22,7 +22,12 @@
 
 namespace sparkle
 {
-AppFramework::AppFramework() = default;
+constexpr float LogInterval = 1.f;
+
+AppFramework::AppFramework()
+    : frame_rate_monitor_(LogInterval, false, [this](float delta_time) { MeasurePerformance(delta_time); })
+{
+}
 
 AppFramework::~AppFramework()
 {
@@ -315,8 +320,6 @@ bool AppFramework::MainLoop()
 
 void AppFramework::AdvanceFrame(float main_thread_time)
 {
-    constexpr float LogInterval = 1.f;
-
     delta_time_ = frame_timer_.ElapsedSecond();
     frame_timer_.Reset();
 
@@ -324,9 +327,7 @@ void AppFramework::AdvanceFrame(float main_thread_time)
 
     frame_number_++;
 
-    static TimerCaller frame_rate_monitor(LogInterval, false,
-                                          [this](float delta_time) { MeasurePerformance(delta_time); });
-    frame_rate_monitor.Tick();
+    frame_rate_monitor_.Tick();
 }
 
 void AppFramework::MeasurePerformance(float delta_time)

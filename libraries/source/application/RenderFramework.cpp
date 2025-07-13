@@ -12,10 +12,13 @@
 
 #include <mutex>
 
+constexpr float LogInterval = 1.f;
+
 namespace sparkle
 {
 RenderFramework::RenderFramework(NativeView *native_view, RHIContext *rhi, UiManager *ui_manager, Scene *scene)
-    : native_view_(native_view), rhi_(rhi), ui_manager_(ui_manager), scene_(scene)
+    : native_view_(native_view), rhi_(rhi), ui_manager_(ui_manager), scene_(scene),
+      frame_rate_monitor_(LogInterval, false, [this](float delta_time) { MeasurePerformance(delta_time); })
 {
 }
 
@@ -89,8 +92,6 @@ void RenderFramework::RenderLoop()
 
 void RenderFramework::AdvanceFrame(float render_thread_time)
 {
-    constexpr float LogInterval = 1.f;
-
     last_second_render_thread_time_ += render_thread_time;
 
     float gpu_time = rhi_->GetFrameStats(rhi_->GetFrameIndex()).elapsed_time_ms;
@@ -99,9 +100,7 @@ void RenderFramework::AdvanceFrame(float render_thread_time)
         last_second_gpu_time_ += gpu_time;
     }
 
-    static TimerCaller frame_rate_monitor(LogInterval, false,
-                                          [this](float delta_time) { MeasurePerformance(delta_time); });
-    frame_rate_monitor.Tick();
+    frame_rate_monitor_.Tick();
 }
 
 void RenderFramework::MeasurePerformance([[maybe_unused]] float delta_time)

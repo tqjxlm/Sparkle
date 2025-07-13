@@ -2,6 +2,7 @@
 
 #include "renderer/renderer/Renderer.h"
 
+#include "core/Timer.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
@@ -66,5 +67,7 @@ private:
     float running_time_per_spp_ = 0.f;
 
     uint32_t last_second_total_spp_ = 0;
+
+    TimerCaller spp_logger_;
 };
 } // namespace sparkle

@@ -138,6 +138,7 @@ private:
     float delta_time_;
     uint64_t frame_number_ = 0;
     float last_second_main_thread_time_ = 0.f;
+    TimerCaller frame_rate_monitor_;
 
     // event handler
     bool current_pressing_ = false;
