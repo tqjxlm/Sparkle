@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Event.h"
+#include "core/Timer.h"
 #include "renderer/RenderConfig.h"
 
 #include <mutex>
@@ -93,5 +94,7 @@ private:
     float last_second_gpu_time_ = 0.f;
 
     Event renderer_created_event_;
+
+    TimerCaller frame_rate_monitor_;
 };
 } // namespace sparkle
