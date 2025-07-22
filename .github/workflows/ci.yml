@@ -21,8 +21,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
-        framework: [glfw, android, macos, ios]
+        os: [macos-latest, windows-latest]
+        framework: [android, glfw, macos, ios]
         build_type: [Debug, Release]
         exclude:
           - os: windows-latest
