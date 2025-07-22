@@ -10,7 +10,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Setup GLFW Environment
+    - name: Setup GLFW Environment (All Platforms)
       if: inputs.framework == 'glfw'
       uses: aminya/setup-cpp@v1
       with:
@@ -42,12 +42,14 @@ runs:
       with:
         xcode-version: latest-stable
 
-    - name: Cache Build cache
+    - name: Cache Prerequisites (All Platforms)
       uses: actions/cache@v4
       with:
         path: |
           ./build_cache
         key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py') }}}
+        restore-keys: |
+          ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
 
     - name: Cache Gradle packages (Android)
       if: inputs.framework == 'android'
@@ -57,3 +59,5 @@ runs:
           ~/.gradle/caches
           ~/.gradle/wrapper
         key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/build.gradle', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}}
+        restore-keys: |
+          ${{ inputs.os }}-android-gradle-
