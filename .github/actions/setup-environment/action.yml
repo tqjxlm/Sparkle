@@ -58,6 +58,9 @@ runs:
         path: |
           ~/.gradle/caches
           ~/.gradle/wrapper
-        key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/build.gradle', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}}
+          ./build_system/android/.gradle
+          ./build_system/android/app/build
+          ./build_system/android/build
+        key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/**/*.gradle', './build_system/android/**/gradle.properties', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}}
         restore-keys: |
           ${{ inputs.os }}-android-gradle-
