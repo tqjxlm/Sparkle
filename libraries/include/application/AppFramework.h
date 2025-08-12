@@ -18,6 +18,7 @@ class Logger;
 class TaskManager;
 class MaterialManager;
 class EventSubscription;
+struct ThreadTaskQueue;
 
 class AppFramework
 {
@@ -154,6 +155,8 @@ private:
     RHIConfig rhi_config_;
 
     std::unique_ptr<EventSubscription> renderer_created_subscription_;
+
+    std::shared_ptr<ThreadTaskQueue> pending_tasks_;
 
     bool core_initialized_ = false;
     bool initialized_ = false;

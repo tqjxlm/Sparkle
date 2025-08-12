@@ -14,6 +14,7 @@ class Renderer;
 class NativeView;
 class Scene;
 class UiManager;
+struct ThreadTaskQueue;
 
 class RenderFramework
 {
@@ -63,8 +64,9 @@ private:
 
     void MeasurePerformance(float delta_time);
 
-    static constexpr unsigned RenderTaskBufferSize = 1;
-    std::queue<std::vector<std::function<void()>>> frame_task_queue_;
+    static constexpr unsigned MaxBufferedTaskFrames = 1;
+    std::queue<std::vector<std::function<void()>>> tasks_per_frame_;
+    std::shared_ptr<ThreadTaskQueue> task_queue_;
 
     std::unique_ptr<Renderer> renderer_;
 

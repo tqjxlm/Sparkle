@@ -9,7 +9,7 @@
 #include "core/Event.h"
 #include "core/FileManager.h"
 #include "core/Profiler.h"
-#include "core/TaskManager.h"
+#include "core/task/TaskManager.h"
 #include "rhi/RHI.h"
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
@@ -27,6 +27,7 @@ constexpr float LogInterval = 1.f;
 AppFramework::AppFramework()
     : frame_rate_monitor_(LogInterval, false, [this](float delta_time) { MeasurePerformance(delta_time); })
 {
+    pending_tasks_ = std::make_shared<ThreadTaskQueue>();
 }
 
 AppFramework::~AppFramework()
@@ -55,7 +56,8 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     render_config_.Init();
     rhi_config_.Init();
 
-    task_manager_ = TaskManager::CreateInstance(app_config_.max_threads - 2);
+    task_manager_ = std::make_unique<TaskManager>(app_config_.max_threads);
+    TaskDispatcher::Instance().RegisterTaskQueue(pending_tasks_, ThreadName::Main);
 
 #if ENABLE_PROFILER
     Profiler::RegisterThreadForProfiling("Main");
@@ -131,23 +133,19 @@ bool AppFramework::Init()
     {
         PROFILE_SCOPE_LOG("Init scene");
 
-        auto scene_loaded_event = SceneManager::LoadScene(main_scene_.get(), app_config_.scene).share();
+        SceneManager::LoadScene(main_scene_.get(), app_config_.scene)->Then([this]() {
+            if (app_config_.default_skybox && !main_scene_->GetSkyLight())
+            {
+                SceneManager::AddDefaultSky(main_scene_.get());
+            }
 
-        TaskManager::RunInWorkerThread([this, event = std::move(scene_loaded_event)]() {
-            event.wait();
-
-            TaskManager::RunInMainThread([this]() {
-                if (app_config_.default_skybox && !main_scene_->GetSkyLight())
-                {
-                    SceneManager::AddDefaultSky(main_scene_.get());
-                }
-
-                if (render_config_.IsRaterizationMode() && !main_scene_->GetDirectionalLight())
-                {
-                    SceneManager::AddDefaultDirectionalLight(main_scene_.get());
-                }
-            });
+            if (render_config_.IsRaterizationMode() && !main_scene_->GetDirectionalLight())
+            {
+                SceneManager::AddDefaultDirectionalLight(main_scene_.get());
+            }
         });
+
+        Log(Info, "Init scene ok");
     }
 
     frame_timer_.Reset();
@@ -274,7 +272,7 @@ bool AppFramework::MainLoop()
     {
         PROFILE_SCOPE("MainLoop ConsumeThreadTasks");
 
-        TaskManager::Instance().ConsumeThreadTasks(ThreadName::Main);
+        pending_tasks_->RunAll();
     }
 
     {
@@ -410,7 +408,7 @@ void AppFramework::Cleanup()
 
     FileManager::DestroyNativeFileManager();
 
-    Log(Debug, "App exit gracefully.");
+    Log(Info, "App exit gracefully.");
 
     logger_ = nullptr;
 

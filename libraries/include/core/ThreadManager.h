@@ -32,6 +32,12 @@ public:
         return render_thread_id_ != std::thread::id();
     }
 
+    static bool IsInCurrentThread(ThreadName thread_name)
+    {
+        return (thread_name == ThreadName::Main && IsInMainThread()) ||
+               (thread_name == ThreadName::Render && IsInRenderThread());
+    }
+
     static void RegisterMainThread();
 
     static void RegisterRenderThread();
@@ -41,6 +47,8 @@ public:
     static void UnregisterRenderThread();
 
     static void PrintCurrentThreadInfo();
+
+    static ThreadName CurrentThread();
 
 private:
     static std::thread::id main_thread_id_;

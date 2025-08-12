@@ -1,7 +1,7 @@
 #include "scene/component/camera/CameraComponent.h"
 
 #include "core/Logger.h"
-#include "core/TaskManager.h"
+#include "core/task/TaskManager.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "scene/Scene.h"

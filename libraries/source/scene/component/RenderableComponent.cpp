@@ -1,9 +1,10 @@
 #include "scene/component/RenderableComponent.h"
 
-#include "core/TaskManager.h"
 #include "core/ThreadManager.h"
+#include "core/task/TaskManager.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "scene/Scene.h"
+
 
 namespace sparkle
 {

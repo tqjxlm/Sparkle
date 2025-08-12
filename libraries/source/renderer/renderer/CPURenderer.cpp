@@ -2,10 +2,10 @@
 
 #include "core/Logger.h"
 #include "core/Profiler.h"
-#include "core/TaskManager.h"
 #include "core/math/Intersection.h"
 #include "core/math/Ray.h"
 #include "core/math/Sampler.h"
+#include "core/task/TaskManager.h"
 #include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/UiPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
@@ -357,7 +357,7 @@ void CPURenderer::BasePass(const SceneRenderProxy &scene, const RenderConfig &co
     const float pixel_width = 1.f / static_cast<float>(image_size_.x() - 1);
     const float pixel_height = 1.f / static_cast<float>(image_size_.y() - 1);
 
-    static std::vector<std::future<void>> row_tasks;
+    static std::vector<std::shared_ptr<TaskFuture<>>> row_tasks;
     row_tasks.resize(image_size_.y());
 
     // parallel by row
@@ -373,7 +373,7 @@ void CPURenderer::BasePass(const SceneRenderProxy &scene, const RenderConfig &co
 
     for (const auto &row_task : row_tasks)
     {
-        row_task.wait();
+        row_task->Wait();
     }
 }
 

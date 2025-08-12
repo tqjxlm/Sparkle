@@ -1,6 +1,6 @@
 #include "scene/component/primitive/SpherePrimitive.h"
 
-#include "core/TaskManager.h"
+#include "core/task/TaskManager.h"
 #include "io/Mesh.h"
 #include "renderer/proxy/SphereRenderProxy.h"
 

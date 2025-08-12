@@ -2,6 +2,7 @@
 
 #include "core/FileManager.h"
 #include "core/Logger.h"
+#include "core/ThreadManager.h"
 #include "io/ImageTypes.h"
 #include "io/Material.h"
 #include "io/Mesh.h"
@@ -531,7 +532,7 @@ static std::shared_ptr<SceneNode> ProcessNode(const tinygltf::Model &model, unsi
 
 std::shared_ptr<SceneNode> GLTFLoader::Load(const std::string &path, Scene *scene)
 {
-    Log(Debug, "GLTFLoader: begin loading model {}", path);
+    Log(Debug, "GLTFLoader: begin loading model {} in thread {}", path, Enum2Str(ThreadManager::CurrentThread()));
 
     tinygltf::Model model;
     std::string err;

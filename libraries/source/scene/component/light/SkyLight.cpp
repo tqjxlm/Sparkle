@@ -1,8 +1,8 @@
 #include "scene/component/light/SkyLight.h"
 
 #include "core/Logger.h"
-#include "core/TaskManager.h"
 #include "core/math/Utilities.h"
+#include "core/task/TaskManager.h"
 #include "io/Image.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
