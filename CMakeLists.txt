@@ -256,7 +256,7 @@ if (APPLE)
     set (RESOURCES ${RESOURCES} ${PROJECT_RESOURCE_DIRECTORY})
     
     # Ensure proper C++ runtime linking for exception handling
-    target_link_libraries(sparkle PRIVATE "-lc++abi")
+    target_link_libraries(sparkle PRIVATE "-lc++abi" "-lc++")
 endif()
 
 # ------------------ platform configuration ------------------
