@@ -21,7 +21,6 @@ std::shared_ptr<TaskFuture<>> TaskManager::OnAll(const std::vector<std::shared_p
 
     if (tasks.empty())
     {
-
         promise->set_value();
         future->OnReady();
         return future;
@@ -31,13 +30,15 @@ std::shared_ptr<TaskFuture<>> TaskManager::OnAll(const std::vector<std::shared_p
 
     for (const auto &task : tasks)
     {
-        task->Then([promise, counter, future]() {
-            if (counter->fetch_sub(1) == 1)
-            {
-                promise->set_value();
-                future->OnReady();
-            }
-        });
+        task->Then(
+            [promise, counter, future]() {
+                if (counter->fetch_sub(1) == 1)
+                {
+                    promise->set_value();
+                    future->OnReady();
+                }
+            },
+            TargetThread::Worker);
     }
 
     return future;
