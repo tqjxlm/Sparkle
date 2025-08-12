@@ -2,7 +2,7 @@
 
 #include "core/FileManager.h"
 #include "core/Logger.h"
-#include "core/TaskManager.h"
+#include "core/task/TaskManager.h"
 #include "io/ImageTypes.h"
 
 #pragma clang diagnostic push

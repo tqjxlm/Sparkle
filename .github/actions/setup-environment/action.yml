@@ -7,9 +7,36 @@ inputs:
   os:
     description: "Operating system"
     required: true
+outputs:
+  build-args:
+    description: "Additional build arguments"
+    value: ${{ steps.set-build-args.outputs.args }}
 runs:
   using: "composite"
   steps:
+    - name: Cache Prerequisites (All Platforms)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ./build_cache
+        key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py') }}}
+        restore-keys: |
+          ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
+
+    - name: Cache Gradle packages (Android)
+      if: inputs.framework == 'android'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+          ./build_system/android/.gradle
+          ./build_system/android/app/build
+          ./build_system/android/build
+        key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/**/*.gradle', './build_system/android/**/gradle.properties', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}}
+        restore-keys: |
+          ${{ inputs.os }}-android-gradle-
+
     - name: Setup GLFW Environment (All Platforms)
       if: inputs.framework == 'glfw'
       uses: aminya/setup-cpp@v1
@@ -42,25 +69,13 @@ runs:
       with:
         xcode-version: latest-stable
 
-    - name: Cache Prerequisites (All Platforms)
-      uses: actions/cache@v4
-      with:
-        path: |
-          ./build_cache
-        key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py') }}}
-        restore-keys: |
-          ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
-
-    - name: Cache Gradle packages (Android)
-      if: inputs.framework == 'android'
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-          ./build_system/android/.gradle
-          ./build_system/android/app/build
-          ./build_system/android/build
-        key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/**/*.gradle', './build_system/android/**/gradle.properties', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}}
-        restore-keys: |
-          ${{ inputs.os }}-android-gradle-
+    - name: Set build arguments
+      id: set-build-args
+      shell: bash
+      run: |
+        if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"macos"* ]]; then
+          LLVM_PREFIX=$(brew --prefix llvm)
+          echo "args=--cmake-args='-DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\"'" >> $GITHUB_OUTPUT
+        else
+          echo "args=" >> $GITHUB_OUTPUT
+        fi

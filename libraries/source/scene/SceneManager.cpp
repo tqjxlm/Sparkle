@@ -1,9 +1,9 @@
 #include "scene/SceneManager.h"
 
 #include "core/Logger.h"
-#include "core/TaskManager.h"
 #include "core/math/Sampler.h"
 #include "core/math/Utilities.h"
+#include "core/task/TaskManager.h"
 #include "io/Mesh.h"
 #include "io/scene/SceneDataFactory.h"
 #include "scene/Scene.h"
@@ -77,7 +77,7 @@ static std::shared_ptr<OrbitCameraComponent> CreateDefaultCamera()
     return std::make_shared<OrbitCameraComponent>(camera_attribute);
 }
 
-static std::future<void> LoadSceneFromFile(Scene *scene, const std::string &file_path)
+static std::shared_ptr<TaskFuture<>> LoadSceneFromFile(Scene *scene, const std::string &file_path)
 {
     // always load a default camera as the fallback behaviour
     auto main_camera = CreateDefaultCamera();
@@ -87,14 +87,12 @@ static std::future<void> LoadSceneFromFile(Scene *scene, const std::string &file
     main_camera->Setup(Zeros, 10.f, 0.f, 0.f);
     scene->SetMainCamera(main_camera);
 
-    return SceneDataFactory::Load(file_path, scene, [scene](const auto &node) {
-        auto *scene_root = scene->GetRootNode();
-
-        scene_root->AddChild(node);
+    return SceneDataFactory::Load(file_path, scene)->Then([scene](const std::shared_ptr<SceneNode> &node) {
+        scene->GetRootNode()->AddChild(node);
     });
 }
 
-static std::future<void> LoadTestScene(Scene *scene)
+static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
 {
     Log(Info, "Loading standard scene");
 
@@ -141,34 +139,31 @@ static std::future<void> LoadTestScene(Scene *scene)
         primitive->SetMaterial(material_manager.GetMetalMaterials()[MaterialManager::GOLD]);
     }
 
-    std::vector<std::shared_future<void>> async_tasks;
+    std::vector<std::shared_ptr<TaskFuture<>>> async_tasks;
 
     // models
     auto water_bottle_task =
-        SceneDataFactory::Load("models/WaterBottle/WaterBottle.gltf", scene, [scene_root](const auto &node) {
-            node->SetTransform({-4.f, -4.f, 2.7f}, {0, 0, utilities::ToRadian(-30.f)}, Ones * 2.f);
-            scene_root->AddChild(node);
-        });
-    async_tasks.emplace_back(water_bottle_task.share());
+        SceneDataFactory::Load("models/WaterBottle/WaterBottle.gltf", scene)
+            ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
+                node->SetTransform({-4.f, -4.f, 2.7f}, {0, 0, utilities::ToRadian(-30.f)}, Ones * 2.f);
+                scene_root->AddChild(node);
+            });
+    async_tasks.emplace_back(water_bottle_task);
 
-    auto boom_box_task = SceneDataFactory::Load("models/BoomBox/BoomBox.gltf", scene, [scene_root](const auto &node) {
-        node->SetTransform({5.f, 4.f, 3.f}, {0, 0, utilities::ToRadian(30.f)}, Ones * 3.f);
-        scene_root->AddChild(node);
-    });
-    async_tasks.emplace_back(boom_box_task.share());
+    auto boom_box_task = SceneDataFactory::Load("models/BoomBox/BoomBox.gltf", scene)
+                             ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
+                                 node->SetTransform({5.f, 4.f, 3.f}, {0, 0, utilities::ToRadian(30.f)}, Ones * 3.f);
+                                 scene_root->AddChild(node);
+                             });
+    async_tasks.emplace_back(boom_box_task);
 
-    // a lot of random spheres
-    return TaskManager::RunInWorkerThread([scene, tasks = std::move(async_tasks)]() {
-        for (const auto &async_task : tasks)
-        {
-            async_task.wait();
-        }
-
-        TaskManager::RunInMainThread([scene]() { SceneManager::GenerateRandomSpheres(*scene, 10); });
+    return TaskManager::OnAll(async_tasks)->Then([scene]() {
+        // a lot of random spheres
+        SceneManager::GenerateRandomSpheres(*scene, 10);
     });
 }
 
-std::future<void> SceneManager::LoadScene(Scene *scene, const std::string &scene_name)
+std::shared_ptr<TaskFuture<>> SceneManager::LoadScene(Scene *scene, const std::string &scene_name)
 {
     if (scene_name.empty() || scene_name == "Test")
     {

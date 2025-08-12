@@ -3,8 +3,8 @@
 #include "application/NativeView.h"
 #include "application/UiManager.h"
 #include "core/Profiler.h"
-#include "core/TaskManager.h"
 #include "core/ThreadManager.h"
+#include "core/task/TaskManager.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/renderer/Renderer.h"
 #include "rhi/RHI.h"
@@ -20,6 +20,8 @@ RenderFramework::RenderFramework(NativeView *native_view, RHIContext *rhi, UiMan
     : native_view_(native_view), rhi_(rhi), ui_manager_(ui_manager), scene_(scene),
       frame_rate_monitor_(LogInterval, false, [this](float delta_time) { MeasurePerformance(delta_time); })
 {
+    task_queue_ = std::make_shared<ThreadTaskQueue>();
+    TaskDispatcher::Instance().RegisterTaskQueue(task_queue_, ThreadName::Render);
 }
 
 RenderFramework::~RenderFramework() = default;
@@ -43,13 +45,13 @@ void RenderFramework::RenderThreadMain()
     }
 
     // discard all remaining tasks as we are going to exit
-    while (!frame_task_queue_.empty())
+    while (!tasks_per_frame_.empty())
     {
-        frame_task_queue_.pop();
+        tasks_per_frame_.pop();
     }
     end_of_frame_signal_.notify_all();
 
-    Log(Debug, "Render thread about to exit.");
+    Log(Info, "Render thread about to exit.");
 
     rhi_->WaitForDeviceIdle();
 
@@ -125,10 +127,10 @@ void RenderFramework::PushRenderTasks()
 
     {
         PROFILE_SCOPE("MainLoop wait for render thread");
-        can_push_new_tasks_.wait(lock, [this]() { return frame_task_queue_.size() < RenderTaskBufferSize; });
+        can_push_new_tasks_.wait(lock, [this]() { return tasks_per_frame_.size() < MaxBufferedTaskFrames; });
     }
 
-    frame_task_queue_.push(TaskManager::Instance().PopRenderThreadTasks());
+    tasks_per_frame_.push(task_queue_->PopTasks());
 
     new_task_pushed_.notify_all();
 }
@@ -173,7 +175,7 @@ void RenderFramework::WaitUntilIdle()
 {
     std::unique_lock<std::mutex> lock(task_queue_mutex_);
 
-    end_of_frame_signal_.wait(lock, [this]() { return frame_task_queue_.empty(); });
+    end_of_frame_signal_.wait(lock, [this]() { return tasks_per_frame_.empty(); });
 }
 
 void RenderFramework::StopRenderThread()
@@ -277,21 +279,21 @@ void RenderFramework::ConsumeRenderThreadTasks()
     {
         std::unique_lock<std::mutex> lock(task_queue_mutex_);
 
-        if (frame_task_queue_.empty())
+        if (tasks_per_frame_.empty())
         {
             PROFILE_SCOPE("render thread starving");
 
             new_task_pushed_.wait(lock);
         }
 
-        if (frame_task_queue_.empty())
+        if (tasks_per_frame_.empty())
         {
             return;
         }
 
-        std::swap(frame_tasks, frame_task_queue_.front());
+        std::swap(frame_tasks, tasks_per_frame_.front());
 
-        frame_task_queue_.pop();
+        tasks_per_frame_.pop();
     }
 
     // 2. tell the main thread that new tasks are welcome

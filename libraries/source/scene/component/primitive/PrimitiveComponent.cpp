@@ -1,6 +1,6 @@
 #include "scene/component/primitive/PrimitiveComponent.h"
 
-#include "core/TaskManager.h"
+#include "core/task/TaskManager.h"
 #include "renderer/proxy/PrimitiveRenderProxy.h"
 #include "scene/Scene.h"
 #include "scene/material/Material.h"

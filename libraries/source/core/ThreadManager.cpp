@@ -52,4 +52,19 @@ void ThreadManager::RegisterTaskThread(size_t thread_index)
     thread_name = "TaskThread" + std::to_string(thread_index);
     SetCurrentThreadName(thread_name);
 }
+
+ThreadName ThreadManager::CurrentThread()
+{
+    if (IsInMainThread())
+    {
+        return ThreadName::Main;
+    }
+
+    if (IsInRenderThread())
+    {
+        return ThreadName::Render;
+    }
+
+    return ThreadName::Worker;
+}
 } // namespace sparkle
