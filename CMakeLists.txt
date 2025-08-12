@@ -254,6 +254,9 @@ add_dependencies(sparkle copy-resources)
 
 if (APPLE)
     set (RESOURCES ${RESOURCES} ${PROJECT_RESOURCE_DIRECTORY})
+    
+    # Ensure proper C++ runtime linking for exception handling
+    target_link_libraries(sparkle PRIVATE "-lc++abi")
 endif()
 
 # ------------------ platform configuration ------------------
