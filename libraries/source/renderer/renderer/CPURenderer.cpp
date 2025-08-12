@@ -371,10 +371,7 @@ void CPURenderer::BasePass(const SceneRenderProxy &scene, const RenderConfig &co
         });
     }
 
-    for (const auto &row_task : row_tasks)
-    {
-        row_task->Wait();
-    }
+    TaskManager::OnAll(row_tasks)->Wait();
 }
 
 static void SpatialDenoisePixel(unsigned i, unsigned j, unsigned width, unsigned height, unsigned num_samples,

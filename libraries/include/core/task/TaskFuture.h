@@ -13,7 +13,7 @@ namespace sparkle
 {
 enum class TargetThread : uint8_t
 {
-    Current, // the thread where Then() is called
+    Current, // the thread where EnqueueTask() or Then() is called
     Main,
     Render,
     Worker,

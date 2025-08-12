@@ -46,6 +46,7 @@ TaskDispatcher::~TaskDispatcher()
 
 void TaskDispatcher::DispatchPendingTasks()
 {
+    // when there's no pending task, release thread resources and wait
     std::unique_lock<std::mutex> lock(mutex_);
     new_task_pushed_.wait(lock, [this] { return !pending_tasks_.empty() || shutdown_requested_; });
 

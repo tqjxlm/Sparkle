@@ -21,6 +21,8 @@ struct ThreadTaskQueue
     std::vector<std::function<void()>> PopTasks();
 };
 
+// Task dispatcher routes tasks to different threads.
+// It uses a monitor thread to wait for new tasks from TaskManager and TaskFuture.
 class TaskDispatcher
 {
     struct PendingTask
