@@ -7,6 +7,10 @@ inputs:
   os:
     description: "Operating system"
     required: true
+outputs:
+  build-args:
+    description: "Additional build arguments"
+    value: ${{ steps.set-build-args.outputs.args }}
 runs:
   using: "composite"
   steps:
@@ -48,12 +52,6 @@ runs:
       run: brew install glfw
       shell: bash
 
-    - name: Set LLVM library paths (macOS)
-      if: inputs.framework == 'glfw' && contains(inputs.os, 'macos')
-      run: |
-        LLVM_PREFIX=$(brew --prefix llvm)
-        echo "CMAKE_CXX_STANDARD_LIBRARIES=-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib" >> $GITHUB_ENV
-      shell: bash
 
     - name: Set up JDK 17 (Android)
       if: inputs.framework == 'android'
@@ -71,3 +69,14 @@ runs:
       uses: maxim-lobanov/setup-xcode@v1
       with:
         xcode-version: latest-stable
+
+    - name: Set build arguments
+      id: set-build-args
+      shell: bash
+      run: |
+        if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"macos"* ]]; then
+          LLVM_PREFIX=$(brew --prefix llvm)
+          echo "args=-DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\"" >> $GITHUB_OUTPUT
+        else
+          echo "args=" >> $GITHUB_OUTPUT
+        fi
