@@ -52,7 +52,6 @@ runs:
       run: brew install glfw
       shell: bash
 
-
     - name: Set up JDK 17 (Android)
       if: inputs.framework == 'android'
       uses: actions/setup-java@v3
@@ -76,7 +75,7 @@ runs:
       run: |
         if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"macos"* ]]; then
           LLVM_PREFIX=$(brew --prefix llvm)
-          echo "args=-DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\"" >> $GITHUB_OUTPUT
+          echo "args=--cmake-args=-DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\"" >> $GITHUB_OUTPUT
         else
           echo "args=" >> $GITHUB_OUTPUT
         fi

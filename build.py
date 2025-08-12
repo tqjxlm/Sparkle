@@ -12,11 +12,18 @@ SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
 
 
-def construct_additional_cmake_options(parsed_args):
+def construct_additional_cmake_options(parsed_args, cmake_args=None):
     profile_settings = "-DENABLE_PROFILER=ON" if parsed_args.profile else "-DENABLE_PROFILER=OFF"
     shader_debug_settings = "-DSHADER_DEBUG=ON" if parsed_args.shader_debug else "-DSHADER_DEBUG=OFF"
     asan_settings = "-DENABLE_ASAN=ON" if parsed_args.asan else "-DENABLE_ASAN=OFF"
     cmake_options = [profile_settings, shader_debug_settings, asan_settings]
+
+    # Add additional CMake arguments if provided
+    if cmake_args:
+        # Split the cmake_args string into individual arguments
+        import shlex
+        additional_args = shlex.split(cmake_args)
+        cmake_options.extend(additional_args)
 
     return cmake_options
 
@@ -52,6 +59,8 @@ def parse_args(args=None):
     parser.add_argument("--apple_auto_sign", action="store_true",
                         help="Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set."
                         "See https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
+    parser.add_argument("--cmake-args",
+                        help="Additional CMake arguments (e.g., --cmake-args='-DCMAKE_EXE_LINKER_FLAGS=\"-lc++abi\"')")
 
     # Unknown args will be used for --run the built executable
     parsed_args, unknown_args = parser.parse_known_args(args)
@@ -61,7 +70,7 @@ def parse_args(args=None):
         "config": parsed_args.config,
         "archive": parsed_args.archive,
         "run": parsed_args.run,
-        "cmake_options": construct_additional_cmake_options(parsed_args),
+        "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
         "generate_only": parsed_args.generate_only,
         "setup_only": parsed_args.setup_only,
