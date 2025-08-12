@@ -31,10 +31,8 @@ std::shared_ptr<TaskFuture<std::shared_ptr<SceneNode>>> SceneDataFactory::Load(c
     {
         Log(Error, "Unsupported model format: {}", path);
 
-        auto task_promise = std::make_shared<std::promise<std::shared_ptr<SceneNode>>>();
-        auto future = std::make_shared<TaskFuture<std::shared_ptr<SceneNode>>>(task_promise->get_future());
-        task_promise->set_value(nullptr);
-        return future;
+        return TaskManager::Instance().EnqueueTask([]() { return std::shared_ptr<SceneNode>(nullptr); },
+                                                   TargetThread::Current);
     }
 
     return TaskManager::Instance().EnqueueTask(
