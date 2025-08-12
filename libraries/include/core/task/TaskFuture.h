@@ -185,8 +185,8 @@ private:
             else
             {
                 auto value = future_.get();
-                TaskDispatcher::Instance().EnqueueTask([value, task = std::forward<TaskFunc>(task)]() { task(value); },
-                                                       thread_name);
+                TaskDispatcher::Instance().EnqueueTask(
+                    [value, wrapped_task = std::forward<TaskFunc>(task)]() { wrapped_task(value); }, thread_name);
             }
         }
     }

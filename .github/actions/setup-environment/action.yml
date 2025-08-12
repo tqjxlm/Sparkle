@@ -14,7 +14,7 @@ runs:
       if: inputs.framework == 'glfw'
       uses: aminya/setup-cpp@v1
       with:
-        compiler: llvm
+        compiler: llvm-20
         vcvarsall: ${{ contains(inputs.os, 'windows') }}
         cmake: true
         ninja: true
