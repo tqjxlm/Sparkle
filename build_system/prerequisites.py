@@ -6,7 +6,7 @@ import os
 import sys
 import subprocess
 
-from build_system.utils import download_file, extract_archive
+from build_system.utils import download_file, extract_archive, extract_zip
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -14,9 +14,21 @@ is_windows = platform.system() == "Windows"
 is_macos = platform.system() == "Darwin"
 
 
+def load_prerequisites_versions():
+    """Load version information from prerequisites.json."""
+    prerequisites_path = os.path.join(SCRIPTPATH, "..", "prerequisites.json")
+    try:
+        with open(prerequisites_path, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Warning: Could not load prerequisites.json: {e}")
+        return {}
+
+
 def install_cmake():
     """Install CMake automatically based on platform."""
-    cmake_version = "3.30.5"
+    prerequisites = load_prerequisites_versions()
+    cmake_version = prerequisites.get("cmake", "3.30.5")
 
     # Create build_cache directory if it doesn't exist
     build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
@@ -316,7 +328,8 @@ def install_vulkan_sdk(build_cache_dir):
     tmp_dir = os.path.join(build_cache_dir, "tmp")
 
     try:
-        latest_version = "1.4.313.0"
+        prerequisites = load_prerequisites_versions()
+        latest_version = prerequisites.get("VulkanSDK", "1.4.313.0")
         print(f"Use Vulkan SDK version: {latest_version}")
 
         # Check if already installed in build_cache
@@ -518,7 +531,6 @@ def find_llvm_path():
 
     # Try common Linux distribution paths
     common_paths = [
-        "/usr/lib/llvm-18",
         "/usr/local/llvm",
         "/opt/llvm",
     ]
@@ -727,7 +739,8 @@ def find_or_install_ninja():
         return ninja_executable
 
     # Ninja not found in PATH, try to install to build_cache
-    ninja_version = "1.12.1"
+    prerequisites = load_prerequisites_versions()
+    ninja_version = prerequisites.get("ninja", "1.12.1")
 
     # Create build_cache directory if it doesn't exist
     build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
@@ -826,3 +839,61 @@ def install_glfw():
             print(f"Error: {e}")
     else:
         print("GLFW auto-installation not supported on this platform. Please make sure it is installed manually, preferably via a native package manager.")
+
+
+def setup_android_validation(script_dir):
+    """Setup Android Vulkan validation layer binaries with version from prerequisites.json."""
+    prerequisites = load_prerequisites_versions()
+    vulkan_version = prerequisites.get("VulkanSDK", "1.4.313.0")
+
+    android_dir = script_dir
+    app_jni_dir = os.path.join(android_dir, "app", "src", "main", "jniLibs")
+    zip_path = os.path.join(android_dir, "android-validation-binaries.zip")
+    url = f"https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/download/vulkan-sdk-{vulkan_version}/android-binaries-{vulkan_version}.zip"
+
+    if os.path.exists(zip_path):
+        print("Android validation binaries are up-to-date, skipping setup.")
+        return
+
+    print(
+        f"Setting up Android validation binaries for Vulkan SDK {vulkan_version}...")
+
+    # Download validation binaries
+    download_file(url, zip_path)
+
+    # Remove existing jniLibs directory
+    if os.path.exists(app_jni_dir):
+        print(f"Removing existing directory: {app_jni_dir}")
+        shutil.rmtree(app_jni_dir)
+    os.makedirs(app_jni_dir, exist_ok=True)
+
+    # Extract zip to jniLibs
+    try:
+        extract_zip(zip_path, app_jni_dir)
+    except Exception as e:
+        print(f"Failed to extract zip file: {e}")
+        # Clean up downloaded file
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        raise Exception()
+
+    # Flatten directory structure (move all subdirs/files up one level)
+    # Find the first subdirectory in jniLibs
+    subdirs = [d for d in os.listdir(app_jni_dir) if os.path.isdir(
+        os.path.join(app_jni_dir, d))]
+    if subdirs:
+        parent_dir = os.path.join(app_jni_dir, subdirs[0])
+        # Move all contents up one level
+        for item in os.listdir(parent_dir):
+            src = os.path.join(parent_dir, item)
+            dst = os.path.join(app_jni_dir, item)
+            if os.path.exists(dst):
+                if os.path.isdir(dst):
+                    shutil.rmtree(dst)
+                else:
+                    os.remove(dst)
+            shutil.move(src, dst)
+        # Remove now-empty parent directory
+        shutil.rmtree(parent_dir)
+
+    print("Android validation binaries setup completed.")

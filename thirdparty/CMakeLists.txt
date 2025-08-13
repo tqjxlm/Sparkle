@@ -117,8 +117,25 @@ target_link_libraries(sparkle_thirdparty PUBLIC mimalloc-obj)
 FetchContent_Declare(
     cpptrace
     GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
-    GIT_TAG        v0.8.3
+    GIT_TAG        v1.0.4
 )
+
+# Check if compiler supports C++20 modules
+# Note: clang-cl doesn't fully support CMake's module dependency scanning yet
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19.28")
+    # MSVC 16.8+ supports modules
+    set(CPPTRACE_DISABLE_CXX_20_MODULES OFF CACHE BOOL "Disable C++20 modules in cpptrace" FORCE)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "16.0")
+    # Regular Clang 16+ has reasonable module support (exclude clang-cl for now)
+    set(CPPTRACE_DISABLE_CXX_20_MODULES OFF CACHE BOOL "Disable C++20 modules in cpptrace" FORCE)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "11.0")
+    # GCC 11+ has experimental module support
+    set(CPPTRACE_DISABLE_CXX_20_MODULES OFF CACHE BOOL "Disable C++20 modules in cpptrace" FORCE)
+else()
+    # Disable C++20 modules for compatibility with current compiler/CMake setup
+    set(CPPTRACE_DISABLE_CXX_20_MODULES ON CACHE BOOL "Disable C++20 modules in cpptrace" FORCE)
+endif()
+
 FetchContent_MakeAvailable(cpptrace)
 
 suppress_warnings(cpptrace-lib)
