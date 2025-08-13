@@ -270,7 +270,8 @@ if (APPLE)
         enable_language(OBJCXX)
     endif()
 
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # workaround for homebrew llvm to find pthread.h
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         execute_process(COMMAND xcrun --show-sdk-path OUTPUT_VARIABLE MACOS_SDK_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isysroot ${MACOS_SDK_PATH}")
     endif()
