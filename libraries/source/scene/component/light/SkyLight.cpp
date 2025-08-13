@@ -67,17 +67,17 @@ void SkyLight::Cook()
     cube_map_ = std::make_unique<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16,
                                               sky_map_->GetName() + "_CubeMap");
 
-    std::array<Scalar, 6> max_brightness_per_face;
-    std::array<Vector3, 6> max_brightness_dir_per_face;
-    std::array<Vector3, 6> subtracted_color_per_face;
+    std::array<Scalar, Image2DCube::FaceId::Count> max_brightness_per_face;
+    std::array<Vector3, Image2DCube::FaceId::Count> max_brightness_dir_per_face;
+    std::array<Vector3, Image2DCube::FaceId::Count> subtracted_color_per_face;
 
     std::ranges::fill(max_brightness_per_face, 0.f);
     std::ranges::fill(max_brightness_dir_per_face, Zeros);
     std::ranges::fill(subtracted_color_per_face, Zeros);
 
-    std::vector<std::shared_ptr<TaskFuture<void>>> cube_map_tasks(6);
+    std::vector<std::shared_ptr<TaskFuture<void>>> cube_map_tasks(Image2DCube::FaceId::Count);
 
-    for (unsigned id = 0; id < 6; id++)
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
     {
         auto face_id = static_cast<Image2DCube::FaceId>(id);
         auto &this_face = cube_map_->GetFace(face_id);
@@ -130,7 +130,7 @@ void SkyLight::Cook()
     Scalar max_brightness = 0.f;
     Vector3 max_brightness_dir;
     sun_brightness_ = Zeros;
-    for (unsigned i = 0; i < 6; i++)
+    for (unsigned i = 0; i < Image2DCube::FaceId::Count; i++)
     {
         if (max_brightness_per_face[i] > max_brightness)
         {
