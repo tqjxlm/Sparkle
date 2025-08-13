@@ -3,66 +3,13 @@ import subprocess
 import platform
 from pathlib import Path
 import os
-import shutil
 
 from build_system.utils import run_command_with_logging, download_file, extract_zip, robust_rmtree
 from build_system.builder_interface import FrameworkBuilder
+from build_system.prerequisites import setup_android_validation
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
-
-
-def setup_android_validation(script_dir):
-    android_dir = script_dir
-    app_jni_dir = os.path.join(android_dir, "app", "src", "main", "jniLibs")
-    zip_path = os.path.join(android_dir, "android-validation-binaries.zip")
-    url = "https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/download/vulkan-sdk-1.4.313.0/android-binaries-1.4.313.0.zip"
-
-    if os.path.exists(zip_path):
-        print("Android validation binaries are up-to-date, skipping setup.")
-        return
-
-    print("Setting up Android validation binaries...")
-
-    # Download validation binaries
-    download_file(url, zip_path)
-
-    # Remove existing jniLibs directory
-    if os.path.exists(app_jni_dir):
-        print(f"Removing existing directory: {app_jni_dir}")
-        shutil.rmtree(app_jni_dir)
-    os.makedirs(app_jni_dir, exist_ok=True)
-
-    # Extract zip to jniLibs
-    try:
-        extract_zip(zip_path, app_jni_dir)
-    except Exception as e:
-        print(f"Failed to extract zip file: {e}")
-        # Clean up downloaded file
-        if os.path.exists(zip_path):
-            os.remove(zip_path)
-        raise Exception()
-
-    # Flatten directory structure (move all subdirs/files up one level)
-    # Find the first subdirectory in jniLibs
-    subdirs = [d for d in os.listdir(app_jni_dir) if os.path.isdir(
-        os.path.join(app_jni_dir, d))]
-    if subdirs:
-        parent_dir = os.path.join(app_jni_dir, subdirs[0])
-        # Move all contents up one level
-        for item in os.listdir(parent_dir):
-            src = os.path.join(parent_dir, item)
-            dst = os.path.join(app_jni_dir, item)
-            if os.path.exists(dst):
-                if os.path.isdir(dst):
-                    shutil.rmtree(dst)
-                else:
-                    os.remove(dst)
-            shutil.move(src, dst)
-        # Remove now-empty parent directory
-        shutil.rmtree(parent_dir)
-
-    print("Android validation binaries setup completed.")
 
 
 def download_gradle_wrapper():

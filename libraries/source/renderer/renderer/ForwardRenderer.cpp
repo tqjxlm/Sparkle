@@ -196,7 +196,10 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
     {
     case RenderConfig::OutputImage::SceneColor:
         texture_output_pass_ = nullptr;
-        sky_box_pass_->OverrideSkyMap(nullptr);
+        if (sky_box_pass_)
+        {
+            sky_box_pass_->OverrideSkyMap(nullptr);
+        }
         return true;
     case RenderConfig::OutputImage::IBL_BrdfTexture:
         if (!ibl_)
@@ -207,14 +210,14 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
             PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, ibl_->GetBRDFMap(), screen_color_rt_);
         return true;
     case RenderConfig::OutputImage::IBL_DiffuseMap:
-        if (!ibl_)
+        if (!ibl_ || !sky_box_pass_)
         {
             return false;
         }
         sky_box_pass_->OverrideSkyMap(ibl_->GetDiffuseMap());
         return true;
     case RenderConfig::OutputImage::IBL_SpecularMap:
-        if (!ibl_)
+        if (!ibl_ || !sky_box_pass_)
         {
             return false;
         }
