@@ -73,10 +73,10 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 | framework | windows                 | macos                   | ios                | android               |
 | --------- | ----------------------- | ----------------------- | ------------------ | --------------------- |
-| glfw      | clang-cl (vs-installer) | llvm (homebrew & XCode) | -                  | -                     |
+| glfw      | clang-cl (vs-installer) | llvm (homebrew & Xcode) | -                  | -                     |
 | glfw-sln  | msvc (Visual Studio)    | -                       | -                  | -                     |
-| macos     | -                       | apple-llvm (XCode)      | -                  | -                     |
-| ios       | -                       | -                       | apple-llvm (XCode) | -                     |
+| macos     | -                       | apple-llvm (Xcode)      | -                  | -                     |
+| ios       | -                       | -                       | apple-llvm (Xcode) | -                     |
 | android   | -                       | -                       | -                  | llvm (Android Studio) |
 
 ### External Dependencies
