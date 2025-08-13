@@ -182,8 +182,10 @@ void SceneManager::RemoveLastNode(Scene *scene)
 
 void SceneManager::AddDefaultSky(Scene *scene)
 {
-    auto [sky_light_node, sky_light] = MakeNodeWithComponent<SkyLight>(scene, scene->GetRootNode(), "DefaultSky");
-    sky_light->SetSkyMap("skymap/studio_garden.hdr");
+    auto [sky_light_node, sky_light] = MakeNodeWithComponent<SkyLight>(scene, nullptr, "DefaultSky");
+    TaskManager::RunInWorkerThread([sky_light]() {
+        sky_light->SetSkyMap("skymap/studio_garden.hdr");
+    })->Then([scene, sky_light_node]() { scene->GetRootNode()->AddChild(sky_light_node); });
 }
 
 void SceneManager::AddDefaultDirectionalLight(Scene *scene)

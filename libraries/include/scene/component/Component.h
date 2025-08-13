@@ -88,7 +88,10 @@ std::tuple<std::shared_ptr<SceneNode>, std::shared_ptr<T>> MakeNodeWithComponent
     auto node = std::make_shared<SceneNode>(scene, name);
     node->AddComponent(primitive_component);
 
-    parent_node->AddChild(node);
+    if (parent_node)
+    {
+        parent_node->AddChild(node);
+    }
 
     return std::make_tuple(node, primitive_component);
 }
