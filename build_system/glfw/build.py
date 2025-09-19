@@ -76,23 +76,36 @@ def configure(args, is_generate_sln):
         generator_args = [
             "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
     else:
-        # Non-Windows: find LLVM installation
-        LLVM = find_llvm_path()
-        if not LLVM:
-            print("Error: Could not find LLVM installation.")
-            if platform.system() == "Darwin":
-                print(
-                    "Please install LLVM via Homebrew (Apple's system clang is not supported):")
-                print("  brew install llvm")
+        # Non-Windows: Use system clang/clang++ compilers
+        ninja_path = find_or_install_ninja()
+        
+        # On macOS, prefer system clang; on other platforms find LLVM
+        if platform.system() == "Darwin":
+            # Use system clang directly on macOS (Xcode clang)
+            xcode_clang_path = "/usr/bin/clang"
+            xcode_clangpp_path = "/usr/bin/clang++"
+            
+            if os.path.exists(xcode_clang_path) and os.path.exists(xcode_clangpp_path):
+                print("Using Xcode system clang/clang++ compilers")
+                compiler_args = [
+                    f"-DCMAKE_C_COMPILER={xcode_clang_path}", f"-DCMAKE_CXX_COMPILER={xcode_clangpp_path}"]
             else:
-                print(
-                    "Please install LLVM via your package manager or set the LLVM environment variable.")
+                print("Error: Could not find Xcode clang compilers at /usr/bin/.")
+                print("Please install Xcode Command Line Tools: xcode-select --install")
+                raise Exception()
+        else:
+            # Non-macOS: find LLVM installation
+            LLVM = find_llvm_path()
+            if LLVM:
+                compiler_args = [
+                    f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
+            else:
+                print("Error: Could not find LLVM installation.")
+                print("Please install clang via your package manager or set the LLVM environment variable.")
                 print("  Ubuntu/Debian: sudo apt install clang")
                 print("  Fedora: sudo dnf install clang")
-            raise Exception()
-        ninja_path = find_or_install_ninja()
-        compiler_args = [
-            f"-DCMAKE_C_COMPILER={LLVM}/bin/clang", f"-DCMAKE_CXX_COMPILER={LLVM}/bin/clang++"]
+                raise Exception()
+        
         generator_args = [
             "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
 

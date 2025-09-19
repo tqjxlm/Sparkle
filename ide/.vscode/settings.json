@@ -12,7 +12,7 @@
         // "--compile-commands-dir=${workspaceFolder}/build_system/macos/clangd/"
         // "--compile-commands-dir=${workspaceFolder}/build_system/ios/clangd/"
     ],
-    "clangd.path": "/opt/homebrew/opt/llvm/bin/clangd",
+    "clangd.path": "/usr/bin/clangd",
     // "clangd.path": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clangd.exe",
     "[cpp]": {
         "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
@@ -28,16 +28,16 @@
     },
     "editor.formatOnSave": true,
     "C_Cpp.intelliSenseEngine": "disabled",
-    "clang-format.executable": "/opt/homebrew/opt/llvm/bin/clang-format",
+    "clang-format.executable": "/usr/bin/clang-format",
     // "clang-format.executable": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-format.exe",
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
-    "C_Cpp.codeAnalysis.clangTidy.path": "/opt/homebrew/opt/llvm/bin/clang-tidy",
+    "C_Cpp.codeAnalysis.clangTidy.path": "/usr/bin/clang-tidy",
     // "C_Cpp.codeAnalysis.clangTidy.path": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-tidy.exe",
     "C_Cpp.codeAnalysis.clangTidy.useBuildPath": true,
     "slang.additionalSearchPaths": [
         "${workspaceFolder}/shaders/include"
     ],
-    "slang.format.clangFormatLocation": "/opt/homebrew/opt/llvm/bin/clang-format",
+    "slang.format.clangFormatLocation": "/usr/bin/clang-format",
     //"slang.format.clangFormatLocation": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-format.exe",
     "slang.slangdLocation": "D:/SDKs/VulkanSDK/1.4.313.0/Bin/slangd.exe"
 }
