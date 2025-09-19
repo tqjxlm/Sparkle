@@ -495,55 +495,28 @@ def find_llvm_path():
             f"Warning: LLVM environment variable set to '{llvm_path_override}' but path is invalid.")
         print("Falling back to automatic detection...")
 
-    homebrew_paths = [
-        "/opt/homebrew/opt/llvm",  # Apple Silicon
-        "/usr/local/opt/llvm",     # Intel Mac
-    ]
-
-    # Try Homebrew paths first (macOS) - prioritize over system clang
+    # macOS-specific handling: prefer Xcode clang, fallback to Homebrew LLVM
     if platform.system() == "Darwin":
+        # 1. Try Xcode system clang first
+        xcode_clang_path = "/usr/bin/clang"
+        xcode_clangpp_path = "/usr/bin/clang++"
+        if os.path.exists(xcode_clang_path) and os.path.exists(xcode_clangpp_path):
+            print("Found Xcode clang at: /usr")
+            return "/usr"
+        
+        # 2. Try Homebrew LLVM paths as fallback
+        homebrew_paths = [
+            "/opt/homebrew/opt/llvm",  # Apple Silicon
+            "/usr/local/opt/llvm",     # Intel Mac
+        ]
         for llvm_path in homebrew_paths:
             clang_path = os.path.join(llvm_path, "bin", "clang")
             clangpp_path = os.path.join(llvm_path, "bin", "clang++")
             if os.path.exists(clang_path) and os.path.exists(clangpp_path):
                 print(f"Found LLVM via Homebrew at: {llvm_path}")
                 return llvm_path
-
-    # Try to find clang in PATH (but skip Apple's system clang on macOS)
-    try:
-        clang_result = subprocess.run(
-            ["which", "clang"], capture_output=True, text=True, timeout=5)
-        if clang_result.returncode == 0:
-            clang_path = clang_result.stdout.strip()
-            # Skip Apple's system clang on macOS
-            if platform.system() == "Darwin" and "/usr/bin/clang" in clang_path:
-                pass  # Skip Apple's system clang
-            else:
-                # Extract LLVM root from clang path (e.g., /usr/local/bin/clang -> /usr/local)
-                bin_dir = os.path.dirname(clang_path)
-                llvm_root = os.path.dirname(bin_dir)
-                clangpp_path = os.path.join(bin_dir, "clang++")
-                if os.path.exists(clangpp_path):
-                    print(f"Found LLVM via PATH at: {llvm_root}")
-                    return llvm_root
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-        pass
-
-    # Try common Linux distribution paths
-    common_paths = [
-        "/usr/local/llvm",
-        "/opt/llvm",
-    ]
-
-    for llvm_path in common_paths:
-        clang_path = os.path.join(llvm_path, "bin", "clang")
-        clangpp_path = os.path.join(llvm_path, "bin", "clang++")
-        if os.path.exists(clang_path) and os.path.exists(clangpp_path):
-            print(f"Found LLVM at: {llvm_path}")
-            return llvm_path
-
-    # Still no? try to install it
-    if is_macos:
+        
+        # 3. Try to install Homebrew LLVM if nothing found
         print("LLVM not found. Attempting to install via Homebrew...")
         try:
             result = subprocess.run(
@@ -562,8 +535,40 @@ def find_llvm_path():
         except Exception as e:
             print("Failed to install LLVM via Homebrew. Please install manually.")
             print(f"Error: {e}")
-    else:
-        print("LLVM auto-installation not supported on this platform. Please make sure it is installed manually, preferably via a native package manager.")
+        
+        return None
+
+    # Try to find clang in PATH (non-macOS or fallback)
+    try:
+        clang_result = subprocess.run(
+            ["which", "clang"], capture_output=True, text=True, timeout=5)
+        if clang_result.returncode == 0:
+            clang_path = clang_result.stdout.strip()
+            # Extract LLVM root from clang path (e.g., /usr/local/bin/clang -> /usr/local)
+            bin_dir = os.path.dirname(clang_path)
+            llvm_root = os.path.dirname(bin_dir)
+            clangpp_path = os.path.join(bin_dir, "clang++")
+            if os.path.exists(clangpp_path):
+                print(f"Found LLVM via PATH at: {llvm_root}")
+                return llvm_root
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+        pass
+
+    # Try common Linux distribution paths
+    common_paths = [
+        "/usr/local/llvm",
+        "/opt/llvm",
+    ]
+
+    for llvm_path in common_paths:
+        clang_path = os.path.join(llvm_path, "bin", "clang")
+        clangpp_path = os.path.join(llvm_path, "bin", "clang++")
+        if os.path.exists(clang_path) and os.path.exists(clangpp_path):
+            print(f"Found LLVM at: {llvm_path}")
+            return llvm_path
+
+    # Non-macOS platforms: auto-installation not supported
+    print("LLVM auto-installation not supported on this platform. Please make sure it is installed manually, preferably via a native package manager.")
 
     return None
 

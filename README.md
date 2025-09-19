@@ -71,13 +71,13 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 ### Compiler
 
-| framework | windows                 | macos                   | ios                | android               |
-| --------- | ----------------------- | ----------------------- | ------------------ | --------------------- |
-| glfw      | clang-cl (vs-installer) | llvm (homebrew & Xcode) | -                  | -                     |
-| glfw-sln  | msvc (Visual Studio)    | -                       | -                  | -                     |
-| macos     | -                       | apple-llvm (Xcode)      | -                  | -                     |
-| ios       | -                       | -                       | apple-llvm (Xcode) | -                     |
-| android   | -                       | -                       | -                  | llvm (Android Studio) |
+| framework | windows                 | macos              | ios                | android               |
+| --------- | ----------------------- | ------------------ | ------------------ | --------------------- |
+| glfw      | clang-cl (vs-installer) | apple-llvm (Xcode) | -                  | -                     |
+| glfw-sln  | msvc (Visual Studio)    | -                  | -                  | -                     |
+| macos     | -                       | apple-llvm (Xcode) | -                  | -                     |
+| ios       | -                       | -                  | apple-llvm (Xcode) | -                     |
+| android   | -                       | -                  | -                  | llvm (Android Studio) |
 
 ### External Dependencies
 
@@ -304,7 +304,7 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 
 #### Intellisense
 
-1. **Install toolchain**: For MacOS and iOS, install llvm via homebrew. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
+1. **Install toolchain**: For MacOS and iOS, install Xcode. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
 2. **Generate project configuration**:
 
    ``` shell
@@ -320,7 +320,7 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 
 #### Debugging
 
-1. **Install toolchain**: For MacOS and iOS, install llvm via homebrew. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
+1. **Install toolchain**: For MacOS and iOS, install Xcode. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
 2. **Install VSCode extensions**: CodeLLDB.
 3. **Copy IDE config**: Copy `ide/.vscode/launch.json` to `.vscode/launch.json` in project root.
 4. **Configure paths**: Modify paths in `.vscode/launch.json` to match your environment.
