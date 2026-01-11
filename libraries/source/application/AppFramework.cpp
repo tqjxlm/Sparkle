@@ -16,8 +16,6 @@
 #include "scene/component/camera/CameraComponent.h"
 #include "scene/material/MaterialManager.h"
 
-#include <imgui.h>
-
 #include <format>
 
 namespace sparkle
@@ -175,79 +173,12 @@ void AppFramework::GenerateBuiltinUi()
             {"RHI", &rhi_config_},
         };
 
-        ui_manager_->RequestWindowDraw({[config_collections]() {
-            float font_size = ImGui::GetFontSize();
-
-            const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
-            ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 20, main_viewport->WorkPos.y + 20),
-                                    ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(font_size * 20, font_size * 30), ImGuiCond_Always);
-
-            ImGuiWindowFlags window_flags = 0;
-            window_flags |= ImGuiWindowFlags_NoResize;
-            window_flags |= ImGuiWindowFlags_NoMove;
-            window_flags |= ImGuiWindowFlags_NoCollapse;
-
-            ImGui::Begin("Config", nullptr, window_flags);
-
-            ImGui::BeginTabBar("ConfigTabs", 0);
-
-            for (const auto &config_collection : config_collections)
-            {
-                if (ImGui::BeginTabItem(config_collection.first))
-                {
-                    for (const auto &generator : config_collection.second->GetConfigUiGenerators())
-                    {
-                        generator();
-                    }
-
-                    ImGui::EndTabItem();
-                }
-            }
-
-            ImGui::EndTabBar();
-
-            ImGui::End();
-        }});
+        ConfigManager::DrawUi(ui_manager_.get(), config_collections);
     }
 
     if (app_config_.show_screen_log)
     {
-        auto messages = logger_->GetScreenLogs();
-        if (!messages.empty())
-        {
-            ui_manager_->RequestWindowDraw({[messages]() {
-                float font_size = ImGui::GetFontSize();
-
-                auto max_width = font_size * 30;
-                auto max_height = font_size * 20;
-
-                const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
-                ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + main_viewport->WorkSize.x - max_width - 20,
-                                               main_viewport->WorkPos.y + 20),
-                                        ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(max_width, max_height), ImGuiCond_Always);
-
-                ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                                                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                                                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
-                                                ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus;
-
-                ImGui::Begin("Screen Log", nullptr, window_flags);
-
-                for (const auto &log : messages)
-                {
-                    // right align
-                    float window_width = ImGui::GetWindowWidth();
-                    float text_width = ImGui::CalcTextSize(log.c_str()).x;
-                    ImGui::SetCursorPosX(window_width - text_width);
-
-                    ImGui::TextUnformatted(log.c_str());
-                }
-
-                ImGui::End();
-            }});
-        }
+        logger_->DrawUi(ui_manager_.get());
     }
 }
 

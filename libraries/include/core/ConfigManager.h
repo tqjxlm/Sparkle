@@ -11,6 +11,9 @@ class ArgumentParser;
 
 namespace sparkle
 {
+class UiManager;
+struct ConfigCollection;
+
 class ConfigManager
 {
 public:
@@ -66,6 +69,8 @@ public:
     {
         return registered_categories_;
     }
+
+    static void DrawUi(UiManager *ui_manager, const std::vector<std::pair<const char *, ConfigCollection *>> &configs);
 
 private:
     void LoadFromArgs();
