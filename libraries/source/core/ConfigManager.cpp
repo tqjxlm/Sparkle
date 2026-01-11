@@ -1,9 +1,12 @@
 #include "core/ConfigManager.h"
 
+#include "application/ConfigCollection.h"
+#include "application/UiManager.h"
 #include "core/FileManager.h"
 #include "core/Logger.h"
 
 #include <argparse/argparse.hpp>
+#include <imgui.h>
 #include <nlohmann/json.hpp>
 
 namespace sparkle
@@ -158,5 +161,43 @@ void ConfigManager::Register(ConfigValueBase &config)
     {
         found_category->second.push_back(&config);
     }
+}
+
+void ConfigManager::DrawUi(UiManager *ui_manager,
+                           const std::vector<std::pair<const char *, ConfigCollection *>> &configs)
+{
+    ui_manager->RequestWindowDraw({[configs]() {
+        float font_size = ImGui::GetFontSize();
+
+        const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 20, main_viewport->WorkPos.y + 20), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(font_size * 20, font_size * 30), ImGuiCond_Always);
+
+        ImGuiWindowFlags window_flags = 0;
+        window_flags |= ImGuiWindowFlags_NoResize;
+        window_flags |= ImGuiWindowFlags_NoMove;
+        window_flags |= ImGuiWindowFlags_NoCollapse;
+
+        ImGui::Begin("Config", nullptr, window_flags);
+
+        ImGui::BeginTabBar("ConfigTabs", 0);
+
+        for (const auto &config_collection : configs)
+        {
+            if (ImGui::BeginTabItem(config_collection.first))
+            {
+                for (const auto &generator : config_collection.second->GetConfigUiGenerators())
+                {
+                    generator();
+                }
+
+                ImGui::EndTabItem();
+            }
+        }
+
+        ImGui::EndTabBar();
+
+        ImGui::End();
+    }});
 }
 } // namespace sparkle

@@ -19,6 +19,8 @@
 
 namespace sparkle
 {
+class UiManager;
+
 class Logger
 {
 public:
@@ -26,6 +28,15 @@ public:
 
     ~Logger();
 
+    void DrawUi(UiManager *ui_manager) const;
+
+    static void Flush();
+
+    // thread-safe. it renders in main thread and respects AppConfig::show_screen_log.
+    // you should call it every frame to make the message stay on screen.
+    static void LogToScreen(const std::string &tag, const std::string &message);
+
+private:
     [[nodiscard]] std::vector<std::string> GetScreenLogs() const
     {
         std::vector<std::string> logs;
@@ -39,13 +50,6 @@ public:
         return logs;
     }
 
-    static void Flush();
-
-    // thread-safe. it renders in main thread and respects AppConfig::show_screen_log.
-    // you should call it every frame to make the message stay on screen.
-    static void LogToScreen(const std::string &tag, const std::string &message);
-
-private:
     // we use a shared_ptr here because spdlog will share the ownership
     std::shared_ptr<spdlog::logger> logger_;
 

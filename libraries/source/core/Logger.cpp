@@ -1,5 +1,6 @@
 #include "core/Logger.h"
 
+#include "application/UiManager.h"
 #include "core/Exception.h"
 #include "core/FileManager.h"
 #include "core/task/TaskManager.h"
@@ -7,9 +8,11 @@
 #if FRAMEWORK_ANDROID
 #include <spdlog/sinks/android_sink.h>
 #endif
+#include <imgui.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <algorithm>
 #include <chrono>
 
 namespace sparkle
@@ -92,8 +95,7 @@ void Logger::LogToScreen(const std::string &tag, const std::string &message)
             if (message.empty())
             {
                 instance_->screen_logs_.erase(entry);
-                instance_->screen_log_tags_.erase(
-                    std::find(instance_->screen_log_tags_.begin(), instance_->screen_log_tags_.end(), tag));
+                instance_->screen_log_tags_.erase(std::ranges::find(instance_->screen_log_tags_, tag));
             }
             else
             {
@@ -101,5 +103,44 @@ void Logger::LogToScreen(const std::string &tag, const std::string &message)
             }
         }
     });
+}
+
+void Logger::DrawUi(UiManager *ui_manager) const
+{
+    auto messages = GetScreenLogs();
+    if (!messages.empty())
+    {
+        ui_manager->RequestWindowDraw({[messages]() {
+            float font_size = ImGui::GetFontSize();
+
+            auto max_width = font_size * 30;
+            auto max_height = font_size * 20;
+
+            const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + main_viewport->WorkSize.x - max_width - 20,
+                                           main_viewport->WorkPos.y + 20),
+                                    ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(max_width, max_height), ImGuiCond_Always);
+
+            ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
+                                            ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+            ImGui::Begin("Screen Log", nullptr, window_flags);
+
+            for (const auto &log : messages)
+            {
+                // right align
+                float window_width = ImGui::GetWindowWidth();
+                float text_width = ImGui::CalcTextSize(log.c_str()).x;
+                ImGui::SetCursorPosX(window_width - text_width);
+
+                ImGui::TextUnformatted(log.c_str());
+            }
+
+            ImGui::End();
+        }});
+    }
 }
 } // namespace sparkle
