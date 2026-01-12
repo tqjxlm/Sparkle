@@ -12,25 +12,13 @@ class StdFileManager : public FileManager
 public:
     using FileManager::FileManager;
 
-    bool ResourceExists(const std::string &filepath) override;
-
-    size_t GetResourceSize(const std::string &filepath) override;
-
-    bool FileExists(const std::string &filepath, bool external) override;
-
-    bool TryCreateDirectory(const std::string &filepath, bool external) override;
-
-    std::string GetAbosluteFilePath(const std::string &filepath, bool external) override;
-
-    std::vector<char> ReadResource(const std::string &filepath) override;
-
-    std::vector<char> ReadFile(const std::string &filepath, bool external) override;
-
-    std::string WriteFile(const std::string &filepath, const char *data, uint64_t size, bool external) override;
-
-    std::vector<PathEntry> ListDirectory(const std::string &dirpath, bool external) override;
-
-    std::vector<PathEntry> ListResourceDirectory(const std::string &dirpath) override;
+    std::string GetAbsoluteFilePath(const FileEntry &file) override;
+    bool Exists(const FileEntry &file) override;
+    size_t GetSize(const FileEntry &file) override;
+    std::vector<char> Read(const FileEntry &file) override;
+    std::string Write(const FileEntry &file, const char *data, uint64_t size) override;
+    bool TryCreateDirectory(const FileEntry &file) override;
+    std::vector<PathEntry> ListDirectory(const FileEntry &dirpath) override;
 
 protected:
     static std::vector<char> ReadFile(const std::string &absolute_path);

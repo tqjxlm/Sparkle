@@ -14,7 +14,7 @@ static void SetupStyle()
     auto &io = ImGui::GetIO();
 
     {
-        auto font_data = FileManager::GetNativeFileManager()->ReadResource("fonts/Roboto-Medium.ttf");
+        auto font_data = FileManager::GetNativeFileManager()->Read(FileEntry::Resource("fonts/Roboto-Medium.ttf"));
         ASSERT(!font_data.empty());
 
         ImFontConfig font_config;

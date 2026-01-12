@@ -350,7 +350,7 @@ static int TinyusdzAssetReadFun(const char *resolved_asset_name, uint64_t req_nb
 {
     auto *file_manager = reinterpret_cast<FileManager *>(userdata);
 
-    auto data = file_manager->ReadResource(resolved_asset_name);
+    auto data = file_manager->Read(FileEntry::Resource(resolved_asset_name));
     if (data.size() < req_nbytes)
     {
         *err = std::format("TinyUSDZ: asset size smaller than requested. loaded {}. requested {}. asset {}",
@@ -374,7 +374,7 @@ static int TinyusdzAssetResolveFun(const char *asset_name, const std::vector<std
     // assume single search path for now
     *resolved_asset_name = search_paths[0] + "/" + asset_name;
 
-    if (file_manager->ResourceExists(*resolved_asset_name))
+    if (file_manager->Exists(FileEntry::Resource(*resolved_asset_name)))
     {
         return 0;
     }
@@ -473,7 +473,7 @@ std::shared_ptr<SceneNode> USDLoader::Load(const std::string &path, Scene *scene
     std::string warn;
     std::string err;
 
-    auto data = FileManager::GetNativeFileManager()->ReadResource(path);
+    auto data = FileManager::GetNativeFileManager()->Read(FileEntry::Resource(path));
 
     if (data.empty())
     {

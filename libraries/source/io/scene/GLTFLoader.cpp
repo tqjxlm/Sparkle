@@ -538,7 +538,7 @@ std::shared_ptr<SceneNode> GLTFLoader::Load(const std::string &path, Scene *scen
     std::string err;
     std::string warn;
 
-    const auto &data = FileManager::GetNativeFileManager()->ReadResource(path);
+    const auto &data = FileManager::GetNativeFileManager()->Read(FileEntry::Resource(path));
     if (data.empty())
     {
         Log(Error, "failed to find model {}", path);
@@ -605,7 +605,7 @@ GLTFLoader::GLTFLoader()
     file_callback.ReadWholeFile = [](std::vector<unsigned char> *out, std::string *, const std::string &filepath,
                                      void *) {
         auto *file_manager = FileManager::GetNativeFileManager();
-        auto data = file_manager->ReadResource(filepath);
+        auto data = file_manager->Read(FileEntry::Resource(filepath));
         if (data.empty())
         {
             return false;
@@ -618,19 +618,19 @@ GLTFLoader::GLTFLoader()
                                       const std::vector<unsigned char> &contents, void *) {
         auto *file_manager = FileManager::GetNativeFileManager();
 
-        auto write_out_path =
-            file_manager->WriteFile(filepath, reinterpret_cast<const char *>(contents.data()), contents.size(), false);
+        auto write_out_path = file_manager->Write(FileEntry::Internal(filepath),
+                                                  reinterpret_cast<const char *>(contents.data()), contents.size());
         return !write_out_path.empty();
     };
     file_callback.FileExists = [](const std::string &filepath, void *) {
         auto *file_manager = FileManager::GetNativeFileManager();
 
-        return file_manager->ResourceExists(filepath);
+        return file_manager->Exists(FileEntry::Resource(filepath));
     };
     file_callback.GetFileSizeInBytes = [](size_t *filesize_out, std::string *err, const std::string &abs_filename,
                                           void *) {
         auto *file_manager = FileManager::GetNativeFileManager();
-        size_t size = file_manager->GetResourceSize(abs_filename);
+        size_t size = file_manager->GetSize(FileEntry::Resource(abs_filename));
         if (size == std::numeric_limits<size_t>::max())
         {
             *err = std::format("file not exists! {}", abs_filename);

@@ -13,9 +13,9 @@ FileManager::~FileManager()
     Log(Debug, "FileManager destroyed");
 }
 
-template <> std::string FileManager::ReadResourceAsType(const std::string &filepath)
+template <> std::string FileManager::ReadAsType(const FileEntry &file)
 {
-    auto data = ReadResource(filepath);
+    auto data = Read(file);
     std::string data_string(data.begin(), data.end());
     return data_string;
 }

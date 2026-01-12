@@ -15,7 +15,7 @@ void MetalShader::Load()
     }
 
     auto path = shader_info_->GetPath() + ".metal";
-    auto shader_data = FileManager::GetNativeFileManager()->ReadResourceAsType<std::string>(path);
+    auto shader_data = FileManager::GetNativeFileManager()->ReadAsType<std::string>(FileEntry::Resource(path));
 
     MTLCompileOptions *compile_option = [[MTLCompileOptions alloc] init];
 

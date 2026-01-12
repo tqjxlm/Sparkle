@@ -27,14 +27,15 @@ Logger::Logger()
 
     logger_ = std::make_shared<spdlog::logger>("default");
 
-    FileManager::GetNativeFileManager()->TryCreateDirectory("logs", true);
+    FileManager::GetNativeFileManager()->TryCreateDirectory(FileEntry::External("logs"));
 
     {
         namespace ch = std::chrono;
         auto time_stamp = std::format("{:%Y_%m_%d_%H_%M_%S}", ch::floor<ch::seconds>(ch::system_clock::now()));
 
         auto log_file_path_relative = std::format("logs/output_{}.log", time_stamp);
-        auto log_file_path = FileManager::GetNativeFileManager()->GetAbosluteFilePath(log_file_path_relative, true);
+        auto log_file_path =
+            FileManager::GetNativeFileManager()->GetAbsoluteFilePath(FileEntry::External(log_file_path_relative));
 
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path, true);
         logger_->sinks().push_back(file_sink);
@@ -43,7 +44,8 @@ Logger::Logger()
     // TODO(tqjxlm): copy the file instead of writing to two files at runtime
     {
         auto log_file_path_relative = std::string("logs/output.log");
-        auto log_file_path = FileManager::GetNativeFileManager()->GetAbosluteFilePath(log_file_path_relative, true);
+        auto log_file_path =
+            FileManager::GetNativeFileManager()->GetAbsoluteFilePath(FileEntry::External(log_file_path_relative));
 
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path, true);
         logger_->sinks().push_back(file_sink);
