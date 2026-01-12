@@ -17,6 +17,7 @@ public:
     std::string GetAbosluteFilePath(const std::string &filepath, bool external) override;
     std::vector<char> ReadResource(const std::string &filepath) override;
     size_t GetResourceSize(const std::string &filepath) override;
+    std::vector<PathEntry> ListResourceDirectory(const std::string &dirpath) override;
 };
 } // namespace sparkle
 

@@ -54,6 +54,20 @@ public:
         return WriteFile(filepath, data.data(), data.size(), external);
     }
 
+    struct PathEntry
+    {
+        std::string name;      // File or directory name
+        bool is_directory;     // True if entry is a directory
+        uint64_t size;         // File size in bytes (0 for directories)
+    };
+
+    // List all files and directories in the given directory path
+    // Returns empty vector if directory doesn't exist or can't be read
+    virtual std::vector<PathEntry> ListDirectory(const std::string &dirpath, bool external) = 0;
+
+    // List resource directory contents
+    virtual std::vector<PathEntry> ListResourceDirectory(const std::string &dirpath) = 0;
+
     template <class T> T ReadResourceAsType(const std::string &filepath);
 
 protected:

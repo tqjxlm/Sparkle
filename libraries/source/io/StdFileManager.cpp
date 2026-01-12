@@ -130,4 +130,66 @@ std::string StdFileManager::WriteFile(const std::string &filepath, const char *d
 
     return fs::absolute(full_path).string();
 }
+
+std::vector<FileManager::PathEntry> StdFileManager::ListDirectory(const std::string &dirpath, bool external)
+{
+    std::vector<PathEntry> entries;
+
+    const auto absolute_path = GetAbosluteFilePath(dirpath, external);
+
+    if (!fs::exists(absolute_path) || !fs::is_directory(absolute_path))
+    {
+        Log(Warn, "Directory does not exist or is not a directory: {}", absolute_path);
+        return entries;
+    }
+
+    try
+    {
+        for (const auto &entry : fs::directory_iterator(absolute_path))
+        {
+            PathEntry dir_entry;
+            dir_entry.name = entry.path().filename().string();
+            dir_entry.is_directory = entry.is_directory();
+            dir_entry.size = entry.is_regular_file() ? entry.file_size() : 0;
+            entries.push_back(dir_entry);
+        }
+    }
+    catch (const fs::filesystem_error &e)
+    {
+        Log(Error, "Error listing directory {}: {}", absolute_path, e.what());
+    }
+
+    return entries;
+}
+
+std::vector<FileManager::PathEntry> StdFileManager::ListResourceDirectory(const std::string &dirpath)
+{
+    std::vector<PathEntry> entries;
+
+    const auto resource_path = ResourceRoot + dirpath;
+
+    if (!fs::exists(resource_path) || !fs::is_directory(resource_path))
+    {
+        Log(Warn, "Resource directory does not exist or is not a directory: {}", resource_path);
+        return entries;
+    }
+
+    try
+    {
+        for (const auto &entry : fs::directory_iterator(resource_path))
+        {
+            PathEntry dir_entry;
+            dir_entry.name = entry.path().filename().string();
+            dir_entry.is_directory = entry.is_directory();
+            dir_entry.size = entry.is_regular_file() ? entry.file_size() : 0;
+            entries.push_back(dir_entry);
+        }
+    }
+    catch (const fs::filesystem_error &e)
+    {
+        Log(Error, "Error listing resource directory {}: {}", resource_path, e.what());
+    }
+
+    return entries;
+}
 } // namespace sparkle
