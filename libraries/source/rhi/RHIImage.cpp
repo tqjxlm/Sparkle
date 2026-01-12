@@ -35,7 +35,8 @@ std::string RHIImage::SaveToFile(const std::string &file_path, RHIContext *rhi)
 
     const char *buffer_data = reinterpret_cast<const char *>(staging_buffer->Lock());
 
-    auto written_path = FileManager::GetNativeFileManager()->WriteFile(file_path, buffer_data, image_size, false);
+    auto written_path =
+        FileManager::GetNativeFileManager()->Write(FileEntry::Internal(file_path), buffer_data, image_size);
 
     staging_buffer->UnLock();
 
@@ -44,7 +45,7 @@ std::string RHIImage::SaveToFile(const std::string &file_path, RHIContext *rhi)
 
 bool RHIImage::LoadFromFile(const std::string &file_path)
 {
-    auto file_data = FileManager::GetNativeFileManager()->ReadFile(file_path, false);
+    auto file_data = FileManager::GetNativeFileManager()->Read(FileEntry::Internal(file_path));
     if (file_data.empty())
     {
         return false;

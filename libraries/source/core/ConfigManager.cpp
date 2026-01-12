@@ -35,8 +35,8 @@ void ConfigManager::LoadFromFile(bool generated)
 {
     using json = nlohmann::json;
 
-    const auto &raw_data = generated ? FileManager::GetNativeFileManager()->ReadFile(config_path, true)
-                                     : FileManager::GetNativeFileManager()->ReadResource(config_path);
+    const auto &raw_data = generated ? FileManager::GetNativeFileManager()->Read(FileEntry::External(config_path))
+                                     : FileManager::GetNativeFileManager()->Read(FileEntry::Resource(config_path));
 
     json data = json::parse(raw_data, nullptr, false);
     if (data.empty() || data.is_discarded())
@@ -99,7 +99,7 @@ void ConfigManager::SaveAll()
     const auto &raw_data = data_to_write.dump(4);
 
     const auto &write_result =
-        FileManager::GetNativeFileManager()->WriteFile(config_path, raw_data.data(), raw_data.size(), true);
+        FileManager::GetNativeFileManager()->Write(FileEntry::External(config_path), raw_data.data(), raw_data.size());
 
     if (!write_result.empty())
     {
