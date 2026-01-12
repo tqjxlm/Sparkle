@@ -28,6 +28,10 @@ public:
 
     std::string WriteFile(const std::string &filepath, const char *data, uint64_t size, bool external) override;
 
+    std::vector<PathEntry> ListDirectory(const std::string &dirpath, bool external) override;
+
+    std::vector<PathEntry> ListResourceDirectory(const std::string &dirpath) override;
+
 protected:
     static std::vector<char> ReadFile(const std::string &absolute_path);
 };

@@ -25,6 +25,8 @@ public:
         return (external ? external_file_path_ : internal_file_path_) + "/" + filepath;
     };
 
+    std::vector<PathEntry> ListResourceDirectory(const std::string &dirpath) override;
+
     // some libraryies may want to use asset manager directly
     AAssetManager *GetAssetManager()
     {

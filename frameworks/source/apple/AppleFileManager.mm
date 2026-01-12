@@ -132,6 +132,66 @@ std::vector<char> AppleFileManager::ReadResource(const std::string &filepath)
         return loaded_data;
     }
 }
+
+std::vector<FileManager::PathEntry> AppleFileManager::ListResourceDirectory(const std::string &dirpath)
+{
+    std::vector<PathEntry> entries;
+
+    @autoreleasepool
+    {
+        std::filesystem::path fs_path(ResourceRoot + dirpath);
+        NSString *dir_ns = [NSString stringWithUTF8String:fs_path.c_str()];
+
+        NSBundle *bundle = [NSBundle mainBundle];
+        NSString *bundle_resource_path = [bundle resourcePath];
+        NSString *full_dir_path = [bundle_resource_path stringByAppendingPathComponent:dir_ns];
+
+        NSFileManager *file_manager = [NSFileManager defaultManager];
+        NSError *error = nil;
+
+        BOOL is_directory = NO;
+        if (![file_manager fileExistsAtPath:full_dir_path isDirectory:&is_directory] || !is_directory)
+        {
+            Log(Warn, "Resource directory does not exist or is not a directory: {}", [full_dir_path UTF8String]);
+            return entries;
+        }
+
+        NSArray *contents = [file_manager contentsOfDirectoryAtPath:full_dir_path error:&error];
+
+        if (error)
+        {
+            Log(Error, "Error listing resource directory {}: {}", [full_dir_path UTF8String],
+                [error.localizedDescription UTF8String]);
+            return entries;
+        }
+
+        for (NSString *item in contents)
+        {
+            NSString *item_path = [full_dir_path stringByAppendingPathComponent:item];
+
+            BOOL item_is_directory = NO;
+            [file_manager fileExistsAtPath:item_path isDirectory:&item_is_directory];
+
+            PathEntry entry;
+            entry.name = [item UTF8String];
+            entry.is_directory = item_is_directory;
+
+            if (!item_is_directory)
+            {
+                NSDictionary *attributes = [file_manager attributesOfItemAtPath:item_path error:nil];
+                entry.size = attributes ? [attributes fileSize] : 0;
+            }
+            else
+            {
+                entry.size = 0;
+            }
+
+            entries.push_back(entry);
+        }
+    }
+
+    return entries;
+}
 } // namespace sparkle
 
 #endif
