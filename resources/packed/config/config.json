@@ -20,7 +20,7 @@
     "render_thread": true,
     "ui": false,
     "rebuild_cache": false,
-    "default_sky": false,
+    "default_sky": true,
     "dynamic_spp": false,
     "target_framerate": 120,
     "gpu_time_budget_ratio": 0.8

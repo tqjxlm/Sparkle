@@ -12,13 +12,13 @@ class StdFileManager : public FileManager
 public:
     using FileManager::FileManager;
 
-    std::string GetAbsoluteFilePath(const FileEntry &file) override;
-    bool Exists(const FileEntry &file) override;
-    size_t GetSize(const FileEntry &file) override;
-    std::vector<char> Read(const FileEntry &file) override;
-    std::string Write(const FileEntry &file, const char *data, uint64_t size) override;
-    bool TryCreateDirectory(const FileEntry &file) override;
-    std::vector<PathEntry> ListDirectory(const FileEntry &dirpath) override;
+    std::filesystem::path ResolvePath(const Path &path) override;
+    bool Exists(const Path &file) override;
+    size_t GetSize(const Path &file) override;
+    std::vector<char> Read(const Path &file) override;
+    std::string Write(const Path &file, const char *data, uint64_t size) override;
+    bool TryCreateDirectory(const Path &file) override;
+    std::vector<Path> ListDirectory(const Path &dirpath) override;
 
 protected:
     static std::vector<char> ReadFile(const std::string &absolute_path);

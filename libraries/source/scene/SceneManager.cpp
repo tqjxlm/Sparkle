@@ -1,6 +1,8 @@
 #include "scene/SceneManager.h"
 
+#include "core/FileManager.h"
 #include "core/Logger.h"
+#include "core/Profiler.h"
 #include "core/math/Sampler.h"
 #include "core/math/Utilities.h"
 #include "core/task/TaskManager.h"
@@ -16,8 +18,12 @@
 #include "scene/material/LambertianMaterial.h"
 #include "scene/material/MaterialManager.h"
 
+#include <imgui.h>
+
 namespace sparkle
 {
+static constexpr const char *DefaultSkyMapFile = "skymap/studio_garden.hdr";
+
 void SceneManager::GenerateRandomSpheres(Scene &scene, unsigned count)
 {
     auto &material_manager = MaterialManager::Instance();
@@ -77,18 +83,17 @@ static std::shared_ptr<OrbitCameraComponent> CreateDefaultCamera()
     return std::make_shared<OrbitCameraComponent>(camera_attribute);
 }
 
-static std::shared_ptr<TaskFuture<>> LoadSceneFromFile(Scene *scene, const std::string &file_path)
+static std::shared_ptr<TaskFuture<>> LoadSceneFromFile(Scene *scene, const Path &path)
 {
-    // always load a default camera as the fallback behaviour
-    auto main_camera = CreateDefaultCamera();
-    auto camera_node = std::make_shared<SceneNode>(scene, "DefaultCamera");
-    camera_node->AddComponent(main_camera);
-    scene->GetRootNode()->AddChild(camera_node);
-    main_camera->Setup(Zeros, 10.f, 0.f, 0.f);
-    scene->SetMainCamera(main_camera);
-
-    return SceneDataFactory::Load(file_path, scene)->Then([scene](const std::shared_ptr<SceneNode> &node) {
-        scene->GetRootNode()->AddChild(node);
+    return SceneDataFactory::Load(path, scene)->Then([scene, path](const std::shared_ptr<SceneNode> &node) {
+        if (node)
+        {
+            scene->GetRootNode()->AddChild(node);
+        }
+        else
+        {
+            Log(Error, "failed to load model {}", path.path.string());
+        }
     });
 }
 
@@ -96,19 +101,16 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
 {
     Log(Info, "Loading standard scene");
 
+    std::vector<std::shared_ptr<TaskFuture<>>> async_tasks;
+
     auto *scene_root = scene->GetRootNode();
 
     // camera
-    auto main_camera = CreateDefaultCamera();
-    auto camera_node = std::make_shared<SceneNode>(scene, "DefaultCamera");
-    camera_node->AddComponent(main_camera);
-    scene_root->AddChild(camera_node);
-
-    scene->SetMainCamera(main_camera);
+    auto *main_camera = static_cast<OrbitCameraComponent *>(scene->GetMainCamera());
     main_camera->Setup(Zeros, 25.f, 10.f, -20.f);
 
     // lights
-    SceneManager::AddDefaultSky(scene);
+    async_tasks.push_back(SceneManager::AddDefaultSky(scene));
     SceneManager::AddDefaultDirectionalLight(scene);
 
     auto &material_manager = MaterialManager::Instance();
@@ -139,21 +141,25 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
         primitive->SetMaterial(material_manager.GetMetalMaterials()[MaterialManager::GOLD]);
     }
 
-    std::vector<std::shared_ptr<TaskFuture<>>> async_tasks;
-
     // models
     auto water_bottle_task =
-        SceneDataFactory::Load("models/WaterBottle/WaterBottle.gltf", scene)
+        SceneDataFactory::Load(Path::Resource("models/WaterBottle/WaterBottle.gltf"), scene)
             ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
-                node->SetTransform({-4.f, -4.f, 2.7f}, {0, 0, utilities::ToRadian(-30.f)}, Ones * 2.f);
-                scene_root->AddChild(node);
+                if (node)
+                {
+                    node->SetTransform({-4.f, -4.f, 2.7f}, {0, 0, utilities::ToRadian(-30.f)}, Ones * 2.f);
+                    scene_root->AddChild(node);
+                }
             });
     async_tasks.emplace_back(water_bottle_task);
 
-    auto boom_box_task = SceneDataFactory::Load("models/BoomBox/BoomBox.gltf", scene)
+    auto boom_box_task = SceneDataFactory::Load(Path::Resource("models/BoomBox/BoomBox.gltf"), scene)
                              ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
-                                 node->SetTransform({5.f, 4.f, 3.f}, {0, 0, utilities::ToRadian(30.f)}, Ones * 3.f);
-                                 scene_root->AddChild(node);
+                                 if (node)
+                                 {
+                                     node->SetTransform({5.f, 4.f, 3.f}, {0, 0, utilities::ToRadian(30.f)}, Ones * 3.f);
+                                     scene_root->AddChild(node);
+                                 }
                              });
     async_tasks.emplace_back(boom_box_task);
 
@@ -163,14 +169,44 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
     });
 }
 
-std::shared_ptr<TaskFuture<>> SceneManager::LoadScene(Scene *scene, const std::string &scene_name)
+void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky, bool need_default_lighting)
 {
-    if (scene_name.empty() || scene_name == "Test")
+    PROFILE_SCOPE_LOG("SceneManager::LoadScene");
+
+    Log(Info, "Loading scene... {}", asset_path.path.string());
+
+    scene->Cleanup();
+
+    // always load a default camera as the fallback behaviour
+    auto main_camera = CreateDefaultCamera();
+    auto camera_node = std::make_shared<SceneNode>(scene, "DefaultCamera");
+    camera_node->AddComponent(main_camera);
+    main_camera->Setup(Zeros, 10.f, 0.f, 0.f);
+
+    scene->SetMainCamera(main_camera);
+    scene->GetRootNode()->AddChild(camera_node);
+
+    std::shared_ptr<TaskFuture<>> load_task;
+    if (!asset_path.IsValid() || asset_path.path.empty())
     {
-        return LoadTestScene(scene);
+        load_task = LoadTestScene(scene);
+    }
+    else
+    {
+        load_task = LoadSceneFromFile(scene, asset_path);
     }
 
-    return LoadSceneFromFile(scene, scene_name);
+    load_task->Then([scene, need_default_sky, need_default_lighting]() {
+        if (need_default_lighting && !scene->GetDirectionalLight())
+        {
+            SceneManager::AddDefaultDirectionalLight(scene);
+        }
+
+        if (need_default_sky && !scene->GetSkyLight())
+        {
+            SceneManager::AddDefaultSky(scene)->Forget();
+        }
+    });
 }
 
 void SceneManager::RemoveLastNode(Scene *scene)
@@ -180,12 +216,11 @@ void SceneManager::RemoveLastNode(Scene *scene)
     root_node->RemoveChild(last_child);
 }
 
-void SceneManager::AddDefaultSky(Scene *scene)
+std::shared_ptr<TaskFuture<void>> SceneManager::AddDefaultSky(Scene *scene)
 {
     auto [sky_light_node, sky_light] = MakeNodeWithComponent<SkyLight>(scene, nullptr, "DefaultSky");
-    TaskManager::RunInWorkerThread([sky_light]() {
-        sky_light->SetSkyMap("skymap/studio_garden.hdr");
-    })->Then([scene, sky_light_node]() { scene->GetRootNode()->AddChild(sky_light_node); });
+    return TaskManager::RunInWorkerThread([sky_light]() { sky_light->SetSkyMap(DefaultSkyMapFile); })
+        ->Then([scene, sky_light_node]() { scene->GetRootNode()->AddChild(sky_light_node); });
 }
 
 void SceneManager::AddDefaultDirectionalLight(Scene *scene)
@@ -204,6 +239,41 @@ void SceneManager::AddDefaultDirectionalLight(Scene *scene)
         {
             dir_light->SetColor(sky_light->GetSunBrightness());
             dir_light_node->SetTransform(Zeros, sky_light->GetSunDirection());
+        }
+    }
+}
+
+void SceneManager::DrawUi(Scene *scene, bool need_default_sky, bool need_default_lighting)
+{
+    auto *file_manager = FileManager::GetNativeFileManager();
+
+    ImGui::Text("Available Models:");
+    ImGui::Separator();
+
+    if (ImGui::Selectable("Test"))
+    {
+        SceneManager::LoadScene(scene, {}, need_default_sky, need_default_lighting);
+    }
+
+    static auto cached_model_dirs = file_manager->ListDirectory(Path::Resource("models"));
+    for (const auto &entry : cached_model_dirs)
+    {
+        if (ImGui::Selectable(entry.path.filename().c_str()))
+        {
+            auto files = file_manager->ListDirectory(entry);
+
+            for (const auto &file : files)
+            {
+                auto ext = file.path.extension().string();
+                if (ext == ".gltf" || ext == ".glb" || ext == ".usda" || ext == ".usdc" || ext == ".usdz")
+                {
+                    SceneManager::LoadScene(scene, file, need_default_sky, need_default_lighting);
+                    return;
+                }
+            }
+
+            Log(Warn, "No supported model file found in: {}", entry.path.string());
+            return;
         }
     }
 }

@@ -7,8 +7,10 @@ namespace sparkle
 class USDLoader : public SceneLoader
 {
 public:
+    using SceneLoader::SceneLoader;
+
     ~USDLoader() override = default;
 
-    std::shared_ptr<SceneNode> Load(const std::string &path, Scene *scene) override;
+    std::shared_ptr<SceneNode> Load(Scene *scene) override;
 };
 } // namespace sparkle

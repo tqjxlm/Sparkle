@@ -13,7 +13,10 @@ namespace sparkle
 {
 SkyLight::SkyLight() = default;
 
-SkyLight::~SkyLight() = default;
+SkyLight::~SkyLight()
+{
+    node_->GetScene()->GetRenderProxy()->SetSkyLight(nullptr);
+}
 
 void SkyLight::SetSkyMap(const std::string &file_path)
 {

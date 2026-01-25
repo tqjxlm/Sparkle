@@ -1,6 +1,7 @@
 #if FRAMEWORK_ANDROID
 
 #include "android/AndroidFileManager.h"
+#include "core/Logger.h"
 
 #include <android/asset_manager.h>
 
@@ -15,45 +16,45 @@ std::unique_ptr<FileManager> FileManager::CreateNativeFileManager()
     return instance;
 }
 
-std::string AndroidFileManager::GetAbsoluteFilePath(const FileEntry &file)
+std::filesystem::path AndroidFileManager::ResolvePath(const Path &path)
 {
-    switch (file.type)
+    switch (path.type)
     {
-    case FileType::Resource:
-        return ResourceRoot + file.path;
-    case FileType::Internal:
-        return internal_file_path_ + "/" + file.path;
-    case FileType::External:
-        return external_file_path_ + "/" + file.path;
+    case PathType::Internal:
+        return internal_file_path_ / path.path;
+    case PathType::External:
+        return external_file_path_ / path.path;
+    default:
+        UnImplemented(path.type);
+        return {};
     }
-    return "";
 }
 
-bool AndroidFileManager::Exists(const FileEntry &file)
+bool AndroidFileManager::Exists(const Path &file)
 {
-    if (file.type == FileType::Resource)
+    if (file.type == PathType::Resource)
     {
-        const auto &resource_path = ResourceRoot + file.path;
+        auto resource_path = ResourceRoot / file.path;
         AAsset *asset = AAssetManager_open(asset_manager_, resource_path.c_str(), AASSET_MODE_UNKNOWN);
         bool exists = (asset != nullptr);
-        if (asset)
+        if (asset != nullptr)
         {
             AAsset_close(asset);
         }
         return exists;
     }
 
-    // For Internal and External, use parent implementation
+    // default to use parent implementation
     return StdFileManager::Exists(file);
 }
 
-size_t AndroidFileManager::GetSize(const FileEntry &file)
+size_t AndroidFileManager::GetSize(const Path &file)
 {
-    if (file.type == FileType::Resource)
+    if (file.type == PathType::Resource)
     {
-        const auto &resource_path = ResourceRoot + file.path;
+        auto resource_path = ResourceRoot / file.path;
         AAsset *asset = AAssetManager_open(asset_manager_, resource_path.c_str(), AASSET_MODE_UNKNOWN);
-        if (!asset)
+        if (asset == nullptr)
         {
             return std::numeric_limits<size_t>::max();
         }
@@ -63,17 +64,17 @@ size_t AndroidFileManager::GetSize(const FileEntry &file)
         return size;
     }
 
-    // For Internal and External, use parent implementation
+    // default to use parent implementation
     return StdFileManager::GetSize(file);
 }
 
-std::vector<char> AndroidFileManager::Read(const FileEntry &file)
+std::vector<char> AndroidFileManager::Read(const Path &file)
 {
-    if (file.type == FileType::Resource)
+    if (file.type == PathType::Resource)
     {
-        const auto &resource_path = ResourceRoot + file.path;
+        auto resource_path = ResourceRoot / file.path;
         AAsset *asset = AAssetManager_open(asset_manager_, resource_path.c_str(), AASSET_MODE_BUFFER);
-        if (!asset)
+        if (asset == nullptr)
         {
             return {};
         }
@@ -88,70 +89,45 @@ std::vector<char> AndroidFileManager::Read(const FileEntry &file)
         return buffer;
     }
 
-    // For Internal and External, use parent implementation
+    // default to use parent implementation
     return StdFileManager::Read(file);
 }
 
-std::vector<PathEntry> AndroidFileManager::ListDirectory(const FileEntry &dirpath)
+std::vector<Path> AndroidFileManager::ListDirectory(const Path &dirpath)
 {
-    if (dirpath.type == FileType::Resource)
+    if (dirpath.type == PathType::Resource)
     {
-        std::vector<PathEntry> entries;
+        std::vector<Path> entries;
 
         if (!asset_manager_)
         {
             return entries;
         }
 
-        const auto &resource_path = ResourceRoot + dirpath.path;
+        auto resource_path = ResourceRoot / dirpath.path;
         AAssetDir *asset_dir = AAssetManager_openDir(asset_manager_, resource_path.c_str());
-        if (!asset_dir)
+        if (asset_dir == nullptr)
         {
+            Log(Warn, "Failed to open asset dir {}", resource_path.string());
             return entries;
         }
+
+        Log(Info, "Iterating asset dir {}", resource_path.string());
 
         const char *filename;
         while ((filename = AAssetDir_getNextFileName(asset_dir)) != nullptr)
         {
-            PathEntry entry;
-            entry.name = filename;
+            Log(Info, "Found item in asset dir {}", filename);
 
-            // Check if it's a directory by trying to open it as a directory
-            std::string full_path = resource_path + "/" + filename;
-            AAssetDir *test_dir = AAssetManager_openDir(asset_manager_, full_path.c_str());
-            entry.is_directory = (test_dir != nullptr && AAssetDir_getNextFileName(test_dir) != nullptr);
-            if (test_dir)
-            {
-                AAssetDir_close(test_dir);
-            }
-
-            if (!entry.is_directory)
-            {
-                // Get file size
-                AAsset *asset = AAssetManager_open(asset_manager_, full_path.c_str(), AASSET_MODE_UNKNOWN);
-                if (asset)
-                {
-                    entry.size = AAsset_getLength64(asset);
-                    AAsset_close(asset);
-                }
-                else
-                {
-                    entry.size = 0;
-                }
-            }
-            else
-            {
-                entry.size = 0;
-            }
-
-            entries.push_back(entry);
+            std::string full_path = resource_path / filename;
+            entries.emplace_back(full_path, dirpath.type);
         }
 
         AAssetDir_close(asset_dir);
         return entries;
     }
 
-    // For Internal and External, use parent implementation
+    // default to use parent implementation
     return StdFileManager::ListDirectory(dirpath);
 }
 

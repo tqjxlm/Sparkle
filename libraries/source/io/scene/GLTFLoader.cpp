@@ -530,23 +530,27 @@ static std::shared_ptr<SceneNode> ProcessNode(const tinygltf::Model &model, unsi
     return scene_node;
 }
 
-std::shared_ptr<SceneNode> GLTFLoader::Load(const std::string &path, Scene *scene)
+std::shared_ptr<SceneNode> GLTFLoader::Load(Scene *scene)
 {
-    Log(Debug, "GLTFLoader: begin loading model {} in thread {}", path, Enum2Str(ThreadManager::CurrentThread()));
+    auto path_string = asset_root_.path.string();
+
+    Log(Debug, "GLTFLoader: begin loading model {} in thread {}", path_string,
+        Enum2Str(ThreadManager::CurrentThread()));
 
     tinygltf::Model model;
     std::string err;
     std::string warn;
 
-    const auto &data = FileManager::GetNativeFileManager()->Read(FileEntry::Resource(path));
+    auto *file_manager = FileManager::GetNativeFileManager();
+
+    const auto &data = file_manager->Read(asset_root_);
     if (data.empty())
     {
-        Log(Error, "failed to find model {}", path);
+        Log(Error, "failed to find model {}", path_string);
         return nullptr;
     }
 
-    std::filesystem::path fs_path(path);
-    auto parent_path = fs_path.parent_path().string();
+    auto parent_path = asset_root_.path.parent_path().string();
 
     ASSERT(data.size() < std::numeric_limits<int>::max());
     const bool ret = loader_->LoadASCIIFromString(&model, &err, &warn, data.data(),
@@ -554,18 +558,18 @@ std::shared_ptr<SceneNode> GLTFLoader::Load(const std::string &path, Scene *scen
 
     if (!ret)
     {
-        Log(Error, "failed to load model from {}. parent path {}", path, parent_path);
+        Log(Error, "failed to load model from {}. parent path {}", path_string, parent_path);
         Log(Error, "{}", err);
         return nullptr;
     }
 
     if (!warn.empty())
     {
-        Log(Warn, "loading model with warning: {}", path);
+        Log(Warn, "loading model with warning: {}", path_string);
         Log(Warn, "{}", warn);
     }
 
-    auto loaded_root = std::make_shared<SceneNode>(scene, path);
+    auto loaded_root = std::make_shared<SceneNode>(scene, asset_root_.path);
 
     std::vector<int> *nodes_to_traverse_ref;
     std::vector<int> nodes_to_traverse;
@@ -596,16 +600,21 @@ std::shared_ptr<SceneNode> GLTFLoader::Load(const std::string &path, Scene *scen
     return loaded_root;
 }
 
-GLTFLoader::GLTFLoader()
+GLTFLoader::GLTFLoader(Path asset_root) : SceneLoader(std::move(asset_root))
 {
-    loader_ = std::make_shared<tinygltf::TinyGLTF>();
+    auto *file_manager = FileManager::GetNativeFileManager();
 
     tinygltf::FsCallbacks file_callback;
+    file_callback.user_data = &asset_root_;
+
     file_callback.ExpandFilePath = [](const std::string &filepath, void *) { return filepath; };
-    file_callback.ReadWholeFile = [](std::vector<unsigned char> *out, std::string *, const std::string &filepath,
-                                     void *) {
-        auto *file_manager = FileManager::GetNativeFileManager();
-        auto data = file_manager->Read(FileEntry::Resource(filepath));
+
+    file_callback.ReadWholeFile = [file_manager](std::vector<unsigned char> *out, std::string *,
+                                                 const std::string &filepath, void *user_data) {
+        const auto &root_path = *reinterpret_cast<const Path *>(user_data);
+        const auto &path_object = Path(filepath, root_path.type);
+
+        auto data = file_manager->Read(path_object);
         if (data.empty())
         {
             return false;
@@ -614,33 +623,40 @@ GLTFLoader::GLTFLoader()
         std::ranges::copy(data, out->begin());
         return true;
     };
-    file_callback.WriteWholeFile = [](std::string *, const std::string &filepath,
-                                      const std::vector<unsigned char> &contents, void *) {
-        auto *file_manager = FileManager::GetNativeFileManager();
 
-        auto write_out_path = file_manager->Write(FileEntry::Internal(filepath),
+    file_callback.WriteWholeFile = [file_manager](std::string *, const std::string &filepath,
+                                                  const std::vector<unsigned char> &contents, void *) {
+        auto write_out_path = file_manager->Write(Path::Internal(filepath),
                                                   reinterpret_cast<const char *>(contents.data()), contents.size());
         return !write_out_path.empty();
     };
-    file_callback.FileExists = [](const std::string &filepath, void *) {
-        auto *file_manager = FileManager::GetNativeFileManager();
 
-        return file_manager->Exists(FileEntry::Resource(filepath));
+    file_callback.FileExists = [file_manager](const std::string &filepath, void *user_data) {
+        Log(Debug, "GLTF check file exist: {}", filepath);
+
+        const auto &root_path = *reinterpret_cast<const Path *>(user_data);
+        const auto &path_object = Path(filepath, root_path.type);
+
+        return file_manager->Exists(path_object);
     };
-    file_callback.GetFileSizeInBytes = [](size_t *filesize_out, std::string *err, const std::string &abs_filename,
-                                          void *) {
-        auto *file_manager = FileManager::GetNativeFileManager();
-        size_t size = file_manager->GetSize(FileEntry::Resource(abs_filename));
+
+    file_callback.GetFileSizeInBytes = [file_manager](size_t *filesize_out, std::string *err,
+                                                      const std::string &filepath, void *user_data) {
+        const auto &root_path = *reinterpret_cast<const Path *>(user_data);
+        const auto &path_object = Path(filepath, root_path.type);
+
+        size_t size = file_manager->GetSize(path_object);
         if (size == std::numeric_limits<size_t>::max())
         {
-            *err = std::format("file not exists! {}", abs_filename);
+            *err = std::format("file not exists! {}", filepath);
             return false;
         }
 
         *filesize_out = size;
         return true;
     };
-    file_callback.user_data = nullptr;
+
+    loader_ = std::make_shared<tinygltf::TinyGLTF>();
     loader_->SetFsCallbacks(file_callback);
 }
 

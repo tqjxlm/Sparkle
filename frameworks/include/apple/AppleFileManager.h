@@ -13,11 +13,11 @@ public:
 
     static std::string GetResourceFilePath(const std::string &filepath);
 
-    std::string GetAbsoluteFilePath(const FileEntry &file) override;
-    bool Exists(const FileEntry &file) override;
-    size_t GetSize(const FileEntry &file) override;
-    std::vector<char> Read(const FileEntry &file) override;
-    std::vector<PathEntry> ListDirectory(const FileEntry &dirpath) override;
+    std::filesystem::path ResolvePath(const Path &path) override;
+    bool Exists(const Path &file) override;
+    size_t GetSize(const Path &file) override;
+    std::vector<char> Read(const Path &file) override;
+    std::vector<Path> ListDirectory(const Path &dirpath) override;
 };
 } // namespace sparkle
 

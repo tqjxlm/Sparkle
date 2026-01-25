@@ -148,6 +148,11 @@ public:
         future_.wait();
     }
 
+    void Forget()
+    {
+        // noop
+    }
+
     [[nodiscard]] bool IsReady() const
     {
         return future_.wait_for(std::chrono::nanoseconds(0)) == std::future_status::ready;

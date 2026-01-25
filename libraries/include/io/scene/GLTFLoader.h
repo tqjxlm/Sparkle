@@ -12,11 +12,11 @@ namespace sparkle
 class GLTFLoader : public SceneLoader
 {
 public:
-    GLTFLoader();
+    explicit GLTFLoader(Path asset_root);
 
     ~GLTFLoader() override;
 
-    std::shared_ptr<SceneNode> Load(const std::string &path, Scene *scene) override;
+    std::shared_ptr<SceneNode> Load(Scene *scene) override;
 
 private:
     std::shared_ptr<tinygltf::TinyGLTF> loader_;

@@ -350,7 +350,7 @@ static int TinyusdzAssetReadFun(const char *resolved_asset_name, uint64_t req_nb
 {
     auto *file_manager = reinterpret_cast<FileManager *>(userdata);
 
-    auto data = file_manager->Read(FileEntry::Resource(resolved_asset_name));
+    auto data = file_manager->Read(Path::Resource(resolved_asset_name));
     if (data.size() < req_nbytes)
     {
         *err = std::format("TinyUSDZ: asset size smaller than requested. loaded {}. requested {}. asset {}",
@@ -374,7 +374,7 @@ static int TinyusdzAssetResolveFun(const char *asset_name, const std::vector<std
     // assume single search path for now
     *resolved_asset_name = search_paths[0] + "/" + asset_name;
 
-    if (file_manager->Exists(FileEntry::Resource(*resolved_asset_name)))
+    if (file_manager->Exists(Path::Resource(*resolved_asset_name)))
     {
         return 0;
     }
@@ -467,44 +467,46 @@ static std::shared_ptr<SceneNode> LoadScene(const std::string &path, const tinyu
     return root_node;
 }
 
-std::shared_ptr<SceneNode> USDLoader::Load(const std::string &path, Scene *scene)
+std::shared_ptr<SceneNode> USDLoader::Load(Scene *scene)
 {
     tinyusdz::Stage stage;
     std::string warn;
     std::string err;
 
-    auto data = FileManager::GetNativeFileManager()->Read(FileEntry::Resource(path));
+    auto path_string = asset_root_.path.string();
+
+    auto data = FileManager::GetNativeFileManager()->Read(asset_root_);
 
     if (data.empty())
     {
-        Log(Error, "USDLoader: failed to load file {}. {}", path, err);
+        Log(Error, "USDLoader: failed to load file {}. {}", path_string, err);
         return nullptr;
     }
 
     // Auto detect USDA/USDC/USDZ
-    bool ret =
-        tinyusdz::LoadUSDFromMemory(reinterpret_cast<uint8_t *>(data.data()), data.size(), path, &stage, &warn, &err);
+    bool ret = tinyusdz::LoadUSDFromMemory(reinterpret_cast<uint8_t *>(data.data()), data.size(), path_string, &stage,
+                                           &warn, &err);
 
     if (!warn.empty())
     {
-        Log(Warn, "USDLoader: loading file {} with warning {}", path, warn);
+        Log(Warn, "USDLoader: loading file {} with warning {}", path_string, warn);
     }
 
     if (!ret)
     {
         if (!err.empty())
         {
-            Log(Error, "USDLoader: loading file {} failed. {}", path, err);
+            Log(Error, "USDLoader: loading file {} failed. {}", path_string, err);
         }
         return nullptr;
     }
 
-    Log(Debug, "USDLoader: loading file {} ok", path);
+    Log(Debug, "USDLoader: loading file {} ok", path_string);
 
-    auto root_node = LoadScene(path, stage, scene);
+    auto root_node = LoadScene(path_string, stage, scene);
     if (root_node)
     {
-        root_node->SetName(path);
+        root_node->SetName(asset_root_.path);
     }
 
     return root_node;

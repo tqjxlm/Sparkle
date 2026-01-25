@@ -4,7 +4,7 @@
 #include "application/UiManager.h"
 #include "core/Profiler.h"
 #include "core/ThreadManager.h"
-#include "core/task/TaskManager.h"
+#include "core/task/TaskDispatcher.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/renderer/Renderer.h"
 #include "rhi/RHI.h"

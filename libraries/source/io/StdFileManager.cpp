@@ -23,58 +23,53 @@ std::unique_ptr<FileManager> FileManager::CreateNativeFileManager()
 }
 #endif
 
-std::string StdFileManager::GetAbsoluteFilePath(const FileEntry &file)
+std::filesystem::path StdFileManager::ResolvePath(const Path &path)
 {
-    std::string base_path;
-    switch (file.type)
+    std::filesystem::path base_path;
+    switch (path.type)
     {
-    case FileType::Resource:
+    case PathType::Resource:
         base_path = ResourceRoot;
         break;
-    case FileType::Internal:
-    case FileType::External:
+    case PathType::Internal:
+    case PathType::External:
         base_path = GeneratedRoot;
         break;
+    default:
+        UnImplemented(path.type);
     }
 
-    fs::path fs_path(base_path + file.path);
-    return fs::absolute(fs_path).string();
+    fs::path fs_path(base_path / path.path);
+    return fs::absolute(fs_path);
 }
 
-bool StdFileManager::Exists(const FileEntry &file)
+bool StdFileManager::Exists(const Path &file)
 {
-    if (file.type == FileType::Resource)
-    {
-        auto resource_path = ResourceRoot + file.path;
-        return fs::exists(resource_path);
-    }
-
-    auto absolute_path = GetAbsoluteFilePath(file);
-    return fs::exists(absolute_path);
+    ASSERT(file.IsValid());
+    return fs::exists(file.Resolved());
 }
 
-size_t StdFileManager::GetSize(const FileEntry &file)
+size_t StdFileManager::GetSize(const Path &file)
 {
     if (!Exists(file))
     {
         return std::numeric_limits<size_t>::max();
     }
 
-    auto absolute_path = GetAbsoluteFilePath(file);
-    return fs::file_size(absolute_path);
+    return fs::file_size(file.Resolved());
 }
 
-std::vector<char> StdFileManager::Read(const FileEntry &file)
+std::vector<char> StdFileManager::Read(const Path &file)
 {
-    auto absolute_path = GetAbsoluteFilePath(file);
-    return ReadFile(absolute_path);
+    ASSERT(file.IsValid());
+    return ReadFile(file.Resolved());
 }
 
-std::string StdFileManager::Write(const FileEntry &file, const char *data, uint64_t size)
+std::string StdFileManager::Write(const Path &file, const char *data, uint64_t size)
 {
-    if (file.type == FileType::Resource)
+    if (file.type == PathType::Resource)
     {
-        Log(Error, "Cannot write to resource file: {}", file.path);
+        Log(Error, "Cannot write to resource file: {}", file.path.string());
         return "";
     }
 
@@ -82,16 +77,16 @@ std::string StdFileManager::Write(const FileEntry &file, const char *data, uint6
     fs::path dir = path.parent_path();
     if (!dir.empty())
     {
-        FileEntry dir_file(dir.string(), file.type);
+        Path dir_file(dir.string(), file.type);
         TryCreateDirectory(dir_file);
     }
 
-    const auto &full_path = GetAbsoluteFilePath(file);
+    const auto &full_path = file.Resolved();
 
     std::ofstream ofs(full_path, std::ios_base::binary);
     if (!ofs.is_open())
     {
-        Log(Warn, "Saving failed: unable to create file {}.", full_path);
+        Log(Warn, "Saving failed: unable to create file {}.", full_path.string());
         return "";
     }
 
@@ -100,29 +95,28 @@ std::string StdFileManager::Write(const FileEntry &file, const char *data, uint6
 
     if (!ofs)
     {
-        Log(Warn, "Saving failed: unable to write file {}.", full_path);
+        Log(Warn, "Saving failed: unable to write file {}.", full_path.string());
         return "";
     }
 
     return fs::absolute(full_path).string();
 }
 
-bool StdFileManager::TryCreateDirectory(const FileEntry &file)
+bool StdFileManager::TryCreateDirectory(const Path &file)
 {
-    if (file.type == FileType::Resource)
+    if (file.type == PathType::Resource)
     {
-        Log(Error, "Cannot create directory in resource location: {}", file.path);
+        Log(Error, "Cannot create directory in resource location: {}", file.path.string());
         return false;
     }
 
-    auto absolute_path_string = GetAbsoluteFilePath(file);
-    fs::path absolute_path(absolute_path_string);
+    auto absolute_path = file.Resolved();
 
     if (!fs::exists(absolute_path))
     {
         if (!fs::create_directories(absolute_path))
         {
-            Log(Warn, "Unable to create directory {}.", absolute_path_string);
+            Log(Warn, "Unable to create directory {}.", absolute_path.string());
             return false;
         }
     }
@@ -130,14 +124,14 @@ bool StdFileManager::TryCreateDirectory(const FileEntry &file)
     return true;
 }
 
-std::vector<PathEntry> StdFileManager::ListDirectory(const FileEntry &dirpath)
+std::vector<Path> StdFileManager::ListDirectory(const Path &dirpath)
 {
-    std::vector<PathEntry> entries;
-    const auto absolute_path = GetAbsoluteFilePath(dirpath);
+    std::vector<Path> entries;
+    const auto absolute_path = dirpath.Resolved();
 
     if (!fs::exists(absolute_path) || !fs::is_directory(absolute_path))
     {
-        Log(Warn, "Directory does not exist or is not a directory: {}", absolute_path);
+        Log(Warn, "Directory does not exist or is not a directory: {}", absolute_path.string());
         return entries;
     }
 
@@ -145,16 +139,12 @@ std::vector<PathEntry> StdFileManager::ListDirectory(const FileEntry &dirpath)
     {
         for (const auto &entry : fs::directory_iterator(absolute_path))
         {
-            PathEntry dir_entry;
-            dir_entry.name = entry.path().filename().string();
-            dir_entry.is_directory = entry.is_directory();
-            dir_entry.size = entry.is_regular_file() ? entry.file_size() : 0;
-            entries.push_back(dir_entry);
+            entries.emplace_back(entry.path(), dirpath.type);
         }
     }
     catch (const fs::filesystem_error &e)
     {
-        Log(Error, "Error listing directory {}: {}", absolute_path, e.what());
+        Log(Error, "Error listing directory {}: {}", absolute_path.string(), e.what());
     }
 
     return entries;

@@ -1,7 +1,6 @@
 #include "core/ConfigManager.h"
 
 #include "application/ConfigCollection.h"
-#include "application/UiManager.h"
 #include "core/FileManager.h"
 #include "core/Logger.h"
 
@@ -35,8 +34,8 @@ void ConfigManager::LoadFromFile(bool generated)
 {
     using json = nlohmann::json;
 
-    const auto &raw_data = generated ? FileManager::GetNativeFileManager()->Read(FileEntry::External(config_path))
-                                     : FileManager::GetNativeFileManager()->Read(FileEntry::Resource(config_path));
+    const auto &raw_data = generated ? FileManager::GetNativeFileManager()->Read(Path::External(config_path))
+                                     : FileManager::GetNativeFileManager()->Read(Path::Resource(config_path));
 
     json data = json::parse(raw_data, nullptr, false);
     if (data.empty() || data.is_discarded())
@@ -99,7 +98,7 @@ void ConfigManager::SaveAll()
     const auto &raw_data = data_to_write.dump(4);
 
     const auto &write_result =
-        FileManager::GetNativeFileManager()->Write(FileEntry::External(config_path), raw_data.data(), raw_data.size());
+        FileManager::GetNativeFileManager()->Write(Path::External(config_path), raw_data.data(), raw_data.size());
 
     if (!write_result.empty())
     {
@@ -163,41 +162,23 @@ void ConfigManager::Register(ConfigValueBase &config)
     }
 }
 
-void ConfigManager::DrawUi(UiManager *ui_manager,
-                           const std::vector<std::pair<const char *, ConfigCollection *>> &configs)
+void ConfigManager::DrawUi(const std::vector<std::pair<const char *, ConfigCollection *>> &configs)
 {
-    ui_manager->RequestWindowDraw({[configs]() {
-        float font_size = ImGui::GetFontSize();
+    ImGui::BeginTabBar("ConfigTabs", 0);
 
-        const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 20, main_viewport->WorkPos.y + 20), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(font_size * 20, font_size * 30), ImGuiCond_Always);
-
-        ImGuiWindowFlags window_flags = 0;
-        window_flags |= ImGuiWindowFlags_NoResize;
-        window_flags |= ImGuiWindowFlags_NoMove;
-        window_flags |= ImGuiWindowFlags_NoCollapse;
-
-        ImGui::Begin("Config", nullptr, window_flags);
-
-        ImGui::BeginTabBar("ConfigTabs", 0);
-
-        for (const auto &config_collection : configs)
+    for (const auto &config_collection : configs)
+    {
+        if (ImGui::BeginTabItem(config_collection.first))
         {
-            if (ImGui::BeginTabItem(config_collection.first))
+            for (const auto &generator : config_collection.second->GetConfigUiGenerators())
             {
-                for (const auto &generator : config_collection.second->GetConfigUiGenerators())
-                {
-                    generator();
-                }
-
-                ImGui::EndTabItem();
+                generator();
             }
+
+            ImGui::EndTabItem();
         }
+    }
 
-        ImGui::EndTabBar();
-
-        ImGui::End();
-    }});
+    ImGui::EndTabBar();
 }
 } // namespace sparkle

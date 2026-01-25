@@ -181,6 +181,7 @@ target_include_directories(sparkle_thirdparty SYSTEM PUBLIC
     magic_enum/include
     xoshiro_cpp
     hash-library/include
+    IconFontCppHeaders
 )
 
 target_link_libraries(sparkle PUBLIC sparkle_thirdparty)

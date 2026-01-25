@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/Exception.h"
-#include "core/FileTypes.h"
+#include "core/Path.h"
 
 #include <memory>
 #include <string>
@@ -10,10 +10,6 @@
 namespace sparkle
 {
 // an abstract class to handle platform-specific files
-// files are managed by three types:
-// 1. resource file. read-only. may need platform-specific methods to read.
-// 2. internal file. read-write. not user-visible. can be handled generally with std::fstream.
-// 3. external file. read-write. user-visible. can be handled generally with std::fstream.
 class FileManager
 {
 public:
@@ -34,27 +30,27 @@ public:
 
     virtual ~FileManager();
 
-    virtual std::string GetAbsoluteFilePath(const FileEntry &file) = 0;
-    virtual bool Exists(const FileEntry &file) = 0;
-    virtual size_t GetSize(const FileEntry &file) = 0;
-    virtual std::vector<char> Read(const FileEntry &file) = 0;
-    virtual std::string Write(const FileEntry &file, const char *data, uint64_t size) = 0;
+    virtual std::filesystem::path ResolvePath(const Path &path) = 0;
+    virtual bool Exists(const Path &file) = 0;
+    virtual size_t GetSize(const Path &file) = 0;
+    virtual std::vector<char> Read(const Path &file) = 0;
+    virtual std::string Write(const Path &file, const char *data, uint64_t size) = 0;
 
-    std::string Write(const FileEntry &file, const std::vector<char> &data)
+    std::string Write(const Path &file, const std::vector<char> &data)
     {
         return Write(file, data.data(), data.size());
     }
 
-    template <class T> T ReadAsType(const FileEntry &file);
+    template <class T> T ReadAsType(const Path &file);
 
-    virtual bool TryCreateDirectory(const FileEntry &file) = 0;
+    virtual bool TryCreateDirectory(const Path &file) = 0;
 
-    // List all files and directories in the given directory path
-    virtual std::vector<PathEntry> ListDirectory(const FileEntry &dirpath) = 0;
+    // List all files and directories in the given directory path. it will always return raw file path.
+    [[nodiscard]] virtual std::vector<Path> ListDirectory(const Path &dirpath) = 0;
 
 protected:
     static FileManager *native_file_manager_;
-    static const std::string ResourceRoot;
-    static const std::string GeneratedRoot;
+    static const std::filesystem::path ResourceRoot;
+    static const std::filesystem::path GeneratedRoot;
 };
 } // namespace sparkle

@@ -162,5 +162,6 @@ private:
     bool initialized_ = false;
     bool show_settngs_ = false;
     bool renderer_ready_ = false;
+    int selected_settings_tab_ = 0;
 };
 } // namespace sparkle
