@@ -101,16 +101,11 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
 {
     Log(Info, "Loading standard scene");
 
-    std::vector<std::shared_ptr<TaskFuture<>>> async_tasks;
-
     auto *scene_root = scene->GetRootNode();
 
-    // camera
     auto *main_camera = static_cast<OrbitCameraComponent *>(scene->GetMainCamera());
     main_camera->Setup(Zeros, 25.f, 10.f, -20.f);
 
-    // lights
-    async_tasks.push_back(SceneManager::AddDefaultSky(scene));
     SceneManager::AddDefaultDirectionalLight(scene);
 
     auto &material_manager = MaterialManager::Instance();
@@ -142,6 +137,8 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
     }
 
     // models
+    std::vector<std::shared_ptr<TaskFuture<>>> model_tasks;
+
     auto water_bottle_task =
         SceneDataFactory::Load(Path::Resource("models/WaterBottle/WaterBottle.gltf"), scene)
             ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
@@ -151,7 +148,7 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
                     scene_root->AddChild(node);
                 }
             });
-    async_tasks.emplace_back(water_bottle_task);
+    model_tasks.emplace_back(water_bottle_task);
 
     auto boom_box_task = SceneDataFactory::Load(Path::Resource("models/BoomBox/BoomBox.gltf"), scene)
                              ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
@@ -161,17 +158,25 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
                                      scene_root->AddChild(node);
                                  }
                              });
-    async_tasks.emplace_back(boom_box_task);
+    model_tasks.emplace_back(boom_box_task);
 
-    return TaskManager::OnAll(async_tasks)->Then([scene]() {
-        // a lot of random spheres
-        SceneManager::GenerateRandomSpheres(*scene, 10);
-    });
+    auto models_loaded = TaskManager::OnAll(model_tasks);
+    auto last_task_finished = models_loaded;
+
+    // append a bunch of random spheres to the task chain
+    for (int i = 0; i < 10; i++)
+    {
+        last_task_finished = last_task_finished->Then([scene]() { SceneManager::GenerateRandomSpheres(*scene, 1); });
+    }
+
+    return last_task_finished;
 }
 
 void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky, bool need_default_lighting)
 {
     PROFILE_SCOPE_LOG("SceneManager::LoadScene");
+
+    // TODO(tqjxlm): handle pending async tasks
 
     Log(Info, "Loading scene... {}", asset_path.path.string());
 
@@ -190,10 +195,13 @@ void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_def
     if (!asset_path.IsValid() || asset_path.path.empty())
     {
         load_task = LoadTestScene(scene);
+        need_default_sky = true;
+        scene->GetRootNode()->SetName("TestScene");
     }
     else
     {
         load_task = LoadSceneFromFile(scene, asset_path);
+        scene->GetRootNode()->SetName(asset_path.path.parent_path());
     }
 
     load_task->Then([scene, need_default_sky, need_default_lighting]() {
@@ -250,15 +258,23 @@ void SceneManager::DrawUi(Scene *scene, bool need_default_sky, bool need_default
     ImGui::Text("Available Models:");
     ImGui::Separator();
 
-    if (ImGui::Selectable("Test"))
+    ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 30);
+
     {
-        SceneManager::LoadScene(scene, {}, need_default_sky, need_default_lighting);
+        bool is_current_scene = scene->GetRootNode()->GetName() == "TestScene";
+
+        if (ImGui::Selectable("TestScene", is_current_scene))
+        {
+            SceneManager::LoadScene(scene, {}, need_default_sky, need_default_lighting);
+        }
     }
 
     static auto cached_model_dirs = file_manager->ListDirectory(Path::Resource("models"));
     for (const auto &entry : cached_model_dirs)
     {
-        if (ImGui::Selectable(entry.path.filename().c_str()))
+        bool is_current_scene = scene->GetRootNode()->GetName() == entry.path;
+
+        if (ImGui::Selectable(entry.path.filename().c_str(), is_current_scene))
         {
             auto files = file_manager->ListDirectory(entry);
 
@@ -268,13 +284,14 @@ void SceneManager::DrawUi(Scene *scene, bool need_default_sky, bool need_default
                 if (ext == ".gltf" || ext == ".glb" || ext == ".usda" || ext == ".usdc" || ext == ".usdz")
                 {
                     SceneManager::LoadScene(scene, file, need_default_sky, need_default_lighting);
-                    return;
+                    continue;
                 }
             }
 
             Log(Warn, "No supported model file found in: {}", entry.path.string());
-            return;
         }
     }
+
+    ImGui::PopStyleVar(1);
 }
 } // namespace sparkle
