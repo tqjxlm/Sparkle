@@ -117,7 +117,7 @@ private:
 
     void MeasurePerformance(float delta_time);
 
-    void GenerateBuiltinUi();
+    void DrawUi();
 
     std::unique_ptr<RenderFramework> render_framework_;
 
@@ -160,8 +160,7 @@ private:
 
     bool core_initialized_ = false;
     bool initialized_ = false;
-    bool show_settngs_ = false;
+    bool show_control_panel_ = false;
     bool renderer_ready_ = false;
-    int selected_settings_tab_ = 0;
 };
 } // namespace sparkle

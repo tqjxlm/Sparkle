@@ -122,10 +122,9 @@ void Logger::DrawUi(UiManager *ui_manager) const
                                     ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(max_width, max_height), ImGuiCond_Always);
 
-            ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                                            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
-                                            ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus;
+            ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+                                            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                            ImGuiWindowFlags_NoBackground;
 
             ImGui::Begin("Screen Log", nullptr, window_flags);
 

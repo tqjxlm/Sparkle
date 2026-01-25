@@ -156,68 +156,66 @@ struct VerticalIconTab
 
 static void DrawVerticalIconTabs(const std::vector<VerticalIconTab> &tabs, unsigned &current_tab)
 {
-    const float button_size = 40.f;             // square icon buttons
-    const float bar_width = button_size + 10.f; // icon strip width
-    const ImVec2 icon_size{button_size, button_size};
-
-    // tighten horizontal spacing
-    ImGuiStyle &style = ImGui::GetStyle();
-    float saved_spacing_x = style.ItemSpacing.x;
-
-    // gap between page & bar
-    style.ItemSpacing.x = 10.f;
-
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
-
-    ImGui::BeginChild("icon_bar", ImVec2(bar_width, 0), 0,
-                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-
-    for (unsigned i = 0u; i < tabs.size(); ++i)
+    // vertical tab bar
     {
-        ImGui::PushID(i);
-        bool sel = (current_tab == i);
+        const ImVec2 icon_size{80.f, 40.f};
+        const float bar_width = icon_size.x;
 
-        // highlight selected tab
-        if (sel)
+        ImGui::PushStyleVarX(ImGuiStyleVar_ItemSpacing, 10.f);
+
+        ImGui::BeginChild("icon_bar", ImVec2(bar_width, 0), 0,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        for (unsigned i = 0u; i < tabs.size(); ++i)
         {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.30f, 0.44f, 0.60f, 1.f)),
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.32f, 0.49f, 0.68f, 1.f)),
-                ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.80f, 0.80f, 0.90f, 1.f));
+            ImGui::PushID(i);
+            bool selected = (current_tab == i);
+
+            // highlight selected tab
+            if (selected)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.30f, 0.44f, 0.60f, 1.f)),
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.32f, 0.49f, 0.68f, 1.f)),
+                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.80f, 0.80f, 0.90f, 1.f));
+            }
+
+            bool pressed = ImGui::Button(tabs[i].icon, icon_size);
+            if (pressed)
+            {
+                current_tab = i;
+            }
+
+            if (selected)
+            {
+                ImGui::PopStyleColor(3);
+            }
+
+            ImGui::PopID();
         }
 
-        bool pressed = ImGui::Button(tabs[i].icon, icon_size);
+        ImGui::EndChild();
 
-        if (pressed)
-        {
-            current_tab = i;
-        }
-
-        if (sel)
-        {
-            ImGui::PopStyleColor(3);
-        }
-
-        ImGui::PopID();
+        ImGui::PopStyleVar(1);
     }
 
-    ImGui::EndChild();
+    // vertical separator
+    {
+        ImGui::SameLine();
 
-    ImGui::SameLine();
+        ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+    }
 
-    ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+    // content page
+    {
+        ImGui::SameLine();
 
-    ImGui::SameLine();
-
-    ImGui::BeginChild("page");
-    tabs[current_tab].draw();
-    ImGui::EndChild();
-
-    style.ItemSpacing.x = saved_spacing_x;
-
-    ImGui::PopStyleColor(1);
+        ImGui::BeginChild("page");
+        tabs[current_tab].draw();
+        ImGui::EndChild();
+    }
 }
 
-void AppFramework::GenerateBuiltinUi()
+void AppFramework::DrawUi()
 {
     if (!renderer_ready_)
     {
@@ -225,7 +223,7 @@ void AppFramework::GenerateBuiltinUi()
         return;
     }
 
-    if (show_settngs_)
+    if (show_control_panel_)
     {
         ui_manager_->RequestWindowDraw({[this]() {
             static std::vector<std::pair<const char *, ConfigCollection *>> configs{
@@ -233,6 +231,19 @@ void AppFramework::GenerateBuiltinUi()
                 {"Render", &render_config_},
                 {"RHI", &rhi_config_},
             };
+
+            float font_size = ImGui::GetFontSize();
+
+            const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 20, main_viewport->WorkPos.y + 20),
+                                    ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(font_size * 30, font_size * 30), ImGuiCond_Always);
+
+            ImGuiWindowFlags window_flags = 0;
+            window_flags |= ImGuiWindowFlags_NoDecoration;
+            window_flags |= ImGuiWindowFlags_NoMove;
+
+            ImGui::Begin("Control Panel", nullptr, window_flags);
 
             static unsigned current_tab = 0;
             static std::vector<VerticalIconTab> tabs{
@@ -243,21 +254,6 @@ void AppFramework::GenerateBuiltinUi()
                                               render_config_.IsRaterizationMode());
                      }},
                 {.icon = ICON_FA_GEAR, .draw = [=]() { ConfigManager::DrawUi(configs); }}};
-
-            float font_size = ImGui::GetFontSize();
-
-            const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
-            ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 20, main_viewport->WorkPos.y + 20),
-                                    ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(font_size * 40, font_size * 30), ImGuiCond_Always);
-
-            ImGuiWindowFlags window_flags = 0;
-            window_flags |= ImGuiWindowFlags_NoResize;
-            window_flags |= ImGuiWindowFlags_NoMove;
-            window_flags |= ImGuiWindowFlags_NoCollapse;
-
-            ImGui::Begin("Control Panel", nullptr, window_flags);
-
             DrawVerticalIconTabs(tabs, current_tab);
 
             ImGui::End();
@@ -316,7 +312,7 @@ bool AppFramework::MainLoop()
     {
         PROFILE_SCOPE("MainLoop render ui");
 
-        GenerateBuiltinUi();
+        DrawUi();
         ui_manager_->Render();
     }
 
@@ -557,7 +553,7 @@ void AppFramework::ClickCallback()
     {
         if (double_click_cooldown_.ElapsedMilliSecond() > DoubleClickCooldownMS)
         {
-            show_settngs_ = !show_settngs_;
+            show_control_panel_ = !show_control_panel_;
 
             double_click_cooldown_.Reset();
         }
@@ -644,6 +640,8 @@ void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on) co
 
 void AppFramework::RequestExit()
 {
+    // TODO(tqjxlm): handle pending async tasks
+
     CoreStates::Instance().SetAppState(CoreStates::AppState::Exiting);
 }
 
