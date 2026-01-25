@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Path.h"
 #include "core/task/TaskFuture.h"
 #include "scene/SceneNode.h"
 
@@ -9,7 +10,7 @@ namespace sparkle
 class SceneDataFactory
 {
 public:
-    static std::shared_ptr<TaskFuture<std::shared_ptr<SceneNode>>> Load(const std::string &path, Scene *scene,
+    static std::shared_ptr<TaskFuture<std::shared_ptr<SceneNode>>> Load(const Path &path, Scene *scene,
                                                                         bool async = true);
 };
 } // namespace sparkle

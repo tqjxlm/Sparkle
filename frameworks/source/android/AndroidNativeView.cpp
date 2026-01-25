@@ -60,7 +60,6 @@ static void ImGuiHandleAndroidInputEvent(const GameActivityMotionEvent *input_ev
         // "UNKNOWN", as a fallback).
         if (tool_type == AMOTION_EVENT_TOOL_TYPE_FINGER || tool_type == AMOTION_EVENT_TOOL_TYPE_UNKNOWN)
         {
-            Log(Debug, "event_pos: {}, {}", event_pos.x(), event_pos.y());
             io.AddMousePosEvent(event_pos.x(), event_pos.y());
             io.AddMouseButtonEvent(0, flags == AMOTION_EVENT_ACTION_DOWN);
         }

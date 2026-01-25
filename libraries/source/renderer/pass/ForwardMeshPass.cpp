@@ -389,7 +389,7 @@ void ForwardMeshPass::SetIBL(ImageBasedLighting *ibl)
 
     ibl_ = ibl;
 
-    if (ibl_->NeedUpdate())
+    if (ibl_ && ibl_->NeedUpdate())
     {
         ibl_changed_subscription_ = ibl_->OnRenderResourceChange().Subscribe([this]() { ibl_dirty_ = true; });
     }

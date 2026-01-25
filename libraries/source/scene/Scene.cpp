@@ -7,9 +7,9 @@
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "scene/SceneNode.h"
 #include "scene/component/camera/CameraComponent.h"
+#include "scene/component/light/SkyLight.h"
 #include "scene/component/primitive/PrimitiveComponent.h"
 #include "scene/material/Material.h"
-
 
 #include <queue>
 
@@ -151,7 +151,10 @@ bool Scene::BoxCollides(const PrimitiveComponent *primitive) const
 
 void Scene::Cleanup()
 {
-    root_node_ = nullptr;
+    root_node_ = std::make_unique<SceneNode>(this, "SceneRoot");
+    sky_light_ = nullptr;
+    directional_light_ = nullptr;
+    main_camera_ = nullptr;
 }
 
 void Scene::UnregisterMaterial(const std::shared_ptr<Material> &material)
@@ -186,5 +189,10 @@ void Scene::RegisterMaterial(Material *material)
     }
 
     material_usage_[material]++;
+}
+
+void Scene::SetSkyLight(SkyLight *light)
+{
+    sky_light_ = light;
 }
 } // namespace sparkle

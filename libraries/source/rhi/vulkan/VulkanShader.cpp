@@ -52,7 +52,7 @@ void VulkanShader::Load()
 
 void VulkanShader::LoadShaderModule(const char *file_path)
 {
-    auto shader_code = FileManager::GetNativeFileManager()->Read(FileEntry::Resource(file_path));
+    auto shader_code = FileManager::GetNativeFileManager()->Read(Path::Resource(file_path));
 
     SpvReflectResult result = spvReflectCreateShaderModule(shader_code.size(), shader_code.data(), &reflection_module_);
     ASSERT_EQUAL(result, SPV_REFLECT_RESULT_SUCCESS);

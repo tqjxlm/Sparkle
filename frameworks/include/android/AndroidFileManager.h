@@ -11,11 +11,11 @@ namespace sparkle
 class AndroidFileManager : public StdFileManager
 {
 public:
-    std::string GetAbsoluteFilePath(const FileEntry &file) override;
-    bool Exists(const FileEntry &file) override;
-    size_t GetSize(const FileEntry &file) override;
-    std::vector<char> Read(const FileEntry &file) override;
-    std::vector<PathEntry> ListDirectory(const FileEntry &dirpath) override;
+    std::filesystem::path ResolvePath(const Path &path) override;
+    bool Exists(const Path &file) override;
+    size_t GetSize(const Path &file) override;
+    std::vector<char> Read(const Path &file) override;
+    std::vector<Path> ListDirectory(const Path &dirpath) override;
 
     void Setup(AAssetManager *asset_manager, const std::string &interal_file_path,
                const std::string &external_file_path);
@@ -28,8 +28,8 @@ public:
 
 private:
     AAssetManager *asset_manager_ = nullptr;
-    std::string external_file_path_;
-    std::string internal_file_path_;
+    std::filesystem::path external_file_path_;
+    std::filesystem::path internal_file_path_;
 };
 } // namespace sparkle
 

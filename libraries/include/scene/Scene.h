@@ -71,10 +71,7 @@ public:
         return directional_light_;
     }
 
-    void SetSkyLight(SkyLight *light)
-    {
-        sky_light_ = light;
-    }
+    void SetSkyLight(SkyLight *light);
 
     [[nodiscard]] SkyLight *GetSkyLight() const
     {
@@ -95,10 +92,10 @@ private:
     // every scene must have a main camera
     CameraComponent *main_camera_ = nullptr;
 
-    // if multiple directional lights exist, only the first one takes effect
+    // if multiple directional lights exist, only the first one takes effect.
     DirectionalLight *directional_light_ = nullptr;
 
-    // if multiple sky lights exist, only the first one takes effect
+    // only one sky light will take effect. new sky light overrides the existing one.
     SkyLight *sky_light_ = nullptr;
 };
 } // namespace sparkle

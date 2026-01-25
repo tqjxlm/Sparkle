@@ -21,8 +21,8 @@ static void WriteImageFile(void *context, void *data, int size)
 {
     const auto &path = *static_cast<std::string *>(context);
     auto *file_manager = FileManager::GetNativeFileManager();
-    auto saved_path = file_manager->Write(FileEntry::External(path), reinterpret_cast<const char *>(data),
-                                          static_cast<uint64_t>(size));
+    auto saved_path =
+        file_manager->Write(Path::External(path), reinterpret_cast<const char *>(data), static_cast<uint64_t>(size));
     if (saved_path.empty())
     {
         Log(Error, "Failed to save image {}", path);
@@ -51,10 +51,10 @@ bool Image2D::LoadFromFile(const std::string &file_path)
     auto *file_manager = FileManager::GetNativeFileManager();
 
     // try two locations: packed folder and generated folder
-    auto data = file_manager->Read(FileEntry::Resource(file_path));
+    auto data = file_manager->Read(Path::Resource(file_path));
     if (data.empty())
     {
-        data = file_manager->Read(FileEntry::Internal(file_path));
+        data = file_manager->Read(Path::Internal(file_path));
         if (data.empty())
         {
             Log(Error, "failed to read image file {}", file_path);
@@ -169,7 +169,7 @@ bool Image2D::WriteToFile(const std::string &file_path) const
         }
 
         auto *file_manager = FileManager::GetNativeFileManager();
-        file_manager->Write(FileEntry::External(file_path), buffer);
+        file_manager->Write(Path::External(file_path), buffer);
     }
     else
     {

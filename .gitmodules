@@ -55,3 +55,6 @@
 [submodule "thirdparty/tinyusdz"]
 	path = thirdparty/tinyusdz
 	url = https://github.com/lighttransport/tinyusdz.git
+[submodule "thirdparty/IconFontCppHeaders"]
+	path = thirdparty/IconFontCppHeaders
+	url = https://github.com/juliettef/IconFontCppHeaders.git

@@ -8,7 +8,7 @@ static ConfigValue<uint32_t> config_max_thread("thread", "maximum threads to use
 static ConfigValue<std::string> config_scene("scene", "the scene to render", "app", "");
 static ConfigValue<bool> config_screen_log("screen_log", "show screen log", "app", true, true);
 static ConfigValue<bool> config_rebuild_cache("rebuild_cache", "rebuild all cache", "app", false);
-static ConfigValue<bool> config_default_skybox("default_sky", "use a default sky box", "app", false);
+static ConfigValue<bool> config_default_skybox("default_sky", "use a default sky box", "app", false, true);
 static ConfigValue<bool> config_render_thread("render_thread", "enable render thread", "app", true);
 
 void AppConfig::Init()

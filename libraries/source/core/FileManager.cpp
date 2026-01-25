@@ -5,15 +5,15 @@
 namespace sparkle
 {
 FileManager *FileManager::native_file_manager_ = nullptr;
-const std::string FileManager::ResourceRoot("packed/");
-const std::string FileManager::GeneratedRoot("generated/");
+const std::filesystem::path FileManager::ResourceRoot("packed/");
+const std::filesystem::path FileManager::GeneratedRoot("generated/");
 
 FileManager::~FileManager()
 {
     Log(Debug, "FileManager destroyed");
 }
 
-template <> std::string FileManager::ReadAsType(const FileEntry &file)
+template <> std::string FileManager::ReadAsType(const Path &file)
 {
     auto data = Read(file);
     std::string data_string(data.begin(), data.end());
