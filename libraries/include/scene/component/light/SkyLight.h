@@ -53,6 +53,12 @@ protected:
 private:
     void LogCookStatus() const;
 
+    [[nodiscard]] std::string GetCachePath() const;
+
+    bool TryLoadCache();
+
+    void SaveCache() const;
+
     Vector3 color_ = Vector3(0.5f, 0.7f, 1.0f);
 
     std::unique_ptr<Image2D> sky_map_;
