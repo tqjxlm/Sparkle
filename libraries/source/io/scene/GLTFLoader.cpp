@@ -569,7 +569,7 @@ std::shared_ptr<SceneNode> GLTFLoader::Load(Scene *scene)
         Log(Warn, "{}", warn);
     }
 
-    auto loaded_root = std::make_shared<SceneNode>(scene, asset_root_.path);
+    auto loaded_root = std::make_shared<SceneNode>(scene, asset_root_.path.string());
 
     std::vector<int> *nodes_to_traverse_ref;
     std::vector<int> nodes_to_traverse;

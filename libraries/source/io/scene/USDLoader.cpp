@@ -506,7 +506,7 @@ std::shared_ptr<SceneNode> USDLoader::Load(Scene *scene)
     auto root_node = LoadScene(path_string, stage, scene);
     if (root_node)
     {
-        root_node->SetName(asset_root_.path);
+        root_node->SetName(asset_root_.path.string());
     }
 
     return root_node;
