@@ -1,5 +1,6 @@
 #include "scene/component/light/SkyLight.h"
 
+#include "core/FileManager.h"
 #include "core/Logger.h"
 #include "core/Timer.h"
 #include "core/math/Utilities.h"
@@ -61,11 +62,16 @@ void SkyLight::OnAttach()
 
 void SkyLight::Cook()
 {
+    ASSERT(sky_map_);
+
+    if (TryLoadCache())
+    {
+        cooked_ = true;
+        return;
+    }
+
     Log(Info, "Cooking sky map {}", sky_map_->GetName());
     Timer timer;
-
-    // TODO(tqjxlm): cache cook results
-    ASSERT(sky_map_);
 
     cube_map_ = std::make_unique<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16,
                                               sky_map_->GetName() + "_CubeMap");
@@ -160,6 +166,8 @@ void SkyLight::Cook()
         utilities::VectorToString(sun_brightness_));
 
     cooked_ = true;
+
+    SaveCache();
 }
 
 void SkyLight::LogCookStatus() const
@@ -176,6 +184,90 @@ void SkyLight::LogCookStatus() const
     else
     {
         Logger::LogToScreen("SkyLight::Cook", "");
+    }
+}
+
+std::string SkyLight::GetCachePath() const
+{
+    return "cached/skylight/" + sky_map_->GetName() + ".cache";
+}
+
+bool SkyLight::TryLoadCache()
+{
+    auto *file_manager = FileManager::GetNativeFileManager();
+    auto file_path = GetCachePath();
+
+    auto data = file_manager->Read(Path::Internal(file_path));
+    if (data.empty())
+    {
+        return false;
+    }
+
+    const size_t face_size = CubeMapSize * CubeMapSize * GetPixelSize(PixelFormat::RGBAFloat16);
+    const size_t expected_size = 6 * face_size + 2 * sizeof(float) * 3;
+
+    if (data.size() != expected_size)
+    {
+        Log(Warn, "sky light cache size mismatch. loaded {}. expected {}.", data.size(), expected_size);
+        return false;
+    }
+
+    cube_map_ = std::make_unique<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16,
+                                              sky_map_->GetName() + "_CubeMap");
+
+    const char *ptr = data.data();
+
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
+    {
+        auto face_id = static_cast<Image2DCube::FaceId>(id);
+        auto &face = cube_map_->GetFace(face_id);
+        std::memcpy(const_cast<uint8_t *>(face.GetRawData()), ptr, face_size);
+        ptr += face_size;
+    }
+
+    std::memcpy(sun_brightness_.data(), ptr, sizeof(float) * 3);
+    ptr += sizeof(float) * 3;
+
+    std::memcpy(sun_direction_.data(), ptr, sizeof(float) * 3);
+
+    Log(Info, "loaded sky light cache from {}", file_path);
+
+    return true;
+}
+
+void SkyLight::SaveCache() const
+{
+    auto *file_manager = FileManager::GetNativeFileManager();
+    auto file_path = GetCachePath();
+
+    const size_t face_size = CubeMapSize * CubeMapSize * GetPixelSize(PixelFormat::RGBAFloat16);
+    const size_t total_size = 6 * face_size + 2 * sizeof(float) * 3;
+
+    std::vector<char> data(total_size);
+    char *ptr = data.data();
+
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
+    {
+        auto face_id = static_cast<Image2DCube::FaceId>(id);
+        const auto &face = cube_map_->GetFace(face_id);
+        std::memcpy(ptr, face.GetRawData(), face_size);
+        ptr += face_size;
+    }
+
+    std::memcpy(ptr, sun_brightness_.data(), sizeof(float) * 3);
+    ptr += sizeof(float) * 3;
+
+    std::memcpy(ptr, sun_direction_.data(), sizeof(float) * 3);
+
+    auto written_path = file_manager->Write(Path::Internal(file_path), data);
+
+    if (written_path.empty())
+    {
+        Log(Error, "failed to save sky light cache: {}", file_path);
+    }
+    else
+    {
+        Log(Info, "saved sky light cache to {}", written_path);
     }
 }
 
