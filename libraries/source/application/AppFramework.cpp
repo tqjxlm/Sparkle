@@ -122,7 +122,7 @@ bool AppFramework::Init()
     render_framework_ = std::make_unique<RenderFramework>(view_, rhi_.get(), ui_manager_.get(), main_scene_.get());
     if (app_config_.render_thread)
     {
-        render_framework_->StartRenderThread();
+        render_framework_->StartRenderThread(render_config_);
     }
     else
     {

@@ -163,9 +163,10 @@ void RenderFramework::NewFrame(uint64_t frame_number, const RenderConfig &render
     render_config_ = render_config;
 }
 
-void RenderFramework::StartRenderThread()
+void RenderFramework::StartRenderThread(const RenderConfig &render_config)
 {
     render_thread_ = std::thread(&RenderFramework::RenderThreadMain, this);
+    render_config_ = render_config;
 
     std::unique_lock<std::mutex> lock(thread_mutex_);
     render_thread_started_.wait(lock, [this]() { return render_loop_started_; });

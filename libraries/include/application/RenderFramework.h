@@ -23,7 +23,7 @@ public:
 
     ~RenderFramework();
 
-    void StartRenderThread();
+    void StartRenderThread(const RenderConfig &render_config);
 
     // called by main thread, run on main thread
     void StopRenderThread();
