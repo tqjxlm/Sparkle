@@ -62,7 +62,7 @@ size_t StdFileManager::GetSize(const Path &file)
 std::vector<char> StdFileManager::Read(const Path &file)
 {
     ASSERT(file.IsValid());
-    return ReadFile(file.Resolved());
+    return ReadFile(file.Resolved().string());
 }
 
 std::string StdFileManager::Write(const Path &file, const char *data, uint64_t size)

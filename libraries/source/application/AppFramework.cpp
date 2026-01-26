@@ -168,7 +168,7 @@ static void DrawVerticalIconTabs(const std::vector<VerticalIconTab> &tabs, unsig
 
         for (unsigned i = 0u; i < tabs.size(); ++i)
         {
-            ImGui::PushID(i);
+            ImGui::PushID(static_cast<int>(i));
             bool selected = (current_tab == i);
 
             // highlight selected tab

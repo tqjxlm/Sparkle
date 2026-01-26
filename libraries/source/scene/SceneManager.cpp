@@ -201,7 +201,7 @@ void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_def
     else
     {
         load_task = LoadSceneFromFile(scene, asset_path);
-        scene->GetRootNode()->SetName(asset_path.path.parent_path());
+        scene->GetRootNode()->SetName(asset_path.path.parent_path().string());
     }
 
     load_task->Then([scene, need_default_sky, need_default_lighting]() {
@@ -274,7 +274,7 @@ void SceneManager::DrawUi(Scene *scene, bool need_default_sky, bool need_default
     {
         bool is_current_scene = scene->GetRootNode()->GetName() == entry.path;
 
-        if (ImGui::Selectable(entry.path.filename().c_str(), is_current_scene))
+        if (ImGui::Selectable(entry.path.filename().string().c_str(), is_current_scene))
         {
             auto files = file_manager->ListDirectory(entry);
 
