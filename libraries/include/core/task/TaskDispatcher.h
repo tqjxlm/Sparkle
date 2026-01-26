@@ -3,6 +3,7 @@
 #include "core/ThreadManager.h"
 
 #include <BS_thread_pool.hpp>
+
 #include <condition_variable>
 #include <mutex>
 #include <queue>
