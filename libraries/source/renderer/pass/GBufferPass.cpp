@@ -106,7 +106,7 @@ void GBufferPass::BindShaderResources(const RHIResourceRef<RHIPipelineState> &ps
 
 void GBufferPass::HandleNewPrimitive(uint32_t primitive_id)
 {
-    auto *primitive = scene_proxy_->GetPrimitives()[primitive_id];
+    auto *primitive = scene_proxy_->GetPrimitive(primitive_id);
 
     auto *mesh_proxy = primitive->As<MeshRenderProxy>();
 

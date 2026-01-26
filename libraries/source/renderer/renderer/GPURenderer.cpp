@@ -208,19 +208,22 @@ void GPURenderer::Update()
 
     bool need_rebuild_tlas = false;
     std::unordered_set<uint32_t> primitives_to_update;
-    for (const auto &[from, to, type] : scene_render_proxy_->GetPrimitiveChangeList())
+    for (const auto &[type, primitive, from, to] : scene_render_proxy_->GetPrimitiveChangeList())
     {
         switch (type)
         {
         case SceneRenderProxy::PrimitiveChangeType::New:
         case SceneRenderProxy::PrimitiveChangeType::Move: {
-            auto *to_primitive = scene_render_proxy_->GetPrimitives()[to];
-            if (to_primitive->IsMesh())
+            if (primitive->IsMesh() && primitive->GetPrimitiveIndex() != UINT_MAX)
             {
-                const auto *mesh = to_primitive->As<MeshRenderProxy>();
-
+                const auto *mesh = primitive->As<MeshRenderProxy>();
                 const auto &blas = mesh->GetAccelerationStructure();
-                tlas_->SetBLAS(blas.get(), to_primitive->GetPrimitiveIndex());
+
+                tlas_->SetBLAS(blas.get(), primitive->GetPrimitiveIndex());
+            }
+            else
+            {
+                tlas_->SetBLAS(nullptr, to);
             }
 
             need_rebuild_tlas = true;
@@ -228,6 +231,7 @@ void GPURenderer::Update()
         }
         case SceneRenderProxy::PrimitiveChangeType::Remove:
             tlas_->SetBLAS(nullptr, from);
+
             need_rebuild_tlas = true;
             break;
         case SceneRenderProxy::PrimitiveChangeType::Update:

@@ -141,24 +141,28 @@ void SceneRenderProxy::RegisterPrimitive(PrimitiveRenderProxy *primitive)
     primitive->SetPrimitiveIndex(new_index);
     primitives_.push_back(primitive);
 
-    primitive_changes_.push_back({.to_id = new_index, .type = PrimitiveChangeType::New});
+    primitive_changes_.push_back({.type = PrimitiveChangeType::New, .primitive = primitive, .to_id = new_index});
 }
 
 void SceneRenderProxy::UnregisterPrimitive(PrimitiveRenderProxy *primitive)
 {
     auto index_to_remove = primitive->GetPrimitiveIndex();
+    auto index_swapped = static_cast<uint32_t>(primitives_.size() - 1);
 
-    primitive_changes_.push_back({.from_id = index_to_remove, .type = PrimitiveChangeType::Remove});
-
+    // we swap it with the last primitive in the list so the primitive index is always dense
     if (RemoveAtSwap(primitives_, index_to_remove))
     {
         auto *swapped_primitive = primitives_[index_to_remove];
-        primitive_changes_.push_back({.from_id = swapped_primitive->GetPrimitiveIndex(),
-                                      .to_id = index_to_remove,
-                                      .type = PrimitiveChangeType::Move});
+        primitive_changes_.push_back({.type = PrimitiveChangeType::Move,
+                                      .primitive = swapped_primitive,
+                                      .from_id = swapped_primitive->GetPrimitiveIndex(),
+                                      .to_id = index_to_remove});
 
         swapped_primitive->SetPrimitiveIndex(index_to_remove);
     }
+
+    primitive_changes_.push_back(
+        {.type = PrimitiveChangeType::Remove, .primitive = primitive, .from_id = index_swapped});
 
     primitive->SetPrimitiveIndex(UINT_MAX);
 }
@@ -246,12 +250,12 @@ void SceneRenderProxy::UpdateBVH()
 {
     PROFILE_SCOPE("SceneRenderProxy::UpdateBVH");
 
-    for (const auto &[from, to, type] : primitive_changes_)
+    for (const auto &[type, primitive, from, to] : primitive_changes_)
     {
         switch (type)
         {
         case PrimitiveChangeType::New:
-            primitives_[to]->BuildBVH();
+            primitive->BuildBVH();
             need_bvh_update_ = true;
             break;
         case PrimitiveChangeType::Remove:
@@ -337,7 +341,7 @@ MaterialRenderProxy *SceneRenderProxy::AddMaterial(std::unique_ptr<MaterialRende
         material_id = *free_material_ids_.begin();
         free_material_ids_.erase(material_id);
 
-        ASSERT(!materials_[material_id]);
+        ASSERT_F(!materials_[material_id], "material id %d is already in use", material_id);
 
         materials_[material_id] = std::move(material);
     }
