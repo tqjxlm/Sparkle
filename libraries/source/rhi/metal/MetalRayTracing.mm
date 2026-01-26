@@ -148,9 +148,24 @@ void MetalBLAS::Build(id<MTLAccelerationStructureCommandEncoder> command_encoder
 
 void MetalTLAS::Build()
 {
-    blas_array_ = [[NSMutableArray alloc] init];
+    size_t blas_count = 0;
 
-    auto blas_count = all_blas_.size();
+    for (auto *blas_slot : all_blas_)
+    {
+        auto *blas = RHICast<MetalBLAS>(blas_slot);
+
+        if (blas)
+        {
+            blas_count++;
+        }
+    }
+
+    if (blas_count == 0)
+    {
+        return;
+    }
+
+    blas_array_ = [[NSMutableArray alloc] init];
 
     // a buffer of BLAS descriptors. each descriptor represents a BLAS, with its own transformation matrix.
     blas_descriptor_buffer_ = context->GetRHI()->CreateBuffer(
