@@ -412,9 +412,18 @@ if (MSVC)
     set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT sparkle)
 endif()
 
-# separate build and generation for ninja as it is a single configuration generator
-if(CMAKE_GENERATOR STREQUAL "Ninja")
-    set_target_properties(sparkle PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PRODUCT_OUTPUT_DIRECTORY})
+# Set output directory for all generators (single-config and multi-config)
+set_target_properties(sparkle PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${PRODUCT_OUTPUT_DIRECTORY}
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG ${PRODUCT_OUTPUT_DIRECTORY}
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PRODUCT_OUTPUT_DIRECTORY}
+)
+
+# Set Visual Studio debugger working directory to where resources are located
+if (MSVC)
+    set_target_properties(sparkle PROPERTIES
+        VS_DEBUGGER_WORKING_DIRECTORY ${PRODUCT_OUTPUT_DIRECTORY}
+    )
 endif()
 
 # ------------------ final output ------------------
