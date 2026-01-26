@@ -629,7 +629,7 @@ void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on) co
         if (action == KeyAction::Release)
         {
             Log(Debug, "Remove debug sphere");
-            SceneManager::RemoveLastNode(main_scene_.get());
+            SceneManager::RemoveLastDebugSphere(main_scene_.get());
         }
         break;
     }

@@ -39,7 +39,7 @@ public:
 
     void AddChild(const std::shared_ptr<SceneNode> &child);
 
-    void RemoveChild(const std::shared_ptr<SceneNode> &child);
+    void RemoveChild(SceneNode *child);
 
     [[nodiscard]] const std::vector<std::shared_ptr<SceneNode>> &GetChildren() const
     {
