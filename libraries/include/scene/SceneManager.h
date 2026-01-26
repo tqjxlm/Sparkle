@@ -13,7 +13,7 @@ class SceneManager
 public:
     static void LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky, bool need_default_lighting);
 
-    static void RemoveLastNode(Scene *scene);
+    static void RemoveLastDebugSphere(Scene *scene);
 
     static void GenerateRandomSpheres(Scene &scene, unsigned count);
 

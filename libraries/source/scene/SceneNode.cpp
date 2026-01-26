@@ -74,7 +74,7 @@ void SceneNode::AddChild(const std::shared_ptr<SceneNode> &child)
     }
 }
 
-void SceneNode::RemoveChild(const std::shared_ptr<SceneNode> &child)
+void SceneNode::RemoveChild(SceneNode *child)
 {
     ASSERT_F(ThreadManager::IsInMainThread(), "Scene management should only happen in main thread");
 

@@ -23,6 +23,7 @@
 namespace sparkle
 {
 static constexpr const char *DefaultSkyMapFile = "skymap/studio_garden.hdr";
+static std::vector<SceneNode *> debug_spheres;
 
 void SceneManager::GenerateRandomSpheres(Scene &scene, unsigned count)
 {
@@ -73,6 +74,8 @@ void SceneManager::GenerateRandomSpheres(Scene &scene, unsigned count)
             Vector3 position = spread_center + Vector3(position_xy.x(), position_xy.y(), radius);
             node->SetTransform(position, Zeros, Ones * radius);
         } while (scene.BoxCollides(primitive.get()));
+
+        debug_spheres.push_back(node.get());
     }
 }
 
@@ -182,6 +185,8 @@ void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_def
 
     scene->Cleanup();
 
+    debug_spheres.clear();
+
     // always load a default camera as the fallback behaviour
     auto main_camera = CreateDefaultCamera();
     auto camera_node = std::make_shared<SceneNode>(scene, "DefaultCamera");
@@ -217,11 +222,12 @@ void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_def
     });
 }
 
-void SceneManager::RemoveLastNode(Scene *scene)
+void SceneManager::RemoveLastDebugSphere(Scene *scene)
 {
     auto *root_node = scene->GetRootNode();
-    const auto &last_child = root_node->GetChildren().back();
-    root_node->RemoveChild(last_child);
+    auto *last_sphere = debug_spheres.back();
+    root_node->RemoveChild(last_sphere);
+    debug_spheres.pop_back();
 }
 
 std::shared_ptr<TaskFuture<void>> SceneManager::AddDefaultSky(Scene *scene)
