@@ -71,6 +71,49 @@ android {
     namespace 'io.tqjxlm.sparkle'
 }
 
+// Generate directory manifest files for Android Asset Manager
+// Android's AAssetDir_getNextFileName() only returns files, not subdirectories.
+// This task creates _dir_manifest.txt files listing subdirectories for each directory.
+tasks.register('generateAssetManifests') {
+    def assetsDir = file("${rootProject.projectDir}/output/assets")
+
+    doLast {
+        if (!assetsDir.exists()) {
+            println "Assets directory does not exist yet: ${assetsDir}"
+            return
+        }
+
+        // Recursively find all directories and generate manifests
+        assetsDir.eachDirRecurse { dir ->
+            def subdirs = []
+            dir.eachDir { subdir ->
+                subdirs.add(subdir.name)
+            }
+
+            def manifestFile = new File(dir, "_dir_manifest.txt")
+            if (!subdirs.isEmpty()) {
+                // Write manifest with subdirectory names
+                manifestFile.text = subdirs.sort().join('\n') + '\n'
+                println "Generated manifest: ${manifestFile.path} with ${subdirs.size()} entries"
+            } else if (manifestFile.exists()) {
+                // Remove stale manifest if no subdirectories exist
+                manifestFile.delete()
+            }
+        }
+
+        // Also generate manifest for the root assets directory
+        def rootSubdirs = []
+        assetsDir.eachDir { subdir ->
+            rootSubdirs.add(subdir.name)
+        }
+        if (!rootSubdirs.isEmpty()) {
+            def rootManifest = new File(assetsDir, "_dir_manifest.txt")
+            rootManifest.text = rootSubdirs.sort().join('\n') + '\n'
+            println "Generated root manifest: ${rootManifest.path} with ${rootSubdirs.size()} entries"
+        }
+    }
+}
+
 // keep assets in sync with the output directory
 tasks.register('copyAssets', Copy) {
     from "${rootProject.projectDir}/output/assets"
@@ -86,6 +129,7 @@ tasks.register('copyAssets', Copy) {
 
     dependsOn(lintVitalAnalyzeRelease)
     dependsOn(generateReleaseLintVitalReportModel)
+    dependsOn(generateAssetManifests)
 
     inputs.dir "${rootProject.projectDir}/output/assets"
     outputs.dir "${project.projectDir}/src/main/assets"
@@ -93,6 +137,10 @@ tasks.register('copyAssets', Copy) {
 
 // make sure copyAssets runs before the mergeAssets task and after the externalNativeBuild task
 android.applicationVariants.configureEach { variant ->
+    // generateAssetManifests must run after native build (which copies resources)
+    tasks.named("generateAssetManifests").configure {
+        dependsOn tasks.named("externalNativeBuild${variant.name.capitalize()}")
+    }
     tasks.named("copyAssets").configure {
        dependsOn tasks.named("externalNativeBuild${variant.name.capitalize()}")
     }

@@ -632,8 +632,6 @@ GLTFLoader::GLTFLoader(Path asset_root) : SceneLoader(std::move(asset_root))
     };
 
     file_callback.FileExists = [file_manager](const std::string &filepath, void *user_data) {
-        Log(Debug, "GLTF check file exist: {}", filepath);
-
         const auto &root_path = *reinterpret_cast<const Path *>(user_data);
         const auto &path_object = Path(filepath, root_path.type);
 
