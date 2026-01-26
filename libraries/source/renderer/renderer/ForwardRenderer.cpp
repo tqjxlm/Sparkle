@@ -278,14 +278,12 @@ void ForwardRenderer::HandleSceneChanges()
     {
         bool need_rebuild_tlas = false;
         std::unordered_set<uint32_t> primitives_to_update;
-        for (const auto &[from, to, type] : scene_render_proxy_->GetPrimitiveChangeList())
+        for (const auto &[type, primitive, from, to] : scene_render_proxy_->GetPrimitiveChangeList())
         {
-            auto *to_primitive = scene_render_proxy_->GetPrimitives()[to];
-
             switch (type)
             {
             case SceneRenderProxy::PrimitiveChangeType::New:
-                RegisterBLAS(to_primitive);
+                RegisterBLAS(primitive);
                 need_rebuild_tlas = true;
                 break;
             case SceneRenderProxy::PrimitiveChangeType::Remove:
@@ -293,7 +291,7 @@ void ForwardRenderer::HandleSceneChanges()
                 need_rebuild_tlas = true;
                 break;
             case SceneRenderProxy::PrimitiveChangeType::Move:
-                RegisterBLAS(to_primitive);
+                RegisterBLAS(primitive);
                 need_rebuild_tlas = true;
                 break;
             case SceneRenderProxy::PrimitiveChangeType::Update:
@@ -382,6 +380,8 @@ void ForwardRenderer::RegisterBLAS(PrimitiveRenderProxy *primitive)
     {
         return;
     }
+
+    ASSERT(primitive->GetPrimitiveIndex() != UINT_MAX);
 
     const auto *mesh = primitive->As<MeshRenderProxy>();
 

@@ -31,9 +31,10 @@ public:
 
     struct PrimitiveChange
     {
+        PrimitiveChangeType type;
+        PrimitiveRenderProxy *primitive;
         uint32_t from_id = std::numeric_limits<uint32_t>::max();
         uint32_t to_id = std::numeric_limits<uint32_t>::max();
-        PrimitiveChangeType type;
     };
 
     SceneRenderProxy();
@@ -42,11 +43,17 @@ public:
 
 #pragma region SceneComponents
 
+    [[nodiscard]] auto *GetPrimitive(uint32_t id) const
+    {
+        return id < primitives_.size() ? primitives_[id] : nullptr;
+    }
+
     [[nodiscard]] const auto &GetPrimitives() const
     {
         return primitives_;
     }
 
+    // get the change list this frame. it is guaranteed to be valid for only one frame.
     [[nodiscard]] const auto &GetPrimitiveChangeList() const
     {
         return primitive_changes_;

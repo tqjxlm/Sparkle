@@ -111,11 +111,9 @@ void BindlessManager::UnregisterTexture(RHIImage *rhi_image)
     }
 }
 
-void BindlessManager::UpdatePrimitive(uint32_t primitive_id)
+void BindlessManager::UpdatePrimitive(PrimitiveRenderProxy *primitive)
 {
     ASSERT(is_valid_);
-
-    auto *primitive = scene_proxy_->GetPrimitives()[primitive_id];
 
     if (!primitive->IsMesh())
     {
@@ -159,7 +157,7 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
         std::vector<uint32_t> data_to_update;
         std::vector<uint32_t> id_to_update;
 
-        for (const auto &[from, to, type] : scene_proxy_->GetPrimitiveChangeList())
+        for (const auto &[type, primitive, from, to] : scene_proxy_->GetPrimitiveChangeList())
         {
             switch (type)
             {
@@ -167,11 +165,13 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
             case SceneRenderProxy::PrimitiveChangeType::Move: {
                 // we treat new primitives and updated primitives in exactly the same way,
                 // as we do not care about empty or stale ids which will not be referenced anyway
-                UpdatePrimitive(to);
+                if (primitive->GetPrimitiveIndex() != UINT_MAX)
+                {
+                    UpdatePrimitive(primitive);
 
-                auto *primitive = scene_proxy_->GetPrimitives()[to];
-                data_to_update.push_back(primitive->GetMaterialRenderProxy()->GetRenderIndex());
-                id_to_update.push_back(to);
+                    data_to_update.push_back(primitive->GetMaterialRenderProxy()->GetRenderIndex());
+                    id_to_update.push_back(to);
+                }
             }
             break;
             case SceneRenderProxy::PrimitiveChangeType::Remove:

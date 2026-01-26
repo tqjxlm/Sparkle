@@ -12,6 +12,7 @@
 #include "scene/material/Material.h"
 
 #include <queue>
+#include <ranges>
 
 namespace sparkle
 {
@@ -100,14 +101,14 @@ void Scene::RecreateRenderProxy()
         }
     });
 
-    for (auto [material, _] : material_usage_)
+    for (auto *material : material_usage_ | std::views::keys)
     {
         material->DestroyRenderProxy();
     }
 
     render_proxy_ = CreateRenderProxy();
 
-    for (auto [material, _] : material_usage_)
+    for (auto *material : material_usage_ | std::views::keys)
     {
         render_proxy_->AddMaterial(material->CreateRenderProxy());
     }

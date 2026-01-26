@@ -8,6 +8,7 @@
 namespace sparkle
 {
 class SceneRenderProxy;
+class PrimitiveRenderProxy;
 
 enum class BindlessResourceType : uint8_t
 {
@@ -71,7 +72,7 @@ public:
     void InitRenderResources(RHIContext *rhi);
 
 protected:
-    void UpdatePrimitive(uint32_t primitive_id);
+    void UpdatePrimitive(PrimitiveRenderProxy *primitive);
 
 private:
     RHIResourceRef<RHIResourceArray> texture_array_;
