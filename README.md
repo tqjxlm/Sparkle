@@ -359,7 +359,6 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 
 ### IO
 
-* [ ] allow loading scene from UI
 * [ ] full USD support (current one is far from complete)
 * [ ] external data loader interface
 
@@ -373,7 +372,6 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 ### Build
 
 * [ ] Linux support
-* [ ] make all prerequisites auto-installable
 
 ### Infrastructure
 
