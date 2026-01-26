@@ -27,7 +27,8 @@ public:
         return *instance_;
     }
 
-    template <std::invocable<> Func> auto EnqueueTask(Func &&task, TargetThread target_thread)
+    template <std::invocable<> Func>
+    auto EnqueueTask(Func &&task, TargetThread target_thread, bool allow_run_now = true)
     {
         using ReturnType = std::invoke_result_t<Func>;
         std::function<ReturnType()> func = std::forward<Func>(task);
@@ -51,7 +52,7 @@ public:
         ThreadName thread_name = GetTargetThreadName(target_thread);
 
         // it is possible the caller is already in the target thread
-        bool run_now = ThreadManager::IsInCurrentThread(thread_name);
+        bool run_now = allow_run_now && ThreadManager::IsInCurrentThread(thread_name);
         if (run_now)
         {
             task_to_dispatch();
@@ -64,19 +65,19 @@ public:
         return future;
     }
 
-    template <std::invocable<> Func> static auto RunInMainThread(Func &&task)
+    template <std::invocable<> Func> static auto RunInMainThread(Func &&task, bool allow_run_now = true)
     {
-        return TaskManager::Instance().EnqueueTask(std::forward<Func>(task), TargetThread::Main);
+        return TaskManager::Instance().EnqueueTask(std::forward<Func>(task), TargetThread::Main, allow_run_now);
     }
 
-    template <std::invocable<> Func> static auto RunInRenderThread(Func &&task)
+    template <std::invocable<> Func> static auto RunInRenderThread(Func &&task, bool allow_run_now = true)
     {
-        return TaskManager::Instance().EnqueueTask(std::forward<Func>(task), TargetThread::Render);
+        return TaskManager::Instance().EnqueueTask(std::forward<Func>(task), TargetThread::Render, allow_run_now);
     }
 
-    template <std::invocable<> Func> static auto RunInWorkerThread(Func &&task)
+    template <std::invocable<> Func> static auto RunInWorkerThread(Func &&task, bool allow_run_now = true)
     {
-        return TaskManager::Instance().EnqueueTask(std::forward<Func>(task), TargetThread::Worker);
+        return TaskManager::Instance().EnqueueTask(std::forward<Func>(task), TargetThread::Worker, allow_run_now);
     }
 
     template <typename Func> static auto ParallelFor(unsigned first_index, unsigned index_after_last, Func &&task)

@@ -51,6 +51,8 @@ protected:
     std::unique_ptr<RenderProxy> CreateRenderProxy() override;
 
 private:
+    void LogCookStatus() const;
+
     Vector3 color_ = Vector3(0.5f, 0.7f, 1.0f);
 
     std::unique_ptr<Image2D> sky_map_;
@@ -60,6 +62,7 @@ private:
     std::unique_ptr<Image2DCube> cube_map_;
 
     bool cooked_ = false;
+    std::atomic<int32_t> cooked_row_count_ = 0;
 
     Vector3 sun_brightness_ = Ones;
 

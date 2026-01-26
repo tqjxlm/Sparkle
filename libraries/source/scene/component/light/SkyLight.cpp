@@ -11,6 +11,8 @@
 
 namespace sparkle
 {
+constexpr unsigned CubeMapSize = 1024;
+
 SkyLight::SkyLight() = default;
 
 SkyLight::~SkyLight()
@@ -65,8 +67,6 @@ void SkyLight::Cook()
     // TODO(tqjxlm): cache cook results
     ASSERT(sky_map_);
 
-    constexpr unsigned CubeMapSize = 1024;
-
     cube_map_ = std::make_unique<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16,
                                               sky_map_->GetName() + "_CubeMap");
 
@@ -79,6 +79,8 @@ void SkyLight::Cook()
     std::ranges::fill(subtracted_color_per_face, Zeros);
 
     std::vector<std::shared_ptr<TaskFuture<void>>> cube_map_tasks(Image2DCube::FaceId::Count);
+
+    cooked_row_count_ = 0;
 
     for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
     {
@@ -124,9 +126,14 @@ void SkyLight::Cook()
                             subtracted_color_per_face[face_id] += subtracted_color * solid_angle;
                         }
                     }
+
+                    cooked_row_count_++;
                 }
             });
     }
+
+    // kick off the log timer
+    TaskManager::RunInMainThread([this]() { LogCookStatus(); });
 
     TaskManager::OnAll(cube_map_tasks)->Wait();
 
@@ -153,6 +160,23 @@ void SkyLight::Cook()
         utilities::VectorToString(sun_brightness_));
 
     cooked_ = true;
+}
+
+void SkyLight::LogCookStatus() const
+{
+    // TODO(tqjxlm): it's better to use some kind of repeat timer
+    float progress = static_cast<float>(cooked_row_count_.load()) / (CubeMapSize * Image2DCube::FaceId::Count) * 100.f;
+    Logger::LogToScreen("SkyLight::Cook", fmt::format("Cooking sky map {:.1f}%", progress));
+
+    if (!cooked_)
+    {
+        // keep logging until we are finished
+        TaskManager::RunInMainThread([this]() { LogCookStatus(); }, false);
+    }
+    else
+    {
+        Logger::LogToScreen("SkyLight::Cook", "");
+    }
 }
 
 } // namespace sparkle
