@@ -4,6 +4,7 @@
 #include "core/Logger.h"
 
 #include <android/asset_manager.h>
+#include <sstream>
 
 namespace sparkle
 {
@@ -105,6 +106,31 @@ std::vector<Path> AndroidFileManager::ListDirectory(const Path &dirpath)
         }
 
         auto resource_path = ResourceRoot / dirpath.path;
+
+        // Android's AAssetDir_getNextFileName() only returns files, not subdirectories.
+        // We use a manifest file (_dir_manifest.txt) generated at build time to list subdirectories.
+        auto manifest_path = resource_path / "_dir_manifest.txt";
+        AAsset *manifest_asset = AAssetManager_open(asset_manager_, manifest_path.c_str(), AASSET_MODE_BUFFER);
+        if (manifest_asset != nullptr)
+        {
+            auto size = AAsset_getLength64(manifest_asset);
+            std::string manifest_content(static_cast<size_t>(size), '\0');
+            AAsset_read(manifest_asset, manifest_content.data(), size);
+            AAsset_close(manifest_asset);
+
+            // Parse manifest - each line is a subdirectory name
+            std::istringstream stream(manifest_content);
+            std::string line;
+            while (std::getline(stream, line))
+            {
+                if (!line.empty())
+                {
+                    entries.emplace_back(dirpath.path / line, dirpath.type);
+                }
+            }
+        }
+
+        // Also iterate files using standard API (AAssetDir only returns files, not directories)
         AAssetDir *asset_dir = AAssetManager_openDir(asset_manager_, resource_path.c_str());
         if (asset_dir == nullptr)
         {
@@ -112,18 +138,18 @@ std::vector<Path> AndroidFileManager::ListDirectory(const Path &dirpath)
             return entries;
         }
 
-        Log(Info, "Iterating asset dir {}", resource_path.string());
-
         const char *filename;
         while ((filename = AAssetDir_getNextFileName(asset_dir)) != nullptr)
         {
-            Log(Info, "Found item in asset dir {}", filename);
-
-            std::string full_path = resource_path / filename;
-            entries.emplace_back(full_path, dirpath.type);
+            // Skip the manifest file itself
+            if (std::string(filename) == "_dir_manifest.txt")
+            {
+                continue;
+            }
+            entries.emplace_back(dirpath.path / filename, dirpath.type);
         }
-
         AAssetDir_close(asset_dir);
+
         return entries;
     }
 
