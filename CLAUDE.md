@@ -134,6 +134,13 @@ The build system automatically handles:
 - `NativeView` handles platform-specific windowing and input
 - `RenderFramework` manages the rendering pipeline lifecycle
 
+**Task System (`libraries/include/core/task/`):**
+
+- `TaskManager` provides modern C++ task scheduling and parallel execution
+- `TaskDispatcher` handles task distribution across worker threads
+- `TaskFuture` enables asynchronous task result handling
+- Supports both CPU-bound and I/O-bound task execution
+
 **RHI Layer (`libraries/include/rhi/`):**
 
 - Minimal abstraction over Vulkan and Metal
@@ -231,6 +238,8 @@ shaders/
 **External Requirements:**
 
 - **Vulkan SDK 1.4.313.0+** (for Vulkan builds) - Required environment variable `VULKAN_SDK`
+- **CMake 3.30.5+** (automatically managed by build system)
+- **Ninja 1.12.1+** (automatically managed by build system)
 - **GLFW3** (automatically handled by build system for GLFW platform builds)
 - **Android Studio** (for Android builds - includes JBR and NDK)
   - Alternative: JDK 17+ and Android NDK separately
@@ -246,15 +255,30 @@ shaders/
 - **Tracy**: Profiler
 - **STB**: Image loading/writing
 - **TinyGLTF**: glTF model loading
+- **TinyUSDZ**: USD file format support
 - **nlohmann/json**: JSON parsing
 - **spdlog**: Logging framework
 - **magic_enum**: Enum reflection
-- **mimalloc**: Memory allocator
+- **mimalloc 3.x**: High-performance memory allocator
 - **VMA**: Vulkan Memory Allocator
 - **SPIRV-Reflect**: SPIRV reflection
-- 15+ additional libraries in `thirdparty/`
+- **cpptrace**: Stack trace generation
+- **thread-pool**: Modern C++ thread pool
+- **hash-library**: Fast hash functions
+- **fast_float**: High-performance string to float conversion
+- **bvh**: Bounding Volume Hierarchy
+- **argparse**: Command line argument parsing
+- **xoshiro_cpp**: High-quality random number generation
+- **volk**: Vulkan meta-loader
+- 20+ additional libraries in `thirdparty/`
 
 All third-party dependencies are automatically managed through git submodules and require no manual installation.
+
+**Centralized Prerequisites Management:**
+
+- Version requirements centralized in `prerequisites.json`
+- Automatic version validation and environment setup
+- Consistent toolchain versions across all platforms
 
 ## Build System Architecture
 
@@ -273,6 +297,12 @@ The build system consists of several key components:
 - `build_system/macos/build.py` - macOS native application builds  
 - `build_system/ios/build.py` - iOS application builds with device deployment
 - `build_system/android/build.py` - Android APK builds with Gradle integration
+
+**Prerequisites Management (`build_system/prerequisites.py`):**
+
+- Centralized version control for external dependencies
+- Automatic validation of required tool versions
+- Environment setup and configuration management
 
 **Shared Utilities (`build_system/utils.py`):**
 
@@ -332,7 +362,10 @@ Sparkle/
 ├── libraries/          # Core engine libraries
 │   ├── include/       # Header files
 │   │   ├── application/  # Application framework
-│   │   ├── core/        # Core utilities (logging, math, etc.)
+│   │   ├── core/        # Core utilities (logging, math, task system, etc.)
+│   │   │   ├── math/    # Mathematical utilities and types
+│   │   │   └── task/    # Modern C++ task system
+│   │   ├── io/          # I/O operations and file management
 │   │   ├── renderer/    # Rendering system
 │   │   ├── rhi/         # Graphics API abstraction
 │   │   └── scene/       # Scene management
@@ -352,6 +385,7 @@ Sparkle/
 ├── thirdparty/        # Third-party dependencies (git submodules)
 ├── build_system/      # Build configuration per platform
 ├── resources/         # Assets and configuration
+├── prerequisites.json # Centralized version requirements
 └── .github/           # CI/CD workflows
 ```
 
@@ -372,6 +406,14 @@ Sparkle/
 - **Python**: PEP8 (autopep8)
 - Stack trace generation on exceptions
 - Comprehensive logging with multiple levels
+- Always follow the coding style guidelines. Use clang-format, markdownlint, and autopep8 to validate your formatting.
+- Comment verbosity: describe structural and algorithmic design. Describe caveats and exceptions that are not immediately obvious.
+- Comment verbosity: avoid commenting self-explaining code. Treat every line as a final product that goes into the repository.
+- Write code that is self-explaining.
+- Review code strictly as if you are Linus Torvalds.
+- Remove unused code, arguments, variables, includes, etc.
+- Keep design clean and readable.
+- Use newest C++ features.
 
 ## Development Environment
 

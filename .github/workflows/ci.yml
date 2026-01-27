@@ -9,14 +9,50 @@ on:
       - 'LICENSE'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'ide/**'
-      - 'LICENSE'
 
 jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      docs_only: ${{ steps.check-docs-only.outputs.docs_only }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check if only documentation files changed
+        id: check-docs-only
+        run: |
+          # Get list of changed files
+          changed_files=$(git diff --name-only origin/main...HEAD)
+          echo "Changed files:"
+          echo "$changed_files"
+          
+          # Check if only documentation files were changed
+          docs_only=true
+          while IFS= read -r file; do
+            if [[ ! "$file" =~ \.md$ ]] && [[ ! "$file" =~ ^ide/ ]] && [[ "$file" != "LICENSE" ]]; then
+              docs_only=false
+              break
+            fi
+          done <<< "$changed_files"
+          
+          if [ "$docs_only" = true ]; then
+            echo "docs_only=true" >> $GITHUB_OUTPUT
+            echo "✓ Documentation-only changes detected"
+          else
+            echo "docs_only=false" >> $GITHUB_OUTPUT
+            echo "✓ Code changes detected, full CI will run"
+          fi
+      - name: Validate documentation changes
+        if: steps.check-docs-only.outputs.docs_only == 'true'
+        run: echo "✓ Documentation change validated successfully"
+
   build:
     runs-on: ${{ matrix.os }}
+    needs: docs-check
+    if: always() && needs.docs-check.outputs.docs_only != 'true'
 
     strategy:
       fail-fast: false
