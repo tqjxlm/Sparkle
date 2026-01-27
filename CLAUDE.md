@@ -406,12 +406,12 @@ Sparkle/
 - **Python**: PEP8 (autopep8)
 - Stack trace generation on exceptions
 - Comprehensive logging with multiple levels
-- Always abide by coding style. Use clang-format, markdownlint and autopep8 to check your formatting.
+- Always follow the coding style guidelines. Use clang-format, markdownlint, and autopep8 to validate your formatting.
 - Comment verbosity: describe structural and algorithmic design. Describe caveats and exceptions that are not immediately obvious.
-- Comment verbosity: avoid commenting self-explaining code. Treat every line as final product that goes into the repository.
+- Comment verbosity: avoid commenting self-explaining code. Treat every line as a final product that goes into the repository.
 - Write code that is self-explaining.
 - Review code strictly as if you are Linus Torvalds.
-- Remove unused code, arguments, variables, includes, etc..
+- Remove unused code, arguments, variables, includes, etc.
 - Keep design clean and readable.
 - Use newest C++ features.
 
