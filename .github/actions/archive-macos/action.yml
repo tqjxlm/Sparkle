@@ -26,7 +26,7 @@ runs:
   using: "composite"
   steps:
     - name: Import Code-Signing Certificates
-      uses: Apple-Actions/import-codesign-certs@v3
+      uses: Apple-Actions/import-codesign-certs@v6
       with:
         p12-file-base64: ${{ inputs.certificate-p12-base64 }}
         p12-password: ${{ inputs.certificate-password }}

@@ -13,8 +13,14 @@ toolchain_args = [
     f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"]
 
 
-def get_output_dir():
+def get_project_dir():
+    """Directory for CMake/Xcode project files."""
     return os.path.join(SCRIPTPATH, "project")
+
+
+def get_output_dir():
+    """Directory for build output (set by CMake PRODUCT_OUTPUT_DIRECTORY)."""
+    return os.path.join(SCRIPTPATH, "output", "build")
 
 
 def run_on_device(app_path):
@@ -95,14 +101,11 @@ def run_on_device(app_path):
     print("3. Build and run from Xcode")
 
 
-def get_app_path(args):
+def get_app_path():
     output_dir = get_output_dir()
     app_name = "sparkle.app"
-    if args["config"] == "Debug":
-        app_path = os.path.join(output_dir, "Debug-iphoneos", app_name)
-    else:
-        app_path = os.path.join(output_dir, "Release-iphoneos", app_name)
-    return app_path
+    # CMake outputs to the same directory regardless of config (RUNTIME_OUTPUT_DIRECTORY)
+    return os.path.join(output_dir, app_name)
 
 
 class IosBuilder(FrameworkBuilder):
@@ -141,7 +144,7 @@ class IosBuilder(FrameworkBuilder):
 
     def generate_project(self, args):
         """Generate Xcode project files."""
-        output_dir = get_output_dir()
+        output_dir = get_project_dir()
 
         if args.get("clean", False):
             robust_rmtree(output_dir)
@@ -194,7 +197,7 @@ class IosBuilder(FrameworkBuilder):
     def archive(self, args):
         """Archive the built project."""
         output_dir = get_output_dir()
-        app_path = get_app_path(args)
+        app_path = get_app_path()
         archive_path = os.path.join(output_dir, "sparkle.ipa")
 
         compress_zip(app_path, archive_path)
@@ -203,7 +206,7 @@ class IosBuilder(FrameworkBuilder):
 
     def run(self, args):
         """Run the built project."""
-        app_path = get_app_path(args)
+        app_path = get_app_path()
 
         if os.path.exists(app_path):
             print(f"\nBuilt app bundle is available at: {app_path}")

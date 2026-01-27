@@ -8,18 +8,21 @@ SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
 
 
-def get_output_dir():
+def get_project_dir():
+    """Directory for CMake/Xcode project files."""
     return os.path.join(SCRIPTPATH, "project")
 
 
-def get_app_path(args):
+def get_output_dir():
+    """Directory for build output (set by CMake PRODUCT_OUTPUT_DIRECTORY)."""
+    return os.path.join(SCRIPTPATH, "output", "build")
+
+
+def get_app_path():
     output_dir = get_output_dir()
     app_name = "sparkle.app"
-    if args["config"] == "Debug":
-        app_path = os.path.join(output_dir, "Debug", app_name)
-    else:
-        app_path = os.path.join(output_dir, "Release", app_name)
-    return app_path
+    # CMake outputs to the same directory regardless of config (RUNTIME_OUTPUT_DIRECTORY)
+    return os.path.join(output_dir, app_name)
 
 
 def try_archiving(app_path, archive_path):
@@ -121,7 +124,7 @@ class MacosBuilder(FrameworkBuilder):
 
     def generate_project(self, args):
         """Generate Xcode project files."""
-        output_dir = get_output_dir()
+        output_dir = get_project_dir()
 
         if args.get("clean", False):
             robust_rmtree(output_dir)
@@ -162,7 +165,7 @@ class MacosBuilder(FrameworkBuilder):
         """Archive the built project."""
 
         output_dir = get_output_dir()
-        app_path = get_app_path(args)
+        app_path = get_app_path()
         archive_path = os.path.join(output_dir, "product.zip")
 
         # try archiving with apple toolchain
@@ -177,7 +180,7 @@ class MacosBuilder(FrameworkBuilder):
 
     def run(self, args):
         """Run the built project."""
-        app_path = get_app_path(args)
+        app_path = get_app_path()
 
         if os.path.exists(app_path):
             executable_path = os.path.join(
