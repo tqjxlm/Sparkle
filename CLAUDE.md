@@ -16,7 +16,7 @@ python build.py --framework=android --run           # Build and run (Android dev
 **IDE Project Generation:**
 
 ```bash
-python build.py --framework=glfw --generate_only    # Visual Studio / Ninja
+python build.py --framework=glfw --generate_only    # Visual Studio (Windows)
 python build.py --framework=macos --generate_only   # Xcode (macOS)
 python build.py --framework=ios --generate_only     # Xcode (iOS)
 python build.py --framework=android --generate_only # Android Studio

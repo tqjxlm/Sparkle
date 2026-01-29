@@ -203,16 +203,16 @@ python3 build.py --framework macos
 ```
 
 ``` shell
-# generate an iOS Xcode project wihtout building
+# generate an iOS Xcode project without building
 export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
-export APPLE_DEVELOPER_TEAM=ABC123DEF4
+export APPLE_DEVELOPER_TEAM_ID =ABC123DEF4
 python3 build.py --framework ios --apple_auto_sign --generate_only
 ```
 
 ``` shell
 # make an iOS release build and run on a connected device in ray tracing mode
 export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
-export APPLE_DEVELOPER_TEAM=ABC123DEF4
+export APPLE_DEVELOPER_TEAM_ID =ABC123DEF4
 python3 build.py --framework ios --apple_auto_sign --run --pipeline gpu
 ```
 
