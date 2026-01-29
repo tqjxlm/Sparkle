@@ -61,11 +61,11 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 ### Tested on Devices
 
-| platform | windows          | android          | macos        | ios       |
-| -------- | ---------------- | ---------------- | ------------ | --------- |
-| system   | windows 11       | android 13       | macos 15.5   | ios 18.5  |
-| cpu      | Ryzen 5975WX     | Snapdragon 8Gen2 | Apple M3 Pro | Apple A18 |
-| gpu      | GeForce RTX 4080 | Adreno 740       | Apple M3 Pro | Apple A18 |
+| platform | windows          | android          | macos        | ios           |
+| -------- | ---------------- | ---------------- | ------------ | ------------- |
+| system   | windows 11       | android 13       | macos 26.2   | ios 26.2      |
+| cpu      | Ryzen 5975WX     | Snapdragon 8Gen2 | Apple M3 Pro | Apple A18 Pro |
+| gpu      | GeForce RTX 4080 | Adreno 740       | Apple M3 Pro | Apple A18 Pro |
 
 ## Dependencies
 
@@ -206,14 +206,14 @@ python3 build.py --framework macos
 # generate an iOS Xcode project wihtout building
 export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
 export APPLE_DEVELOPER_TEAM=ABC123DEF4
-python3 build.py --framework ios --generate_only
+python3 build.py --framework ios --apple_auto_sign --generate_only
 ```
 
 ``` shell
 # make an iOS release build and run on a connected device in ray tracing mode
 export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
 export APPLE_DEVELOPER_TEAM=ABC123DEF4
-python3 build.py --framework ios --run --pipeline gpu
+python3 build.py --framework ios --apple_auto_sign --run --pipeline gpu
 ```
 
 ### Build via Script
@@ -275,36 +275,13 @@ Search across the project for keyword "ConfigValue" for more available configs.
 
 Sometimes you want better debugging or intellisense support from IDEs. Follow the instructions below to generate IDE project files.
 
-### Visual Studio / Rider / Clion (Only for glfw framework on Windows)
-
-``` shell
-python3 build.py --framework=glfw --generate_only
-start build_system/glfw/project/sparkle.sln
-select sparkle as start up project
-```
-
-### Xcode (Only for macos/ios framework on MacOS)
-
-``` shell
-python3 build.py --framework=macos --generate_only     # or --framework=ios
-open build_system/macos/project/sparkle.xcodeproj      # or build_system/ios/project/sparkle.xcodeproj
-select sparkle as start up target
-```
-
-### Android Studio (Only for android framework)
-
-* Open project folder `build_system/android` in Android Studio
-* Sync project with Gradle files
-* Select debug or release build in build configuration panel
-* Select "Run" or "Debug" to run on your device
-
 ### Visual Studio Code (All platforms)
 
-This project is configured to work with VSCode perfectly (I use it heavily when developing this project). There are some steps to setup.
+This project is configured to work with VSCode perfectly (I use it heavily when developing this project). Follow the steps to set up.
 
 #### Intellisense
 
-1. **Install toolchain**: For MacOS and iOS, install Xcode. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
+1. **Install toolchain**: For MacOS and iOS, install Xcode. For Windows, install clang-cl via Visual Studio Installer. For Android, install Android Studio.
 2. **Generate project configuration**:
 
    ``` shell
@@ -326,19 +303,43 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 4. **Configure paths**: Modify paths in `.vscode/launch.json` to match your environment.
 5. **Start debugging session**: Follow [vscode documentation](<https://code.visualstudio.com/docs/cpp/launch-json-reference>)
 
+### Visual Studio / Rider / Clion (Only for glfw framework on Windows)
+
+``` shell
+python3 build.py --framework=glfw --generate_only
+start build_system/glfw/project/sparkle.sln
+# select sparkle as start up project
+```
+
+### Xcode (Only for macos/ios frameworks on MacOS)
+
+``` shell
+python3 build.py --framework=macos --generate_only     # or --framework=ios
+open build_system/macos/project/sparkle.xcodeproj      # or build_system/ios/project/sparkle.xcodeproj
+# select sparkle as start up target
+```
+
+### Android Studio (Only for android framework)
+
+``` shell
+python3 build.py --framework=android --generate_only
+# open project folder `build_system/android` in Android Studio
+# select debug or release build in build configuration panel
+```
+
 ## Todo list
 
 ### CI/CD
 
-* [ ] format and style check workflow
-* [ ] unit test workflow
-* [ ] functional test workflow
-* [ ] performance test workflow
+* [ ] format and style check pipeline
+* [ ] unit test pipeline
+* [ ] functional test pipeline
+* [ ] performance test pipeline
 
 ### Path Tracing Renderers
 
-* [ ] denoiser
-* [ ] ReSTIR
+* [ ] ASVGF
+* [ ] vendor-specific denoising and super sampling
 * [ ] dynamic scene
 
 ### Rasterization Renderers
@@ -364,8 +365,8 @@ This project is configured to work with VSCode perfectly (I use it heavily when 
 
 ### Cook
 
-* [ ] standalone cooker bake resources
-* [ ] built-in shader compiler
+* [ ] standalone cooker
+* [ ] standalone shader compiler
 * [ ] texture compression
 * [ ] slang support for metal
 
