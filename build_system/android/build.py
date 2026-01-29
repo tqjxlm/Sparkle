@@ -195,14 +195,14 @@ def sync_only(args):
         sync_cmd = [
             gradlew_path,
             "generateJsonModelDebug",
-            f"-PcmakeArgs={cmake_args}",
+            f"-PcmakeArgs={' '.join(cmake_args)}",
             "--info",
         ]
     else:
         sync_cmd = [
             gradlew_path,
             "generateJsonModelRelease",
-            f"-PcmakeArgs={cmake_args}",
+            f"-PcmakeArgs={' '.join(cmake_args)}",
             "--info",
         ]
 
