@@ -21,7 +21,8 @@ jobs:
           filters: |
             code:
               - '**'
-              - '!*.md'
+              - '!**/*.md'
+              - '!docs/**'
               - '!ide/**'
               - '!LICENSE'
 
@@ -30,3 +31,11 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/build.yml
     secrets: inherit
+
+  ci:
+    if: always()
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
