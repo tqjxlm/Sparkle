@@ -20,11 +20,17 @@ jobs:
         with:
           filters: |
             code:
-              - '**'
-              - '!**/*.md'
-              - '!docs/**'
-              - '!ide/**'
-              - '!LICENSE'
+              - 'libraries/**'
+              - 'frameworks/**'
+              - 'shaders/**'
+              - 'thirdparty/**'
+              - 'build_system/**'
+              - 'resources/**'
+              - '.github/**'
+              - '.gitmodules'
+              - 'CMakeLists.txt'
+              - 'build.py'
+              - 'prerequisites.json'
 
   build:
     needs: changes
