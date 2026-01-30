@@ -3,6 +3,7 @@
 ## CI
 
 * A CI pipeline is setup in github [actions](https://github.com/tqjxlm/Sparkle/actions) at .github/workflows/ci.yml
+* Pushing tags will generate releases on github. The release process is defined in .github/workflows/release.yml.
 * All PRs are required to pass CI before merging.
 * For now, there's only building test. I will add unit test, functional test, performance test and style check later.
 * Archived builds will be uploaded on successful runs. You can download them from the [actions](https://github.com/tqjxlm/Sparkle/actions) page.
