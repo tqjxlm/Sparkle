@@ -3,111 +3,30 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'ide/**'
-      - 'LICENSE'
   pull_request:
     branches: [main]
 
 jobs:
-  docs-check:
+  changes:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
     outputs:
-      docs_only: ${{ steps.check-docs-only.outputs.docs_only }}
+      code: ${{ steps.filter.outputs.code }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
         with:
-          fetch-depth: 0
-      - name: Check if only documentation files changed
-        id: check-docs-only
-        run: |
-          # Get list of changed files
-          changed_files=$(git diff --name-only origin/main...HEAD)
-          echo "Changed files:"
-          echo "$changed_files"
-          
-          # Check if only documentation files were changed
-          docs_only=true
-          while IFS= read -r file; do
-            if [[ ! "$file" =~ \.md$ ]] && [[ ! "$file" =~ ^ide/ ]] && [[ "$file" != "LICENSE" ]]; then
-              docs_only=false
-              break
-            fi
-          done <<< "$changed_files"
-          
-          if [ "$docs_only" = true ]; then
-            echo "docs_only=true" >> $GITHUB_OUTPUT
-            echo "✓ Documentation-only changes detected"
-          else
-            echo "docs_only=false" >> $GITHUB_OUTPUT
-            echo "✓ Code changes detected, full CI will run"
-          fi
-      - name: Validate documentation changes
-        if: steps.check-docs-only.outputs.docs_only == 'true'
-        run: echo "✓ Documentation change validated successfully"
+          filters: |
+            code:
+              - '**'
+              - '!*.md'
+              - '!ide/**'
+              - '!LICENSE'
 
   build:
-    runs-on: ${{ matrix.os }}
-    needs: docs-check
-    if: always() && needs.docs-check.outputs.docs_only != 'true'
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-        framework: [android, glfw, macos, ios]
-        build_type: [Debug, Release]
-        exclude:
-          - os: windows-latest
-            framework: macos
-          - os: windows-latest
-            framework: android
-          - os: windows-latest
-            framework: ios
-      max-parallel: 16
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Environment
-        id: setup-environment
-        uses: ./.github/actions/setup-environment
-        with:
-          framework: ${{ matrix.framework }}
-          os: ${{ matrix.os }}
-
-      - name: Setup Signing Certificates (iOS)
-        if: matrix.framework == 'ios'
-        uses: ./.github/actions/setup-certs-ios
-        with:
-          certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
-          certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
-          team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
-          appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
-          appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
-          appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
-
-      - name: Build
-        run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --archive ${{ steps.setup-environment.outputs.build-args }}
-
-      - name: Archive App Bundle (macOS)
-        if: matrix.framework == 'macos'
-        uses: ./.github/actions/archive-macos
-        with:
-          certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-          signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
-          notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
-          team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
-          app-path: build_system/${{ matrix.framework }}/product/${{ matrix.framework }}-macos-${{ matrix.build_type }}.zip
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.framework }}-${{ matrix.os }}-${{ matrix.build_type }}
-          path: build_system/${{ matrix.framework }}/product
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
