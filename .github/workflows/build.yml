@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
         framework: [android, glfw, macos, ios]
         build_type: ${{ fromJSON(format('[{0}]', inputs.build_type)) }}
         exclude:
@@ -25,6 +25,14 @@ jobs:
             framework: android
           - os: windows-latest
             framework: ios
+          - os: ubuntu-latest
+            framework: macos
+          - os: ubuntu-latest
+            framework: ios
+          - os: ubuntu-latest
+            framework: glfw
+          - os: macos-latest
+            framework: android
       max-parallel: 16
 
     steps:
