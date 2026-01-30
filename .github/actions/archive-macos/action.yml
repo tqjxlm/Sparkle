@@ -58,7 +58,15 @@ runs:
     - name: Staple notarization ticket
       shell: bash
       run: |
-        xcrun stapler staple "$RUNNER_TEMP/build/sparkle.app"
+        for attempt in 1 2 3; do
+          if xcrun stapler staple "$RUNNER_TEMP/build/sparkle.app"; then
+            exit 0
+          fi
+          echo "Stapling attempt $attempt failed, retrying in 15 seconds..."
+          sleep 15
+        done
+        echo "Stapling failed after 3 attempts"
+        exit 1
 
     - name: Create final distribution archive
       shell: bash
