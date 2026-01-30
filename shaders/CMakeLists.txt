@@ -12,7 +12,11 @@ endif()
 message("Vulkan SDK from environment " $ENV{VULKAN_SDK})
 
 find_program(SPIRV_CROSS spirv-cross HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
-find_program(SLANGC slangc HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/bin/)
+if(DEFINED ENV{SLANGC})
+    set(SLANGC $ENV{SLANGC})
+else()
+    find_program(SLANGC slangc HINTS /usr/bin /usr/local/bin)
+endif()
 
 set(OUTPUT_SHADER_DIRECTORY ${PROJECT_RESOURCE_DIRECTORY}/shaders)
 file(MAKE_DIRECTORY "${OUTPUT_SHADER_DIRECTORY}/standard")
