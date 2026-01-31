@@ -1,7 +1,8 @@
 import os
 import subprocess
+import zipfile
 
-from build_system.utils import compress_zip, run_command_with_logging, robust_rmtree
+from build_system.utils import run_command_with_logging, robust_rmtree
 from build_system.builder_interface import FrameworkBuilder
 
 SCRIPT = os.path.abspath(__file__)
@@ -195,12 +196,23 @@ class IosBuilder(FrameworkBuilder):
         run_command_with_logging(build_cmd, log_file, "Building iOS project")
 
     def archive(self, args):
-        """Archive the built project."""
+        """Archive the built project as an IPA (requires Payload/ directory structure)."""
         output_dir = get_output_dir()
         app_path = get_app_path()
         archive_path = os.path.join(output_dir, "sparkle.ipa")
 
-        compress_zip(app_path, archive_path)
+        if not os.path.isdir(app_path):
+            raise FileNotFoundError(f"App bundle not found: {app_path}")
+
+        app_name = os.path.basename(app_path)
+        with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(app_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.join(
+                        "Payload", app_name,
+                        os.path.relpath(file_path, app_path))
+                    zf.write(file_path, arcname)
 
         return archive_path
 
