@@ -478,6 +478,93 @@ def install_vulkan_sdk(build_cache_dir):
         raise Exception()
 
 
+def install_slangc(build_cache_dir):
+    """Install slangc (Slang shader compiler) to build_cache directory."""
+    prerequisites = load_prerequisites_versions()
+    slang_version = prerequisites.get("slang", "2026.1.1")
+
+    slang_dir = os.path.join(build_cache_dir, "slang")
+    slangc_executable = os.path.join(slang_dir, "bin", "slangc")
+    if is_windows:
+        slangc_executable += ".exe"
+
+    if os.path.exists(slangc_executable):
+        print("slangc already installed in build_cache.")
+        return slangc_executable
+
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if machine in ("amd64", "x86_64"):
+        arch = "x86_64"
+    elif machine in ("arm64", "aarch64"):
+        arch = "aarch64"
+    else:
+        print(
+            f"Error: Unsupported architecture '{machine}' for slangc installation.")
+        raise Exception()
+
+    if system == "windows":
+        platform_name = "windows"
+    elif system == "darwin":
+        platform_name = "macos"
+    elif system == "linux":
+        platform_name = "linux"
+    else:
+        print(
+            f"Error: Unsupported platform '{system}' for slangc installation.")
+        raise Exception()
+
+    filename = f"slang-{slang_version}-{platform_name}-{arch}.zip"
+    download_url = f"https://github.com/shader-slang/slang/releases/download/v{slang_version}/{filename}"
+
+    try:
+        download_path = os.path.join(build_cache_dir, filename)
+
+        print(f"Downloading slangc {slang_version}...")
+        print(f"URL: {download_url}")
+
+        download_file(download_url, download_path)
+
+        print("Extracting slangc...")
+        os.makedirs(slang_dir, exist_ok=True)
+        extract_zip(download_path, slang_dir)
+
+        if not is_windows:
+            os.chmod(slangc_executable, 0o755)
+
+        os.remove(download_path)
+
+        if os.path.exists(slangc_executable):
+            print(f"slangc {slang_version} installed successfully!")
+            return slangc_executable
+        else:
+            print(
+                f"Error: slangc executable not found after installation: {slangc_executable}")
+            raise Exception()
+
+    except Exception as e:
+        print(f"Error installing slangc: {e}")
+        print("Please install slangc manually from: https://github.com/shader-slang/slang/releases")
+        raise Exception()
+
+
+def find_slangc():
+    """Find slangc or install it automatically. Returns the path to the slangc executable."""
+    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
+    slang_dir = os.path.join(build_cache_dir, "slang")
+    slangc_executable = os.path.join(slang_dir, "bin", "slangc")
+    if is_windows:
+        slangc_executable += ".exe"
+
+    if os.path.exists(slangc_executable):
+        return slangc_executable
+
+    print("slangc not found. Installing to build_cache...")
+    os.makedirs(build_cache_dir, exist_ok=True)
+    return install_slangc(build_cache_dir)
+
+
 def find_llvm_path():
     """Find LLVM installation path automatically."""
     if is_windows:
@@ -503,7 +590,7 @@ def find_llvm_path():
         if os.path.exists(xcode_clang_path) and os.path.exists(xcode_clangpp_path):
             print("Found Xcode clang at: /usr")
             return "/usr"
-        
+
         # 2. Try Homebrew LLVM paths as fallback
         homebrew_paths = [
             "/opt/homebrew/opt/llvm",  # Apple Silicon
@@ -515,7 +602,7 @@ def find_llvm_path():
             if os.path.exists(clang_path) and os.path.exists(clangpp_path):
                 print(f"Found LLVM via Homebrew at: {llvm_path}")
                 return llvm_path
-        
+
         # 3. Try to install Homebrew LLVM if nothing found
         print("LLVM not found. Attempting to install via Homebrew...")
         try:
@@ -535,7 +622,7 @@ def find_llvm_path():
         except Exception as e:
             print("Failed to install LLVM via Homebrew. Please install manually.")
             print(f"Error: {e}")
-        
+
         return None
 
     # Try to find clang in PATH (non-macOS or fallback)

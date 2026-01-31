@@ -92,6 +92,19 @@ def prepare_environment(args=None):
                 if os.path.exists(path):
                     java_home = path
                     break
+        elif platform.system() == "Linux":
+            possible_paths = [
+                "/usr/lib/jvm/temurin-17-jdk-amd64",
+                "/usr/lib/jvm/java-17-openjdk-amd64",
+                "/usr/lib/jvm/java-17",
+                "/opt/android-studio/jbr",
+                os.path.expanduser("~/android-studio/jbr"),
+                "/snap/android-studio/current/android-studio/jbr",
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    java_home = path
+                    break
 
     if java_home and os.path.exists(java_home):
         os.environ["JAVA_HOME"] = java_home
@@ -110,6 +123,9 @@ def prepare_environment(args=None):
         if platform.system() == "Darwin":
             print(
                 "   Example: export JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home'")
+        elif platform.system() == "Linux":
+            print(
+                "   Example: export JAVA_HOME='/usr/lib/jvm/java-17-openjdk-amd64'")
         raise Exception()
 
     # Ensure gradle-wrapper.jar exists

@@ -6,7 +6,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from build_system.prerequisites import find_cmake, find_and_set_vulkan_sdk
+from build_system.prerequisites import find_cmake, find_and_set_vulkan_sdk, find_slangc
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -88,6 +88,10 @@ def check_environment(args):
         args["cmake_executable"] = cmake_executable
 
     find_and_set_vulkan_sdk()
+
+    slangc_path = find_slangc()
+    os.environ["SLANGC"] = slangc_path
+    print(f"Using slangc: {slangc_path}")
 
     # Exit if framework is macos or ios but not running on macOS
     if args["framework"] in ("macos", "ios") and sys.platform != "darwin":

@@ -19,7 +19,7 @@ runs:
       with:
         path: |
           ./build_cache
-        key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py') }}}
+        key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}}
         restore-keys: |
           ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
 
