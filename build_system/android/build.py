@@ -97,6 +97,9 @@ def prepare_environment(args=None):
                 "/usr/lib/jvm/temurin-17-jdk-amd64",
                 "/usr/lib/jvm/java-17-openjdk-amd64",
                 "/usr/lib/jvm/java-17",
+                "/opt/android-studio/jbr",
+                os.path.expanduser("~/android-studio/jbr"),
+                "/snap/android-studio/current/android-studio/jbr",
             ]
             for path in possible_paths:
                 if os.path.exists(path):
