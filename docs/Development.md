@@ -175,13 +175,14 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 * `--clean` - Clean output directory before configure, which resolves some build errors.
 * `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)
 * `--help` - Show all usage help.
+* `--run` - Run after building. For mobile builds, it tries to run on a connected device.
 
 **Common run options:**
 
-* `--run` - Run after building. For mobile builds, it tries to run on a connected device.
 * `--pipeline` - Rendering pipeline to use (cpu, gpu, forward, deferred).
-* `--scene` - Scene to render. Empty for the standard testing scene. Other values for models under resources/models.
+* `--scene` - Scene to render. Empty for the standard testing scene. Other values for models under resources (e.g. models/WaterBottle/WaterBottle.gltf).
 * `--validation` - Enable graphics API validation.
+* `--load_last_session` - Load last session on startup, including all configs and camera state. This will override current command line arguments.
 * `--max-spp` - Max sample per pixel.
 * `--thread` - Num threads to use for cpu pipeline.
 * `--help` - Show all usage help.

@@ -3,6 +3,7 @@
 #include "application/NativeKeyboard.h"
 #include "application/NativeView.h"
 #include "application/RenderFramework.h"
+#include "application/SessionManager.h"
 #include "application/UiManager.h"
 #include "core/ConfigManager.h"
 #include "core/CoreStates.h"
@@ -18,9 +19,9 @@
 
 #include <IconsFontAwesome7.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <format>
-#include <imgui_internal.h>
 
 namespace sparkle
 {
@@ -57,6 +58,10 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     app_config_.Init();
     render_config_.Init();
     rhi_config_.Init();
+
+    session_manager_ = std::make_unique<SessionManager>();
+    session_manager_->SetLoadLastSession(app_config_.load_last_session);
+    session_manager_->LoadLastSessionIfRequested();
 
     task_manager_ = std::make_unique<TaskManager>(app_config_.max_threads);
     TaskDispatcher::Instance().RegisterTaskQueue(pending_tasks_, ThreadName::Main);
@@ -133,7 +138,13 @@ bool AppFramework::Init()
         render_framework_->ListenRendererCreatedEvent().Subscribe([this]() { renderer_ready_ = true; });
 
     SceneManager::LoadScene(main_scene_.get(), Path::Resource(app_config_.scene), app_config_.default_skybox,
-                            render_config_.IsRaterizationMode());
+                            render_config_.IsRaterizationMode())
+        ->Forget();
+
+    if (session_manager_)
+    {
+        session_manager_->ApplyCamera(GetMainCamera());
+    }
 
     Log(Info, "Default scene loading task dispatched");
 
@@ -252,6 +263,15 @@ void AppFramework::DrawUi()
                      [this]() {
                          SceneManager::DrawUi(main_scene_.get(), app_config_.default_skybox,
                                               render_config_.IsRaterizationMode());
+                     }},
+                {.icon = ICON_FA_ARROW_ROTATE_LEFT,
+                 .draw =
+                     [this]() {
+                         if (session_manager_)
+                         {
+                             session_manager_->DrawUi(main_scene_.get(), app_config_.default_skybox,
+                                                      render_config_.IsRaterizationMode());
+                         }
                      }},
                 {.icon = ICON_FA_GEAR, .draw = [=]() { ConfigManager::DrawUi(configs); }}};
             DrawVerticalIconTabs(tabs, current_tab);

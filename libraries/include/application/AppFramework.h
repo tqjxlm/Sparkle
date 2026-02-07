@@ -17,6 +17,7 @@ class UiManager;
 class Logger;
 class TaskManager;
 class MaterialManager;
+class SessionManager;
 class EventSubscription;
 struct ThreadTaskQueue;
 
@@ -125,6 +126,7 @@ private:
     std::unique_ptr<Scene> main_scene_;
     std::unique_ptr<RHIContext> rhi_;
     std::unique_ptr<UiManager> ui_manager_;
+    std::unique_ptr<SessionManager> session_manager_;
 
     // core singleton
     std::unique_ptr<Logger> logger_;

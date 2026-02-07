@@ -1,5 +1,6 @@
 #include "scene/SceneManager.h"
 
+#include "core/ConfigManager.h"
 #include "core/FileManager.h"
 #include "core/Logger.h"
 #include "core/Profiler.h"
@@ -24,6 +25,26 @@ namespace sparkle
 {
 static constexpr const char *DefaultSkyMapFile = "skymap/studio_garden.hdr";
 static std::vector<SceneNode *> debug_spheres;
+
+static void UpdateSceneConfig(const Path &asset_path)
+{
+    auto *scene_config = ConfigManager::Instance().GetConfig<std::string>("scene");
+    if (!scene_config)
+    {
+        return;
+    }
+
+    std::string new_value;
+    if (asset_path.IsValid() && !asset_path.path.empty())
+    {
+        new_value = asset_path.path.string();
+    }
+
+    if (scene_config->Get() != new_value)
+    {
+        scene_config->Set(new_value);
+    }
+}
 
 void SceneManager::GenerateRandomSpheres(Scene &scene, unsigned count)
 {
@@ -175,13 +196,16 @@ static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
     return last_task_finished;
 }
 
-void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky, bool need_default_lighting)
+std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky,
+                                                          bool need_default_lighting)
 {
     PROFILE_SCOPE_LOG("SceneManager::LoadScene");
 
     // TODO(tqjxlm): handle pending async tasks
 
     Log(Info, "Loading scene... {}", asset_path.path.string());
+
+    UpdateSceneConfig(asset_path);
 
     scene->Cleanup();
 
@@ -209,7 +233,7 @@ void SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_def
         scene->GetRootNode()->SetName(asset_path.path.parent_path().string());
     }
 
-    load_task->Then([scene, need_default_sky, need_default_lighting]() {
+    return load_task->Then([scene, need_default_sky, need_default_lighting]() {
         if (need_default_lighting && !scene->GetDirectionalLight())
         {
             SceneManager::AddDefaultDirectionalLight(scene);
@@ -271,7 +295,7 @@ void SceneManager::DrawUi(Scene *scene, bool need_default_sky, bool need_default
 
         if (ImGui::Selectable("TestScene", is_current_scene))
         {
-            SceneManager::LoadScene(scene, {}, need_default_sky, need_default_lighting);
+            SceneManager::LoadScene(scene, {}, need_default_sky, need_default_lighting)->Forget();
         }
     }
 
@@ -289,7 +313,7 @@ void SceneManager::DrawUi(Scene *scene, bool need_default_sky, bool need_default
                 auto ext = file.path.extension().string();
                 if (ext == ".gltf" || ext == ".glb" || ext == ".usda" || ext == ".usdc" || ext == ".usdz")
                 {
-                    SceneManager::LoadScene(scene, file, need_default_sky, need_default_lighting);
+                    SceneManager::LoadScene(scene, file, need_default_sky, need_default_lighting)->Forget();
                     continue;
                 }
             }
