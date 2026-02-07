@@ -10,6 +10,10 @@ static ConfigValue<bool> config_screen_log("screen_log", "show screen log", "app
 static ConfigValue<bool> config_rebuild_cache("rebuild_cache", "rebuild all cache", "app", false);
 static ConfigValue<bool> config_default_skybox("default_sky", "use a default sky box", "app", false, true);
 static ConfigValue<bool> config_render_thread("render_thread", "enable render thread", "app", true);
+static ConfigValue<bool> config_load_last_session("load_last_session",
+                                                  "load last session on startup, including all configs and camera "
+                                                  "state. this will override current command line arguments.",
+                                                  "app", false);
 
 void AppConfig::Init()
 {
@@ -31,5 +35,6 @@ void AppConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_rebuild_cache, rebuild_cache);
     ConfigCollectionHelper::RegisterConfig(this, config_default_skybox, default_skybox);
     ConfigCollectionHelper::RegisterConfig(this, config_render_thread, render_thread);
+    ConfigCollectionHelper::RegisterConfig(this, config_load_last_session, load_last_session);
 }
 } // namespace sparkle
