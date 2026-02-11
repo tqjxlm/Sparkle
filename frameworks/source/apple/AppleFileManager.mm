@@ -60,10 +60,16 @@ std::filesystem::path AppleFileManager::ResolvePath(const Path &path)
         {
             NSString *bundle_name = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
             base_dir = [base_dir URLByAppendingPathComponent:bundle_name isDirectory:YES];
+            NSError *dir_error = nil;
             [[NSFileManager defaultManager] createDirectoryAtURL:base_dir
                                      withIntermediateDirectories:YES
                                                       attributes:nil
-                                                           error:nil];
+                                                           error:&dir_error];
+            if (dir_error)
+            {
+                Log(Error, "Failed to create external directory: {}", [dir_error.localizedDescription UTF8String]);
+                return {};
+            }
         }
 #endif
 

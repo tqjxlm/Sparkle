@@ -14,7 +14,9 @@
 
 #include <imgui.h>
 
+#include <cctype>
 #include <chrono>
+#include <ctime>
 #include <mutex>
 
 constexpr float LogInterval = 1.f;
@@ -50,7 +52,12 @@ std::string BuildScreenshotName(const Scene *scene, RenderConfig::Pipeline pipel
     auto scene_name = SanitizeFileNameToken(scene->GetRootNode()->GetName());
 
     const auto now_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm local_tm = *std::localtime(&now_time);
+    std::tm local_tm{};
+#ifdef _WIN32
+    localtime_s(&local_tm, &now_time);
+#else
+    localtime_r(&now_time, &local_tm);
+#endif
 
     return std::format("{}_{}_{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}.png", scene_name, Enum2Str(pipeline),
                        local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday, local_tm.tm_hour,

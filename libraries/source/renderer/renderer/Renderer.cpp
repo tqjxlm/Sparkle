@@ -135,7 +135,7 @@ bool Renderer::ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, boo
     auto *rhi = rhi_;
 
     rhi_->EnqueueEndOfFrameTasks(
-        [rhi, staging_buffer, width, height, format, output_path, completion = std::move(completion)]() {
+        [rhi, staging_buffer, width, height, format, output_path, on_complete = std::move(completion)]() {
             rhi->WaitForDeviceIdle();
 
             const auto *raw_data = reinterpret_cast<const uint8_t *>(staging_buffer->Lock());
@@ -152,9 +152,9 @@ bool Renderer::ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, boo
                 Log(Error, "Failed to save screenshot to {}", output_path);
             }
 
-            if (completion)
+            if (on_complete)
             {
-                completion();
+                on_complete();
             }
         });
 
