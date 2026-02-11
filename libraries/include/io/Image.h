@@ -26,6 +26,10 @@ public:
         memcpy(pixels_.data(), pixels.data(), pixels.size());
     }
 
+    // Creates an R8G8B8A8_SRGB image from raw pixel data in the given source format.
+    // Handles BGRA swizzle and linear-to-sRGB conversion for HDR formats.
+    static Image2D CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format);
+
     bool LoadFromFile(const std::string &file_path);
 
     bool CopyFrom(const Image2D &other);

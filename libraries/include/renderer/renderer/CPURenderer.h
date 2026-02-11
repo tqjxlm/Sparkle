@@ -6,6 +6,7 @@
 #include "renderer/resource/GBuffer.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIImage.h"
+#include "rhi/RHIRenderTarget.h"
 
 namespace sparkle
 {
@@ -41,6 +42,7 @@ private:
 
     RHIResourceRef<RHIBuffer> image_buffer_;
     RHIResourceRef<RHIImage> screen_texture_;
+    RHIResourceRef<RHIRenderTarget> screen_rt_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
     std::unique_ptr<class UiPass> ui_pass_;
 

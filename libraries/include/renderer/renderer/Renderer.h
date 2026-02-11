@@ -2,12 +2,17 @@
 
 #include "core/math/Types.h"
 #include "renderer/RenderConfig.h"
+#include "rhi/RHIImage.h"
+
+#include <functional>
+#include <string>
 
 namespace sparkle
 {
 class SceneRenderProxy;
 class RHIContext;
 class NativeView;
+class RHIRenderTarget;
 struct AppConfig;
 class CameraRenderProxy;
 class MaterialRenderProxy;
@@ -36,6 +41,11 @@ public:
 
     void OnFrameBufferResize(int width, int height);
 
+    using ScreenshotCallback = std::function<void(bool success, const std::string &path)>;
+
+    void RequestSaveScreenshot(const std::string &file_path, bool capture_ui = false,
+                               ScreenshotCallback on_complete = nullptr);
+
     static std::unique_ptr<Renderer> CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                                                     SceneRenderProxy *scene_render_proxy);
 
@@ -48,6 +58,10 @@ public:
 protected:
     virtual void Update() = 0;
 
+    // return true if readback is performed
+    [[nodiscard]] bool ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, bool capture_ui,
+                                                      RHIPipelineStage after_stage);
+
     RHIContext *rhi_;
     SceneRenderProxy *scene_render_proxy_;
 
@@ -55,5 +69,11 @@ protected:
     Vector2UInt image_size_;
 
     const RenderConfig &render_config_;
+
+private:
+    std::string screenshot_file_path_;
+    bool screenshot_requested_ = false;
+    bool screenshot_capture_ui_ = false;
+    ScreenshotCallback screenshot_completion_;
 };
 } // namespace sparkle

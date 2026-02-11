@@ -49,17 +49,17 @@ void CPURenderer::InitRenderResources()
             .width = image_size_.x(),
             .height = image_size_.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst |
-                      RHIImage::ImageUsage::ColorAttachment,
+                      RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransferSrc,
             .msaa_samples = static_cast<uint8_t>(rhi_->GetConfig().msaa_samples),
         },
         "CpuPipelineColorBuffer");
 
-    auto base_rt = rhi_->CreateRenderTarget({}, screen_texture_, nullptr, "CpuPipelineRenderTarget");
+    screen_rt_ = rhi_->CreateRenderTarget({}, screen_texture_, nullptr, "CpuPipelineRenderTarget");
 
     screen_quad_pass_ =
         PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, screen_texture_, rhi_->GetBackBufferRenderTarget());
 
-    ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, base_rt);
+    ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, screen_rt_);
 
     gbuffer_.Resize(image_size_.x(), image_size_.y());
     ping_pong_buffer_.resize(image_size_.y(), std::vector<Vector4>(image_size_.x()));
@@ -105,6 +105,8 @@ void CPURenderer::Render()
         ToneMappingPass(output_image_);
     }
 
+    bool has_readback = false;
+
     // GPU workload: copy the image to a texture
     {
         image_buffer_->Upload(rhi_, output_image_.GetRawData());
@@ -114,6 +116,8 @@ void CPURenderer::Render()
                                      .before_stage = RHIPipelineStage::Transfer});
 
         image_buffer_->CopyToImage(screen_texture_.get());
+
+        has_readback = ReadbackFinalOutputIfRequested(screen_rt_.get(), false, RHIPipelineStage::Transfer);
     }
 
     // post process: ui
@@ -124,17 +128,17 @@ void CPURenderer::Render()
                                          .after_stage = RHIPipelineStage::Transfer,
                                          .before_stage = RHIPipelineStage::ColorOutput});
             ui_pass_->Render();
-            screen_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                         .after_stage = RHIPipelineStage::ColorOutput,
-                                         .before_stage = RHIPipelineStage::PixelShader});
-        }
-        else
-        {
-            screen_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                         .after_stage = RHIPipelineStage::Transfer,
-                                         .before_stage = RHIPipelineStage::PixelShader});
+
+            has_readback = ReadbackFinalOutputIfRequested(screen_rt_.get(), true, RHIPipelineStage::ColorOutput);
         }
     }
+
+    auto last_stage =
+        (has_readback || !render_config_.render_ui) ? RHIPipelineStage::Transfer : RHIPipelineStage::ColorOutput;
+
+    screen_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                 .after_stage = last_stage,
+                                 .before_stage = RHIPipelineStage::PixelShader});
 
     // screen pass: render it on a screen quad
     {
