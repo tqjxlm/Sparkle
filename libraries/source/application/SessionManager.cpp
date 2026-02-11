@@ -176,11 +176,8 @@ void ApplyConfigJson(const nlohmann::json &config_json)
                     continue;
                 }
                 const auto new_value = value.get<float>();
-                if (config->GetValueAs<float>() != new_value)
-                {
-                    Log(Debug, "Session config override {}: {}->{}", name, config->GetValueAs<float>(), new_value);
-                    config->SetValueAs<float>(new_value);
-                }
+                Log(Debug, "Session config restore {}: {}", name, new_value);
+                config->SetValueAs<float>(new_value);
             }
             break;
             case ConfigValueBase::String: {
