@@ -41,7 +41,7 @@ public:
 
     void OnFrameBufferResize(int width, int height);
 
-    using ScreenshotCallback = std::function<void(bool success, const std::string &path)>;
+    using ScreenshotCallback = std::function<void()>;
 
     void RequestSaveScreenshot(const std::string &file_path, bool capture_ui = false,
                                ScreenshotCallback on_complete = nullptr);
