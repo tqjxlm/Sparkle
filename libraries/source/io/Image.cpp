@@ -250,15 +250,6 @@ bool Image2D::WriteToFile(const std::string &file_path) const
                                               pixels_.data(), static_cast<int>(GetPixelSize(pixel_format_) * width_));
     }
 
-    if (save_success == 1)
-    {
-        Log(Info, "Output ok. Path {}", file_path);
-    }
-    else
-    {
-        Log(Info, "Output failed. Path {}", file_path);
-    }
-
     return save_success != 0;
 }
 
