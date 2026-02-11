@@ -45,11 +45,9 @@ std::string SanitizeFileNameToken(std::string_view value, size_t max_length = 64
 
 std::string BuildScreenshotName(const Scene *scene, RenderConfig::Pipeline pipeline)
 {
-    std::string scene_name = "scene";
-    if (scene && scene->GetRootNode())
-    {
-        scene_name = SanitizeFileNameToken(scene->GetRootNode()->GetName());
-    }
+    ASSERT(scene && scene->GetRootNode());
+
+    auto scene_name = SanitizeFileNameToken(scene->GetRootNode()->GetName());
 
     const auto now_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm local_tm = *std::localtime(&now_time);
@@ -359,23 +357,18 @@ void RenderFramework::DrawUi()
     const bool saving = screenshot_saving_.load();
 
     ImGui::BeginDisabled(saving);
-    if (ImGui::Button(saving ? "Saving..." : "Save Screenshot"))
+    if (ImGui::Button("Save Screenshot"))
     {
         auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline);
         const bool capture_ui = should_capture_ui_;
+
+        last_saved_screenshot_path_ = screenshot_name;
 
         screenshot_saving_.store(true);
 
         TaskManager::RunInRenderThread([this, screenshot_name, capture_ui]() {
             renderer_->RequestSaveScreenshot(screenshot_name, capture_ui,
-                                             [this](bool success, const std::string &path) {
-                                                 if (success)
-                                                 {
-                                                     std::lock_guard lock(screenshot_path_mutex_);
-                                                     last_saved_screenshot_path_ = path;
-                                                 }
-                                                 screenshot_saving_.store(false);
-                                             });
+                                             [this]() { screenshot_saving_.store(false); });
         });
     }
     ImGui::EndDisabled();
@@ -388,12 +381,9 @@ void RenderFramework::DrawUi()
 
     ImGui::PopStyleVar();
 
+    if (!last_saved_screenshot_path_.empty())
     {
-        std::lock_guard lock(screenshot_path_mutex_);
-        if (!last_saved_screenshot_path_.empty())
-        {
-            ImGui::TextWrapped("Saved: %s", last_saved_screenshot_path_.c_str());
-        }
+        ImGui::TextWrapped(saving ? "Saving: %s" : "Saved: %s", last_saved_screenshot_path_.c_str());
     }
 }
 } // namespace sparkle

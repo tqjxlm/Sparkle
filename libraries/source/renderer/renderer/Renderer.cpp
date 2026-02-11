@@ -76,8 +76,9 @@ void Renderer::RequestSaveScreenshot(const std::string &file_path, bool capture_
                                      Renderer::ScreenshotCallback on_complete)
 {
     ASSERT(ThreadManager::IsInRenderThread());
+    ASSERT(!file_path.empty());
 
-    std::filesystem::path screenshot_path = file_path.empty() ? "screenshot.png" : file_path;
+    std::filesystem::path screenshot_path = std::filesystem::path("screenshots") / file_path;
     screenshot_path.replace_extension(".png");
 
     screenshot_file_path_ = screenshot_path.string();
@@ -153,7 +154,7 @@ bool Renderer::ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, boo
 
             if (completion)
             {
-                completion(success, output_path);
+                completion();
             }
         });
 

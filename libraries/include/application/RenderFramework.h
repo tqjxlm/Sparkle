@@ -104,7 +104,6 @@ private:
 
     bool should_capture_ui_ = false;
     std::atomic<bool> screenshot_saving_{false};
-    std::mutex screenshot_path_mutex_;
     std::string last_saved_screenshot_path_;
 };
 } // namespace sparkle
