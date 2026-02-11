@@ -42,7 +42,7 @@ std::filesystem::path AppleFileManager::ResolvePath(const Path &path)
 #endif
 
         bool is_external = path.type == PathType::External;
-        NSURL *document_dir = [[NSFileManager defaultManager]
+        NSURL *base_dir = [[NSFileManager defaultManager]
               URLForDirectory:is_external ? NSDocumentDirectory : NSApplicationSupportDirectory
                      inDomain:NSUserDomainMask
             appropriateForURL:nil
@@ -50,12 +50,25 @@ std::filesystem::path AppleFileManager::ResolvePath(const Path &path)
                         error:&error];
         if (error)
         {
-            Log(Error, "Error accessing Application Support directory: {}", [error.localizedDescription UTF8String]);
+            Log(Error, "Error accessing directory: {}", [error.localizedDescription UTF8String]);
             return {};
         }
 
-        NSURL *file_url = [document_dir URLByAppendingPathComponent:[NSString stringWithUTF8String:path.path.c_str()]
-                                                        isDirectory:NO];
+#if FRAMEWORK_MACOS
+        // On macOS, scope external files under ~/Documents/<AppName>/ to avoid cluttering the Documents root
+        if (is_external)
+        {
+            NSString *bundle_name = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+            base_dir = [base_dir URLByAppendingPathComponent:bundle_name isDirectory:YES];
+            [[NSFileManager defaultManager] createDirectoryAtURL:base_dir
+                                     withIntermediateDirectories:YES
+                                                      attributes:nil
+                                                           error:nil];
+        }
+#endif
+
+        NSURL *file_url = [base_dir URLByAppendingPathComponent:[NSString stringWithUTF8String:path.path.c_str()]
+                                                    isDirectory:NO];
 
         return [file_url fileSystemRepresentation];
     }
