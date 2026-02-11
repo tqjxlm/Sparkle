@@ -7,6 +7,8 @@
 
 namespace sparkle
 {
+class RHIBuffer;
+
 class RHIRenderTarget : public RHIResource
 {
 public:
@@ -81,7 +83,7 @@ public:
     RHIRenderTarget(const Attribute &attribute, const ColorImageArray &color_images,
                     const RHIResourceRef<RHIImage> &depth_image, const std::string &name);
 
-    RHIResourceRef<RHIImage> GetColorImage(size_t index)
+    [[nodiscard]] RHIResourceRef<RHIImage> GetColorImage(size_t index) const
     {
         return color_images_[index];
     }

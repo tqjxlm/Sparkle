@@ -4,6 +4,7 @@
 #include "core/Timer.h"
 #include "renderer/RenderConfig.h"
 
+#include <atomic>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -50,6 +51,8 @@ public:
     {
         return renderer_created_event_.OnTrigger();
     }
+
+    void DrawUi();
 
 private:
     void RenderThreadMain();
@@ -98,5 +101,10 @@ private:
     Event renderer_created_event_;
 
     TimerCaller frame_rate_monitor_;
+
+    bool should_capture_ui_ = false;
+    std::atomic<bool> screenshot_saving_{false};
+    std::mutex screenshot_path_mutex_;
+    std::string last_saved_screenshot_path_;
 };
 } // namespace sparkle

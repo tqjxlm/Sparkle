@@ -13,10 +13,80 @@
 #include <stb_image_write.h>
 #pragma clang diagnostic pop
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 
 namespace sparkle
 {
+namespace
+{
+uint8_t FloatToUint8(float value)
+{
+    return static_cast<uint8_t>(std::lround(std::clamp(value, 0.f, 1.f) * 255.f));
+}
+
+void ConvertPixelsToRGBA8(const uint8_t *source_data, uint8_t *dest, uint32_t pixel_count, PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::R8G8B8A8_SRGB:
+    case PixelFormat::R8G8B8A8_UNORM:
+        memcpy(dest, source_data, pixel_count * 4);
+        break;
+    case PixelFormat::B8G8R8A8_SRGB:
+    case PixelFormat::B8G8R8A8_UNORM:
+        for (uint32_t i = 0; i < pixel_count; i++)
+        {
+            dest[i * 4 + 0] = source_data[i * 4 + 2];
+            dest[i * 4 + 1] = source_data[i * 4 + 1];
+            dest[i * 4 + 2] = source_data[i * 4 + 0];
+            dest[i * 4 + 3] = source_data[i * 4 + 3];
+        }
+        break;
+    case PixelFormat::RGBAFloat16: {
+        const auto *src = reinterpret_cast<const Half *>(source_data);
+        for (uint32_t i = 0; i < pixel_count; i++)
+        {
+            Vector3 rgb{static_cast<float>(src[i * 4 + 0]), static_cast<float>(src[i * 4 + 1]),
+                        static_cast<float>(src[i * 4 + 2])};
+            auto srgb = utilities::LinearToSrgb(rgb.cwiseMax(0.f).cwiseMin(1.f));
+            dest[i * 4 + 0] = FloatToUint8(srgb.x());
+            dest[i * 4 + 1] = FloatToUint8(srgb.y());
+            dest[i * 4 + 2] = FloatToUint8(srgb.z());
+            dest[i * 4 + 3] = FloatToUint8(static_cast<float>(src[i * 4 + 3]));
+        }
+        break;
+    }
+    case PixelFormat::RGBAFloat: {
+        const auto *src = reinterpret_cast<const float *>(source_data);
+        for (uint32_t i = 0; i < pixel_count; i++)
+        {
+            Vector3 rgb{src[i * 4 + 0], src[i * 4 + 1], src[i * 4 + 2]};
+            auto srgb = utilities::LinearToSrgb(rgb.cwiseMax(0.f).cwiseMin(1.f));
+            dest[i * 4 + 0] = FloatToUint8(srgb.x());
+            dest[i * 4 + 1] = FloatToUint8(srgb.y());
+            dest[i * 4 + 2] = FloatToUint8(srgb.z());
+            dest[i * 4 + 3] = FloatToUint8(src[i * 4 + 3]);
+        }
+        break;
+    }
+    default:
+        Log(Error, "Unsupported pixel format for RGBA8 conversion: {}", Enum2Str(format));
+        memset(dest, 0, pixel_count * 4);
+        break;
+    }
+}
+} // namespace
+
+Image2D Image2D::CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format)
+{
+    Image2D image(width, height, PixelFormat::R8G8B8A8_SRGB);
+    ConvertPixelsToRGBA8(data, image.pixels_.data(), width * height, source_format);
+    return image;
+}
+
 static void WriteImageFile(void *context, void *data, int size)
 {
     const auto &path = *static_cast<std::string *>(context);
@@ -146,7 +216,7 @@ bool Image2D::WriteToFile(const std::string &file_path) const
     int save_success = 0;
     if (IsHDRFormat(pixel_format_))
     {
-        // TODO(tqjxlm): streaming file saving
+        // TODO(tqjxlm): async file saving
         std::vector<char> buffer;
         auto *custom_data = static_cast<void *>(&buffer);
 

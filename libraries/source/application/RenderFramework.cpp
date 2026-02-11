@@ -5,17 +5,61 @@
 #include "core/Profiler.h"
 #include "core/ThreadManager.h"
 #include "core/task/TaskDispatcher.h"
+#include "core/task/TaskManager.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/renderer/Renderer.h"
 #include "rhi/RHI.h"
 #include "scene/Scene.h"
+#include "scene/SceneNode.h"
 
+#include <imgui.h>
+
+#include <chrono>
 #include <mutex>
 
 constexpr float LogInterval = 1.f;
 
 namespace sparkle
 {
+namespace
+{
+std::string SanitizeFileNameToken(std::string_view value, size_t max_length = 64)
+{
+    std::string sanitized(value.substr(0, max_length));
+    for (auto &ch : sanitized)
+    {
+        const auto c = static_cast<unsigned char>(ch);
+        if (!std::isalnum(c) && ch != '_' && ch != '-')
+        {
+            ch = '_';
+        }
+    }
+
+    if (sanitized.empty())
+    {
+        sanitized = "scene";
+    }
+
+    return sanitized;
+}
+
+std::string BuildScreenshotName(const Scene *scene, RenderConfig::Pipeline pipeline)
+{
+    std::string scene_name = "scene";
+    if (scene && scene->GetRootNode())
+    {
+        scene_name = SanitizeFileNameToken(scene->GetRootNode()->GetName());
+    }
+
+    const auto now_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm local_tm = *std::localtime(&now_time);
+
+    return std::format("{}_{}_{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}.png", scene_name, Enum2Str(pipeline),
+                       local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday, local_tm.tm_hour,
+                       local_tm.tm_min, local_tm.tm_sec);
+}
+} // namespace
+
 RenderFramework::RenderFramework(NativeView *native_view, RHIContext *rhi, UiManager *ui_manager, Scene *scene)
     : native_view_(native_view), rhi_(rhi), ui_manager_(ui_manager), scene_(scene),
       frame_rate_monitor_(LogInterval, false, [this](float delta_time) { MeasurePerformance(delta_time); })
@@ -304,6 +348,52 @@ void RenderFramework::ConsumeRenderThreadTasks()
     for (auto &task : frame_tasks)
     {
         task();
+    }
+}
+
+void RenderFramework::DrawUi()
+{
+    ImGui::TextUnformatted("Screenshot");
+    ImGui::Separator();
+
+    const bool saving = screenshot_saving_.load();
+
+    ImGui::BeginDisabled(saving);
+    if (ImGui::Button(saving ? "Saving..." : "Save Screenshot"))
+    {
+        auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline);
+        const bool capture_ui = should_capture_ui_;
+
+        screenshot_saving_.store(true);
+
+        TaskManager::RunInRenderThread([this, screenshot_name, capture_ui]() {
+            renderer_->RequestSaveScreenshot(screenshot_name, capture_ui,
+                                             [this](bool success, const std::string &path) {
+                                                 if (success)
+                                                 {
+                                                     std::lock_guard lock(screenshot_path_mutex_);
+                                                     last_saved_screenshot_path_ = path;
+                                                 }
+                                                 screenshot_saving_.store(false);
+                                             });
+        });
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+
+    ImGui::Checkbox("With UI", &should_capture_ui_);
+
+    ImGui::PopStyleVar();
+
+    {
+        std::lock_guard lock(screenshot_path_mutex_);
+        if (!last_saved_screenshot_path_.empty())
+        {
+            ImGui::TextWrapped("Saved: %s", last_saved_screenshot_path_.c_str());
+        }
     }
 }
 } // namespace sparkle

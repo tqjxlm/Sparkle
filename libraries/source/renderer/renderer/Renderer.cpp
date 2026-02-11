@@ -1,12 +1,15 @@
 #include "renderer/renderer/Renderer.h"
 
 #include "core/ThreadManager.h"
+#include "io/Image.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/renderer/CPURenderer.h"
 #include "renderer/renderer/DeferredRenderer.h"
 #include "renderer/renderer/ForwardRenderer.h"
 #include "renderer/renderer/GPURenderer.h"
 #include "rhi/RHI.h"
+
+#include <filesystem>
 
 namespace sparkle
 {
@@ -67,5 +70,93 @@ void Renderer::Tick()
 void Renderer::OnFrameBufferResize(int width, int height)
 {
     rhi_->RecreateFrameBuffer(width, height);
+}
+
+void Renderer::RequestSaveScreenshot(const std::string &file_path, bool capture_ui,
+                                     Renderer::ScreenshotCallback on_complete)
+{
+    ASSERT(ThreadManager::IsInRenderThread());
+
+    std::filesystem::path screenshot_path = file_path.empty() ? "screenshot.png" : file_path;
+    screenshot_path.replace_extension(".png");
+
+    screenshot_file_path_ = screenshot_path.string();
+    screenshot_requested_ = true;
+    screenshot_capture_ui_ = capture_ui;
+    screenshot_completion_ = std::move(on_complete);
+}
+
+bool Renderer::ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, bool capture_ui,
+                                              RHIPipelineStage after_stage)
+{
+    ASSERT(ThreadManager::IsInRenderThread());
+    ASSERT(final_output);
+
+    if (!screenshot_requested_)
+    {
+        return false;
+    }
+
+    if (screenshot_capture_ui_ != capture_ui)
+    {
+        return false;
+    }
+
+    screenshot_requested_ = false;
+    screenshot_capture_ui_ = false;
+    auto output_path = screenshot_file_path_;
+    screenshot_file_path_.clear();
+    auto completion = std::move(screenshot_completion_);
+
+    // just assume color image 0 is the final output.
+    auto color_image = final_output->GetColorImage(0);
+
+    ASSERT(color_image);
+
+    auto staging_buffer =
+        rhi_->CreateBuffer({.size = color_image->GetStorageSize(),
+                            .usages = RHIBuffer::BufferUsage::TransferDst,
+                            .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                            .is_dynamic = false},
+                           "ScreenshotReadbackStagingBuffer");
+
+    color_image->Transition({.target_layout = RHIImageLayout::TransferSrc,
+                             .after_stage = after_stage,
+                             .before_stage = RHIPipelineStage::Transfer});
+
+    color_image->CopyToBuffer(staging_buffer);
+
+    // we do not transition the image back. only the caller knows what to do with the image.
+
+    const auto width = color_image->GetWidth();
+    const auto height = color_image->GetHeight();
+    const auto format = color_image->GetAttributes().format;
+    auto *rhi = rhi_;
+
+    rhi_->EnqueueEndOfFrameTasks(
+        [rhi, staging_buffer, width, height, format, output_path, completion = std::move(completion)]() {
+            rhi->WaitForDeviceIdle();
+
+            const auto *raw_data = reinterpret_cast<const uint8_t *>(staging_buffer->Lock());
+            auto screenshot = Image2D::CreateFromRawPixels(raw_data, width, height, format);
+            staging_buffer->UnLock();
+            bool success = screenshot.WriteToFile(output_path);
+
+            if (success)
+            {
+                Log(Info, "Screenshot saved to {}", output_path);
+            }
+            else
+            {
+                Log(Error, "Failed to save screenshot to {}", output_path);
+            }
+
+            if (completion)
+            {
+                completion(success, output_path);
+            }
+        });
+
+    return true;
 }
 } // namespace sparkle

@@ -85,7 +85,8 @@ void ForwardRenderer::InitRenderResources()
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
             .width = image_size_.x(),
             .height = image_size_.y(),
-            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment,
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment |
+                      RHIImage::ImageUsage::TransferSrc,
 
             .msaa_samples = 1,
         },
@@ -169,14 +170,28 @@ void ForwardRenderer::Render()
             tone_mapping_pass_->Render();
         }
 
+        bool has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), false,
+                                                           RHIPipelineStage::ColorOutput);
+
         if (render_config_.render_ui)
         {
+            if (has_readback)
+            {
+                screen_color_->Transition({.target_layout = RHIImageLayout::ColorOutput,
+                                           .after_stage = RHIPipelineStage::Transfer,
+                                           .before_stage = RHIPipelineStage::ColorOutput});
+            }
+
             ui_pass_->Render();
         }
 
-        screen_color_->Transition({.target_layout = RHIImageLayout::Read,
-                                   .after_stage = RHIPipelineStage::ColorOutput,
-                                   .before_stage = RHIPipelineStage::PixelShader});
+        has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), true,
+                                                      RHIPipelineStage::ColorOutput);
+
+        screen_color_->Transition(
+            {.target_layout = RHIImageLayout::Read,
+             .after_stage = has_readback ? RHIPipelineStage::Transfer : RHIPipelineStage::ColorOutput,
+             .before_stage = RHIPipelineStage::PixelShader});
     }
 
     // screen pass: copy screen_color to final buffer

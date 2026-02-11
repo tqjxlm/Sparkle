@@ -39,8 +39,7 @@ std::filesystem::path StdFileManager::ResolvePath(const Path &path)
         UnImplemented(path.type);
     }
 
-    fs::path fs_path(base_path / path.path);
-    return fs::absolute(fs_path);
+    return fs::absolute(base_path / path.path);
 }
 
 bool StdFileManager::Exists(const Path &file)
@@ -99,7 +98,7 @@ std::string StdFileManager::Write(const Path &file, const char *data, uint64_t s
         return "";
     }
 
-    return fs::absolute(full_path).string();
+    return full_path.string();
 }
 
 bool StdFileManager::TryCreateDirectory(const Path &file)

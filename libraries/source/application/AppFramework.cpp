@@ -267,12 +267,10 @@ void AppFramework::DrawUi()
                 {.icon = ICON_FA_ARROW_ROTATE_LEFT,
                  .draw =
                      [this]() {
-                         if (session_manager_)
-                         {
-                             session_manager_->DrawUi(main_scene_.get(), app_config_.default_skybox,
-                                                      render_config_.IsRaterizationMode());
-                         }
+                         session_manager_->DrawUi(main_scene_.get(), app_config_.default_skybox,
+                                                  render_config_.IsRaterizationMode());
                      }},
+                {.icon = ICON_FA_CAMERA, .draw = [this]() { render_framework_->DrawUi(); }},
                 {.icon = ICON_FA_GEAR, .draw = [=]() { ConfigManager::DrawUi(configs); }}};
             DrawVerticalIconTabs(tabs, current_tab);
 
