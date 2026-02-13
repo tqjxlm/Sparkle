@@ -34,6 +34,8 @@ static ConfigValue<float> config_target_framerate("target_framerate", "target fr
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
 static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
+static ConfigValue<bool> config_auto_screenshot("auto_screenshot", "auto screenshot after scene is fully loaded",
+                                                "renderer", false);
 
 void RenderConfig::Init()
 {
@@ -55,6 +57,12 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
     ConfigCollectionHelper::RegisterConfig(this, config_gpu_budget_ratio, gpu_time_budget_ratio);
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
+    ConfigCollectionHelper::RegisterConfig(this, config_auto_screenshot, auto_screenshot);
+
+    if (auto_screenshot)
+    {
+        Log(Info, "Auto screenshot requested: wait for the scene to be fully loaded and a frame is fully rendered.");
+    }
 
     Validate();
 }

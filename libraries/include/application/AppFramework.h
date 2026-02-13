@@ -3,6 +3,7 @@
 #include "application/AppConfig.h"
 #include "core/Timer.h"
 #include "core/math/Types.h"
+#include "core/task/TaskFuture.h"
 #include "renderer/RenderConfig.h"
 #include "rhi/RHIConfig.h"
 
@@ -160,9 +161,13 @@ private:
 
     std::shared_ptr<ThreadTaskQueue> pending_tasks_;
 
+    std::shared_ptr<TaskFuture<void>> scene_load_task_;
+
     bool core_initialized_ = false;
     bool initialized_ = false;
     bool show_control_panel_ = false;
     bool renderer_ready_ = false;
+    bool scene_file_loaded_ = false;
+    bool scene_async_tasks_completed_ = false;
 };
 } // namespace sparkle

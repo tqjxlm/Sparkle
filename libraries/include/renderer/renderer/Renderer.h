@@ -46,6 +46,10 @@ public:
     void RequestSaveScreenshot(const std::string &file_path, bool capture_ui = false,
                                ScreenshotCallback on_complete = nullptr);
 
+    void NotifySceneLoaded();
+
+    [[nodiscard]] virtual bool IsReadyForAutoScreenshot() const;
+
     static std::unique_ptr<Renderer> CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                                                     SceneRenderProxy *scene_render_proxy);
 
@@ -69,6 +73,8 @@ protected:
     Vector2UInt image_size_;
 
     const RenderConfig &render_config_;
+
+    bool scene_loaded_ = false;
 
 private:
     std::string screenshot_file_path_;

@@ -153,8 +153,7 @@ void GPURenderer::Render()
     {
         tone_mapping_pass_->Render();
 
-        bool has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, false,
-                                                           RHIPipelineStage::ColorOutput);
+        bool has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, false, RHIPipelineStage::ColorOutput);
 
         if (render_config_.render_ui)
         {
@@ -168,8 +167,7 @@ void GPURenderer::Render()
             ui_pass_->Render();
         }
 
-        has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, true,
-                                                      RHIPipelineStage::ColorOutput);
+        has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, true, RHIPipelineStage::ColorOutput);
 
         tone_mapping_output_->Transition(
             {.target_layout = RHIImageLayout::Read,
@@ -182,6 +180,12 @@ void GPURenderer::Render()
 }
 
 GPURenderer::~GPURenderer() = default;
+
+bool GPURenderer::IsReadyForAutoScreenshot() const
+{
+    auto *camera = scene_render_proxy_->GetCamera();
+    return scene_loaded_ && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
+}
 
 void GPURenderer::Update()
 {

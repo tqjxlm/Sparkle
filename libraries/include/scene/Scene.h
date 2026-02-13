@@ -2,6 +2,7 @@
 
 #include "core/Exception.h"
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -80,6 +81,26 @@ public:
 
 #pragma endregion
 
+#pragma region Async Task Tracking
+
+    void RegisterAsyncTask()
+    {
+        pending_async_tasks_.fetch_add(1);
+    }
+
+    void UnregisterAsyncTask()
+    {
+        auto prev = pending_async_tasks_.fetch_sub(1);
+        ASSERT(prev > 0);
+    }
+
+    [[nodiscard]] bool HasPendingAsyncTasks() const
+    {
+        return pending_async_tasks_.load() > 0;
+    }
+
+#pragma endregion
+
 private:
     static std::unique_ptr<SceneRenderProxy> CreateRenderProxy();
 
@@ -97,5 +118,7 @@ private:
 
     // only one sky light will take effect. new sky light overrides the existing one.
     SkyLight *sky_light_ = nullptr;
+
+    std::atomic<int32_t> pending_async_tasks_{0};
 };
 } // namespace sparkle

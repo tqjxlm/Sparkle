@@ -257,8 +257,12 @@ void SceneManager::RemoveLastDebugSphere(Scene *scene)
 std::shared_ptr<TaskFuture<void>> SceneManager::AddDefaultSky(Scene *scene)
 {
     auto [sky_light_node, sky_light] = MakeNodeWithComponent<SkyLight>(scene, nullptr, "DefaultSky");
+    scene->RegisterAsyncTask();
     return TaskManager::RunInWorkerThread([sky_light]() { sky_light->SetSkyMap(DefaultSkyMapFile); })
-        ->Then([scene, sky_light_node]() { scene->GetRootNode()->AddChild(sky_light_node); });
+        ->Then([scene, sky_light_node]() {
+            scene->GetRootNode()->AddChild(sky_light_node);
+            scene->UnregisterAsyncTask();
+        });
 }
 
 void SceneManager::AddDefaultDirectionalLight(Scene *scene)
