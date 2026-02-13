@@ -183,8 +183,7 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 * `--scene` - Scene to render. Empty for the standard testing scene. Other values for models under resources (e.g. models/WaterBottle/WaterBottle.gltf).
 * `--validation` - Enable graphics API validation.
 * `--load_last_session` - Load last session on startup, including all configs and camera state. This will override current command line arguments.
-* `--max-spp` - Max sample per pixel.
-* `--thread` - Num threads to use for cpu pipeline.
+* `--auto_screenshot` - Take a screenshot after the scene is fully loaded and a frame is fully rendered. The screenshot is saved to generated/screenshots/ and named with the scene name and pipeline.
 * `--help` - Show all usage help.
 
 ### Configs

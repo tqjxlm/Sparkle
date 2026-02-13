@@ -137,9 +137,8 @@ bool AppFramework::Init()
     renderer_created_subscription_ =
         render_framework_->ListenRendererCreatedEvent().Subscribe([this]() { renderer_ready_ = true; });
 
-    SceneManager::LoadScene(main_scene_.get(), Path::Resource(app_config_.scene), app_config_.default_skybox,
-                            render_config_.IsRaterizationMode())
-        ->Forget();
+    scene_load_task_ = SceneManager::LoadScene(main_scene_.get(), Path::Resource(app_config_.scene),
+                                               app_config_.default_skybox, render_config_.IsRaterizationMode());
 
     if (session_manager_)
     {
@@ -318,6 +317,20 @@ bool AppFramework::MainLoop()
         {
             return true;
         }
+    }
+
+    if (scene_load_task_ && scene_load_task_->IsReady())
+    {
+        scene_load_task_.reset();
+        scene_file_loaded_ = true;
+        Log(Info, "Scene file loaded");
+    }
+
+    if (scene_file_loaded_ && !scene_async_tasks_completed_ && !main_scene_->HasPendingAsyncTasks())
+    {
+        scene_async_tasks_completed_ = true;
+        Log(Info, "Scene async tasks completed");
+        render_framework_->NotifySceneLoaded();
     }
 
     {

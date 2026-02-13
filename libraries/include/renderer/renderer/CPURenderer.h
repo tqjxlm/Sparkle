@@ -26,6 +26,8 @@ public:
 
     void Update() override;
 
+    [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
+
     ~CPURenderer() override;
 
 private:

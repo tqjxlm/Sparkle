@@ -27,6 +27,11 @@ CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
 
 CPURenderer::~CPURenderer() = default;
 
+bool CPURenderer::IsReadyForAutoScreenshot() const
+{
+    return scene_loaded_ && camera_->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
+}
+
 void CPURenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);

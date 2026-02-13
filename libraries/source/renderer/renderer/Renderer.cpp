@@ -72,6 +72,17 @@ void Renderer::OnFrameBufferResize(int width, int height)
     rhi_->RecreateFrameBuffer(width, height);
 }
 
+void Renderer::NotifySceneLoaded()
+{
+    scene_loaded_ = true;
+    Log(Info, "Renderer notified: scene loaded");
+}
+
+bool Renderer::IsReadyForAutoScreenshot() const
+{
+    return scene_loaded_;
+}
+
 void Renderer::RequestSaveScreenshot(const std::string &file_path, bool capture_ui,
                                      Renderer::ScreenshotCallback on_complete)
 {

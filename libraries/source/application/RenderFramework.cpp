@@ -2,6 +2,7 @@
 
 #include "application/NativeView.h"
 #include "application/UiManager.h"
+#include "core/CoreStates.h"
 #include "core/Profiler.h"
 #include "core/ThreadManager.h"
 #include "core/task/TaskDispatcher.h"
@@ -128,6 +129,8 @@ void RenderFramework::RenderLoop()
             renderer_->Tick();
 
             renderer_->Render();
+
+            TryAutoScreenshot();
 
             EndFrame();
         }
@@ -354,6 +357,41 @@ void RenderFramework::ConsumeRenderThreadTasks()
     {
         task();
     }
+}
+
+void RenderFramework::NotifySceneLoaded()
+{
+    TaskManager::RunInRenderThread([this]() {
+        if (renderer_)
+        {
+            renderer_->NotifySceneLoaded();
+        }
+        scene_loaded_notified_ = true;
+    });
+}
+
+bool RenderFramework::IsSceneFullyLoaded() const
+{
+    return scene_loaded_notified_;
+}
+
+void RenderFramework::TryAutoScreenshot()
+{
+    if (!render_config_.auto_screenshot || auto_screenshot_taken_ || !renderer_)
+    {
+        return;
+    }
+
+    if (!IsSceneFullyLoaded() || !renderer_->IsReadyForAutoScreenshot())
+    {
+        return;
+    }
+
+    auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline);
+    Log(Info, "Auto screenshot triggered: {}", screenshot_name);
+    renderer_->RequestSaveScreenshot(screenshot_name, false,
+                                     []() { CoreStates::Instance().SetAppState(CoreStates::AppState::Exiting); });
+    auto_screenshot_taken_ = true;
 }
 
 void RenderFramework::DrawUi()

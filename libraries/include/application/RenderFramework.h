@@ -54,7 +54,13 @@ public:
 
     void DrawUi();
 
+    // called by main thread, run on render thread
+    void NotifySceneLoaded();
+
 private:
+    [[nodiscard]] bool IsSceneFullyLoaded() const;
+
+    void TryAutoScreenshot();
     void RenderThreadMain();
 
     [[nodiscard]] bool BeginFrame();
@@ -105,5 +111,8 @@ private:
     bool should_capture_ui_ = false;
     std::atomic<bool> screenshot_saving_{false};
     std::string last_saved_screenshot_path_;
+
+    bool scene_loaded_notified_ = false;
+    bool auto_screenshot_taken_ = false;
 };
 } // namespace sparkle

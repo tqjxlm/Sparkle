@@ -26,6 +26,8 @@ public:
 
     void InitRenderResources() override;
 
+    [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
+
     ~GPURenderer() override;
 
 private:
