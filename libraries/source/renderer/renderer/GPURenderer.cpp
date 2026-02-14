@@ -183,8 +183,8 @@ GPURenderer::~GPURenderer() = default;
 
 bool GPURenderer::IsReadyForAutoScreenshot() const
 {
-    auto *camera = scene_render_proxy_->GetCamera();
-    return scene_loaded_ && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
+    return Renderer::IsReadyForAutoScreenshot() &&
+           scene_render_proxy_->GetCamera()->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
 }
 
 void GPURenderer::Update()
