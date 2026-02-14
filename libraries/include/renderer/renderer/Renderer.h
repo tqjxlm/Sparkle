@@ -4,6 +4,7 @@
 #include "renderer/RenderConfig.h"
 #include "rhi/RHIImage.h"
 
+#include <atomic>
 #include <functional>
 #include <string>
 
@@ -48,6 +49,22 @@ public:
 
     void NotifySceneLoaded();
 
+    void RegisterAsyncTask()
+    {
+        pending_async_tasks_.fetch_add(1);
+    }
+
+    void UnregisterAsyncTask()
+    {
+        auto prev = pending_async_tasks_.fetch_sub(1);
+        ASSERT(prev > 0);
+    }
+
+    [[nodiscard]] bool HasPendingAsyncTasks() const
+    {
+        return pending_async_tasks_.load() > 0;
+    }
+
     [[nodiscard]] virtual bool IsReadyForAutoScreenshot() const;
 
     static std::unique_ptr<Renderer> CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
@@ -75,6 +92,8 @@ protected:
     const RenderConfig &render_config_;
 
     bool scene_loaded_ = false;
+
+    std::atomic<int32_t> pending_async_tasks_{0};
 
 private:
     std::string screenshot_file_path_;

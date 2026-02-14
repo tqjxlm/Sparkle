@@ -80,7 +80,7 @@ void Renderer::NotifySceneLoaded()
 
 bool Renderer::IsReadyForAutoScreenshot() const
 {
-    return scene_loaded_;
+    return scene_loaded_ && !HasPendingAsyncTasks();
 }
 
 void Renderer::RequestSaveScreenshot(const std::string &file_path, bool capture_ui,

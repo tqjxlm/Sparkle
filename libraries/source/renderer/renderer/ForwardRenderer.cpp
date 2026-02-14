@@ -145,6 +145,11 @@ void ForwardRenderer::Render()
     if (ibl_ && ibl_->NeedUpdate())
     {
         ibl_->CookOnTheFly(render_config_);
+
+        if (!ibl_->NeedUpdate())
+        {
+            UnregisterAsyncTask();
+        }
     }
 
     // base pass: render to scene_color
@@ -369,6 +374,11 @@ void ForwardRenderer::HandleSceneChanges()
             {
                 ibl_ = std::make_unique<ImageBasedLighting>(sky_proxy->GetSkyMap());
                 ibl_->InitRenderResources(rhi_, render_config_);
+
+                if (ibl_->NeedUpdate())
+                {
+                    RegisterAsyncTask();
+                }
 
                 scene_color_pass_->SetIBL(ibl_.get());
             }

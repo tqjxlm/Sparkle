@@ -117,6 +117,11 @@ void DeferredRenderer::Render()
     if (ibl_ && ibl_->NeedUpdate())
     {
         ibl_->CookOnTheFly(render_config_);
+
+        if (!ibl_->NeedUpdate())
+        {
+            UnregisterAsyncTask();
+        }
     }
 
     // geometry pass: render to gbuffer
@@ -312,6 +317,11 @@ void DeferredRenderer::HandleSceneChanges()
             {
                 ibl_ = std::make_unique<ImageBasedLighting>(sky_proxy->GetSkyMap());
                 ibl_->InitRenderResources(rhi_, render_config_);
+
+                if (ibl_->NeedUpdate())
+                {
+                    RegisterAsyncTask();
+                }
 
                 directional_lighting_pass_->SetIBL(ibl_.get());
             }

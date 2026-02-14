@@ -29,7 +29,8 @@ CPURenderer::~CPURenderer() = default;
 
 bool CPURenderer::IsReadyForAutoScreenshot() const
 {
-    return scene_loaded_ && camera_->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
+    return Renderer::IsReadyForAutoScreenshot() &&
+           camera_->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
 }
 
 void CPURenderer::InitRenderResources()
