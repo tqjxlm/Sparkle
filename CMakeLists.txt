@@ -224,6 +224,32 @@ if(ENABLE_VULKAN)
         find_package(Vulkan REQUIRED)
 
         set(LIBRARIES ${LIBRARIES} Vulkan::Vulkan)
+
+        if(APPLE)
+            # Bundle MoltenVK for self-contained builds (no external VK_ICD_FILENAMES needed)
+            get_filename_component(VULKAN_LIB_DIR ${Vulkan_LIBRARY} DIRECTORY)
+            set(MOLTENVK_LIB_SRC "${VULKAN_LIB_DIR}/libMoltenVK.dylib")
+            set(BUNDLED_ICD_DIR "$<TARGET_FILE_DIR:sparkle>/vulkan/icd.d")
+            set(BUNDLED_LIB_DIR "$<TARGET_FILE_DIR:sparkle>/vulkan/lib")
+
+            file(WRITE "${CMAKE_BINARY_DIR}/MoltenVK_icd.json"
+                "{\n"
+                "    \"file_format_version\": \"1.0.0\",\n"
+                "    \"ICD\": {\n"
+                "        \"library_path\": \"../lib/libMoltenVK.dylib\",\n"
+                "        \"api_version\": \"1.2.0\",\n"
+                "        \"is_portability_driver\": true\n"
+                "    }\n"
+                "}\n")
+
+            add_custom_command(TARGET sparkle POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${BUNDLED_ICD_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${BUNDLED_LIB_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MOLTENVK_LIB_SRC}" "${BUNDLED_LIB_DIR}/libMoltenVK.dylib"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_BINARY_DIR}/MoltenVK_icd.json" "${BUNDLED_ICD_DIR}/MoltenVK_icd.json"
+                COMMENT "Bundling MoltenVK ICD for self-contained runtime"
+            )
+        endif()
     endif()
 
     set(INCLUDES
