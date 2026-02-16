@@ -19,6 +19,8 @@ SUPPORTED_PIPELINES = ("gpu", "forward", "deferred")
 
 DEFAULT_SCENE = "TestScene"
 PSNR_THRESHOLD = 30.0
+SSIM_THRESHOLD = 0.95
+SSIM_LOW_THRESHOLD = 0.85
 
 
 def parse_args():
@@ -107,6 +109,52 @@ def download_ground_truth(framework, scene, pipeline):
     return dest
 
 
+def ensure_numpy():
+    try:
+        import numpy as np
+        return np
+    except ImportError:
+        print("NumPy not found, installing...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "numpy"])
+        import numpy as np
+        return np
+
+
+def compute_ssim(img_a, img_b, window_size=11):
+    """Compute mean SSIM between two images using windowed statistics."""
+    np = ensure_numpy()
+
+    C1 = (0.01 * 255) ** 2
+    C2 = (0.03 * 255) ** 2
+
+    a = img_a.astype(np.float64)
+    b = img_b.astype(np.float64)
+    w = window_size
+
+    def box_sum(img):
+        s = np.cumsum(np.cumsum(img, axis=0), axis=1)
+        padded = np.zeros((s.shape[0] + 1, s.shape[1] + 1))
+        padded[1:, 1:] = s
+        return (padded[w:, w:]
+                - padded[:-w, w:]
+                - padded[w:, :-w]
+                + padded[:-w, :-w])
+
+    n = w * w
+    mu_a = box_sum(a) / n
+    mu_b = box_sum(b) / n
+
+    sigma_a_sq = box_sum(a * a) / n - mu_a * mu_a
+    sigma_b_sq = box_sum(b * b) / n - mu_b * mu_b
+    sigma_ab = box_sum(a * b) / n - mu_a * mu_b
+
+    ssim_map = ((2 * mu_a * mu_b + C1) * (2 * sigma_ab + C2)) / \
+               ((mu_a ** 2 + mu_b ** 2 + C1) * (sigma_a_sq + sigma_b_sq + C2))
+
+    return float(np.mean(ssim_map)), float(np.percentile(ssim_map, 1))
+
+
 def compare_images(path_a, path_b):
     try:
         from PIL import Image
@@ -116,6 +164,8 @@ def compare_images(path_a, path_b):
             [sys.executable, "-m", "pip", "install", "Pillow"])
         from PIL import Image
 
+    np = ensure_numpy()
+
     img_a = Image.open(path_a).convert("RGB")
     img_b = Image.open(path_b).convert("RGB")
 
@@ -124,42 +174,32 @@ def compare_images(path_a, path_b):
             f"FAIL: image size mismatch — screenshot {img_a.size} vs ground truth {img_b.size}")
         sys.exit(1)
 
-    pixels_a = img_a.tobytes()
-    pixels_b = img_b.tobytes()
-    num_pixels = len(pixels_a)
+    arr_a = np.array(img_a, dtype=np.float64)
+    arr_b = np.array(img_b, dtype=np.float64)
 
-    # Per-channel difference stats
-    min_diff = 255
-    max_diff = 0
-    sum_sq = 0
-    for a, b in zip(pixels_a, pixels_b):
-        d = abs(a - b)
-        if d < min_diff:
-            min_diff = d
-        if d > max_diff:
-            max_diff = d
-        sum_sq += d * d
-
-    mse = sum_sq / num_pixels
-
-    # Variance of each image (per channel)
-    sum_a = sum(pixels_a)
-    sum_b = sum(pixels_b)
-    mean_a = sum_a / num_pixels
-    mean_b = sum_b / num_pixels
-    var_a = sum(((v - mean_a) ** 2 for v in pixels_a)) / num_pixels
-    var_b = sum(((v - mean_b) ** 2 for v in pixels_b)) / num_pixels
-
+    diff = np.abs(arr_a - arr_b)
+    min_diff = int(diff.min())
+    max_diff = int(diff.max())
+    mse = float(np.mean((arr_a - arr_b) ** 2))
     psnr = float("inf") if mse == 0 else 10.0 * math.log10(255.0 * 255.0 / mse)
+
+    # Per-channel SSIM, averaged across R, G, B
+    ssim_means = []
+    ssim_lows = []
+    for ch in range(3):
+        mean_val, low_val = compute_ssim(arr_a[:, :, ch], arr_b[:, :, ch])
+        ssim_means.append(mean_val)
+        ssim_lows.append(low_val)
+    ssim = sum(ssim_means) / len(ssim_means)
+    ssim_low = min(ssim_lows)
 
     print(f"  Min pixel diff: {min_diff}")
     print(f"  Max pixel diff: {max_diff}")
     print(f"  MSE:            {mse:.4f}")
     print(f"  PSNR:           {psnr:.2f} dB")
-    print(f"  Variance (screenshot):    {var_a:.2f}")
-    print(f"  Variance (ground truth):  {var_b:.2f}")
+    print(f"  SSIM:           {ssim:.4f}  (p1: {ssim_low:.4f})")
 
-    return psnr
+    return psnr, ssim, ssim_low
 
 
 def main():
@@ -182,9 +222,20 @@ def main():
         args.framework, args.scene, args.pipeline)
 
     print("Comparing images...")
-    psnr = compare_images(screenshot, ground_truth)
+    psnr, ssim, ssim_low = compare_images(screenshot, ground_truth)
 
-    if psnr >= PSNR_THRESHOLD:
+    passed = True
+    if psnr < PSNR_THRESHOLD:
+        print(f"FAIL: PSNR {psnr:.2f} dB < {PSNR_THRESHOLD} dB")
+        passed = False
+    if ssim < SSIM_THRESHOLD:
+        print(f"FAIL: SSIM {ssim:.4f} < {SSIM_THRESHOLD}")
+        passed = False
+    if ssim_low < SSIM_LOW_THRESHOLD:
+        print(f"FAIL: SSIM p1 {ssim_low:.4f} < {SSIM_LOW_THRESHOLD}")
+        passed = False
+
+    if passed:
         print("PASS")
         return 0
 
