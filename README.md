@@ -6,7 +6,7 @@ Yet another cross-platform renderer with hardware ray-tracing support. Its main 
 
 It is an experimental demo which aims to be simple and modern, rather than being rich in features or robust for production.
 
-![Failed to load image](https://ooo.0x0.ooo/2025/06/24/OVgDd1.jpg)
+![Failed to load image](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu_glfw.png)
 
 ## Features
 

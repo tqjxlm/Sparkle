@@ -1,0 +1,47 @@
+name: "Setup Mesa Lavapipe"
+description: "Install Mesa lavapipe software Vulkan driver for headless CI testing on Windows"
+
+inputs:
+  mesa-version:
+    description: "Mesa version to install"
+    required: false
+    default: "25.3.5"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download Mesa
+      shell: pwsh
+      run: |
+        $version = "${{ inputs.mesa-version }}"
+        $archive = "mesa3d-${version}-release-msvc.7z"
+        $url = "https://github.com/pal1000/mesa-dist-win/releases/download/${version}/${archive}"
+        $dest = "${{ github.workspace }}/mesa"
+        Write-Host "Downloading Mesa ${version} from ${url}"
+        Invoke-WebRequest -Uri $url -OutFile $archive
+        7z x $archive -o"$dest" -y
+        Write-Host "Mesa extracted to ${dest}"
+        Get-ChildItem -Recurse "$dest" -Include "lvp_icd*","vulkan_lvp*" | ForEach-Object { Write-Host $_.FullName }
+
+    - name: Register Lavapipe ICD in Windows Registry
+      shell: pwsh
+      run: |
+        $mesaDir = "${{ github.workspace }}/mesa/x64"
+        $icdJson = Join-Path $mesaDir "lvp_icd.x86_64.json"
+        if (-not (Test-Path $icdJson)) {
+          Write-Error "Lavapipe ICD not found at ${icdJson}"
+          Get-ChildItem -Recurse "${{ github.workspace }}/mesa" | ForEach-Object { Write-Host $_.FullName }
+          exit 1
+        }
+        Write-Host "Lavapipe ICD: ${icdJson}"
+
+        # Register ICD via registry (env vars are ignored when running with elevated permissions)
+        $regPath = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+        if (-not (Test-Path $regPath)) {
+          New-Item -Path $regPath -Force | Out-Null
+        }
+        New-ItemProperty -Path $regPath -Name $icdJson -Value 0 -PropertyType DWord -Force | Out-Null
+        Write-Host "Registered lavapipe ICD in registry at ${regPath}"
+
+        # Also add mesa dir to PATH so vulkan_lvp.dll is discoverable
+        echo "${mesaDir}" >> $env:GITHUB_PATH

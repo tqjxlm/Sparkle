@@ -72,6 +72,13 @@ jobs:
           team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
           app-path: build_system/${{ matrix.framework }}/product/${{ matrix.framework }}-macos-${{ matrix.build_type }}.zip
 
+      - name: Functional Test
+        uses: ./.github/actions/functional-test
+        with:
+          framework: ${{ matrix.framework }}
+          os: ${{ matrix.os }}
+          build_type: ${{ matrix.build_type }}
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
