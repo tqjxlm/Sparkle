@@ -47,23 +47,25 @@ static VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities,
     return actual_extent;
 }
 
-static VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR> &availablePresentModes,
+static VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR> &available_present_modes,
                                               bool use_vsync)
 {
     if (use_vsync)
     {
-        Log(Info, "VSync On");
-        return VK_PRESENT_MODE_FIFO_KHR;
-    }
-
-    for (const auto &available_present_mode : availablePresentModes)
-    {
-        if (available_present_mode == VK_PRESENT_MODE_MAILBOX_KHR)
+        if (std::ranges::find(available_present_modes, VK_PRESENT_MODE_FIFO_KHR) != available_present_modes.end())
         {
-            return available_present_mode;
+            Log(Info, "VSync On");
+            return VK_PRESENT_MODE_FIFO_KHR;
         }
     }
-    return VK_PRESENT_MODE_IMMEDIATE_KHR;
+
+    if (std::ranges::find(available_present_modes, VK_PRESENT_MODE_MAILBOX_KHR) != available_present_modes.end())
+    {
+        return VK_PRESENT_MODE_MAILBOX_KHR;
+    }
+
+    // no preference, just return the first one available
+    return available_present_modes.front();
 }
 
 VulkanSwapChain::~VulkanSwapChain()

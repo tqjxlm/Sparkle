@@ -71,8 +71,10 @@ void SceneManager::GenerateRandomSpheres(Scene &scene, unsigned count)
         std::shared_ptr<Material> material;
         if (material_type < lambertian_ratio)
         {
-            Vector3 color =
-                Vector3(sampler::RandomUnit<true>(), sampler::RandomUnit<true>(), sampler::RandomUnit<true>());
+            auto r = sampler::RandomUnit<true>();
+            auto g = sampler::RandomUnit<true>();
+            auto b = sampler::RandomUnit<true>();
+            Vector3 color = Vector3(r, g, b);
             material = material_manager.GetOrCreateMaterial<LambertianMaterial>(
                 {.base_color = color, .name = "RandomLambertian"});
         }

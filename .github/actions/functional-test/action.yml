@@ -1,0 +1,38 @@
+name: "Functional Test"
+description: "Run the app, capture a screenshot, and compare against ground truth"
+
+inputs:
+  framework:
+    description: "Build framework (glfw, macos, ios, android)"
+    required: true
+  os:
+    description: "Runner OS (e.g. windows-latest, macos-latest)"
+    required: true
+  build_type:
+    description: "Build configuration (Debug, Release)"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Mesa Lavapipe
+      if: inputs.build_type == 'Release' && inputs.framework == 'glfw' && contains(inputs.os, 'windows')
+      uses: ./.github/actions/setup-mesa
+
+    - name: Run Functional Test
+      if: >-
+        inputs.build_type == 'Release' &&
+        (inputs.framework == 'macos' || (inputs.framework == 'glfw' && contains(inputs.os, 'windows')))
+      shell: bash
+      run: python3 dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward
+
+    - name: Upload Test Screenshot
+      if: >-
+        always() && inputs.build_type == 'Release' &&
+        (inputs.framework == 'macos' || (inputs.framework == 'glfw' && contains(inputs.os, 'windows')))
+      uses: actions/upload-artifact@v4
+      with:
+        name: functional-test-screenshot-${{ inputs.framework }}
+        path: |
+          build_system/${{ inputs.framework }}/output/build/generated/screenshots/
+          ~/Documents/sparkle/screenshots/
