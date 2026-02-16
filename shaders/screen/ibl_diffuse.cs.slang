@@ -8,6 +8,7 @@
     uint max_sample;
     uint time_seed;
     float max_brightness;
+    uint sample_batch;
 }
 
 [[vk::binding(1, 0)]] TextureCube env_map;
@@ -27,8 +28,6 @@
 
     float4 prev_color = out_cube_map[DTid];
 
-    InitRandomBase(pixel.x, pixel.y, time_seed);
-
     float2 pixel_size = 1.f / (float2(resolution) - 1);
     float2 uv = float2(pixel.x, pixel.y) * pixel_size;
 
@@ -39,19 +38,26 @@
     float3 u, v, w;
     GetLocalAxisFromNormal(w_n, u, v, w);
 
-    float3 local_w_i = CosineWeightedHemisphere::Sample();
+    float3 batch_radiance = 0.f;
+    for (uint sample_index = 0; sample_index < sample_batch; sample_index++)
+    {
+        InitRandomBase(pixel.x, pixel.y, time_seed + sample_index);
 
-    // back to world space
-    float3 w_i = normalize(TransformBasisToWorld(local_w_i, u, v, w));
+        float3 local_w_i = CosineWeightedHemisphere::Sample();
 
-    float3 env_sample = env_map.SampleLevel(env_map_sampler, w_i, 0).rgb;
+        // back to world space
+        float3 w_i = normalize(TransformBasisToWorld(local_w_i, u, v, w));
 
-    env_sample = ClampToLength(env_sample, max_brightness);
-    float3 total_radiance = env_sample;
+        float3 env_sample = env_map.SampleLevel(env_map_sampler, w_i, 0).rgb;
 
-    // the sampling method we use allow us to skip cos_w_i and InvPi here
-    // float cos_w_i = AbsCosTheta(local_w_i);
-    // total_radiance *= cos_w_i * InvPi;
+        env_sample = ClampToLength(env_sample, max_brightness);
+        float3 total_radiance = env_sample;
 
-    out_cube_map[DTid] = prev_color + float4(total_radiance / max_sample, 1.f);
+        // the sampling method we use allow us to skip cos_w_i and InvPi here
+        // float cos_w_i = AbsCosTheta(local_w_i);
+        // total_radiance *= cos_w_i * InvPi;
+        batch_radiance += total_radiance;
+    }
+
+    out_cube_map[DTid] = prev_color + float4(batch_radiance / max_sample, float(sample_batch));
 }

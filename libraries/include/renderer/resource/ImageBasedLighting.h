@@ -3,6 +3,8 @@
 #include "core/Event.h"
 #include "renderer/pass/IBLPass.h"
 
+#include <cstdint>
+
 namespace sparkle
 {
 class ImageBasedLighting
@@ -43,11 +45,17 @@ public:
     }
 
 private:
+    [[nodiscard]] unsigned GetAdaptiveCookStepBudget(const RenderConfig &config);
+
     RHIResourceRef<RHIImage> env_map_;
 
     std::unique_ptr<IBLPass> ibl_diffuse_pass_;
     std::unique_ptr<IBLPass> ibl_specular_pass_;
     std::unique_ptr<IBLPass> ibl_brdf_pass_;
+
+    RHIContext *rhi_ = nullptr;
+    unsigned cook_steps_per_frame_ = 2;
+    uint8_t next_cook_pass_index_ = 0;
 
     Event render_resource_change_event_;
 };

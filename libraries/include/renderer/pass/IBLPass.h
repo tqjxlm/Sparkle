@@ -29,7 +29,7 @@ public:
         return is_ready_;
     }
 
-    virtual void CookOnTheFly(const RenderConfig &config) = 0;
+    virtual void CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch) = 0;
 
 protected:
     void Complete();
