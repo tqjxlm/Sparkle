@@ -11,7 +11,7 @@ public:
 
     ~IBLBrdfPass() override;
 
-    void CookOnTheFly(const RenderConfig &config) override;
+    void CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch) override;
 
     void InitRenderResources(const RenderConfig &config) override;
 

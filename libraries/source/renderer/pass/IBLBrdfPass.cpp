@@ -3,6 +3,8 @@
 #include "renderer/pass/ClearTexturePass.h"
 #include "rhi/RHI.h"
 
+#include <algorithm>
+
 namespace sparkle
 {
 class IBLBrdfComputeShader : public RHIShaderInfo
@@ -22,6 +24,7 @@ public:
         Vector2Int resolution;
         uint32_t time_seed;
         uint32_t max_sample;
+        uint32_t sample_batch;
     };
 };
 
@@ -98,7 +101,7 @@ void IBLBrdfPass::InitRenderResources(const RenderConfig &config)
     compute_pass_ = rhi_->CreateComputePass("IBLBrdfComputePass", false);
 }
 
-void IBLBrdfPass::CookOnTheFly(const RenderConfig &)
+void IBLBrdfPass::CookOnTheFly(const RenderConfig &, unsigned samples_per_dispatch)
 {
     ASSERT(!IsReady());
 
@@ -107,16 +110,20 @@ void IBLBrdfPass::CookOnTheFly(const RenderConfig &)
         clear_pass_->Render();
     }
 
-    sample_count_++;
+    const auto remaining_samples = target_sample_count_ - sample_count_;
+    const uint32_t batch_size = std::min(std::max(samples_per_dispatch, 1u), remaining_samples);
 
     IBLBrdfComputeShader::UniformBufferData ubo{
         .resolution = Vector2Int(ibl_image_->GetWidth(0), ibl_image_->GetHeight(0)),
-        .time_seed = static_cast<uint32_t>(sample_count_),
+        .time_seed = sample_count_ + 1u,
         .max_sample = target_sample_count_,
+        .sample_batch = batch_size,
     };
     cs_ub_->Upload(rhi_, &ubo);
 
     Render();
+
+    sample_count_ += batch_size;
 
     if (sample_count_ == target_sample_count_)
     {
