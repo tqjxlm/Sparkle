@@ -109,21 +109,9 @@ def download_ground_truth(framework, scene, pipeline):
     return dest
 
 
-def ensure_numpy():
-    try:
-        import numpy as np
-        return np
-    except ImportError:
-        print("NumPy not found, installing...")
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "numpy"])
-        import numpy as np
-        return np
-
-
 def compute_ssim(img_a, img_b, window_size=11):
     """Compute mean SSIM between two images using windowed statistics."""
-    np = ensure_numpy()
+    import numpy as np
 
     C1 = (0.01 * 255) ** 2
     C2 = (0.03 * 255) ** 2
@@ -156,15 +144,8 @@ def compute_ssim(img_a, img_b, window_size=11):
 
 
 def compare_images(path_a, path_b):
-    try:
-        from PIL import Image
-    except ImportError:
-        print("Pillow not found, installing...")
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "Pillow"])
-        from PIL import Image
-
-    np = ensure_numpy()
+    from PIL import Image
+    import numpy as np
 
     img_a = Image.open(path_a).convert("RGB")
     img_b = Image.open(path_b).convert("RGB")
@@ -202,7 +183,15 @@ def compare_images(path_a, path_b):
     return psnr, ssim, ssim_low
 
 
+def install_dependencies():
+    requirements = os.path.join(SCRIPT_DIR, "requirements.txt")
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-r", requirements],
+        stdout=subprocess.DEVNULL)
+
+
 def main():
+    install_dependencies()
     args = parse_args()
 
     env = None

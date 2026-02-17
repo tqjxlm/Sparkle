@@ -9,6 +9,8 @@
 #include "core/Exception.h"
 #include "core/math/Utilities.h"
 
+#include <algorithm>
+
 namespace sparkle
 {
 static VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR> &availableFormats)
@@ -52,20 +54,22 @@ static VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR
 {
     if (use_vsync)
     {
-        if (std::ranges::find(available_present_modes, VK_PRESENT_MODE_FIFO_KHR) != available_present_modes.end())
+        // FIFO is guaranteed to be available by the vulkan spec
+        ASSERT(std::ranges::find(available_present_modes, VK_PRESENT_MODE_FIFO_KHR) != available_present_modes.end());
+
+        Log(Info, "VSync On");
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    for (auto preferred : {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR})
+    {
+        if (std::ranges::find(available_present_modes, preferred) != available_present_modes.end())
         {
-            Log(Info, "VSync On");
-            return VK_PRESENT_MODE_FIFO_KHR;
+            return preferred;
         }
     }
 
-    if (std::ranges::find(available_present_modes, VK_PRESENT_MODE_MAILBOX_KHR) != available_present_modes.end())
-    {
-        return VK_PRESENT_MODE_MAILBOX_KHR;
-    }
-
-    // no preference, just return the first one available
-    return available_present_modes.front();
+    return VK_PRESENT_MODE_FIFO_KHR;
 }
 
 VulkanSwapChain::~VulkanSwapChain()

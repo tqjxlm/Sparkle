@@ -37,7 +37,8 @@ static void SetBundledIcdPath()
     }
 
     auto icd_path = std::filesystem::path(exe_path).parent_path() / "vulkan/icd.d/MoltenVK_icd.json";
-    if (std::filesystem::exists(icd_path))
+    std::error_code ec;
+    if (std::filesystem::exists(icd_path, ec))
     {
         setenv("VK_ICD_FILENAMES", icd_path.c_str(), 0);
     }
