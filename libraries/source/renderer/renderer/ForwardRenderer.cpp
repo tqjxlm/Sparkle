@@ -175,8 +175,8 @@ void ForwardRenderer::Render()
             tone_mapping_pass_->Render();
         }
 
-        bool has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), false,
-                                                           RHIPipelineStage::ColorOutput);
+        bool has_readback =
+            ReadbackFinalOutputIfRequested(screen_color_rt_.get(), false, RHIPipelineStage::ColorOutput);
 
         if (render_config_.render_ui)
         {
@@ -190,8 +190,7 @@ void ForwardRenderer::Render()
             ui_pass_->Render();
         }
 
-        has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), true,
-                                                      RHIPipelineStage::ColorOutput);
+        has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), true, RHIPipelineStage::ColorOutput);
 
         screen_color_->Transition(
             {.target_layout = RHIImageLayout::Read,
@@ -222,7 +221,7 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
         }
         return true;
     case RenderConfig::OutputImage::IBL_BrdfTexture:
-        if (!ibl_)
+        if (!ibl_ || !ibl_->GetBRDFMap())
         {
             return false;
         }
@@ -230,17 +229,19 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
             PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, ibl_->GetBRDFMap(), screen_color_rt_);
         return true;
     case RenderConfig::OutputImage::IBL_DiffuseMap:
-        if (!ibl_ || !sky_box_pass_)
+        if (!ibl_ || !sky_box_pass_ || !ibl_->GetDiffuseMap())
         {
             return false;
         }
+        texture_output_pass_ = nullptr;
         sky_box_pass_->OverrideSkyMap(ibl_->GetDiffuseMap());
         return true;
     case RenderConfig::OutputImage::IBL_SpecularMap:
-        if (!ibl_ || !sky_box_pass_)
+        if (!ibl_ || !sky_box_pass_ || !ibl_->GetSpecularMap())
         {
             return false;
         }
+        texture_output_pass_ = nullptr;
         sky_box_pass_->OverrideSkyMap(ibl_->GetSpecularMap());
         return true;
     default:

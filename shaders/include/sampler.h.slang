@@ -27,7 +27,7 @@ float Evaluate(float3 N, float3 H, float roughness)
     float denom = (NdotH2 * (a2 - 1.0) + 1.0);
     denom = Pi * denom * denom;
 
-    return num / denom;
+    return num / (denom + Eps);
 }
 
 float Ndf(float cos_theta, float roughness)
@@ -52,6 +52,12 @@ float3 Sample(float3 w_o, float roughness)
     // VNDF sampling
 
     float a = roughness * roughness;
+
+    // Perfect mirror: microfacet normal equals surface normal
+    if (a < Eps)
+    {
+        return float3(0, 0, 1);
+    }
 
     float u1 = RandomUnit();
     float u2 = RandomUnit();
@@ -90,7 +96,7 @@ float3 Sample()
     float2 unit_disk = UnitDisk();
 
     // Project z up to the unit hemisphere
-    float z = sqrt(1.0f - dot(unit_disk, unit_disk));
+    float z = sqrt(max(0.0f, 1.0f - dot(unit_disk, unit_disk)));
 
     return normalize(float3(unit_disk, z));
 }
@@ -113,7 +119,7 @@ float SmithGGX(float cos_o, float cos_i, float roughness)
 
     float ggx_i = cos_o * sqrt((-cos_i * a2 + cos_i) * cos_i + a2 + Eps);
     float ggx_o = cos_i * sqrt((-cos_o * a2 + cos_o) * cos_o + a2 + Eps);
-    return 2.f * cos_o * cos_i / (ggx_o + ggx_i);
+    return 2.f * cos_o * cos_i / (ggx_o + ggx_i + Eps);
 
     // another implementation
 

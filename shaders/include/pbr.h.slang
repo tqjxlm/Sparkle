@@ -46,9 +46,13 @@ float3 SampleSpecularIBL(RenderConfig config, float3 dir, float roughness, IBLCo
 float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttributes surface)
 {
     float3 N = surface.normal;
-    float3 H = normalize(V + L);
     float NdotL = SaturateDot(N, L);
-    float NdotV = SaturateDot(N, V);
+    float NdotV = max(SaturateDot(N, V), Eps);
+
+    float3 H_raw = V + L;
+    if (dot(H_raw, H_raw) < Eps)
+        return (float3)0;
+    float3 H = normalize(H_raw);
     float HdotV = SaturateDot(H, V);
 
     // micro surface
@@ -86,7 +90,7 @@ float3 CalculateAmbientLighting(RenderConfig config, float3 V, SkyLight sky_ligh
                                 IBLConfig ibl)
 {
     float3 N = surface.normal;
-    float NdotV = SaturateDot(N, V);
+    float NdotV = max(SaturateDot(N, V), Eps);
     float3 R = reflect(-V, N);
 
     float3 environment_lighting;

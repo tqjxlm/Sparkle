@@ -348,11 +348,11 @@ VulkanSampler::VulkanSampler(RHISampler::SamplerAttribute attribute, const std::
     sampler_info.addressModeU = GetVulkanSamplerAddressMode(attribute.address_mode);
     sampler_info.addressModeV = GetVulkanSamplerAddressMode(attribute.address_mode);
     sampler_info.addressModeW = GetVulkanSamplerAddressMode(attribute.address_mode);
-    sampler_info.anisotropyEnable = VK_TRUE;
+    sampler_info.anisotropyEnable = attribute.enable_anisotropy ? VK_TRUE : VK_FALSE;
 
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &properties);
-    sampler_info.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    sampler_info.maxAnisotropy = attribute.enable_anisotropy ? properties.limits.maxSamplerAnisotropy : 1.0f;
     if (attribute.address_mode == RHISampler::SamplerAddressMode::ClampToBorder)
     {
         sampler_info.borderColor = GetVulkanBorderColor(attribute.border_color);

@@ -61,10 +61,7 @@ float3 SRGBtoLinear(float3 sRGB)
 float3 ClampToLength(float3 v, float max_length)
 {
     const float length_v = length(v);
-
-    const float scale = lerp(max_length / length_v, 1.0f, step(length_v, max_length));
-
-    return v * scale;
+    return (length_v > max_length) ? v * (max_length / length_v) : v;
 }
 
 float ToLinearDepth(float depth, float near, float far)

@@ -159,7 +159,8 @@ RHIResourceRef<RHIImage> IBLSpecularPass::CreateIBLMap(bool for_cooking, bool al
                                 .filtering_method_min = RHISampler::FilteringMethod::Linear,
                                 .filtering_method_mag = RHISampler::FilteringMethod::Linear,
                                 .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                                .max_lod = (MipLevelCount - 1)};
+                                .max_lod = (MipLevelCount - 1),
+                                .enable_anisotropy = false};
 
     return rhi_->CreateImage(output_attribute, env_map_->GetName() + "_specular");
 }
