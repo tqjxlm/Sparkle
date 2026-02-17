@@ -44,7 +44,7 @@
 
         // recover a pseudo w_o from cos_o.
         // note that the x component is here to make a unit direction, it does not affect the convolution.
-        float3 local_w_o = float3(sqrt(1.0 - cos_o * cos_o), 0, cos_o);
+        float3 local_w_o = float3(sqrt(max(0.0, 1.0 - cos_o * cos_o)), 0, cos_o);
 
         float3 local_w_m = SampleMicroFacetNormal(local_w_o, roughness);
         float3 local_w_i = reflect(-local_w_o, local_w_m);
@@ -64,7 +64,7 @@
             float geometry = SmithGGX(cos_o, cos_i, roughness);
             float normalizer = GeometrySchlickGGX(i_dot_m, roughness) + Eps;
             float brdf_term = geometry / normalizer;
-            float fresnel_term = pow(1.0 - i_dot_m, 5.0);
+            float fresnel_term = pow(max(0.0, 1.0 - i_dot_m), 5.0);
             output = float2((1.0 - fresnel_term) * brdf_term, fresnel_term * brdf_term);
         }
 

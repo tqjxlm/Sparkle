@@ -78,6 +78,7 @@ public:
         FilteringMethod filtering_method_mipmap = FilteringMethod::Count;
         uint8_t min_lod = 0;
         uint8_t max_lod = 0;
+        bool enable_anisotropy = true;
 
         auto operator<=>(const SamplerAttribute &) const = default;
 
@@ -91,6 +92,7 @@ public:
             HashCombine(hash, filtering_method_mipmap);
             HashCombine(hash, min_lod);
             HashCombine(hash, max_lod);
+            HashCombine(hash, enable_anisotropy);
             return hash;
         }
     };

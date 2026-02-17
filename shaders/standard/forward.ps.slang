@@ -65,16 +65,18 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
 
     if (mat_param.normal_texture >= 0)
     {
-        float3 tangent_normal_sampled = SampleNormal(vs_in.uv);
-        surface.normal =
-            normalize(TransformBasisToWorld(tangent_normal_sampled, vs_in.tangent, vs_in.bi_tangent, vs_in.normal));
+        float3 mapped = TransformBasisToWorld(SampleNormal(vs_in.uv), vs_in.tangent, vs_in.bi_tangent, vs_in.normal);
+        float len_sq = dot(mapped, mapped);
+        surface.normal = len_sq > Eps ? mapped * rsqrt(len_sq) : vs_in.normal;
     }
     else
     {
         surface.normal = vs_in.normal;
     }
 
-    surface.normal = normalize(mul((float3x3)ModelMatrixInvTranspose, surface.normal));
+    float3 transformed_normal = mul((float3x3)ModelMatrixInvTranspose, surface.normal);
+    float tn_len_sq = dot(transformed_normal, transformed_normal);
+    surface.normal = tn_len_sq > Eps ? transformed_normal * rsqrt(tn_len_sq) : float3(0, 0, 1);
 
     float4 metallic_roughness_sampled = mat_param.metallic_roughness_texture >= 0
                                             ? metallic_roughness_texture.Sample(material_texture_sampler, vs_in.uv)
@@ -164,5 +166,8 @@ void main(MeshPassVSInterpolant vs_in, out float4 color_out : SV_Target)
         break;
     }
 
-    color_out = float4(ambient + directional + surface.emissive, 1.0f);
+    float3 result = ambient + directional + surface.emissive;
+    if (any(isnan(result) || isinf(result)))
+        result = (float3)0;
+    color_out = float4(result, 1.0f);
 }

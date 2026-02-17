@@ -61,7 +61,8 @@ RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_
     output_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
                                 .filtering_method_min = RHISampler::FilteringMethod::Linear,
                                 .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
+                                .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
+                                .enable_anisotropy = false};
 
     return rhi_->CreateImage(output_attribute, "ibl_brdf_map");
 }
