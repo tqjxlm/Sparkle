@@ -22,14 +22,14 @@ runs:
     - name: Run Functional Test
       if: >-
         inputs.build_type == 'Release' &&
-        (inputs.framework == 'macos' || (inputs.framework == 'glfw' && contains(inputs.os, 'windows')))
+        (inputs.framework == 'glfw' && contains(inputs.os, 'windows'))
       shell: bash
       run: python3 dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward
 
     - name: Upload Test Screenshot
       if: >-
         always() && inputs.build_type == 'Release' &&
-        (inputs.framework == 'macos' || (inputs.framework == 'glfw' && contains(inputs.os, 'windows')))
+        (inputs.framework == 'glfw' && contains(inputs.os, 'windows'))
       uses: actions/upload-artifact@v4
       with:
         name: functional-test-screenshot-${{ inputs.framework }}

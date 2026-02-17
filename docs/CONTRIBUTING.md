@@ -2,7 +2,7 @@
 
 ## CI/CD
 
-See [CI.md](CI.md) for details.
+You must conform to CI/CD requirements. See [CI.md](CI.md) for details.
 
 ## Coding Style
 

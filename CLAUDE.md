@@ -4,6 +4,8 @@ This file provides guidance to Claude Code when working with this repository.
 
 Also read: [README.md](README.md), [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md), [docs/Development.md](docs/Development.md), [docs/TODO.md](docs/TODO.md)
 
+Update all docs after every edit if there are high-level changes. Make all docs clean and accurate. Do not repeat contents across docs.
+
 ## Quick Reference
 
 ```bash

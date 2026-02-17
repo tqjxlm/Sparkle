@@ -4,8 +4,8 @@ Downloads Mesa lavapipe if needed, configures the Vulkan loader to use it,
 then runs the app executable. Importable as a module for the env setup.
 
 Usage:
-    python dev/software_render_test.py [app args...]
-    python dev/software_render_test.py --auto_screenshot true --pipeline forward
+    python dev/run_without_gpu.py [app args...]
+    python dev/run_without_gpu.py --auto_screenshot true --pipeline forward
 """
 
 import os
