@@ -6,7 +6,6 @@
 * [ ] unit test pipeline
 * [ ] functional test pipeline
 * [ ] performance test pipeline
-* [ ] ground truth screenshots for android framework
 
 ## Path Tracing Renderers
 
