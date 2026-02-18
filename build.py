@@ -29,13 +29,11 @@ def construct_additional_cmake_options(parsed_args, cmake_args=None):
 
 
 def parse_args(args=None):
-    from build_system.builder_factory import get_supported_frameworks
-
     parser = argparse.ArgumentParser(
         description="Parse build arguments for sparkle.")
 
     parser.add_argument("--framework", default="glfw",
-                        choices=get_supported_frameworks(), help="Build framework")
+                        choices=["glfw", "macos", "ios", "android"], help="Build framework")
     parser.add_argument("--config", default="Debug",
                         choices=["Release", "Debug"], help="Build configuration")
     parser.add_argument("--archive", action="store_true",
@@ -52,8 +50,8 @@ def parse_args(args=None):
                         help="Generate compile_commands.json for clangd")
     parser.add_argument("--run", action="store_true",
                         help="Run the built executable after building")
-    parser.add_argument("--setup_only", action="store_true",
-                        help="Run setup only without building")
+    parser.add_argument("--skip_build", action="store_true",
+                        help="Do every thing but skip building")
     parser.add_argument("--clean", action="store_true",
                         help="Clean output directory before configure")
     parser.add_argument("--apple_auto_sign", action="store_true",
@@ -73,7 +71,7 @@ def parse_args(args=None):
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
         "generate_only": parsed_args.generate_only,
-        "setup_only": parsed_args.setup_only,
+        "skip_build": parsed_args.skip_build,
         "clangd": parsed_args.clangd,
         "clean": parsed_args.clean,
         "apple_auto_sign": parsed_args.apple_auto_sign,
@@ -160,6 +158,10 @@ def build_project(args):
         print("Generating project...")
         builder.generate_project(args)
     else:
+        if args["skip_build"]:
+            print("Skipping build.")
+            return
+
         print("Building...")
         builder.build(args)
 
@@ -178,13 +180,7 @@ def main():
 
     args = parse_args()
 
-    # Always run setup first
     setup()
-
-    # If --setup_only flag is used, exit after setup
-    if args["setup_only"]:
-        print("Setup-only mode: Skipping build.")
-        return
 
     check_environment(args)
 

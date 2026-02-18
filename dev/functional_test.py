@@ -15,9 +15,8 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 GROUND_TRUTH_URL_BASE = "https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle"
 
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
-SUPPORTED_PIPELINES = ("gpu", "forward", "deferred")
-
 DEFAULT_SCENE = "TestScene"
+
 PSNR_THRESHOLD = 30.0
 SSIM_THRESHOLD = 0.95
 SSIM_LOW_THRESHOLD = 0.85
@@ -28,14 +27,14 @@ def parse_args():
         description="Run an already-built app, capture a screenshot, and compare against ground truth.")
     parser.add_argument("--framework", required=True,
                         choices=SUPPORTED_FRAMEWORKS)
-    parser.add_argument("--pipeline", required=True,
-                        choices=SUPPORTED_PIPELINES)
-    parser.add_argument("--scene", default=DEFAULT_SCENE)
+    parser.add_argument("--pipeline", default="forward")
+    parser.add_argument("--scene")
     parser.add_argument("--skip_run", action="store_true",
                         help="Skip running the app (use existing screenshot)")
     parser.add_argument("--software", action="store_true",
                         help="Use Mesa Lavapipe software Vulkan rendering (Windows only)")
-    return parser.parse_args()
+
+    return parser.parse_known_args()
 
 
 def get_executable(framework):
@@ -53,15 +52,17 @@ def get_executable(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_app(framework, pipeline, scene, env=None):
+def run_app(framework, pipeline, scene, other_args, env=None):
     exe_path, cwd = get_executable(framework)
     if not os.path.exists(exe_path):
         print(f"Executable not found: {exe_path}")
         print("Build the project first with: python3 build.py --framework " + framework)
         sys.exit(1)
 
-    run_cmd = [exe_path, "--auto_screenshot", "true", "--pipeline", pipeline]
-    if scene != DEFAULT_SCENE:
+    run_cmd = [exe_path, "--auto_screenshot", "true",
+               "--pipeline", pipeline] + other_args
+
+    if scene:
         run_cmd += ["--scene", scene]
 
     if env is None:
@@ -192,7 +193,7 @@ def install_dependencies():
 
 def main():
     install_dependencies()
-    args = parse_args()
+    args, unknown_args = parse_args()
 
     env = None
     if args.software:
@@ -200,15 +201,18 @@ def main():
         env = setup_lavapipe()
 
     if not args.skip_run:
-        run_app(args.framework, args.pipeline, args.scene, env=env)
+        run_app(args.framework, args.pipeline,
+                args.scene, unknown_args, env=env)
     else:
         print("Skipping app run, using existing screenshot.")
 
-    screenshot = find_screenshot(args.framework, args.scene, args.pipeline)
+    scene = args.scene or DEFAULT_SCENE
+
+    screenshot = find_screenshot(args.framework, scene, args.pipeline)
 
     print("Downloading ground truth...")
     ground_truth = download_ground_truth(
-        args.framework, args.scene, args.pipeline)
+        args.framework, scene, args.pipeline)
 
     print("Comparing images...")
     psnr, ssim, ssim_low = compare_images(screenshot, ground_truth)
