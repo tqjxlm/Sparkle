@@ -2,23 +2,37 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
-Also read: [README.md](README.md), [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md), [docs/Development.md](docs/Development.md), [docs/TODO.md](docs/TODO.md)
+Also read: [README.md](README.md), [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md), [docs/Development.md](docs/Development.md), [docs/TODO.md](docs/TODO.md), [docs/CI.md](docs/CI.md)
 
 Update all docs after every edit if there are high-level changes. Make all docs clean and accurate. Do not repeat contents across docs.
 
-## Quick Reference
+## Quality Ensurance
+
+Always run build tests and functional tests to ensure quality. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) and [docs/CI.md](docs/CI.md) for details.
 
 ```bash
-python build.py --framework=glfw --run              # Build and run (GLFW/desktop)
-python build.py --framework=macos --run             # Build and run (native macOS)
-python build.py --framework=ios --run               # Build and run (iOS device)
-python build.py --framework=android --run           # Build and run (Android device)
-python build.py --framework=glfw --clangd           # Generate compile_commands.json
-python build.py --framework=glfw --clean            # Clean before build
-python build.py --framework=glfw --asan             # AddressSanitizer
+python build.py --framework=[glfw, macos, ios, android] --clangd           # Generate compile_commands.json
+python build.py --framework=[glfw, macos, ios, android] --clean            # Clean before build
+python build.py --framework=[glfw, macos, ios, android] --asan             # AddressSanitizer
 ```
 
-See [docs/Development.md](docs/Development.md) for full build options, environment variables, and IDE setup.
+```bash
+python build.py --run --framework=[glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]              # Build and run
+python ./dev/functional_test.py --framework [glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]    # Run functional test against ground truth (skip building)
+```
+
+## Logs
+
+For latest running logs, see [external storage path]/generates/logs/output.log. A backup of previous runs are also stored there.
+
+Logs will also be redirected to console when running from command line.
+
+External storage path is platform dependent:
+
+- Windows: executable's directory/generated/logs. e.g. build_system/glfw/output/build/generated/logs
+- macOS: ~/Documents/sparkle/logs
+- iOS: <App's_Document_Directory>/logs. you can use ios-deploy to pull logs.
+- Android: /sdcard/Android/data/io.tqjxlm.sparkle/files/logs. you can use adb to pull logs.
 
 ## Code Style Guidelines
 
@@ -69,29 +83,6 @@ shaders/
 ├── standard/     # Vertex/pixel shaders
 └── utilities/    # Utility compute
 ```
-
-Shader hot-reload supported in debug builds.
-
-## Common Tasks
-
-**Adding a new rendering pipeline:**
-
-1. Create pipeline class in `libraries/source/renderer/`
-2. Register in pipeline factory
-3. Add config option in `resources/config/config.json`
-
-**Adding platform support:**
-
-1. Implement `NativeView` in `frameworks/source/<platform>/`
-2. Create builder in `build_system/<platform>/build.py`
-3. Register in `build_system/builder_factory.py`
-
-**Debugging build issues:**
-
-- Build logs: `build_system/<platform>/output/build/build.log`
-- Use `--clean` to clear cached state
-- Use `--asan` for memory issues
-- Git submodule issues: `git submodule update --init --recursive`
 
 ## Common Pitfalls
 
