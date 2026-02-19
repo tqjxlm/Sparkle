@@ -437,7 +437,7 @@ float3 SamplePixel(RayDesc ray_desc)
     }
 
     float moving_average = (float)total_sample_count / (total_sample_count + spp);
-    all_samples = lerp(this_samples, all_samples, moving_average);
+    all_samples = lerp(this_samples / float(spp), all_samples, moving_average);
 
     // output
     imageData[pixel] = float4(all_samples, 1.f);

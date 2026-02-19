@@ -69,6 +69,7 @@ private:
     float running_time_per_spp_ = 0.f;
 
     uint32_t last_second_total_spp_ = 0;
+    uint32_t dispatched_sample_count_ = 0;
 
     TimerCaller spp_logger_;
 };

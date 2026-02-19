@@ -130,6 +130,7 @@ void GPURenderer::Render()
     {
         clear_pass_->Render();
         camera->ClearPixels();
+        dispatched_sample_count_ = 0;
     }
 
     // base pass: render to texture
@@ -278,10 +279,10 @@ void GPURenderer::Update()
 
     auto *camera = scene_render_proxy_->GetCamera();
 
-    auto current_time =
-        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch());
-    // the truncation is on purpose. we do not care about the actual value.
-    auto time_seed = static_cast<uint32_t>(current_time.count());
+    // Use a per-frame seed that advances every dispatch so fresh samples are generated
+    // even after cumulated_sample_count is capped. Stays identical to GetCumulatedSampleCount()
+    // before the cap, preserving determinism for functional tests.
+    auto time_seed = dispatched_sample_count_;
 
     uint32_t spp;
 
@@ -328,6 +329,7 @@ void GPURenderer::Update()
         .enable_nee = render_config_.enable_nee ? 1u : 0,
     };
 
+    dispatched_sample_count_ += spp;
     camera->AccumulateSample(spp);
 
     if (sky_light)

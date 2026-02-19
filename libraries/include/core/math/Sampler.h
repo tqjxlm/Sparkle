@@ -1,35 +1,43 @@
 #pragma once
 
-#define RANDOM_USE_XOSHIRO 1
-
 #include "core/math/Utilities.h"
 
-#include <thread>
-#if RANDOM_USE_XOSHIRO
 #include <XoshiroCpp.hpp>
-#else
-#include <random>
-#endif
+
+#include <thread>
 
 namespace sparkle
 {
 namespace sampler
 {
+namespace detail
+{
+// Expose the default thread-local RNG so it can be reseeded externally.
+inline XoshiroCpp::Xoshiro128Plus &GetDefaultRng()
+{
+    static thread_local XoshiroCpp::Xoshiro128Plus rng(
+        static_cast<unsigned int>(std::hash<std::thread::id>{}(std::this_thread::get_id())));
+    return rng;
+}
+} // namespace detail
+
+// Reseed the calling thread's RNG with a deterministic value.
+// Call this at the start of each parallel work unit (e.g. row) to ensure
+// reproducible output regardless of which thread pool worker runs the task.
+inline void ReseedCurrentThread(unsigned int seed)
+{
+    detail::GetDefaultRng() = XoshiroCpp::Xoshiro128Plus(seed);
+}
+
 template <bool FixSeed = false> inline float RandomUnit()
 {
-    constexpr unsigned int FixedSeed = 42;
-    static thread_local unsigned int seed =
-        FixSeed ? FixedSeed : static_cast<unsigned int>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
-
-#if RANDOM_USE_XOSHIRO
-    static thread_local XoshiroCpp::Xoshiro128Plus rng(seed);
-    return static_cast<float>(rng()) / static_cast<float>(std::numeric_limits<uint32_t>::max());
-#else
-    static thread_local std::mt19937 generator(seed);
-
-    std::uniform_real_distribution<float> distribution(0.f, 1.f);
-    return distribution(generator);
-#endif
+    if constexpr (FixSeed)
+    {
+        constexpr unsigned int FixedSeed = 42;
+        static thread_local XoshiroCpp::Xoshiro128Plus rng(FixedSeed);
+        return static_cast<float>(rng()) / static_cast<float>(std::numeric_limits<uint32_t>::max());
+    }
+    return static_cast<float>(detail::GetDefaultRng()()) / static_cast<float>(std::numeric_limits<uint32_t>::max());
 }
 
 template <bool FixSeed = false> inline Vector2 UnitDisk()
