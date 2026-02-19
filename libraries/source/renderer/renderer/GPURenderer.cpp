@@ -51,6 +51,31 @@ class RayTracingComputeShader : public RHIShaderInfo
     };
 };
 
+class ASVGFDebugVisualizeComputeShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ASVGFDebugVisualizeComputeShader, RHIShaderStage::Compute,
+                     "shaders/ray_trace/asvgf_debug_visualize.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(outputImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+    struct UniformBufferData
+    {
+        uint32_t stage = 0;
+        uint32_t view = 0;
+        uint32_t history_index = 0;
+        uint32_t frame_index = 0;
+        uint32_t resolution_x = 1;
+        uint32_t resolution_y = 1;
+        uint32_t freeze_history = 0;
+        uint32_t force_clear_history = 0;
+    };
+};
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy)
     : Renderer(render_config, rhi_context, scene_render_proxy),
@@ -59,6 +84,10 @@ GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::gpu);
 
     ASSERT(rhi_->SupportsHardwareRayTracing());
+
+    last_asvgf_enabled_ = render_config_.asvgf;
+    last_asvgf_debug_view_ = render_config_.asvgf_debug_view;
+    last_asvgf_test_stage_ = render_config_.asvgf_test_stage;
 }
 
 void GPURenderer::InitRenderResources()
@@ -104,6 +133,11 @@ void GPURenderer::InitRenderResources()
 
     tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_texture_, tone_mapping_rt_);
 
+    if (render_config_.asvgf)
+    {
+        InitASVGFRenderResources();
+    }
+
     clear_pass_ = PipelinePass::Create<ClearTexturePass>(render_config_, rhi_, Vector4::Zero(),
                                                          RHIImageLayout::StorageWrite, scene_rt_);
 
@@ -131,6 +165,12 @@ void GPURenderer::Render()
         clear_pass_->Render();
         camera->ClearPixels();
         dispatched_sample_count_ = 0;
+        asvgf_history_clear_pending_ = true;
+    }
+
+    if (render_config_.asvgf_force_clear_history)
+    {
+        asvgf_history_clear_pending_ = true;
     }
 
     // base pass: render to texture
@@ -150,9 +190,20 @@ void GPURenderer::Render()
                                     .before_stage = RHIPipelineStage::PixelShader});
     }
 
+    if (render_config_.asvgf)
+    {
+        RunASVGFPasses();
+    }
+
     // screen space passes (post processing)
     {
-        tone_mapping_pass_->Render();
+        auto *tone_mapping_pass = tone_mapping_pass_.get();
+        if (UseASVGFDebugDisplay())
+        {
+            tone_mapping_pass = asvgf_debug_tone_mapping_pass_.get();
+        }
+
+        tone_mapping_pass->Render();
 
         bool has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, false, RHIPipelineStage::ColorOutput);
 
@@ -191,6 +242,26 @@ bool GPURenderer::IsReadyForAutoScreenshot() const
 void GPURenderer::Update()
 {
     PROFILE_SCOPE("GPURenderer::Update");
+
+    auto *camera = scene_render_proxy_->GetCamera();
+
+    bool asvgf_state_changed = render_config_.asvgf != last_asvgf_enabled_ ||
+                               render_config_.asvgf_debug_view != last_asvgf_debug_view_ ||
+                               render_config_.asvgf_test_stage != last_asvgf_test_stage_;
+    if (asvgf_state_changed)
+    {
+        camera->MarkPixelDirty();
+        asvgf_history_clear_pending_ = true;
+
+        last_asvgf_enabled_ = render_config_.asvgf;
+        last_asvgf_debug_view_ = render_config_.asvgf_debug_view;
+        last_asvgf_test_stage_ = render_config_.asvgf_test_stage;
+    }
+
+    if (render_config_.asvgf && !asvgf_debug_pipeline_state_)
+    {
+        InitASVGFRenderResources();
+    }
 
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
     {
@@ -277,8 +348,6 @@ void GPURenderer::Update()
         tlas_->Update(primitives_to_update);
     }
 
-    auto *camera = scene_render_proxy_->GetCamera();
-
     // Use a per-frame seed that advances every dispatch so fresh samples are generated
     // even after cumulated_sample_count is capped. Stays identical to GetCumulatedSampleCount()
     // before the cap, preserving determinism for functional tests.
@@ -321,8 +390,11 @@ void GPURenderer::Update()
         spp = render_config_.sample_per_pixel;
     }
 
+    auto camera_ubo = camera->GetUniformBufferData(render_config_);
+    camera_ubo.mode = GetRayTraceDebugMode();
+
     RayTracingComputeShader::UniformBufferData ubo{
-        .camera = camera->GetUniformBufferData(render_config_),
+        .camera = camera_ubo,
         .time_seed = time_seed,
         .total_sample_count = camera->GetCumulatedSampleCount(),
         .spp = spp,
@@ -351,6 +423,10 @@ void GPURenderer::Update()
     }
 
     tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
+    if (asvgf_debug_tone_mapping_pass_)
+    {
+        asvgf_debug_tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
+    }
 
     last_second_total_spp_ += spp;
 
@@ -420,6 +496,173 @@ void GPURenderer::InitSceneRenderResources()
     cs_resources->materialTextureSampler().BindResource(dummy_texture_2d->GetSampler());
 
     BindBindlessResources();
+}
+
+void GPURenderer::InitASVGFRenderResources()
+{
+    if (asvgf_debug_pipeline_state_)
+    {
+        return;
+    }
+
+    auto create_asvgf_texture = [this](PixelFormat format, const std::string &name) {
+        return rhi_->CreateImage(
+            RHIImage::Attribute{
+                .format = format,
+                .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+                .width = image_size_.x(),
+                .height = image_size_.y(),
+                .usages =
+                    RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
+                .memory_properties = RHIMemoryProperty::DeviceLocal,
+                .mip_levels = 1,
+                .msaa_samples = 1,
+            },
+            name);
+    };
+
+    asvgf_noisy_texture_ = create_asvgf_texture(PixelFormat::RGBAFloat, "ASVGFNoisyTexture");
+    asvgf_feature_normal_roughness_texture_ =
+        create_asvgf_texture(PixelFormat::RGBAFloat16, "ASVGFFeatureNormalRoughness");
+    asvgf_feature_albedo_metallic_texture_ =
+        create_asvgf_texture(PixelFormat::RGBAFloat16, "ASVGFFeatureAlbedoMetallic");
+    asvgf_feature_depth_texture_ = create_asvgf_texture(PixelFormat::R32_FLOAT, "ASVGFFeatureDepth");
+    asvgf_history_color_texture_[0] = create_asvgf_texture(PixelFormat::RGBAFloat, "ASVGFHistoryColor0");
+    asvgf_history_color_texture_[1] = create_asvgf_texture(PixelFormat::RGBAFloat, "ASVGFHistoryColor1");
+    asvgf_history_moments_texture_[0] = create_asvgf_texture(PixelFormat::RGBAFloat16, "ASVGFHistoryMoments0");
+    asvgf_history_moments_texture_[1] = create_asvgf_texture(PixelFormat::RGBAFloat16, "ASVGFHistoryMoments1");
+    asvgf_variance_texture_ = create_asvgf_texture(PixelFormat::R32_FLOAT, "ASVGFVariance");
+    asvgf_atrous_ping_pong_texture_[0] = create_asvgf_texture(PixelFormat::RGBAFloat16, "ASVGFAtrousPing");
+    asvgf_atrous_ping_pong_texture_[1] = create_asvgf_texture(PixelFormat::RGBAFloat16, "ASVGFAtrousPong");
+    asvgf_debug_texture_ = create_asvgf_texture(PixelFormat::RGBAFloat, "ASVGFDebug");
+
+    asvgf_debug_tone_mapping_pass_ =
+        PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, asvgf_debug_texture_, tone_mapping_rt_);
+
+    asvgf_debug_uniform_buffer_ =
+        rhi_->CreateBuffer({.size = sizeof(ASVGFDebugVisualizeComputeShader::UniformBufferData),
+                            .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                            .mem_properties = RHIMemoryProperty::None,
+                            .is_dynamic = true},
+                           "ASVGFDebugUniformBuffer");
+    asvgf_debug_shader_ = rhi_->CreateShader<ASVGFDebugVisualizeComputeShader>();
+    asvgf_debug_pipeline_state_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ASVGFDebugPSO");
+    asvgf_debug_pipeline_state_->SetShader<RHIShaderStage::Compute>(asvgf_debug_shader_);
+    asvgf_debug_pipeline_state_->Compile();
+
+    auto *cs_resources = asvgf_debug_pipeline_state_->GetShaderResource<ASVGFDebugVisualizeComputeShader>();
+    cs_resources->ubo().BindResource(asvgf_debug_uniform_buffer_);
+    cs_resources->outputImage().BindResource(asvgf_debug_texture_->GetDefaultView(rhi_));
+
+    asvgf_debug_compute_pass_ = rhi_->CreateComputePass("ASVGFDebugPass", false);
+    asvgf_history_clear_pending_ = true;
+}
+
+void GPURenderer::RunASVGFPasses()
+{
+    if (!render_config_.asvgf || !asvgf_debug_pipeline_state_)
+    {
+        return;
+    }
+
+    if (asvgf_history_clear_pending_)
+    {
+        ResetASVGFHistoryResources();
+        asvgf_history_clear_pending_ = false;
+    }
+
+    if (!UseASVGFDebugDisplay())
+    {
+        if (!render_config_.asvgf_freeze_history)
+        {
+            asvgf_history_index_ = (asvgf_history_index_ + 1) % 2;
+        }
+
+        return;
+    }
+
+    ASVGFDebugVisualizeComputeShader::UniformBufferData debug_ubo{
+        .stage = static_cast<uint32_t>(render_config_.asvgf_test_stage),
+        .view = static_cast<uint32_t>(render_config_.asvgf_debug_view),
+        .history_index = asvgf_history_index_,
+        .frame_index = static_cast<uint32_t>(rhi_->GetRenderedFrameCount()),
+        .resolution_x = image_size_.x(),
+        .resolution_y = image_size_.y(),
+        .freeze_history = render_config_.asvgf_freeze_history ? 1u : 0u,
+        .force_clear_history = render_config_.asvgf_force_clear_history ? 1u : 0u,
+    };
+    asvgf_debug_uniform_buffer_->Upload(rhi_, &debug_ubo);
+
+    asvgf_debug_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                      .after_stage = RHIPipelineStage::Top,
+                                      .before_stage = RHIPipelineStage::ComputeShader});
+
+    rhi_->BeginComputePass(asvgf_debug_compute_pass_);
+    rhi_->DispatchCompute(asvgf_debug_pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
+    rhi_->EndComputePass(asvgf_debug_compute_pass_);
+
+    asvgf_debug_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                      .after_stage = RHIPipelineStage::ComputeShader,
+                                      .before_stage = RHIPipelineStage::PixelShader});
+
+    if (!render_config_.asvgf_freeze_history)
+    {
+        asvgf_history_index_ = (asvgf_history_index_ + 1) % 2;
+    }
+}
+
+void GPURenderer::ResetASVGFHistoryResources()
+{
+    // S1 scaffolding only: history resources exist but are not consumed yet.
+    // We still reset frame-local state to keep camera/scene invalidation behavior wired in.
+    asvgf_history_index_ = 0;
+}
+
+bool GPURenderer::UseASVGFDebugDisplay() const
+{
+    if (!render_config_.asvgf || !asvgf_debug_tone_mapping_pass_)
+    {
+        return false;
+    }
+
+    switch (render_config_.asvgf_debug_view)
+    {
+    case RenderConfig::ASVGFDebugView::none:
+    case RenderConfig::ASVGFDebugView::noisy:
+    case RenderConfig::ASVGFDebugView::normal:
+    case RenderConfig::ASVGFDebugView::albedo:
+    case RenderConfig::ASVGFDebugView::depth:
+        return false;
+    default:
+        return true;
+    }
+}
+
+uint32_t GPURenderer::GetRayTraceDebugMode() const
+{
+    if (!render_config_.asvgf)
+    {
+        return static_cast<uint32_t>(render_config_.debug_mode);
+    }
+
+    switch (render_config_.asvgf_debug_view)
+    {
+    case RenderConfig::ASVGFDebugView::noisy:
+        return static_cast<uint32_t>(RenderConfig::DebugMode::Color);
+    case RenderConfig::ASVGFDebugView::normal:
+        return static_cast<uint32_t>(RenderConfig::DebugMode::Normal);
+    case RenderConfig::ASVGFDebugView::albedo:
+        return static_cast<uint32_t>(RenderConfig::DebugMode::Albedo);
+    case RenderConfig::ASVGFDebugView::depth:
+        return static_cast<uint32_t>(RenderConfig::DebugMode::Depth);
+    case RenderConfig::ASVGFDebugView::none:
+        return static_cast<uint32_t>(render_config_.debug_mode);
+    default:
+        return static_cast<uint32_t>(RenderConfig::DebugMode::Color);
+    }
 }
 
 void GPURenderer::BindBindlessResources()

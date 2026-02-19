@@ -43,6 +43,30 @@ struct RenderConfig : public ConfigCollection
         Depth = 11,
     };
 
+    enum class ASVGFTestStage : uint8_t
+    {
+        off,
+        raytrace,
+        reprojection,
+        temporal,
+        variance,
+        atrous_iter,
+    };
+
+    enum class ASVGFDebugView : uint8_t
+    {
+        none,
+        noisy,
+        normal,
+        albedo,
+        depth,
+        reprojection_mask,
+        history_length,
+        moments,
+        variance,
+        filtered,
+    };
+
     [[nodiscard]] bool IsCPURenderMode() const
     {
         return pipeline == Pipeline::cpu;
@@ -77,6 +101,13 @@ struct RenderConfig : public ConfigCollection
     uint32_t image_height;
     uint32_t shadow_map_resolution;
     bool spatial_denoise;
+    bool asvgf;
+    uint32_t asvgf_atrous_iterations;
+    uint32_t asvgf_history_cap;
+    ASVGFTestStage asvgf_test_stage;
+    ASVGFDebugView asvgf_debug_view;
+    bool asvgf_freeze_history;
+    bool asvgf_force_clear_history;
     bool use_ssao;
     bool use_prepass;
     bool use_diffuse_ibl;

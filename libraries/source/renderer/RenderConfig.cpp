@@ -30,6 +30,19 @@ static ConfigValue<uint32_t> config_shadow_map_resolution("shadow_map_resolution
                                                           1024);
 static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial denoise in ray tracing procedures",
                                                 "renderer", true, true);
+static ConfigValue<bool> config_asvgf("asvgf", "enable ASVGF denoiser for GPU ray tracing", "renderer", false, true);
+static ConfigValue<uint32_t> config_asvgf_atrous_iterations("asvgf_atrous_iterations",
+                                                            "num A-trous filter iterations", "renderer", 5, true);
+static ConfigValue<uint32_t> config_asvgf_history_cap("asvgf_history_cap", "max ASVGF temporal history length",
+                                                      "renderer", 64, true);
+static ConfigValue<std::string> config_asvgf_test_stage("asvgf_test_stage", "ASVGF pass isolation stage", "renderer",
+                                                        Enum2Str<RenderConfig::ASVGFTestStage::off>(), true);
+static ConfigValue<std::string> config_asvgf_debug_view("asvgf_debug_view", "ASVGF debug output view", "renderer",
+                                                        Enum2Str<RenderConfig::ASVGFDebugView::none>(), true);
+static ConfigValue<bool> config_asvgf_freeze_history("asvgf_freeze_history", "freeze ASVGF temporal history updates",
+                                                     "renderer", false, true);
+static ConfigValue<bool> config_asvgf_force_clear_history("asvgf_force_clear_history",
+                                                          "clear ASVGF history every frame", "renderer", false, true);
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
@@ -52,6 +65,13 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_width, image_width);
     ConfigCollectionHelper::RegisterConfig(this, config_height, image_height);
     ConfigCollectionHelper::RegisterConfig(this, config_spatial_denoise, spatial_denoise);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf, asvgf);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_atrous_iterations, asvgf_atrous_iterations);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_history_cap, asvgf_history_cap);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_test_stage, asvgf_test_stage);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_debug_view, asvgf_debug_view);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_freeze_history, asvgf_freeze_history);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_force_clear_history, asvgf_force_clear_history);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
@@ -105,6 +125,27 @@ void RenderConfig::Validate()
             config_ssao.Set(false);
             use_ssao = false;
         }
+    }
+
+    if (!IsRayTracingMode() && asvgf)
+    {
+        Log(Warn, "asvgf is only supported in gpu pipeline. disabling");
+        config_asvgf.Set(false);
+        asvgf = false;
+    }
+
+    if (asvgf_atrous_iterations > 8)
+    {
+        Log(Warn, "asvgf_atrous_iterations too large ({}). clamped to 8", asvgf_atrous_iterations);
+        config_asvgf_atrous_iterations.Set(8);
+        asvgf_atrous_iterations = 8;
+    }
+
+    if (asvgf_history_cap == 0)
+    {
+        Log(Warn, "asvgf_history_cap must be positive. set to 1");
+        config_asvgf_history_cap.Set(1);
+        asvgf_history_cap = 1;
     }
 
     if (use_ssao)

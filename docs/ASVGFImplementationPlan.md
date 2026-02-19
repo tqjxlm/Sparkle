@@ -7,6 +7,7 @@
 * Check git log to see if there are any relevant changes to this file.
 * After finishing a step, tick the checkbox in the plan below. If the step is too large, break it down into smaller testable steps.
 * When testing, operate all tests from previous steps to make sure no regression is introduced.
+* In this repository, `TestScene` refers to the built-in standard scene. Do not pass `--scene TestScene`; omit `--scene`.
 * Use ground truth from docs/CI.md which is generated for max_spp=2048. If you want to generate ground truth locally, you should only use max_spp>2048 to make a reasonable comparison.
 * The target of asvgf is to improve converging speed. You should get at least the same quality at max_spp=2048 as the baseline. Any degradation is not acceptable.
 * Make sure you change is isolated, i.e. should not make any difference when asvgf is disabled.
@@ -72,7 +73,7 @@ Add these debug/test controls early (S1):
    3. Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage raytrace --asvgf_debug_view normal --spp 1 --max_spp 1
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage raytrace --asvgf_debug_view normal --spp 1 --max_spp 1
 ```
 
    4. Pass criterion: normal/albedo/depth debug outputs are plausible and stable; no NaN/INF pixels.
@@ -83,7 +84,7 @@ python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --a
    3. Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage reprojection --asvgf_debug_view reprojection_mask --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage reprojection --asvgf_debug_view reprojection_mask --spp 1 --max_spp 64
 ```
 
    4. Pass criterion: static camera has mostly valid reprojection; camera move/disocclusion shows expected invalid regions.
@@ -94,7 +95,7 @@ python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --a
    3. Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage temporal --asvgf_debug_view history_length --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage temporal --asvgf_debug_view history_length --spp 1 --max_spp 64
 ```
 
    4. Pass criterion: history length grows in stable areas and resets on invalid reprojection; temporal noise visibly decreases.
@@ -105,7 +106,7 @@ python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --a
    3. Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage variance --asvgf_debug_view variance --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage variance --asvgf_debug_view variance --spp 1 --max_spp 64
 ```
 
    4. Pass criterion: variance highlights noisy regions and decreases as history accumulates.
@@ -116,9 +117,9 @@ python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --a
    3. Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage atrous_iter --asvgf_debug_view filtered --asvgf_atrous_iterations 1 --spp 1 --max_spp 64
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage atrous_iter --asvgf_debug_view filtered --asvgf_atrous_iterations 3 --spp 1 --max_spp 64
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage atrous_iter --asvgf_debug_view filtered --asvgf_atrous_iterations 5 --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage atrous_iter --asvgf_debug_view filtered --asvgf_atrous_iterations 1 --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage atrous_iter --asvgf_debug_view filtered --asvgf_atrous_iterations 3 --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage atrous_iter --asvgf_debug_view filtered --asvgf_atrous_iterations 5 --spp 1 --max_spp 64
 ```
 
    4. Pass criterion: residual noise decreases with iteration count; major geometric/material edges remain sharp.
@@ -129,15 +130,15 @@ python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --a
    3. Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --asvgf_test_stage off --spp 1 --max_spp 64 --auto_screenshot true
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage off --spp 1 --max_spp 64 --auto_screenshot true
 ```
 
    4. Pass criterion: no extra flicker/artifacts introduced in post-ASVGF composition path.
 
 ## Progress Checklist
 
-- [ ] S0: Baseline capture and guardrails
-- [ ] S1: Config + renderer scaffolding
+- [x] S0: Baseline capture and guardrails
+- [x] S1: Config + renderer scaffolding
 - [ ] S2: Noisy radiance + feature buffer output
 - [ ] S3: Reprojection infrastructure (previous frame state)
 - [ ] S4: Temporal accumulation and moments
@@ -169,8 +170,8 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --spp 1 --max_spp 1 --auto_screenshot true
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --spp 1 --max_spp 256 --auto_screenshot true
+python .\build.py --framework glfw --run --pipeline gpu -- --spp 1 --max_spp 1 --auto_screenshot true
+python .\build.py --framework glfw --run --pipeline gpu -- --spp 1 --max_spp 256 --auto_screenshot true
 ```
 
 Pass criterion:
@@ -196,7 +197,7 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf false --auto_screenshot true
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf false --auto_screenshot true
 python .\dev\functional_test.py --framework glfw --pipeline gpu
 ```
 
@@ -225,7 +226,7 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --spp 1 --max_spp 1 --auto_screenshot true
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 1 --auto_screenshot true
 ```
 
 Pass criterion:
@@ -250,7 +251,7 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64
 ```
 
 Pass criterion:
@@ -277,7 +278,7 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --spp 1 --max_spp 64 --asvgf_atrous_iterations 0
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64 --asvgf_atrous_iterations 0
 ```
 
 Pass criterion:
@@ -302,7 +303,7 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --spp 1 --max_spp 64 --debug_mode debug
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64 --debug_mode debug
 ```
 
 Pass criterion:
@@ -327,7 +328,7 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --spp 1 --max_spp 64 --asvgf_atrous_iterations 5 --auto_screenshot true
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64 --asvgf_atrous_iterations 5 --auto_screenshot true
 ```
 
 Pass criterion:
@@ -352,7 +353,7 @@ Testable result:
 Test command:
 
 ```bash
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64
 ```
 
 Pass criterion:
@@ -377,7 +378,7 @@ Test command:
 
 ```bash
 python .\dev\functional_test.py --framework glfw --pipeline gpu
-python .\build.py --framework glfw --run --pipeline gpu -- --scene TestScene --asvgf true --spp 1 --max_spp 64 --auto_screenshot true
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64 --auto_screenshot true
 ```
 
 Pass criterion:
