@@ -18,12 +18,21 @@ python build.py --framework=[glfw, macos, ios, android] --asan             # Add
 
 ```bash
 python build.py --run --framework=[glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]              # Build and run
-python ./dev/functional_test.py --framework [glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]    # Run functional test against ground truth (skip building)
+python ./dev/functional_test.py --framework [glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]    # Run functional test against ground truth (does not trigger building)
 ```
+
+## Visual Debugging
+
+Use --auto_screenshot=true as a run argument to automatically take a screenshot after the scene is fully loaded and a frame is fully rendered.
+The screenshot is saved to generated/screenshots/ and named with the scene name and pipeline.
+You can modify configs and the code to get another screenshot to visualize the changes.
+You can modify the render pipeline to output different images to the screenshot for debugging.
+You can modify the screenshot mechanism to capture at different timings.
+Ground truth images can be found in [docs/CI.md](docs/CI.md). But if you are working on a feature that is meant to change the final image output, you should not rely on the ground truth images.
 
 ## Logs
 
-For latest running logs, see [external storage path]/generates/logs/output.log. A backup of previous runs are also stored there.
+For latest running logs, see [external storage path]/logs/output.log. Backup logs from previous runs are also stored there.
 
 Logs will also be redirected to console when running from command line.
 
