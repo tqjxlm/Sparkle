@@ -32,6 +32,7 @@ struct Camera
     uint total_sample_count;
     uint spp;
     uint enable_nee;
+    uint asvgf_enabled;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
@@ -40,12 +41,30 @@ struct Camera
 [[vk::binding(4, 1)]] TextureCube<float4> skyMap;
 [[vk::binding(5, 1)]] SamplerState skyMapSampler;
 [[vk::binding(6, 1)]] SamplerState materialTextureSampler;
+[[vk::binding(7, 1)]] RWTexture2D<float4> noisyImage;
+[[vk::binding(8, 1)]] RWTexture2D<float4> featureNormalRoughnessImage;
+[[vk::binding(9, 1)]] RWTexture2D<float4> featureAlbedoMetallicImage;
+[[vk::binding(10, 1)]] RWTexture2D<float> featureDepthImage;
+[[vk::binding(11, 1)]] RWTexture2D<uint> featurePrimitiveIdImage;
 
 // set 2: bindless resources, shared by the whole scene
 [[vk::binding(0, 2)]] Texture2D textures[];
 [[vk::binding(1, 2)]] StructuredBuffer<uint> indexBuffers[];
 [[vk::binding(2, 2)]] StructuredBuffer<float> vertexBuffers[];
 [[vk::binding(3, 2)]] StructuredBuffer<VertexAttribute> vertexAttributeBuffers[];
+
+static const uint InvalidPrimitiveId = 0xffffffffu;
+
+struct ASVGFFeatureOutput
+{
+    float3 normal;
+    float roughness;
+    float3 albedo;
+    float metallic;
+    float depth;
+    uint primitive_id;
+    uint valid;
+};
 
 float3 SampleNormal(uint texture_id, float2 tex_coord)
 {
@@ -249,10 +268,18 @@ void GetIntersection(RayDesc ray_desc, RayQuery<RAY_FLAG_NONE> ray_query, out In
     intersection.primitiveId = instance_id;
 }
 
-float3 SamplePixel(RayDesc ray_desc)
+float3 SamplePixel(RayDesc ray_desc, out ASVGFFeatureOutput feature_output)
 {
     RayQuery<RAY_FLAG_NONE> ray_query;
     Intersection intersection;
+
+    feature_output.normal = float3(0, 0, 1);
+    feature_output.roughness = 1.0;
+    feature_output.albedo = 0.0;
+    feature_output.metallic = 0.0;
+    feature_output.depth = 0.0;
+    feature_output.primitive_id = InvalidPrimitiveId;
+    feature_output.valid = 0u;
 
     float3 pixel_color = float3(0, 0, 0);
     float3 throughput = float3(1, 1, 1);
@@ -282,6 +309,17 @@ float3 SamplePixel(RayDesc ray_desc)
         // get intersection details
         GetIntersection(ray_desc, ray_query, intersection);
         MaterialParameters mat_param = GetMaterial(intersection);
+
+        if (asvgf_enabled != 0u && bounce == 0)
+        {
+            feature_output.normal = normalize(intersection.normal);
+            feature_output.roughness = saturate(mat_param.roughness);
+            feature_output.albedo = saturate(mat_param.base_color);
+            feature_output.metallic = saturate(mat_param.metallic);
+            feature_output.depth = ray_query.CommittedRayT();
+            feature_output.primitive_id = intersection.primitiveId;
+            feature_output.valid = 1u;
+        }
 
         // terminal condition: emissive
         float3 emissive_color = SampleEmissive(intersection, mat_param);
@@ -403,6 +441,15 @@ float3 SamplePixel(RayDesc ray_desc)
     float3 all_samples = imageData[pixel].rgb;
 
     float3 this_samples = (float3)0;
+    ASVGFFeatureOutput primary_feature;
+    ASVGFFeatureOutput captured_feature;
+    captured_feature.normal = float3(0, 0, 1);
+    captured_feature.roughness = 1.0;
+    captured_feature.albedo = 0.0;
+    captured_feature.metallic = 0.0;
+    captured_feature.depth = 0.0;
+    captured_feature.primitive_id = InvalidPrimitiveId;
+    captured_feature.valid = 0u;
 
     InitRandomBase(pixel.x, pixel.y, time_seed);
 
@@ -428,16 +475,41 @@ float3 SamplePixel(RayDesc ray_desc)
         ray_desc.TMin = Tolerance;
         ray_desc.TMax = 1000.0f;
 
-        float3 this_pixel = SamplePixel(ray_desc);
+        float3 this_pixel = SamplePixel(ray_desc, primary_feature);
 
         // firefly removal
         this_pixel = min(this_pixel, output_limit);
 
         this_samples += this_pixel;
+
+        if (asvgf_enabled != 0u && i == 0u)
+        {
+            captured_feature = primary_feature;
+        }
     }
 
-    float moving_average = (float)total_sample_count / (total_sample_count + spp);
-    all_samples = lerp(this_samples / float(spp), all_samples, moving_average);
+    float3 noisy_samples = this_samples / float(spp);
+    if (asvgf_enabled != 0u)
+    {
+        all_samples = noisy_samples;
+        noisyImage[pixel] = float4(noisy_samples, 1.0);
+
+        float3 normal = captured_feature.valid != 0u ? normalize(captured_feature.normal) : float3(0, 0, 0);
+        float roughness = captured_feature.valid != 0u ? captured_feature.roughness : 1.0;
+        float3 albedo = captured_feature.valid != 0u ? captured_feature.albedo : 0.0;
+        float metallic = captured_feature.valid != 0u ? captured_feature.metallic : 0.0;
+        float depth = captured_feature.valid != 0u ? captured_feature.depth : 0.0;
+
+        featureNormalRoughnessImage[pixel] = float4(normal, roughness);
+        featureAlbedoMetallicImage[pixel] = float4(albedo, metallic);
+        featureDepthImage[pixel] = depth;
+        featurePrimitiveIdImage[pixel] = captured_feature.primitive_id;
+    }
+    else
+    {
+        float moving_average = (float)total_sample_count / (total_sample_count + spp);
+        all_samples = lerp(noisy_samples, all_samples, moving_average);
+    }
 
     // output
     imageData[pixel] = float4(all_samples, 1.f);

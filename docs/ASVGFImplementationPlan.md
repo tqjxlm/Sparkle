@@ -139,14 +139,14 @@ python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_
 
 - [x] S0: Baseline capture and guardrails
 - [x] S1: Config + renderer scaffolding
-- [ ] S2: Noisy radiance + feature buffer output
+- [x] S2: Noisy radiance + feature buffer output
 - [ ] S3: Reprojection infrastructure (previous frame state)
 - [ ] S4: Temporal accumulation and moments
 - [ ] S5: Variance estimation pass
 - [ ] S6: A-trous edge-aware filter passes
 - [ ] S7: Integration polish, tuning, and performance budget
 - [ ] S8: Final validation and documentation
-- [ ] P1: Pass test - RayTraceNoisy + Features
+- [x] P1: Pass test - RayTraceNoisy + Features
 - [ ] P2: Pass test - Reprojection
 - [ ] P3: Pass test - TemporalAccumulation + Moments
 - [ ] P4: Pass test - Variance

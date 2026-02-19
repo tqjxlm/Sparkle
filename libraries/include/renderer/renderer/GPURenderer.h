@@ -65,11 +65,17 @@ private:
     RHIResourceRef<RHIImage> asvgf_feature_normal_roughness_texture_;
     RHIResourceRef<RHIImage> asvgf_feature_albedo_metallic_texture_;
     RHIResourceRef<RHIImage> asvgf_feature_depth_texture_;
+    RHIResourceRef<RHIImage> asvgf_feature_primitive_id_texture_;
     std::array<RHIResourceRef<RHIImage>, 2> asvgf_history_color_texture_;
     std::array<RHIResourceRef<RHIImage>, 2> asvgf_history_moments_texture_;
     RHIResourceRef<RHIImage> asvgf_variance_texture_;
     std::array<RHIResourceRef<RHIImage>, 2> asvgf_atrous_ping_pong_texture_;
     RHIResourceRef<RHIImage> asvgf_debug_texture_;
+    RHIResourceRef<RHIImage> asvgf_fallback_noisy_texture_;
+    RHIResourceRef<RHIImage> asvgf_fallback_normal_roughness_texture_;
+    RHIResourceRef<RHIImage> asvgf_fallback_albedo_metallic_texture_;
+    RHIResourceRef<RHIImage> asvgf_fallback_depth_texture_;
+    RHIResourceRef<RHIImage> asvgf_fallback_primitive_id_texture_;
 
     RHIResourceRef<RHIImage> tone_mapping_output_;
     RHIResourceRef<RHIRenderTarget> tone_mapping_rt_;
