@@ -102,6 +102,7 @@ void CPURenderer::Render()
             }).wait();
 
             camera_->ClearPixels();
+            dispatched_sample_count_ = 0;
         }
 
         BasePass(*scene_render_proxy_, render_config_, debug_point_);
@@ -151,6 +152,7 @@ void CPURenderer::Render()
         screen_quad_pass_->Render();
     }
 
+    dispatched_sample_count_ += actual_sample_per_pixel_;
     camera_->AccumulateSample(actual_sample_per_pixel_);
 }
 
@@ -370,12 +372,21 @@ void CPURenderer::BasePass(const SceneRenderProxy &scene, const RenderConfig &co
     static std::vector<std::shared_ptr<TaskFuture<>>> row_tasks;
     row_tasks.resize(image_size_.y());
 
+    // Use a per-frame seed that advances every dispatch so fresh samples are generated
+    // even after cumulated_sample_count is capped. Stays identical to GetCumulatedSampleCount()
+    // before the cap, preserving determinism for functional tests.
+    const auto frame_seed = dispatched_sample_count_;
+
     // parallel by row
     for (auto j = 0u; j < image_size_.y(); j++)
     {
         row_tasks[j] = TaskManager::RunInWorkerThread([=, this, &scene]() {
             for (auto i = 0u; i < image_size_.x(); i++)
             {
+                // Per-pixel seed: each pixel gets an independent, deterministic
+                // random sequence regardless of which thread processes this row.
+                sampler::ReseedCurrentThread(j * image_size_.x() + i +
+                                             frame_seed * image_size_.x() * image_size_.y());
                 RenderPixel(i, j, pixel_width, pixel_height, scene, config, debug_point);
             }
         });

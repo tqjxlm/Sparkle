@@ -61,5 +61,6 @@ private:
 
     unsigned sub_pixel_count_;
     unsigned actual_sample_per_pixel_;
+    uint32_t dispatched_sample_count_ = 0;
 };
 } // namespace sparkle
