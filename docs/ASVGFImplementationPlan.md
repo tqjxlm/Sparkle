@@ -460,10 +460,12 @@ Validation log (2026-02-20):
 2. `libraries/source/renderer/RenderConfig.cpp`
 3. `libraries/include/renderer/renderer/GPURenderer.h`
 4. `libraries/source/renderer/renderer/GPURenderer.cpp`
-5. `libraries/include/renderer/proxy/CameraRenderProxy.h`
-6. `libraries/source/renderer/proxy/CameraRenderProxy.cpp`
-7. `shaders/ray_trace/ray_trace.cs.slang` (or split ASVGF-specific ray trace shader)
-8. New ASVGF shaders under `shaders/ray_trace/` or `shaders/screen/`:
+5. `libraries/include/renderer/renderer/ASVGF.h`
+6. `libraries/source/renderer/renderer/ASVGF.cpp`
+7. `libraries/include/renderer/proxy/CameraRenderProxy.h`
+8. `libraries/source/renderer/proxy/CameraRenderProxy.cpp`
+9. `shaders/ray_trace/ray_trace.cs.slang` (or split ASVGF-specific ray trace shader)
+10. New ASVGF shaders under `shaders/ray_trace/` or `shaders/screen/`:
    1. temporal pass
    2. variance pass
    3. A-trous pass

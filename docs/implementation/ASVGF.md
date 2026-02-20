@@ -50,6 +50,8 @@ Renderer/config:
 2. `libraries/source/renderer/RenderConfig.cpp`
 3. `libraries/include/renderer/renderer/GPURenderer.h`
 4. `libraries/source/renderer/renderer/GPURenderer.cpp`
+5. `libraries/include/renderer/renderer/ASVGF.h`
+6. `libraries/source/renderer/renderer/ASVGF.cpp`
 
 Shaders:
 
