@@ -7,7 +7,8 @@ This script runs a small set of debug captures and validates:
 4) history_length and history_length_raw encode consistent normalized history,
 5) small deterministic camera nudge keeps mostly-valid reprojection while introducing some invalidation,
 6) temporal accumulation reduces noise while history behaves correctly,
-7) variance output is non-degenerate, correlated with noisy high-frequency regions, and drops with more history.
+7) variance output is non-degenerate, correlated with noisy high-frequency regions, and drops with more history,
+8) A-trous iterations (1/3/5) reduce residual noise while preserving strong edges.
 
 Optional tonemap-sensitive checks are available, but disabled by default because
 the debug views are captured after display mapping, which can saturate values.
@@ -29,7 +30,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 DEFAULT_SCENE = "TestScene"
-SUITES = ("reprojection", "raytrace", "temporal", "variance", "all")
+SUITES = ("reprojection", "raytrace", "temporal", "variance", "atrous", "all")
 
 
 def parse_args():
@@ -66,6 +67,24 @@ def parse_args():
     parser.add_argument("--variance_small_spp", type=int, default=8)
     parser.add_argument("--variance_large_spp", type=int, default=64)
     parser.add_argument("--variance_mean_drop_min", type=float, default=-0.001)
+    parser.add_argument("--atrous_edge_percentile", type=float, default=90.0)
+    parser.add_argument("--atrous_noise_to_noisy_max", type=float, default=0.2)
+    parser.add_argument("--atrous_noise_ratio_3_max", type=float, default=1.8)
+    parser.add_argument("--atrous_noise_ratio_5_max", type=float, default=1.05)
+    parser.add_argument("--atrous_noise_ratio_5_from_1_max", type=float, default=1.5)
+    parser.add_argument("--atrous_edge_ratio_min_iter3", type=float, default=0.2)
+    parser.add_argument("--atrous_edge_ratio_min_iter5", type=float, default=0.5)
+    parser.add_argument("--atrous_iter_delta_min", type=float, default=0.005)
+    parser.add_argument("--atrous_edge_hot_zscore", type=float, default=5.0)
+    parser.add_argument("--atrous_edge_hot_luma_min", type=float, default=0.85)
+    parser.add_argument("--atrous_edge_hot_density_max", type=float, default=0.0005)
+    parser.add_argument("--atrous_edge_hot_count_max", type=int, default=128)
+    parser.add_argument("--atrous_border_delta_max", type=float, default=0.03)
+    parser.add_argument("--atrous_border_bright_threshold", type=float, default=0.98)
+    parser.add_argument("--atrous_border_bright_ratio_max", type=float, default=0.005)
+    parser.add_argument("--atrous_border_spike_delta_min", type=float, default=0.08)
+    parser.add_argument("--atrous_border_spike_ratio_max", type=float, default=0.001)
+    parser.add_argument("--atrous_border_spike_max", type=float, default=0.12)
     parser.add_argument(
         "--disable_motion_reprojection_check",
         action="store_true",
@@ -273,6 +292,103 @@ def luma_local_noise_proxy(image):
         + padded[2:, 2:]
     ) / 9.0
     return np.abs(luma - blurred)
+
+
+def luma_gradient_magnitude(image):
+    luma = np.mean(image, axis=2)
+    padded = np.pad(luma, ((1, 1), (1, 1)), mode="edge")
+    grad_x = 0.5 * (padded[1:-1, 2:] - padded[1:-1, :-2])
+    grad_y = 0.5 * (padded[2:, 1:-1] - padded[:-2, 1:-1])
+    return np.sqrt(grad_x * grad_x + grad_y * grad_y)
+
+
+def luma_local_median(image):
+    luma = np.mean(image, axis=2)
+    padded = np.pad(luma, ((1, 1), (1, 1)), mode="edge")
+    neighborhoods = np.stack(
+        [
+            padded[:-2, :-2],
+            padded[:-2, 1:-1],
+            padded[:-2, 2:],
+            padded[1:-1, :-2],
+            padded[1:-1, 1:-1],
+            padded[1:-1, 2:],
+            padded[2:, :-2],
+            padded[2:, 1:-1],
+            padded[2:, 2:],
+        ],
+        axis=0,
+    )
+    return np.median(neighborhoods, axis=0)
+
+
+def luma_local_mad(image, local_median):
+    luma = np.mean(image, axis=2)
+    padded = np.pad(luma, ((1, 1), (1, 1)), mode="edge")
+    neighborhoods = np.stack(
+        [
+            padded[:-2, :-2],
+            padded[:-2, 1:-1],
+            padded[:-2, 2:],
+            padded[1:-1, :-2],
+            padded[1:-1, 1:-1],
+            padded[1:-1, 2:],
+            padded[2:, :-2],
+            padded[2:, 1:-1],
+            padded[2:, 2:],
+        ],
+        axis=0,
+    )
+    return np.median(np.abs(neighborhoods - local_median), axis=0)
+
+
+def edge_hot_pixel_density(image, edge_mask, zscore_threshold, luma_threshold):
+    luma = np.mean(image, axis=2)
+    local_median = luma_local_median(image)
+    local_mad = luma_local_mad(image, local_median)
+    zscore = (luma - local_median) / np.maximum(local_mad, 1e-4)
+    hot_mask = (zscore >= zscore_threshold) & (luma >= luma_threshold)
+    if np.any(edge_mask):
+        edge_hot_mask = hot_mask & edge_mask
+        edge_hot_count = int(np.count_nonzero(edge_hot_mask))
+        edge_density = edge_hot_count / float(np.count_nonzero(edge_mask))
+    else:
+        edge_hot_count = int(np.count_nonzero(hot_mask))
+        edge_density = edge_hot_count / float(hot_mask.size)
+    return edge_density, float(np.mean(hot_mask)), edge_hot_count
+
+
+def border_bleed_metrics(image, bright_threshold, spike_delta_min):
+    height, width, _ = image.shape
+    if width < 2 or height < 2:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+
+    luma = np.mean(image, axis=2)
+    right_border = luma[:, width - 1]
+    right_inner = luma[:, width - 2]
+    bottom_border = luma[height - 1, :]
+    bottom_inner = luma[height - 2, :]
+
+    right_delta = right_border - right_inner
+    bottom_delta = bottom_border - bottom_inner
+    right_delta_mean = float(np.mean(np.abs(right_delta)))
+    bottom_delta_mean = float(np.mean(np.abs(bottom_delta)))
+
+    border_luma = np.concatenate((right_border, bottom_border))
+    bright_ratio = float(np.mean(border_luma >= bright_threshold))
+
+    right_bright = right_border >= bright_threshold
+    bottom_bright = bottom_border >= bright_threshold
+    right_spikes = (right_delta >= spike_delta_min) & right_bright
+    bottom_spikes = (bottom_delta >= spike_delta_min) & bottom_bright
+    right_spike_max = float(np.max(right_delta[right_bright])) if np.any(right_bright) else 0.0
+    bottom_spike_max = float(np.max(bottom_delta[bottom_bright])) if np.any(bottom_bright) else 0.0
+    spike_max = max(right_spike_max, bottom_spike_max)
+    spike_ratio = float(
+        (np.count_nonzero(right_spikes) + np.count_nonzero(bottom_spikes))
+        / float(right_border.size + bottom_border.size)
+    )
+    return right_delta_mean, bottom_delta_mean, bright_ratio, spike_ratio, spike_max
 
 
 def run_raytrace_suite(args, extra_args, screenshot_scene):
@@ -664,6 +780,188 @@ def run_variance_suite(args, extra_args, screenshot_scene):
     return not failed
 
 
+def run_atrous_suite(args, extra_args, screenshot_scene):
+    noisy_capture = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="atrous_iter",
+        view="noisy",
+        spp=args.spp,
+        max_spp=args.max_spp,
+        runtime_args=[],
+    )
+
+    filtered_captures = {}
+    for iteration in (1, 3, 5):
+        filtered_captures[iteration] = capture_or_fail(
+            args,
+            extra_args,
+            screenshot_scene,
+            stage="atrous_iter",
+            view="filtered",
+            spp=args.spp,
+            max_spp=args.max_spp,
+            runtime_args=["--asvgf_atrous_iterations", str(iteration)],
+        )
+
+    noisy_img = load_rgb01(noisy_capture)
+    filtered_imgs = {iteration: load_rgb01(path) for iteration, path in filtered_captures.items()}
+
+    noisy_noise = float(np.mean(luma_local_noise_proxy(noisy_img)))
+    filtered_noise = {iteration: float(np.mean(luma_local_noise_proxy(img))) for iteration, img in filtered_imgs.items()}
+
+    noise_ratio_1_over_noisy = filtered_noise[1] / max(noisy_noise, 1e-6)
+    noise_ratio_3_over_noisy = filtered_noise[3] / max(noisy_noise, 1e-6)
+    noise_ratio_5_over_noisy = filtered_noise[5] / max(noisy_noise, 1e-6)
+    noise_ratio_3_over_1 = filtered_noise[3] / max(filtered_noise[1], 1e-6)
+    noise_ratio_5_over_3 = filtered_noise[5] / max(filtered_noise[3], 1e-6)
+    noise_ratio_5_over_1 = filtered_noise[5] / max(filtered_noise[1], 1e-6)
+
+    noisy_grad = luma_gradient_magnitude(noisy_img)
+    edge_threshold = float(np.percentile(noisy_grad, args.atrous_edge_percentile))
+    edge_mask = noisy_grad >= edge_threshold
+    if not np.any(edge_mask):
+        edge_mask = np.ones_like(noisy_grad, dtype=bool)
+
+    filtered_edge_strength = {
+        iteration: float(np.mean(luma_gradient_magnitude(img)[edge_mask])) for iteration, img in filtered_imgs.items()
+    }
+    edge_ratio_iter3_over_iter1 = filtered_edge_strength[3] / max(filtered_edge_strength[1], 1e-6)
+    edge_ratio_iter5_over_iter1 = filtered_edge_strength[5] / max(filtered_edge_strength[1], 1e-6)
+
+    edge_hot_density = {}
+    global_hot_density = {}
+    edge_hot_count = {}
+    border_delta_max = {}
+    border_bright_ratio = {}
+    border_spike_ratio = {}
+    border_spike_max = {}
+    for iteration, image in filtered_imgs.items():
+        edge_hot, global_hot, hot_count = edge_hot_pixel_density(
+            image,
+            edge_mask,
+            args.atrous_edge_hot_zscore,
+            args.atrous_edge_hot_luma_min,
+        )
+        edge_hot_density[iteration] = edge_hot
+        global_hot_density[iteration] = global_hot
+        edge_hot_count[iteration] = hot_count
+
+        right_delta, bottom_delta, bright_ratio, spike_ratio, spike_max = border_bleed_metrics(
+            image,
+            args.atrous_border_bright_threshold,
+            args.atrous_border_spike_delta_min,
+        )
+        border_delta_max[iteration] = max(right_delta, bottom_delta)
+        border_bright_ratio[iteration] = bright_ratio
+        border_spike_ratio[iteration] = spike_ratio
+        border_spike_max[iteration] = spike_max
+
+    max_edge_hot_density = max(edge_hot_density.values())
+    max_edge_hot_count = max(edge_hot_count.values())
+    max_border_delta = max(border_delta_max.values())
+    max_border_bright_ratio = max(border_bright_ratio.values())
+    max_border_spike_ratio = max(border_spike_ratio.values())
+    max_border_spike_max = max(border_spike_max.values())
+
+    iter_1_to_5_delta = float(np.mean(np.abs(filtered_imgs[1] - filtered_imgs[5])))
+
+    noisy_reduction_ok = (
+        noise_ratio_1_over_noisy <= args.atrous_noise_to_noisy_max
+        and noise_ratio_3_over_noisy <= args.atrous_noise_to_noisy_max
+        and noise_ratio_5_over_noisy <= args.atrous_noise_to_noisy_max
+    )
+    noise_3_ok = noise_ratio_3_over_1 <= args.atrous_noise_ratio_3_max
+    noise_5_ok = noise_ratio_5_over_3 <= args.atrous_noise_ratio_5_max
+    noise_5_from_1_ok = noise_ratio_5_over_1 <= args.atrous_noise_ratio_5_from_1_max
+    edge_3_ok = edge_ratio_iter3_over_iter1 >= args.atrous_edge_ratio_min_iter3
+    edge_5_ok = edge_ratio_iter5_over_iter1 >= args.atrous_edge_ratio_min_iter5
+    delta_ok = iter_1_to_5_delta >= args.atrous_iter_delta_min
+    edge_hot_ok = max_edge_hot_density <= args.atrous_edge_hot_density_max
+    edge_hot_count_ok = max_edge_hot_count <= args.atrous_edge_hot_count_max
+    border_delta_ok = max_border_delta <= args.atrous_border_delta_max
+    border_bright_ok = max_border_bright_ratio <= args.atrous_border_bright_ratio_max
+    border_spike_ratio_ok = max_border_spike_ratio <= args.atrous_border_spike_ratio_max
+    border_spike_max_ok = max_border_spike_max <= args.atrous_border_spike_max
+
+    print("ASVGF A-trous Metrics")
+    print(f"  noisy residual proxy: {noisy_noise:.6f}")
+    print(f"  filtered residual proxy (iter 1): {filtered_noise[1]:.6f}")
+    print(f"  filtered residual proxy (iter 3): {filtered_noise[3]:.6f}")
+    print(f"  filtered residual proxy (iter 5): {filtered_noise[5]:.6f}")
+    print(f"  residual ratio iter1/noisy: {noise_ratio_1_over_noisy:.6f}")
+    print(f"  residual ratio iter3/noisy: {noise_ratio_3_over_noisy:.6f}")
+    print(f"  residual ratio iter5/noisy: {noise_ratio_5_over_noisy:.6f}")
+    print(f"  residual ratio iter3/iter1: {noise_ratio_3_over_1:.6f}")
+    print(f"  residual ratio iter5/iter3: {noise_ratio_5_over_3:.6f}")
+    print(f"  residual ratio iter5/iter1: {noise_ratio_5_over_1:.6f}")
+    print(f"  edge strength ratio iter3/iter1: {edge_ratio_iter3_over_iter1:.6f}")
+    print(f"  edge strength ratio iter5/iter1: {edge_ratio_iter5_over_iter1:.6f}")
+    print(f"  edge hot-pixel density (iter 1): {edge_hot_density[1]:.6f}")
+    print(f"  edge hot-pixel density (iter 3): {edge_hot_density[3]:.6f}")
+    print(f"  edge hot-pixel density (iter 5): {edge_hot_density[5]:.6f}")
+    print(f"  edge hot-pixel count (iter 1): {edge_hot_count[1]}")
+    print(f"  edge hot-pixel count (iter 3): {edge_hot_count[3]}")
+    print(f"  edge hot-pixel count (iter 5): {edge_hot_count[5]}")
+    print(f"  global hot-pixel density (iter 5): {global_hot_density[5]:.6f}")
+    print(f"  border delta max (iter 1): {border_delta_max[1]:.6f}")
+    print(f"  border delta max (iter 3): {border_delta_max[3]:.6f}")
+    print(f"  border delta max (iter 5): {border_delta_max[5]:.6f}")
+    print(f"  border bright ratio (iter 1): {border_bright_ratio[1]:.6f}")
+    print(f"  border bright ratio (iter 3): {border_bright_ratio[3]:.6f}")
+    print(f"  border bright ratio (iter 5): {border_bright_ratio[5]:.6f}")
+    print(f"  border spike ratio (iter 1): {border_spike_ratio[1]:.6f}")
+    print(f"  border spike ratio (iter 3): {border_spike_ratio[3]:.6f}")
+    print(f"  border spike ratio (iter 5): {border_spike_ratio[5]:.6f}")
+    print(f"  border spike max (iter 1): {border_spike_max[1]:.6f}")
+    print(f"  border spike max (iter 3): {border_spike_max[3]:.6f}")
+    print(f"  border spike max (iter 5): {border_spike_max[5]:.6f}")
+    print(f"  mean image delta iter1->iter5: {iter_1_to_5_delta:.6f}")
+
+    failed = False
+    if not noisy_reduction_ok:
+        print("FAIL: A-trous outputs are not sufficiently denoised relative to the noisy input.")
+        failed = True
+    if not noise_3_ok:
+        print("FAIL: A-trous iteration 3 increased residual noise too much versus iteration 1.")
+        failed = True
+    if not noise_5_ok:
+        print("FAIL: A-trous iteration 5 increased residual noise too much versus iteration 3.")
+        failed = True
+    if not noise_5_from_1_ok:
+        print("FAIL: A-trous iteration 5 increased residual noise too much versus iteration 1.")
+        failed = True
+    if not edge_3_ok:
+        print("FAIL: A-trous iteration 3 blurs strong edges too much versus iteration 1.")
+        failed = True
+    if not edge_5_ok:
+        print("FAIL: A-trous iteration 5 blurs strong edges too much versus iteration 1.")
+        failed = True
+    if not edge_hot_ok:
+        print("FAIL: A-trous output has too many super-bright outliers along strong edges.")
+        failed = True
+    if not edge_hot_count_ok:
+        print("FAIL: A-trous output has too many absolute edge hot pixels.")
+        failed = True
+    if not border_delta_ok:
+        print("FAIL: A-trous output shows frame-border luminance bleed (right/bottom seam jump).")
+        failed = True
+    if not border_bright_ok:
+        print("FAIL: A-trous output has too many near-white frame-border pixels.")
+        failed = True
+    if not border_spike_ratio_ok:
+        print("FAIL: A-trous output has too many right/bottom border spike pixels.")
+        failed = True
+    if not border_spike_max_ok:
+        print("FAIL: A-trous output has a severe right/bottom border brightness spike.")
+        failed = True
+    if not delta_ok:
+        print("FAIL: A-trous output change across iterations is too small (iterations are not visibly effective).")
+        failed = True
+    return not failed
+
+
 def main():
     args, extra_args = parse_args()
     screenshot_scene = args.screenshot_scene
@@ -687,6 +985,10 @@ def main():
 
         if suite in ("variance", "all"):
             if not run_variance_suite(args, extra_args, screenshot_scene):
+                failed = True
+
+        if suite in ("atrous", "all"):
+            if not run_atrous_suite(args, extra_args, screenshot_scene):
                 failed = True
     except RuntimeError as error:
         print(f"FAIL: {error}")

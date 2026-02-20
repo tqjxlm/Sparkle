@@ -163,6 +163,36 @@ class ASVGFVarianceComputeShader : public RHIShaderInfo
     };
 };
 
+class ASVGFAtrousComputeShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ASVGFAtrousComputeShader, RHIShaderStage::Compute, "shaders/ray_trace/asvgf_atrous.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(inputColorTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(featureNormalRoughnessTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(featureAlbedoMetallicTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(featureDepthTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(featurePrimitiveIdTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(varianceTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(outFilteredImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+    struct UniformBufferData
+    {
+        uint32_t resolution_x = 1;
+        uint32_t resolution_y = 1;
+        uint32_t step_width = 1;
+        uint32_t iteration_index = 0;
+        float color_sigma_scale = 3.f;
+        float depth_sigma_scale = 0.05f;
+        float normal_power = 32.f;
+        float albedo_sigma = 0.4f;
+    };
+};
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy)
     : Renderer(render_config, rhi_context, scene_render_proxy),
@@ -390,8 +420,8 @@ void GPURenderer::Update()
         last_asvgf_test_stage_ = render_config_.asvgf_test_stage;
     }
 
-    if (render_config_.asvgf &&
-        (!asvgf_reprojection_pipeline_state_ || !asvgf_variance_pipeline_state_ || !asvgf_debug_pipeline_state_))
+    if (render_config_.asvgf && (!asvgf_reprojection_pipeline_state_ || !asvgf_variance_pipeline_state_ ||
+                                 !asvgf_atrous_pipeline_states_[0] || !asvgf_debug_pipeline_state_))
     {
         InitASVGFRenderResources();
     }
@@ -676,7 +706,8 @@ void GPURenderer::InitSceneRenderResources()
 
 void GPURenderer::InitASVGFRenderResources()
 {
-    if (asvgf_reprojection_pipeline_state_ && asvgf_variance_pipeline_state_ && asvgf_debug_pipeline_state_)
+    if (asvgf_reprojection_pipeline_state_ && asvgf_variance_pipeline_state_ && asvgf_atrous_pipeline_states_[0] &&
+        asvgf_debug_pipeline_state_)
     {
         return;
     }
@@ -753,6 +784,20 @@ void GPURenderer::InitASVGFRenderResources()
     asvgf_variance_pipeline_state_->SetShader<RHIShaderStage::Compute>(asvgf_variance_shader_);
     asvgf_variance_pipeline_state_->Compile();
 
+    asvgf_atrous_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ASVGFAtrousComputeShader::UniformBufferData),
+                                                        .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                        .mem_properties = RHIMemoryProperty::None,
+                                                        .is_dynamic = true},
+                                                       "ASVGFAtrousUniformBuffer");
+    asvgf_atrous_shader_ = rhi_->CreateShader<ASVGFAtrousComputeShader>();
+    for (uint32_t iteration = 0; iteration < asvgf_atrous_pipeline_states_.size(); ++iteration)
+    {
+        asvgf_atrous_pipeline_states_[iteration] =
+            rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, fmt::format("ASVGFAtrousPSO{}", iteration));
+        asvgf_atrous_pipeline_states_[iteration]->SetShader<RHIShaderStage::Compute>(asvgf_atrous_shader_);
+        asvgf_atrous_pipeline_states_[iteration]->Compile();
+    }
+
     asvgf_debug_uniform_buffer_ =
         rhi_->CreateBuffer({.size = sizeof(ASVGFDebugVisualizeComputeShader::UniformBufferData),
                             .usages = RHIBuffer::BufferUsage::UniformBuffer,
@@ -797,6 +842,22 @@ void GPURenderer::InitASVGFRenderResources()
     variance_resources->featureDepthTexture().BindResource(asvgf_feature_depth_texture_->GetDefaultView(rhi_));
     variance_resources->outVarianceImage().BindResource(asvgf_variance_texture_->GetDefaultView(rhi_));
 
+    for (auto &atrous_pipeline_state : asvgf_atrous_pipeline_states_)
+    {
+        auto *atrous_resources = atrous_pipeline_state->GetShaderResource<ASVGFAtrousComputeShader>();
+        atrous_resources->ubo().BindResource(asvgf_atrous_uniform_buffer_);
+        atrous_resources->inputColorTexture().BindResource(asvgf_history_color_texture_[0]->GetDefaultView(rhi_));
+        atrous_resources->featureNormalRoughnessTexture().BindResource(
+            asvgf_feature_normal_roughness_texture_->GetDefaultView(rhi_));
+        atrous_resources->featureAlbedoMetallicTexture().BindResource(
+            asvgf_feature_albedo_metallic_texture_->GetDefaultView(rhi_));
+        atrous_resources->featureDepthTexture().BindResource(asvgf_feature_depth_texture_->GetDefaultView(rhi_));
+        atrous_resources->featurePrimitiveIdTexture().BindResource(
+            asvgf_feature_primitive_id_texture_->GetDefaultView(rhi_));
+        atrous_resources->varianceTexture().BindResource(asvgf_variance_texture_->GetDefaultView(rhi_));
+        atrous_resources->outFilteredImage().BindResource(asvgf_atrous_ping_pong_texture_[0]->GetDefaultView(rhi_));
+    }
+
     auto *debug_resources = asvgf_debug_pipeline_state_->GetShaderResource<ASVGFDebugVisualizeComputeShader>();
     debug_resources->ubo().BindResource(asvgf_debug_uniform_buffer_);
     debug_resources->noisyTexture().BindResource(asvgf_noisy_texture_->GetDefaultView(rhi_));
@@ -816,6 +877,7 @@ void GPURenderer::InitASVGFRenderResources()
 
     asvgf_reprojection_compute_pass_ = rhi_->CreateComputePass("ASVGFReprojectionPass", false);
     asvgf_variance_compute_pass_ = rhi_->CreateComputePass("ASVGFVariancePass", false);
+    asvgf_atrous_compute_pass_ = rhi_->CreateComputePass("ASVGFAtrousPass", false);
     asvgf_debug_compute_pass_ = rhi_->CreateComputePass("ASVGFDebugPass", false);
     asvgf_history_clear_pending_ = true;
 }
@@ -823,8 +885,9 @@ void GPURenderer::InitASVGFRenderResources()
 void GPURenderer::RunASVGFPasses()
 {
     if (!render_config_.asvgf || !asvgf_reprojection_pipeline_state_ || !asvgf_variance_pipeline_state_ ||
-        !asvgf_debug_pipeline_state_ || !asvgf_reprojection_compute_pass_ || !asvgf_variance_compute_pass_ ||
-        !asvgf_reprojection_uniform_buffer_ || !asvgf_variance_uniform_buffer_ || !asvgf_noisy_texture_ ||
+        !asvgf_atrous_pipeline_states_[0] || !asvgf_debug_pipeline_state_ || !asvgf_reprojection_compute_pass_ ||
+        !asvgf_variance_compute_pass_ || !asvgf_atrous_compute_pass_ || !asvgf_reprojection_uniform_buffer_ ||
+        !asvgf_variance_uniform_buffer_ || !asvgf_atrous_uniform_buffer_ || !asvgf_noisy_texture_ ||
         !asvgf_feature_normal_roughness_texture_ || !asvgf_feature_albedo_metallic_texture_ ||
         !asvgf_feature_depth_texture_ || !asvgf_feature_primitive_id_texture_ || !asvgf_reprojection_mask_texture_ ||
         !asvgf_reprojection_debug_texture_ || !asvgf_variance_texture_ ||
@@ -832,7 +895,8 @@ void GPURenderer::RunASVGFPasses()
         !asvgf_history_feature_depth_texture_[0] || !asvgf_history_feature_depth_texture_[1] ||
         !asvgf_history_feature_primitive_id_texture_[0] || !asvgf_history_feature_primitive_id_texture_[1] ||
         !asvgf_history_color_texture_[0] || !asvgf_history_color_texture_[1] || !asvgf_history_moments_texture_[0] ||
-        !asvgf_history_moments_texture_[1] || !scene_texture_)
+        !asvgf_history_moments_texture_[1] || !asvgf_atrous_ping_pong_texture_[0] || !asvgf_atrous_ping_pong_texture_[1] ||
+        !scene_texture_)
     {
         return;
     }
@@ -852,6 +916,10 @@ void GPURenderer::RunASVGFPasses()
                                    render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::variance ||
                                    render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::atrous_iter ||
                                    render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::off;
+    const bool run_atrous_pass = render_config_.asvgf_atrous_iterations > 0 &&
+                                 (render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::atrous_iter ||
+                                  render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::off);
+    const bool use_debug_display = UseASVGFDebugDisplay();
     uint32_t read_history_index = asvgf_history_index_;
     uint32_t write_history_index = (asvgf_history_index_ + 1u) % 2u;
     uint32_t display_history_index = read_history_index;
@@ -989,7 +1057,8 @@ void GPURenderer::RunASVGFPasses()
                                                        .before_stage = RHIPipelineStage::ComputeShader});
         scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::ComputeShader,
-                                    .before_stage = RHIPipelineStage::PixelShader});
+                                    .before_stage = run_atrous_pass ? RHIPipelineStage::ComputeShader
+                                                                    : RHIPipelineStage::PixelShader});
 
         asvgf_history_index_ = write_history_index;
         display_history_index = write_history_index;
@@ -1035,7 +1104,80 @@ void GPURenderer::RunASVGFPasses()
                                              .before_stage = RHIPipelineStage::ComputeShader});
     }
 
-    if (!UseASVGFDebugDisplay())
+    if (run_atrous_pass)
+    {
+        asvgf_feature_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                             .after_stage = RHIPipelineStage::ComputeShader,
+                                                             .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_feature_albedo_metallic_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                            .after_stage = RHIPipelineStage::ComputeShader,
+                                                            .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_feature_depth_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                  .after_stage = RHIPipelineStage::ComputeShader,
+                                                  .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_feature_primitive_id_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                         .after_stage = RHIPipelineStage::ComputeShader,
+                                                         .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_variance_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                             .after_stage = RHIPipelineStage::ComputeShader,
+                                             .before_stage = RHIPipelineStage::ComputeShader});
+
+        const uint32_t max_atrous_iterations = static_cast<uint32_t>(asvgf_atrous_pipeline_states_.size());
+        uint32_t iteration_count = render_config_.asvgf_atrous_iterations;
+        if (iteration_count > max_atrous_iterations)
+        {
+            iteration_count = max_atrous_iterations;
+        }
+
+        RHIResourceRef<RHIImage> input_texture = asvgf_history_color_texture_[display_history_index];
+        for (uint32_t iteration = 0; iteration < iteration_count; ++iteration)
+        {
+            const bool is_last_iteration = (iteration + 1u) == iteration_count;
+            auto output_texture =
+                is_last_iteration ? scene_texture_ : asvgf_atrous_ping_pong_texture_[iteration % asvgf_atrous_ping_pong_texture_.size()];
+            auto atrous_pipeline_state = asvgf_atrous_pipeline_states_[iteration];
+            auto *atrous_resources = atrous_pipeline_state->GetShaderResource<ASVGFAtrousComputeShader>();
+
+            ASVGFAtrousComputeShader::UniformBufferData atrous_ubo{
+                .resolution_x = image_size_.x(),
+                .resolution_y = image_size_.y(),
+                .step_width = 1u << (iteration / 2u),
+                .iteration_index = iteration,
+            };
+            asvgf_atrous_uniform_buffer_->Upload(rhi_, &atrous_ubo);
+
+            atrous_resources->inputColorTexture().BindResource(input_texture->GetDefaultView(rhi_));
+            atrous_resources->outFilteredImage().BindResource(output_texture->GetDefaultView(rhi_));
+
+            input_texture->Transition({.target_layout = RHIImageLayout::Read,
+                                       .after_stage = RHIPipelineStage::ComputeShader,
+                                       .before_stage = RHIPipelineStage::ComputeShader});
+            output_texture->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                        .after_stage = RHIPipelineStage::Top,
+                                        .before_stage = RHIPipelineStage::ComputeShader});
+
+            rhi_->BeginComputePass(asvgf_atrous_compute_pass_);
+            rhi_->DispatchCompute(atrous_pipeline_state, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
+            rhi_->EndComputePass(asvgf_atrous_compute_pass_);
+
+            if (is_last_iteration)
+            {
+                output_texture->Transition(
+                    {.target_layout = RHIImageLayout::Read,
+                     .after_stage = RHIPipelineStage::ComputeShader,
+                     .before_stage = use_debug_display ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader});
+            }
+            else
+            {
+                output_texture->Transition({.target_layout = RHIImageLayout::Read,
+                                            .after_stage = RHIPipelineStage::ComputeShader,
+                                            .before_stage = RHIPipelineStage::ComputeShader});
+                input_texture = output_texture;
+            }
+        }
+    }
+
+    if (!use_debug_display)
     {
         return;
     }
@@ -1043,8 +1185,7 @@ void GPURenderer::RunASVGFPasses()
     auto *debug_resources = asvgf_debug_pipeline_state_->GetShaderResource<ASVGFDebugVisualizeComputeShader>();
     debug_resources->historyMomentsTexture().BindResource(
         asvgf_history_moments_texture_[display_history_index]->GetDefaultView(rhi_));
-    debug_resources->historyColorTexture().BindResource(
-        asvgf_history_color_texture_[display_history_index]->GetDefaultView(rhi_));
+    debug_resources->historyColorTexture().BindResource(scene_texture_->GetDefaultView(rhi_));
 
     ASVGFDebugVisualizeComputeShader::UniformBufferData debug_ubo{
         .stage = static_cast<uint32_t>(render_config_.asvgf_test_stage),
@@ -1083,6 +1224,9 @@ void GPURenderer::RunASVGFPasses()
     asvgf_variance_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                          .after_stage = RHIPipelineStage::ComputeShader,
                                          .before_stage = RHIPipelineStage::ComputeShader});
+    scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::ComputeShader,
+                                .before_stage = RHIPipelineStage::ComputeShader});
     asvgf_history_moments_texture_[display_history_index]->Transition(
         {.target_layout = RHIImageLayout::Read,
          .after_stage = RHIPipelineStage::ComputeShader,

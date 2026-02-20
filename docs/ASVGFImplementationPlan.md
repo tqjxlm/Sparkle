@@ -167,14 +167,14 @@ python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_
 - [x] S3: Reprojection infrastructure (previous frame state)
 - [x] S4: Temporal accumulation and moments
 - [x] S5: Variance estimation pass
-- [ ] S6: A-trous edge-aware filter passes
+- [x] S6: A-trous edge-aware filter passes
 - [ ] S7: Integration polish, tuning, and performance budget
 - [ ] S8: Final validation and documentation
 - [x] P1: Pass test - RayTraceNoisy + Features
 - [x] P2: Pass test - Reprojection
 - [x] P3: Pass test - TemporalAccumulation + Moments
 - [x] P4: Pass test - Variance
-- [ ] P5: Pass test - A-trous iterations (1/3/5)
+- [x] P5: Pass test - A-trous iterations (1/3/5)
 - [ ] P6: Pass test - Final Compose
 
 ## Step Plan With Testable Results
@@ -355,6 +355,7 @@ Test command:
 
 ```bash
 python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64 --asvgf_atrous_iterations 5 --auto_screenshot true
+python .\dev\asvgf_sanity_test.py --framework glfw --suite atrous
 ```
 
 Pass criterion:

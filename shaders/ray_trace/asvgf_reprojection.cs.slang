@@ -45,7 +45,7 @@ static const uint ReprojectionReasonValid = 6u;
 
 float3 ComputeWorldPosition(uint2 pixel, float depth)
 {
-    float2 denominator = float2(max(resolution_x - 1u, 1u), max(resolution_y - 1u, 1u));
+    float2 denominator = float2(max(resolution_x, 1u), max(resolution_y, 1u));
     float2 uv = (float2(pixel) + 0.5) / denominator;
     uv.y = 1.0 - uv.y;
 
@@ -94,7 +94,7 @@ bool ReprojectToPreviousPixel(float3 world_position, out uint2 previous_pixel, o
     }
 
     previous_uv = float2(u, 1.0 - v);
-    float2 prev_pixel_f = previous_uv * float2(max(resolution_x - 1u, 1u), max(resolution_y - 1u, 1u));
+    float2 prev_pixel_f = previous_uv * float2(max(resolution_x, 1u), max(resolution_y, 1u));
     previous_pixel = uint2(prev_pixel_f);
     previous_pixel = min(previous_pixel, uint2(resolution_x - 1u, resolution_y - 1u));
 
