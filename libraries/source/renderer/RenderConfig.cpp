@@ -32,7 +32,7 @@ static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial 
                                                 "renderer", true, true);
 static ConfigValue<bool> config_asvgf("asvgf", "enable ASVGF denoiser for GPU ray tracing", "renderer", false, true);
 static ConfigValue<uint32_t> config_asvgf_atrous_iterations("asvgf_atrous_iterations",
-                                                            "num A-trous filter iterations", "renderer", 5, true);
+                                                            "num A-trous filter iterations", "renderer", 3, true);
 static ConfigValue<uint32_t> config_asvgf_history_cap("asvgf_history_cap", "max ASVGF temporal history length",
                                                       "renderer", 64, true);
 static ConfigValue<std::string> config_asvgf_test_stage("asvgf_test_stage", "ASVGF pass isolation stage", "renderer",

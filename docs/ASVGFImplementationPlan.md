@@ -98,7 +98,9 @@ python .\dev\asvgf_sanity_test.py --framework glfw --suite reprojection
          `center_percentile <= 95` or `center_to_median_ratio <= 4` on both axes.
       2. `history_length_raw.r` matches `history_length` (MAE <= 0.03).
       3. `history_length` and `history_length_raw` have non-degenerate midtone coverage (ratio >= 0.02).
-      4. `reprojection_mask` valid ratio is non-trivial (default range: 0.05 to 0.95).
+      4. `reprojection_mask` valid ratio is non-trivial:
+         `static_valid_ratio >= 0.05`.
+         If static ratio exceeds `0.95`, keep it as warning-only unless motion check also fails.
       5. Small deterministic camera nudge remains mostly valid while introducing some invalidation:
          `moved_valid_ratio <= static_valid_ratio - 0.01` and
          `moved_valid_ratio >= 0.5 * static_valid_ratio`.
@@ -155,9 +157,15 @@ python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_
 
 ```bash
 python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage off --spp 1 --max_spp 64 --auto_screenshot true
+python .\dev\asvgf_sanity_test.py --framework glfw --suite compose
 ```
 
-   4. Pass criterion: no extra flicker/artifacts introduced in post-ASVGF composition path.
+   4. Pass criterion:
+      1. No extra flicker/artifacts introduced in post-ASVGF composition path.
+      2. Compose sanity metrics pass:
+         1. repeat final-output capture delta remains bounded;
+         2. final output is consistent with `filtered` debug output;
+         3. no right/bottom border spike or seam anomaly.
 
 ## Progress Checklist
 
@@ -168,14 +176,14 @@ python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_
 - [x] S4: Temporal accumulation and moments
 - [x] S5: Variance estimation pass
 - [x] S6: A-trous edge-aware filter passes
-- [ ] S7: Integration polish, tuning, and performance budget
+- [x] S7: Integration polish, tuning, and performance budget
 - [ ] S8: Final validation and documentation
 - [x] P1: Pass test - RayTraceNoisy + Features
 - [x] P2: Pass test - Reprojection
 - [x] P3: Pass test - TemporalAccumulation + Moments
 - [x] P4: Pass test - Variance
 - [x] P5: Pass test - A-trous iterations (1/3/5)
-- [ ] P6: Pass test - Final Compose
+- [x] P6: Pass test - Final Compose
 
 ## Step Plan With Testable Results
 
@@ -369,8 +377,15 @@ Pass criterion:
 Implementation:
 
 1. Tune default ASVGF parameters for quality/performance balance.
+   1. default `asvgf_atrous_iterations` reduced to `3` for lower baseline denoiser cost.
+   2. in final compose stage, apply adaptive A-trous iteration taper (`2 -> 1 -> 0`) as accumulated SPP grows
+      to avoid persistent high-frequency detail loss at convergence.
 2. Ensure all image transitions/stages are correct for Vulkan and pass ordering is correct for Metal.
+   1. keep explicit transition ordering for every ASVGF pass output/input edge.
 3. Keep dynamic SPP logic compatible with ASVGF weighting.
+   1. temporal blend/history now uses current frame `spp` rather than fixed frame-count increments.
+4. Add ASVGF pass timing visibility for performance-budget checks.
+   1. frame-level ASVGF overhead estimate is logged on screen (`ASVGFPerf`) relative to ray-trace pass timing.
 
 Testable result:
 
@@ -381,6 +396,7 @@ Test command:
 
 ```bash
 python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64
+python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --dynamic_spp true --spp 1 --max_spp 64
 ```
 
 Pass criterion:

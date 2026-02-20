@@ -134,6 +134,7 @@ class ASVGFReprojectionComputeShader : public RHIShaderInfo
         uint32_t resolution_x = 1;
         uint32_t resolution_y = 1;
         uint32_t history_cap = 1;
+        uint32_t current_spp = 1;
         uint32_t has_previous_camera = 0;
         uint32_t enable_temporal_accumulation = 0;
     };
@@ -572,6 +573,7 @@ void GPURenderer::Update()
         .asvgf_enabled = render_config_.asvgf ? 1u : 0u,
     };
 
+    asvgf_current_frame_spp_ = spp;
     dispatched_sample_count_ += spp;
     camera->AccumulateSample(spp);
 
@@ -617,6 +619,22 @@ void GPURenderer::MeasurePerformance()
     auto average_spp = static_cast<float>(last_second_total_spp_) / frame_count;
 
     Logger::LogToScreen("SPP", fmt::format("SPP: {: .1f}", average_spp));
+
+    if (render_config_.asvgf)
+    {
+        auto timing_frame_index = rhi_->GetFrameIndex();
+        float ray_trace_time_ms = compute_pass_ ? compute_pass_->GetExecutionTime(timing_frame_index) : 0.f;
+        float frame_time_ms = rhi_->GetFrameStats(timing_frame_index).elapsed_time_ms;
+
+        if (ray_trace_time_ms > 0.f && frame_time_ms > 0.f)
+        {
+            float non_rt_time_ms = frame_time_ms > ray_trace_time_ms ? frame_time_ms - ray_trace_time_ms : 0.f;
+            float overhead_ratio = non_rt_time_ms / ray_trace_time_ms;
+            Logger::LogToScreen("ASVGFPerf",
+                                fmt::format("ASVGF+post est: {:.2f}ms frame: {:.2f}ms overhead: +{:.0f}%",
+                                            non_rt_time_ms, frame_time_ms, overhead_ratio * 100.f));
+        }
+    }
 
     last_second_total_spp_ = 0;
 }
@@ -923,6 +941,8 @@ void GPURenderer::RunASVGFPasses()
     uint32_t read_history_index = asvgf_history_index_;
     uint32_t write_history_index = (asvgf_history_index_ + 1u) % 2u;
     uint32_t display_history_index = read_history_index;
+    uint32_t effective_history_cap =
+        std::max(std::max(render_config_.asvgf_history_cap, 1u), render_config_.max_sample_per_pixel);
 
     auto *camera = scene_render_proxy_->GetCamera();
     const auto focus_plane = camera->GetFocusPlane();
@@ -947,7 +967,8 @@ void GPURenderer::RunASVGFPasses()
                 asvgf_previous_camera_valid_ ? to_vec4(asvgf_previous_max_v_, 0.f) : to_vec4(focus_plane.max_v, 0.f),
             .resolution_x = image_size_.x(),
             .resolution_y = image_size_.y(),
-            .history_cap = render_config_.asvgf_history_cap,
+            .history_cap = effective_history_cap,
+            .current_spp = asvgf_current_frame_spp_,
             .has_previous_camera = asvgf_previous_camera_valid_ ? 1u : 0u,
             .enable_temporal_accumulation = enable_temporal_accumulation ? 1u : 0u,
         };
@@ -1129,6 +1150,23 @@ void GPURenderer::RunASVGFPasses()
             iteration_count = max_atrous_iterations;
         }
 
+        // In final compose mode, taper spatial filtering as temporal accumulation converges
+        // to avoid persistent high-frequency loss.
+        if (render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::off)
+        {
+            iteration_count = std::min(iteration_count, 2u);
+
+            const uint32_t accumulated_spp = camera->GetCumulatedSampleCount();
+            if (accumulated_spp >= 512u)
+            {
+                iteration_count = 0;
+            }
+            else if (accumulated_spp >= 128u)
+            {
+                iteration_count = std::min(iteration_count, 1u);
+            }
+        }
+
         RHIResourceRef<RHIImage> input_texture = asvgf_history_color_texture_[display_history_index];
         for (uint32_t iteration = 0; iteration < iteration_count; ++iteration)
         {
@@ -1196,7 +1234,7 @@ void GPURenderer::RunASVGFPasses()
         .resolution_y = image_size_.y(),
         .freeze_history = render_config_.asvgf_freeze_history ? 1u : 0u,
         .force_clear_history = render_config_.asvgf_force_clear_history ? 1u : 0u,
-        .history_cap = render_config_.asvgf_history_cap,
+        .history_cap = effective_history_cap,
     };
     asvgf_debug_uniform_buffer_->Upload(rhi_, &debug_ubo);
 

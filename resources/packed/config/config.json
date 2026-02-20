@@ -16,7 +16,7 @@
     "height": 720,
     "spatial_denoise": false,
     "asvgf": false,
-    "asvgf_atrous_iterations": 5,
+    "asvgf_atrous_iterations": 3,
     "asvgf_history_cap": 64,
     "asvgf_test_stage": "off",
     "asvgf_debug_view": "none",

@@ -207,8 +207,16 @@ VkDescriptorSet VulkanDescriptorSetManager::RequestDescriptorSet(uint32_t resour
     auto layout_hash = resource_set.GetLayoutHash();
     auto &cache = cache_[layout_hash];
     VkDescriptorSetLayout layout = cache.layout;
+    const uint64_t rendered_frame_count = context->GetRHI()->GetRenderedFrameCount();
 
     ASSERT(layout);
+
+    while (!cache.delayed_free_sets.empty() &&
+           cache.delayed_free_sets.front().reusable_after_frame <= rendered_frame_count)
+    {
+        cache.free_sets.push_back(cache.delayed_free_sets.front().index);
+        cache.delayed_free_sets.pop_front();
+    }
 
     // according to vulkan best practice for mobile, we do not destroy allocated descriptor set
     // 1. if an existing one has the matching hash, just use it
@@ -263,7 +271,10 @@ void VulkanDescriptorSetManager::ReleaseDescriptorSet(uint32_t resource_hash, ui
         if (cache.all_sets[index].ref_count == 0)
         {
             cache.allocated_sets.erase(resource_hash);
-            cache.free_sets.push_back(index);
+            const uint64_t rendered_frame_count = context->GetRHI()->GetRenderedFrameCount();
+            const uint64_t max_frames_in_flight = context->GetRHI()->GetMaxFramesInFlight();
+            cache.delayed_free_sets.push_back({.index = index,
+                                               .reusable_after_frame = rendered_frame_count + max_frames_in_flight});
         }
     });
 }

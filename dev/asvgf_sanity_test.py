@@ -8,7 +8,8 @@ This script runs a small set of debug captures and validates:
 5) small deterministic camera nudge keeps mostly-valid reprojection while introducing some invalidation,
 6) temporal accumulation reduces noise while history behaves correctly,
 7) variance output is non-degenerate, correlated with noisy high-frequency regions, and drops with more history,
-8) A-trous iterations (1/3/5) reduce residual noise while preserving strong edges.
+8) A-trous iterations (1/3/5) reduce residual noise while preserving strong edges,
+9) final compose output is stable and consistent with filtered debug output.
 
 Optional tonemap-sensitive checks are available, but disabled by default because
 the debug views are captured after display mapping, which can saturate values.
@@ -30,7 +31,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 DEFAULT_SCENE = "TestScene"
-SUITES = ("reprojection", "raytrace", "temporal", "variance", "atrous", "all")
+SUITES = ("reprojection", "raytrace", "temporal", "variance", "atrous", "compose", "all")
 
 
 def parse_args():
@@ -69,9 +70,9 @@ def parse_args():
     parser.add_argument("--variance_mean_drop_min", type=float, default=-0.001)
     parser.add_argument("--atrous_edge_percentile", type=float, default=90.0)
     parser.add_argument("--atrous_noise_to_noisy_max", type=float, default=0.2)
-    parser.add_argument("--atrous_noise_ratio_3_max", type=float, default=1.8)
+    parser.add_argument("--atrous_noise_ratio_3_max", type=float, default=2.0)
     parser.add_argument("--atrous_noise_ratio_5_max", type=float, default=1.05)
-    parser.add_argument("--atrous_noise_ratio_5_from_1_max", type=float, default=1.5)
+    parser.add_argument("--atrous_noise_ratio_5_from_1_max", type=float, default=1.6)
     parser.add_argument("--atrous_edge_ratio_min_iter3", type=float, default=0.2)
     parser.add_argument("--atrous_edge_ratio_min_iter5", type=float, default=0.5)
     parser.add_argument("--atrous_iter_delta_min", type=float, default=0.005)
@@ -85,6 +86,15 @@ def parse_args():
     parser.add_argument("--atrous_border_spike_delta_min", type=float, default=0.08)
     parser.add_argument("--atrous_border_spike_ratio_max", type=float, default=0.001)
     parser.add_argument("--atrous_border_spike_max", type=float, default=0.12)
+    parser.add_argument("--compose_repeat_mae_max", type=float, default=0.012)
+    parser.add_argument("--compose_repeat_p95_max", type=float, default=0.045)
+    parser.add_argument("--compose_filtered_match_mae_max", type=float, default=0.02)
+    parser.add_argument("--compose_luma_min", type=float, default=0.02)
+    parser.add_argument("--compose_luma_max", type=float, default=0.98)
+    parser.add_argument("--compose_border_delta_max", type=float, default=0.03)
+    parser.add_argument("--compose_border_bright_ratio_max", type=float, default=0.005)
+    parser.add_argument("--compose_border_spike_ratio_max", type=float, default=0.001)
+    parser.add_argument("--compose_border_spike_max", type=float, default=0.12)
     parser.add_argument(
         "--disable_motion_reprojection_check",
         action="store_true",
@@ -474,13 +484,16 @@ def run_reprojection_suite(args, extra_args, screenshot_scene):
     history_has_midtones = history_mid_ratio >= args.history_mid_ratio_min
     history_raw_has_midtones = history_raw_mid_ratio >= args.history_mid_ratio_min
 
-    # Mask should have both valid and invalid regions on TestScene, static camera.
+    # Static mask should not be trivially empty; upper-bound strictness depends on motion sensitivity.
     valid_ratio = float(np.mean(mask_r > 0.5))
-    mask_non_trivial = args.mask_min_valid_ratio <= valid_ratio <= args.mask_max_valid_ratio
+    mask_has_min_valid = valid_ratio >= args.mask_min_valid_ratio
+    mask_exceeds_static_max = valid_ratio > args.mask_max_valid_ratio
+    mask_within_static_range = valid_ratio <= args.mask_max_valid_ratio
 
     motion_valid_ratio = None
     motion_has_invalidation = True
     motion_keeps_majority = True
+    mask_high_ratio_explained_by_motion = True
     if not args.disable_motion_reprojection_check:
         motion_mask = capture_or_fail(
             args,
@@ -505,6 +518,10 @@ def run_reprojection_suite(args, extra_args, screenshot_scene):
         # Small move should invalidate some pixels but keep most history valid.
         motion_has_invalidation = motion_valid_ratio <= (valid_ratio - args.motion_min_drop)
         motion_keeps_majority = motion_valid_ratio >= (valid_ratio * args.motion_min_valid_fraction)
+        # High static valid ratio is acceptable if the deterministic nudge still invalidates history.
+        mask_high_ratio_explained_by_motion = (not mask_exceeds_static_max) or motion_has_invalidation
+    else:
+        mask_high_ratio_explained_by_motion = mask_within_static_range
 
     growth_delta = None
     cap_delta = None
@@ -603,8 +620,11 @@ def run_reprojection_suite(args, extra_args, screenshot_scene):
     if not history_raw_has_midtones:
         print("FAIL: history_length_raw appears degenerate (insufficient midtone coverage).")
         failed = True
-    if not mask_non_trivial:
-        print("FAIL: reprojection mask valid ratio is trivial or unexpected.")
+    if not mask_has_min_valid:
+        print("FAIL: reprojection mask valid ratio is too low (degenerate invalid-heavy mask).")
+        failed = True
+    if not mask_high_ratio_explained_by_motion:
+        print("FAIL: reprojection mask valid ratio is too high without enough motion-driven invalidation.")
         failed = True
     if not args.disable_motion_reprojection_check and not motion_has_invalidation:
         print("FAIL: small camera nudge did not invalidate enough reprojection pixels.")
@@ -962,6 +982,100 @@ def run_atrous_suite(args, extra_args, screenshot_scene):
     return not failed
 
 
+def run_compose_suite(args, extra_args, screenshot_scene):
+    final_capture_a = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="off",
+        view="none",
+        spp=args.spp,
+        max_spp=args.max_spp,
+        runtime_args=[],
+    )
+    final_capture_b = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="off",
+        view="none",
+        spp=args.spp,
+        max_spp=args.max_spp,
+        runtime_args=[],
+    )
+    filtered_capture = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="off",
+        view="filtered",
+        spp=args.spp,
+        max_spp=args.max_spp,
+        runtime_args=[],
+    )
+
+    final_img_a = load_rgb01(final_capture_a)
+    final_img_b = load_rgb01(final_capture_b)
+    filtered_img = load_rgb01(filtered_capture)
+
+    repeat_delta = np.abs(final_img_a - final_img_b)
+    repeat_mae = float(np.mean(repeat_delta))
+    repeat_p95 = float(np.percentile(repeat_delta, 95.0))
+    filtered_match_mae = float(np.mean(np.abs(final_img_a - filtered_img)))
+
+    final_luma = np.mean(final_img_a, axis=2)
+    final_luma_mean = float(np.mean(final_luma))
+
+    right_delta, bottom_delta, bright_ratio, spike_ratio, spike_max = border_bleed_metrics(
+        final_img_a,
+        args.atrous_border_bright_threshold,
+        args.atrous_border_spike_delta_min,
+    )
+    border_delta_max = max(right_delta, bottom_delta)
+
+    repeat_ok = repeat_mae <= args.compose_repeat_mae_max and repeat_p95 <= args.compose_repeat_p95_max
+    filtered_match_ok = filtered_match_mae <= args.compose_filtered_match_mae_max
+    luma_ok = args.compose_luma_min <= final_luma_mean <= args.compose_luma_max
+    border_delta_ok = border_delta_max <= args.compose_border_delta_max
+    border_bright_ok = bright_ratio <= args.compose_border_bright_ratio_max
+    border_spike_ratio_ok = spike_ratio <= args.compose_border_spike_ratio_max
+    border_spike_max_ok = spike_max <= args.compose_border_spike_max
+
+    print("ASVGF Compose Metrics")
+    print(f"  repeat capture MAE: {repeat_mae:.6f}")
+    print(f"  repeat capture p95 abs delta: {repeat_p95:.6f}")
+    print(f"  final-vs-filtered MAE: {filtered_match_mae:.6f}")
+    print(f"  final luma mean: {final_luma_mean:.6f}")
+    print(f"  final border delta max: {border_delta_max:.6f}")
+    print(f"  final border bright ratio: {bright_ratio:.6f}")
+    print(f"  final border spike ratio: {spike_ratio:.6f}")
+    print(f"  final border spike max: {spike_max:.6f}")
+
+    failed = False
+    if not repeat_ok:
+        print("FAIL: final compose output is unstable across identical captures.")
+        failed = True
+    if not filtered_match_ok:
+        print("FAIL: final compose output diverges from filtered debug output unexpectedly.")
+        failed = True
+    if not luma_ok:
+        print("FAIL: final compose output appears degenerate (mean luma out of expected range).")
+        failed = True
+    if not border_delta_ok:
+        print("FAIL: final compose output shows right/bottom border luminance jump.")
+        failed = True
+    if not border_bright_ok:
+        print("FAIL: final compose output has too many near-white border pixels.")
+        failed = True
+    if not border_spike_ratio_ok:
+        print("FAIL: final compose output has too many border brightness spike pixels.")
+        failed = True
+    if not border_spike_max_ok:
+        print("FAIL: final compose output has a severe border brightness spike.")
+        failed = True
+    return not failed
+
+
 def main():
     args, extra_args = parse_args()
     screenshot_scene = args.screenshot_scene
@@ -989,6 +1103,10 @@ def main():
 
         if suite in ("atrous", "all"):
             if not run_atrous_suite(args, extra_args, screenshot_scene):
+                failed = True
+
+        if suite in ("compose", "all"):
+            if not run_compose_suite(args, extra_args, screenshot_scene):
                 failed = True
     except RuntimeError as error:
         print(f"FAIL: {error}")

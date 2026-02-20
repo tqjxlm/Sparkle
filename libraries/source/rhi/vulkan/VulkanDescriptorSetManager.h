@@ -5,6 +5,7 @@
 #include "core/Hash.h"
 #include "rhi/VulkanRHI.h"
 
+#include <deque>
 #include <unordered_set>
 
 namespace sparkle
@@ -83,9 +84,16 @@ private:
 
     struct DescriptorSetCache
     {
+        struct DelayedFreeDescriptorSet
+        {
+            unsigned index = 0;
+            uint64_t reusable_after_frame = 0;
+        };
+
         std::vector<SharedDescriptorSet> all_sets;
         std::unordered_map<uint32_t, unsigned> allocated_sets;
         std::vector<unsigned> free_sets;
+        std::deque<DelayedFreeDescriptorSet> delayed_free_sets;
         VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     };
 

@@ -11,6 +11,7 @@
     uint resolution_x;
     uint resolution_y;
     uint history_cap;
+    uint current_spp;
     uint has_previous_camera;
     uint enable_temporal_accumulation;
 };
@@ -101,10 +102,23 @@ bool ReprojectToPreviousPixel(float3 world_position, out uint2 previous_pixel, o
     return true;
 }
 
-void ComputeNoisyNeighborhoodBounds(uint2 pixel, out float3 min_color, out float3 max_color)
+bool IsCameraUnchanged()
+{
+    float position_delta = length(current_camera_position.xyz - previous_camera_position.xyz);
+    float lower_left_delta = length(current_lower_left.xyz - previous_lower_left.xyz);
+    float max_u_delta = length(current_max_u.xyz - previous_max_u.xyz);
+    float max_v_delta = length(current_max_v.xyz - previous_max_v.xyz);
+    float max_delta = max(max(position_delta, lower_left_delta), max(max_u_delta, max_v_delta));
+    return max_delta < 1e-2;
+}
+
+void ComputeNoisyNeighborhoodStats(uint2 pixel, out float3 mean_color, out float3 stddev_color, out float3 min_color,
+                                   out float3 max_color)
 {
     min_color = float3(1e20, 1e20, 1e20);
     max_color = float3(0.0, 0.0, 0.0);
+    float3 sum_color = 0.0;
+    float3 sum_color_sqr = 0.0;
 
     int2 max_pixel = int2(int(resolution_x) - 1, int(resolution_y) - 1);
 
@@ -114,10 +128,17 @@ void ComputeNoisyNeighborhoodBounds(uint2 pixel, out float3 min_color, out float
         {
             int2 sample_pixel = clamp(int2(pixel) + int2(dx, dy), int2(0, 0), max_pixel);
             float3 sample_color = max(noisyTexture.Load(int3(sample_pixel, 0)).rgb, 0.0);
+            sum_color += sample_color;
+            sum_color_sqr += sample_color * sample_color;
             min_color = min(min_color, sample_color);
             max_color = max(max_color, sample_color);
         }
     }
+
+    const float sample_count = 9.0;
+    mean_color = sum_color / sample_count;
+    float3 variance_color = max(sum_color_sqr / sample_count - mean_color * mean_color, 0.0);
+    stddev_color = sqrt(variance_color);
 }
 
 [shader("compute")]
@@ -132,6 +153,7 @@ void ComputeNoisyNeighborhoodBounds(uint2 pixel, out float3 min_color, out float
     int3 texel = int3(pixel, 0);
     float4 noisy = noisyTexture.Load(texel);
     float3 noisy_color = max(noisy.rgb, 0.0);
+    float frame_spp = max((float)current_spp, 1.0);
 
     float current_depth = featureDepthTexture.Load(texel);
     uint current_primitive_id = featurePrimitiveIdTexture.Load(texel);
@@ -140,15 +162,27 @@ void ComputeNoisyNeighborhoodBounds(uint2 pixel, out float3 min_color, out float
     bool feature_valid = current_primitive_id != InvalidPrimitiveId && current_depth > 0.0;
 
     float reprojected_mask = 0.0;
-    float history_length = feature_valid ? 1.0 : 0.0;
+    float history_length = frame_spp;
     float3 reprojected_color = noisy_color;
     float2 reprojected_moments = float2(dot(noisy_color, LuminanceWeights), 0.0);
     reprojected_moments.y = reprojected_moments.x * reprojected_moments.x;
     uint reprojection_reason = feature_valid ? ReprojectionReasonNoPreviousCamera : ReprojectionReasonNoFeature;
     float2 reprojected_uv = float2(-1.0, -1.0);
     float depth_error_ratio = 0.0;
+    bool camera_unchanged = has_previous_camera != 0u && IsCameraUnchanged();
 
-    if (feature_valid && has_previous_camera != 0u)
+    if (!feature_valid && camera_unchanged)
+    {
+        reprojected_mask = 1.0;
+        reprojection_reason = ReprojectionReasonValid;
+        float2 denominator = float2(max(resolution_x, 1u), max(resolution_y, 1u));
+        reprojected_uv = (float2(pixel) + 0.5) / denominator;
+        reprojected_color = max(prevHistoryColorTexture.Load(texel).rgb, 0.0);
+        float4 previous_moments = prevHistoryMomentsTexture.Load(texel);
+        reprojected_moments = previous_moments.xy;
+        history_length = min(previous_moments.w + frame_spp, (float)history_cap);
+    }
+    else if (feature_valid && has_previous_camera != 0u)
     {
         reprojection_reason = ReprojectionReasonProjectionFailed;
         float3 world_position = ComputeWorldPosition(pixel, current_depth);
@@ -179,7 +213,7 @@ void ComputeNoisyNeighborhoodBounds(uint2 pixel, out float3 min_color, out float
 
                 float4 previous_moments = prevHistoryMomentsTexture.Load(previous_texel);
                 reprojected_moments = previous_moments.xy;
-                history_length = min(previous_moments.w + 1.0, (float)history_cap);
+                history_length = min(previous_moments.w + frame_spp, (float)history_cap);
             }
             else if (!primitive_valid)
             {
@@ -211,15 +245,10 @@ void ComputeNoisyNeighborhoodBounds(uint2 pixel, out float3 min_color, out float
         output_color = noisy_color;
         output_moments = current_moments;
 
-        if (feature_valid && reprojected_mask > 0.5)
+        if (reprojected_mask > 0.5)
         {
-            float3 neighborhood_min = 0.0;
-            float3 neighborhood_max = 0.0;
-            ComputeNoisyNeighborhoodBounds(pixel, neighborhood_min, neighborhood_max);
-            float3 clamped_history_color = clamp(reprojected_color, neighborhood_min, neighborhood_max);
-
-            float blend_alpha = 1.0 / max(history_length, 1.0);
-            output_color = lerp(clamped_history_color, noisy_color, blend_alpha);
+            float blend_alpha = saturate(frame_spp / max(history_length, frame_spp));
+            output_color = lerp(reprojected_color, noisy_color, blend_alpha);
             output_moments = lerp(reprojected_moments, current_moments, blend_alpha);
         }
     }

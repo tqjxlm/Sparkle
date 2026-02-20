@@ -121,6 +121,7 @@ private:
 
     uint32_t last_second_total_spp_ = 0;
     uint32_t dispatched_sample_count_ = 0;
+    uint32_t asvgf_current_frame_spp_ = 1;
 
     uint32_t asvgf_history_index_ = 0;
     bool asvgf_history_clear_pending_ = true;
