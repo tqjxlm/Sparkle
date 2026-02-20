@@ -35,6 +35,8 @@ python .\dev\functional_test.py --framework [glfw, macos, ios, android] --pipeli
 python .\dev\functional_test.py --framework glfw --pipeline forward --software
 ```
 
+ASVGF-specific debug commands, sanity suites, and regression policy are documented in `docs/implementation/ASVGF.md`.
+
 ### TestScene
 
 | framework | cpu                                                                                             | gpu                                                                                               | forward                                                                                               | deferred                                                                                               |

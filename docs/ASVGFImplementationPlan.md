@@ -177,7 +177,7 @@ python .\dev\asvgf_sanity_test.py --framework glfw --suite compose
 - [x] S5: Variance estimation pass
 - [x] S6: A-trous edge-aware filter passes
 - [x] S7: Integration polish, tuning, and performance budget
-- [ ] S8: Final validation and documentation
+- [x] S8: Final validation and documentation
 - [x] P1: Pass test - RayTraceNoisy + Features
 - [x] P2: Pass test - Reprojection
 - [x] P3: Pass test - TemporalAccumulation + Moments
@@ -411,6 +411,7 @@ Implementation:
 1. Validate regression behavior with ASVGF disabled.
 2. Validate ASVGF quality using local reference screenshots (high-SPP reference vs low-SPP denoised).
 3. Update docs/config references for new runtime options and expected behavior.
+4. Generate a dedicated implementation doc for asvgf in docs/implementation. The doc should include system design, API and file structure, available parameters and their impact, the input and output of each pass, the expected quality of each pass and how to evaluate them, and the test suites.
 
 Testable result:
 
@@ -428,6 +429,30 @@ Pass criterion:
 
 1. Functional regression check passes for ASVGF-off behavior.
 2. ASVGF-on screenshots and logs show expected denoise improvements and stable runtime.
+
+Validation log (2026-02-20):
+
+1. ASVGF-off regression:
+   1. `python .\dev\functional_test.py --framework glfw --pipeline gpu`
+   2. Result: `PASS` (PSNR `42.89 dB`, SSIM `0.9948`).
+2. ASVGF pass sanity:
+   1. `python .\dev\asvgf_sanity_test.py --framework glfw --suite all`
+   2. Result: `ASVGF sanity (all): PASS`.
+   3. Key metrics snapshot:
+      1. Raytrace: `normal std=0.371948`, `albedo std=0.416591`, `depth std=0.338192`.
+      2. Reprojection: `valid ratio=1.0000`, moved-camera valid ratio (`yaw=0.8`) `0.6972`.
+      3. Temporal: filtered/noisy std ratio `0.225556`.
+      4. Variance: corr(variance, noisy HF) `0.548629`.
+      5. A-trous: residual ratio iter1/noisy `0.023567`, iter5/noisy `0.035567`.
+      6. Compose: repeat MAE `0.011167`, final-vs-filtered MAE `0.011085`.
+3. ASVGF-on/off screenshot captures:
+   1. ASVGF on (`--asvgf true --spp 1 --max_spp 64`):
+      `build_system/glfw/output/build/generated/screenshots/TestScene_gpu_20260220_161353.png`
+   2. ASVGF off reference (`--asvgf false --spp 1 --max_spp 2048`):
+      `build_system/glfw/output/build/generated/screenshots/TestScene_gpu_20260220_161410.png`
+4. Stability note:
+   1. One transient run hit Windows exception `c0000005` in `VulkanTLAS::Build()` (`GPURenderer::Update()` call path) during repeated manual screenshot capture.
+   2. Immediate rerun succeeded with identical command line.
 
 ## Recommended Initial File Touch List
 

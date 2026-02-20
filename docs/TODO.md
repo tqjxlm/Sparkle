@@ -9,7 +9,6 @@
 
 ## Path Tracing Renderers
 
-* [ ] ASVGF
 * [ ] vendor-specific denoising and super sampling
 * [ ] dynamic scene
 

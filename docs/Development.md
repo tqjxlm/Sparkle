@@ -204,6 +204,8 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 
 Search across the project for keyword "ConfigValue" for more available configs.
 
+ASVGF-specific runtime options, debug commands, and regression/CI guidance are documented in `docs/implementation/ASVGF.md`.
+
 ## Work with IDE
 
 Sometimes you want better debugging or intellisense support from IDEs. Follow the instructions below to generate IDE project files.
