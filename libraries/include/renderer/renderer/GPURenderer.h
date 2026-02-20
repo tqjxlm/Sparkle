@@ -92,15 +92,19 @@ private:
 
     RHIResourceRef<RHIPipelineState> pipeline_state_;
     RHIResourceRef<RHIPipelineState> asvgf_reprojection_pipeline_state_;
+    RHIResourceRef<RHIPipelineState> asvgf_variance_pipeline_state_;
     RHIResourceRef<RHIPipelineState> asvgf_debug_pipeline_state_;
     RHIResourceRef<RHIShader> asvgf_reprojection_shader_;
+    RHIResourceRef<RHIShader> asvgf_variance_shader_;
     RHIResourceRef<RHIShader> asvgf_debug_shader_;
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
     RHIResourceRef<RHIBuffer> asvgf_reprojection_uniform_buffer_;
+    RHIResourceRef<RHIBuffer> asvgf_variance_uniform_buffer_;
     RHIResourceRef<RHIBuffer> asvgf_debug_uniform_buffer_;
     RHIResourceRef<RHIComputePass> asvgf_reprojection_compute_pass_;
+    RHIResourceRef<RHIComputePass> asvgf_variance_compute_pass_;
     RHIResourceRef<RHIComputePass> asvgf_debug_compute_pass_;
 
     struct ComputePerformanceRecord

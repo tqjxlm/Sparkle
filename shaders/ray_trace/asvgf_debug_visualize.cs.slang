@@ -19,8 +19,9 @@
 [[vk::binding(6, 0)]] Texture2D<float> reprojectionMaskTexture;
 [[vk::binding(7, 0)]] Texture2D<float4> historyMomentsTexture;
 [[vk::binding(8, 0)]] Texture2D<float4> historyColorTexture;
-[[vk::binding(9, 0)]] RWTexture2D<float4> outputImage;
-[[vk::binding(10, 0)]] Texture2D<float4> reprojectionDebugTexture;
+[[vk::binding(9, 0)]] Texture2D<float> varianceTexture;
+[[vk::binding(10, 0)]] RWTexture2D<float4> outputImage;
+[[vk::binding(11, 0)]] Texture2D<float4> reprojectionDebugTexture;
 
 static const uint InvalidPrimitiveId = 0xffffffffu;
 
@@ -126,6 +127,12 @@ float3 ReprojectionReasonColor(uint reason)
     case ASVGF_DEBUG_VIEW_MOMENTS: {
         float4 moments = historyMomentsTexture.Load(texel);
         color = saturate(float3(moments.x, moments.y, moments.z));
+        break;
+    }
+    case ASVGF_DEBUG_VIEW_VARIANCE: {
+        float variance = max(varianceTexture.Load(texel), 0.0);
+        float variance_vis = saturate(log2(1.0 + variance * 512.0) / 8.0);
+        color = variance_vis.xxx;
         break;
     }
     case ASVGF_DEBUG_VIEW_REPROJECTION_REASON: {

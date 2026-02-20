@@ -6,7 +6,8 @@ This script runs a small set of debug captures and validates:
 3) reprojection mask is not trivially all-valid/all-invalid,
 4) history_length and history_length_raw encode consistent normalized history,
 5) small deterministic camera nudge keeps mostly-valid reprojection while introducing some invalidation,
-6) temporal accumulation reduces noise while history behaves correctly.
+6) temporal accumulation reduces noise while history behaves correctly,
+7) variance output is non-degenerate, correlated with noisy high-frequency regions, and drops with more history.
 
 Optional tonemap-sensitive checks are available, but disabled by default because
 the debug views are captured after display mapping, which can saturate values.
@@ -28,7 +29,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 DEFAULT_SCENE = "TestScene"
-SUITES = ("reprojection", "raytrace", "temporal", "all")
+SUITES = ("reprojection", "raytrace", "temporal", "variance", "all")
 
 
 def parse_args():
@@ -59,6 +60,12 @@ def parse_args():
     parser.add_argument("--temporal_moments_std_min", type=float, default=0.01)
     parser.add_argument("--temporal_motion_history_drop_min", type=float, default=0.005)
     parser.add_argument("--temporal_motion_history_min_fraction", type=float, default=0.5)
+    parser.add_argument("--variance_std_min", type=float, default=0.005)
+    parser.add_argument("--variance_mid_ratio_min", type=float, default=0.01)
+    parser.add_argument("--variance_noise_corr_min", type=float, default=0.05)
+    parser.add_argument("--variance_small_spp", type=int, default=8)
+    parser.add_argument("--variance_large_spp", type=int, default=64)
+    parser.add_argument("--variance_mean_drop_min", type=float, default=-0.001)
     parser.add_argument(
         "--disable_motion_reprojection_check",
         action="store_true",
@@ -240,6 +247,32 @@ def capture_or_fail(args, extra_args, screenshot_scene, stage, view, spp, max_sp
 def channel_std(image):
     # Return std of the luminance-like average channel.
     return float(np.std(np.mean(image, axis=2)))
+
+
+def pearson_corr(a, b):
+    a_centered = a - np.mean(a)
+    b_centered = b - np.mean(b)
+    denom = np.sqrt(np.sum(a_centered * a_centered) * np.sum(b_centered * b_centered))
+    if denom <= 1e-8:
+        return 0.0
+    return float(np.sum(a_centered * b_centered) / denom)
+
+
+def luma_local_noise_proxy(image):
+    luma = np.mean(image, axis=2)
+    padded = np.pad(luma, ((1, 1), (1, 1)), mode="edge")
+    blurred = (
+        padded[:-2, :-2]
+        + padded[:-2, 1:-1]
+        + padded[:-2, 2:]
+        + padded[1:-1, :-2]
+        + padded[1:-1, 1:-1]
+        + padded[1:-1, 2:]
+        + padded[2:, :-2]
+        + padded[2:, 1:-1]
+        + padded[2:, 2:]
+    ) / 9.0
+    return np.abs(luma - blurred)
 
 
 def run_raytrace_suite(args, extra_args, screenshot_scene):
@@ -552,6 +585,85 @@ def run_temporal_suite(args, extra_args, screenshot_scene):
     return not failed
 
 
+def run_variance_suite(args, extra_args, screenshot_scene):
+    low_history_spp = max(1, min(args.variance_small_spp, args.variance_large_spp))
+    high_history_spp = max(low_history_spp, args.variance_large_spp)
+
+    variance_low = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="variance",
+        view="variance",
+        spp=args.spp,
+        max_spp=low_history_spp,
+        runtime_args=[],
+    )
+    variance_high = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="variance",
+        view="variance",
+        spp=args.spp,
+        max_spp=high_history_spp,
+        runtime_args=[],
+    )
+    noisy_high = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="variance",
+        view="noisy",
+        spp=args.spp,
+        max_spp=high_history_spp,
+        runtime_args=[],
+    )
+
+    variance_low_r = load_rgb01(variance_low)[:, :, 0]
+    variance_high_r = load_rgb01(variance_high)[:, :, 0]
+    noisy_high_img = load_rgb01(noisy_high)
+
+    variance_std = float(np.std(variance_high_r))
+    variance_mid_ratio = float(np.mean((variance_high_r > 0.05) & (variance_high_r < 0.95)))
+    variance_mean_drop = float(np.mean(variance_low_r) - np.mean(variance_high_r))
+
+    noise_proxy = luma_local_noise_proxy(noisy_high_img)
+    variance_noise_corr = pearson_corr(noise_proxy.reshape(-1), variance_high_r.reshape(-1))
+
+    std_ok = variance_std >= args.variance_std_min
+    midtone_ok = variance_mid_ratio >= args.variance_mid_ratio_min
+    drop_ok = variance_mean_drop >= args.variance_mean_drop_min
+    corr_ok = variance_noise_corr >= args.variance_noise_corr_min
+
+    print("ASVGF Variance Metrics")
+    print(f"  variance std (max_spp={high_history_spp}): {variance_std:.6f}")
+    print(f"  variance midtone ratio (max_spp={high_history_spp}): {variance_mid_ratio:.6f}")
+    print(
+        f"  variance mean drop (max_spp {low_history_spp}->{high_history_spp}): "
+        f"{variance_mean_drop:.6f}"
+    )
+    print(
+        f"  variance/noisy-high-frequency corr (max_spp={high_history_spp}): "
+        f"{variance_noise_corr:.6f}"
+    )
+
+    failed = False
+    if not std_ok:
+        print("FAIL: variance debug output appears degenerate (low std).")
+        failed = True
+    if not midtone_ok:
+        print("FAIL: variance debug output has insufficient midtone coverage.")
+        failed = True
+    if not drop_ok:
+        print("FAIL: variance increased unexpectedly with longer accumulation.")
+        failed = True
+    if not corr_ok:
+        print("FAIL: variance is weakly correlated with noisy high-frequency regions.")
+        failed = True
+    return not failed
+
+
 def main():
     args, extra_args = parse_args()
     screenshot_scene = args.screenshot_scene
@@ -571,6 +683,10 @@ def main():
 
         if suite in ("temporal", "all"):
             if not run_temporal_suite(args, extra_args, screenshot_scene):
+                failed = True
+
+        if suite in ("variance", "all"):
+            if not run_variance_suite(args, extra_args, screenshot_scene):
                 failed = True
     except RuntimeError as error:
         print(f"FAIL: {error}")

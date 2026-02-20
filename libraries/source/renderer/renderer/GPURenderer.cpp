@@ -73,6 +73,7 @@ class ASVGFDebugVisualizeComputeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(reprojectionMaskTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(historyMomentsTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(historyColorTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(varianceTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(outputImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(reprojectionDebugTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
 
@@ -135,6 +136,30 @@ class ASVGFReprojectionComputeShader : public RHIShaderInfo
         uint32_t history_cap = 1;
         uint32_t has_previous_camera = 0;
         uint32_t enable_temporal_accumulation = 0;
+    };
+};
+
+class ASVGFVarianceComputeShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ASVGFVarianceComputeShader, RHIShaderStage::Compute, "shaders/ray_trace/asvgf_variance.cs.slang",
+                     "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(historyMomentsTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(featureNormalRoughnessTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(featureDepthTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(outVarianceImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+    struct UniformBufferData
+    {
+        uint32_t resolution_x = 1;
+        uint32_t resolution_y = 1;
+        float depth_sigma_scale = 0.02f;
+        float normal_power = 32.f;
     };
 };
 
@@ -242,7 +267,8 @@ void GPURenderer::Render()
     // base pass: render to texture
     {
         if (render_config_.asvgf && asvgf_noisy_texture_ && asvgf_feature_normal_roughness_texture_ &&
-            asvgf_feature_albedo_metallic_texture_ && asvgf_feature_depth_texture_ && asvgf_feature_primitive_id_texture_)
+            asvgf_feature_albedo_metallic_texture_ && asvgf_feature_depth_texture_ &&
+            asvgf_feature_primitive_id_texture_)
         {
             asvgf_noisy_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                               .after_stage = RHIPipelineStage::Top,
@@ -364,7 +390,8 @@ void GPURenderer::Update()
         last_asvgf_test_stage_ = render_config_.asvgf_test_stage;
     }
 
-    if (render_config_.asvgf && (!asvgf_reprojection_pipeline_state_ || !asvgf_debug_pipeline_state_))
+    if (render_config_.asvgf &&
+        (!asvgf_reprojection_pipeline_state_ || !asvgf_variance_pipeline_state_ || !asvgf_debug_pipeline_state_))
     {
         InitASVGFRenderResources();
     }
@@ -613,10 +640,10 @@ void GPURenderer::InitSceneRenderResources()
         create_asvgf_fallback_texture(PixelFormat::R32_UINT, "ASVGFFallbackPrimitiveId");
 
     cs_resources->noisyImage().BindResource(asvgf_fallback_noisy_texture_->GetDefaultView(rhi_));
-    cs_resources->featureNormalRoughnessImage().BindResource(asvgf_fallback_normal_roughness_texture_->GetDefaultView(
-        rhi_));
-    cs_resources->featureAlbedoMetallicImage().BindResource(asvgf_fallback_albedo_metallic_texture_->GetDefaultView(
-        rhi_));
+    cs_resources->featureNormalRoughnessImage().BindResource(
+        asvgf_fallback_normal_roughness_texture_->GetDefaultView(rhi_));
+    cs_resources->featureAlbedoMetallicImage().BindResource(
+        asvgf_fallback_albedo_metallic_texture_->GetDefaultView(rhi_));
     cs_resources->featureDepthImage().BindResource(asvgf_fallback_depth_texture_->GetDefaultView(rhi_));
     cs_resources->featurePrimitiveIdImage().BindResource(asvgf_fallback_primitive_id_texture_->GetDefaultView(rhi_));
 
@@ -649,7 +676,7 @@ void GPURenderer::InitSceneRenderResources()
 
 void GPURenderer::InitASVGFRenderResources()
 {
-    if (asvgf_reprojection_pipeline_state_ && asvgf_debug_pipeline_state_)
+    if (asvgf_reprojection_pipeline_state_ && asvgf_variance_pipeline_state_ && asvgf_debug_pipeline_state_)
     {
         return;
     }
@@ -715,6 +742,17 @@ void GPURenderer::InitASVGFRenderResources()
     asvgf_reprojection_pipeline_state_->SetShader<RHIShaderStage::Compute>(asvgf_reprojection_shader_);
     asvgf_reprojection_pipeline_state_->Compile();
 
+    asvgf_variance_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ASVGFVarianceComputeShader::UniformBufferData),
+                                                         .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                         .mem_properties = RHIMemoryProperty::None,
+                                                         .is_dynamic = true},
+                                                        "ASVGFVarianceUniformBuffer");
+    asvgf_variance_shader_ = rhi_->CreateShader<ASVGFVarianceComputeShader>();
+    asvgf_variance_pipeline_state_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ASVGFVariancePSO");
+    asvgf_variance_pipeline_state_->SetShader<RHIShaderStage::Compute>(asvgf_variance_shader_);
+    asvgf_variance_pipeline_state_->Compile();
+
     asvgf_debug_uniform_buffer_ =
         rhi_->CreateBuffer({.size = sizeof(ASVGFDebugVisualizeComputeShader::UniformBufferData),
                             .usages = RHIBuffer::BufferUsage::UniformBuffer,
@@ -733,7 +771,8 @@ void GPURenderer::InitASVGFRenderResources()
     raytrace_resources->featureAlbedoMetallicImage().BindResource(
         asvgf_feature_albedo_metallic_texture_->GetDefaultView(rhi_));
     raytrace_resources->featureDepthImage().BindResource(asvgf_feature_depth_texture_->GetDefaultView(rhi_));
-    raytrace_resources->featurePrimitiveIdImage().BindResource(asvgf_feature_primitive_id_texture_->GetDefaultView(rhi_));
+    raytrace_resources->featurePrimitiveIdImage().BindResource(
+        asvgf_feature_primitive_id_texture_->GetDefaultView(rhi_));
 
     auto *reprojection_resources =
         asvgf_reprojection_pipeline_state_->GetShaderResource<ASVGFReprojectionComputeShader>();
@@ -744,11 +783,19 @@ void GPURenderer::InitASVGFRenderResources()
     reprojection_resources->featureDepthTexture().BindResource(asvgf_feature_depth_texture_->GetDefaultView(rhi_));
     reprojection_resources->featurePrimitiveIdTexture().BindResource(
         asvgf_feature_primitive_id_texture_->GetDefaultView(rhi_));
-    reprojection_resources->outReprojectionMaskImage().BindResource(asvgf_reprojection_mask_texture_->GetDefaultView(
-        rhi_));
+    reprojection_resources->outReprojectionMaskImage().BindResource(
+        asvgf_reprojection_mask_texture_->GetDefaultView(rhi_));
     reprojection_resources->outReprojectionDebugImage().BindResource(
         asvgf_reprojection_debug_texture_->GetDefaultView(rhi_));
     reprojection_resources->outSceneColorImage().BindResource(scene_texture_->GetDefaultView(rhi_));
+
+    auto *variance_resources = asvgf_variance_pipeline_state_->GetShaderResource<ASVGFVarianceComputeShader>();
+    variance_resources->ubo().BindResource(asvgf_variance_uniform_buffer_);
+    variance_resources->historyMomentsTexture().BindResource(asvgf_history_moments_texture_[0]->GetDefaultView(rhi_));
+    variance_resources->featureNormalRoughnessTexture().BindResource(
+        asvgf_feature_normal_roughness_texture_->GetDefaultView(rhi_));
+    variance_resources->featureDepthTexture().BindResource(asvgf_feature_depth_texture_->GetDefaultView(rhi_));
+    variance_resources->outVarianceImage().BindResource(asvgf_variance_texture_->GetDefaultView(rhi_));
 
     auto *debug_resources = asvgf_debug_pipeline_state_->GetShaderResource<ASVGFDebugVisualizeComputeShader>();
     debug_resources->ubo().BindResource(asvgf_debug_uniform_buffer_);
@@ -758,25 +805,29 @@ void GPURenderer::InitASVGFRenderResources()
     debug_resources->featureAlbedoMetallicTexture().BindResource(
         asvgf_feature_albedo_metallic_texture_->GetDefaultView(rhi_));
     debug_resources->featureDepthTexture().BindResource(asvgf_feature_depth_texture_->GetDefaultView(rhi_));
-    debug_resources->featurePrimitiveIdTexture().BindResource(asvgf_feature_primitive_id_texture_->GetDefaultView(rhi_));
+    debug_resources->featurePrimitiveIdTexture().BindResource(
+        asvgf_feature_primitive_id_texture_->GetDefaultView(rhi_));
     debug_resources->reprojectionMaskTexture().BindResource(asvgf_reprojection_mask_texture_->GetDefaultView(rhi_));
     debug_resources->historyMomentsTexture().BindResource(asvgf_history_moments_texture_[0]->GetDefaultView(rhi_));
     debug_resources->historyColorTexture().BindResource(asvgf_history_color_texture_[0]->GetDefaultView(rhi_));
+    debug_resources->varianceTexture().BindResource(asvgf_variance_texture_->GetDefaultView(rhi_));
     debug_resources->outputImage().BindResource(asvgf_debug_texture_->GetDefaultView(rhi_));
     debug_resources->reprojectionDebugTexture().BindResource(asvgf_reprojection_debug_texture_->GetDefaultView(rhi_));
 
     asvgf_reprojection_compute_pass_ = rhi_->CreateComputePass("ASVGFReprojectionPass", false);
+    asvgf_variance_compute_pass_ = rhi_->CreateComputePass("ASVGFVariancePass", false);
     asvgf_debug_compute_pass_ = rhi_->CreateComputePass("ASVGFDebugPass", false);
     asvgf_history_clear_pending_ = true;
 }
 
 void GPURenderer::RunASVGFPasses()
 {
-    if (!render_config_.asvgf || !asvgf_reprojection_pipeline_state_ || !asvgf_debug_pipeline_state_ ||
-        !asvgf_reprojection_compute_pass_ || !asvgf_reprojection_uniform_buffer_ || !asvgf_noisy_texture_ ||
+    if (!render_config_.asvgf || !asvgf_reprojection_pipeline_state_ || !asvgf_variance_pipeline_state_ ||
+        !asvgf_debug_pipeline_state_ || !asvgf_reprojection_compute_pass_ || !asvgf_variance_compute_pass_ ||
+        !asvgf_reprojection_uniform_buffer_ || !asvgf_variance_uniform_buffer_ || !asvgf_noisy_texture_ ||
         !asvgf_feature_normal_roughness_texture_ || !asvgf_feature_albedo_metallic_texture_ ||
         !asvgf_feature_depth_texture_ || !asvgf_feature_primitive_id_texture_ || !asvgf_reprojection_mask_texture_ ||
-        !asvgf_reprojection_debug_texture_ ||
+        !asvgf_reprojection_debug_texture_ || !asvgf_variance_texture_ ||
         !asvgf_history_feature_normal_roughness_texture_[0] || !asvgf_history_feature_normal_roughness_texture_[1] ||
         !asvgf_history_feature_depth_texture_[0] || !asvgf_history_feature_depth_texture_[1] ||
         !asvgf_history_feature_primitive_id_texture_[0] || !asvgf_history_feature_primitive_id_texture_[1] ||
@@ -797,6 +848,10 @@ void GPURenderer::RunASVGFPasses()
         render_config_.asvgf_test_stage != RenderConfig::ASVGFTestStage::raytrace && !freeze_history;
     const bool enable_temporal_accumulation =
         render_config_.asvgf_test_stage != RenderConfig::ASVGFTestStage::reprojection;
+    const bool run_variance_pass = render_config_.asvgf_debug_view == RenderConfig::ASVGFDebugView::variance ||
+                                   render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::variance ||
+                                   render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::atrous_iter ||
+                                   render_config_.asvgf_test_stage == RenderConfig::ASVGFTestStage::off;
     uint32_t read_history_index = asvgf_history_index_;
     uint32_t write_history_index = (asvgf_history_index_ + 1u) % 2u;
     uint32_t display_history_index = read_history_index;
@@ -811,15 +866,13 @@ void GPURenderer::RunASVGFPasses()
 
         ASVGFReprojectionComputeShader::UniformBufferData reprojection_ubo{
             .current_camera_position = to_vec4(posture.position, 1.f),
-            .previous_camera_position =
-                asvgf_previous_camera_valid_ ? to_vec4(asvgf_previous_camera_position_, 1.f)
-                                             : to_vec4(posture.position, 1.f),
+            .previous_camera_position = asvgf_previous_camera_valid_ ? to_vec4(asvgf_previous_camera_position_, 1.f)
+                                                                     : to_vec4(posture.position, 1.f),
             .current_lower_left = to_vec4(focus_plane.lower_left, 0.f),
             .current_max_u = to_vec4(focus_plane.max_u, 0.f),
             .current_max_v = to_vec4(focus_plane.max_v, 0.f),
-            .previous_lower_left =
-                asvgf_previous_camera_valid_ ? to_vec4(asvgf_previous_lower_left_, 0.f)
-                                             : to_vec4(focus_plane.lower_left, 0.f),
+            .previous_lower_left = asvgf_previous_camera_valid_ ? to_vec4(asvgf_previous_lower_left_, 0.f)
+                                                                : to_vec4(focus_plane.lower_left, 0.f),
             .previous_max_u =
                 asvgf_previous_camera_valid_ ? to_vec4(asvgf_previous_max_u_, 0.f) : to_vec4(focus_plane.max_u, 0.f),
             .previous_max_v =
@@ -924,9 +977,10 @@ void GPURenderer::RunASVGFPasses()
                               {16u, 16u, 1u});
         rhi_->EndComputePass(asvgf_reprojection_compute_pass_);
 
-        asvgf_history_moments_texture_[write_history_index]->Transition({.target_layout = RHIImageLayout::Read,
-                                                                         .after_stage = RHIPipelineStage::ComputeShader,
-                                                                         .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_history_moments_texture_[write_history_index]->Transition(
+            {.target_layout = RHIImageLayout::Read,
+             .after_stage = RHIPipelineStage::ComputeShader,
+             .before_stage = RHIPipelineStage::ComputeShader});
         asvgf_reprojection_mask_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                                       .after_stage = RHIPipelineStage::ComputeShader,
                                                       .before_stage = RHIPipelineStage::ComputeShader});
@@ -944,6 +998,41 @@ void GPURenderer::RunASVGFPasses()
         asvgf_previous_max_u_ = focus_plane.max_u;
         asvgf_previous_max_v_ = focus_plane.max_v;
         asvgf_previous_camera_valid_ = true;
+    }
+
+    if (run_variance_pass)
+    {
+        auto *variance_resources = asvgf_variance_pipeline_state_->GetShaderResource<ASVGFVarianceComputeShader>();
+        variance_resources->historyMomentsTexture().BindResource(
+            asvgf_history_moments_texture_[display_history_index]->GetDefaultView(rhi_));
+
+        ASVGFVarianceComputeShader::UniformBufferData variance_ubo{
+            .resolution_x = image_size_.x(),
+            .resolution_y = image_size_.y(),
+        };
+        asvgf_variance_uniform_buffer_->Upload(rhi_, &variance_ubo);
+
+        asvgf_history_moments_texture_[display_history_index]->Transition(
+            {.target_layout = RHIImageLayout::Read,
+             .after_stage = RHIPipelineStage::ComputeShader,
+             .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_feature_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                             .after_stage = RHIPipelineStage::ComputeShader,
+                                                             .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_feature_depth_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                  .after_stage = RHIPipelineStage::ComputeShader,
+                                                  .before_stage = RHIPipelineStage::ComputeShader});
+        asvgf_variance_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                             .after_stage = RHIPipelineStage::Top,
+                                             .before_stage = RHIPipelineStage::ComputeShader});
+
+        rhi_->BeginComputePass(asvgf_variance_compute_pass_);
+        rhi_->DispatchCompute(asvgf_variance_pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
+        rhi_->EndComputePass(asvgf_variance_compute_pass_);
+
+        asvgf_variance_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                             .after_stage = RHIPipelineStage::ComputeShader,
+                                             .before_stage = RHIPipelineStage::ComputeShader});
     }
 
     if (!UseASVGFDebugDisplay())
@@ -991,9 +1080,13 @@ void GPURenderer::RunASVGFPasses()
     asvgf_reprojection_debug_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                                    .after_stage = RHIPipelineStage::ComputeShader,
                                                    .before_stage = RHIPipelineStage::ComputeShader});
-    asvgf_history_moments_texture_[display_history_index]->Transition({.target_layout = RHIImageLayout::Read,
-                                                                       .after_stage = RHIPipelineStage::ComputeShader,
-                                                                       .before_stage = RHIPipelineStage::ComputeShader});
+    asvgf_variance_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                         .after_stage = RHIPipelineStage::ComputeShader,
+                                         .before_stage = RHIPipelineStage::ComputeShader});
+    asvgf_history_moments_texture_[display_history_index]->Transition(
+        {.target_layout = RHIImageLayout::Read,
+         .after_stage = RHIPipelineStage::ComputeShader,
+         .before_stage = RHIPipelineStage::ComputeShader});
     asvgf_history_color_texture_[display_history_index]->Transition({.target_layout = RHIImageLayout::Read,
                                                                      .after_stage = RHIPipelineStage::ComputeShader,
                                                                      .before_stage = RHIPipelineStage::ComputeShader});
