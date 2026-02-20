@@ -12,6 +12,7 @@
     uint resolution_y;
     uint history_cap;
     uint has_previous_camera;
+    uint enable_temporal_accumulation;
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> noisyTexture;
@@ -30,6 +31,7 @@
 [[vk::binding(14, 0)]] RWTexture2D<uint> outFeaturePrimitiveIdImage;
 [[vk::binding(15, 0)]] RWTexture2D<float> outReprojectionMaskImage;
 [[vk::binding(16, 0)]] RWTexture2D<float4> outReprojectionDebugImage;
+[[vk::binding(17, 0)]] RWTexture2D<float4> outSceneColorImage;
 
 static const uint InvalidPrimitiveId = 0xffffffffu;
 static const float3 LuminanceWeights = float3(0.2126, 0.7152, 0.0722);
@@ -97,6 +99,25 @@ bool ReprojectToPreviousPixel(float3 world_position, out uint2 previous_pixel, o
     previous_pixel = min(previous_pixel, uint2(resolution_x - 1u, resolution_y - 1u));
 
     return true;
+}
+
+void ComputeNoisyNeighborhoodBounds(uint2 pixel, out float3 min_color, out float3 max_color)
+{
+    min_color = float3(1e20, 1e20, 1e20);
+    max_color = float3(0.0, 0.0, 0.0);
+
+    int2 max_pixel = int2(int(resolution_x) - 1, int(resolution_y) - 1);
+
+    [unroll] for (int dy = -1; dy <= 1; ++dy)
+    {
+        [unroll] for (int dx = -1; dx <= 1; ++dx)
+        {
+            int2 sample_pixel = clamp(int2(pixel) + int2(dx, dy), int2(0, 0), max_pixel);
+            float3 sample_color = max(noisyTexture.Load(int3(sample_pixel, 0)).rgb, 0.0);
+            min_color = min(min_color, sample_color);
+            max_color = max(max_color, sample_color);
+        }
+    }
 }
 
 [shader("compute")]
@@ -179,11 +200,36 @@ bool ReprojectToPreviousPixel(float3 world_position, out uint2 previous_pixel, o
         reprojection_reason = ReprojectionReasonNoPreviousCamera;
     }
 
-    outHistoryColorImage[pixel] = float4(reprojected_color, 1.0);
-    outHistoryMomentsImage[pixel] = float4(reprojected_moments, reprojected_mask, history_length);
+    float luminance = dot(noisy_color, LuminanceWeights);
+    float2 current_moments = float2(luminance, luminance * luminance);
+
+    float3 output_color = reprojected_color;
+    float2 output_moments = reprojected_moments;
+
+    if (enable_temporal_accumulation != 0u)
+    {
+        output_color = noisy_color;
+        output_moments = current_moments;
+
+        if (feature_valid && reprojected_mask > 0.5)
+        {
+            float3 neighborhood_min = 0.0;
+            float3 neighborhood_max = 0.0;
+            ComputeNoisyNeighborhoodBounds(pixel, neighborhood_min, neighborhood_max);
+            float3 clamped_history_color = clamp(reprojected_color, neighborhood_min, neighborhood_max);
+
+            float blend_alpha = 1.0 / max(history_length, 1.0);
+            output_color = lerp(clamped_history_color, noisy_color, blend_alpha);
+            output_moments = lerp(reprojected_moments, current_moments, blend_alpha);
+        }
+    }
+
+    outHistoryColorImage[pixel] = float4(output_color, 1.0);
+    outHistoryMomentsImage[pixel] = float4(output_moments, reprojected_mask, history_length);
     outFeatureNormalRoughnessImage[pixel] = current_normal_roughness;
     outFeatureDepthImage[pixel] = current_depth;
     outFeaturePrimitiveIdImage[pixel] = current_primitive_id;
     outReprojectionMaskImage[pixel] = reprojected_mask;
     outReprojectionDebugImage[pixel] = float4((float)reprojection_reason, reprojected_uv, depth_error_ratio);
+    outSceneColorImage[pixel] = float4(output_color, 1.0);
 }

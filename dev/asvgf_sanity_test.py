@@ -5,7 +5,8 @@ This script runs a small set of debug captures and validates:
 2) reprojection output has no center-line seam artifact (quadrant discontinuity proxy),
 3) reprojection mask is not trivially all-valid/all-invalid,
 4) history_length and history_length_raw encode consistent normalized history,
-5) small deterministic camera nudge keeps mostly-valid reprojection while introducing some invalidation.
+5) small deterministic camera nudge keeps mostly-valid reprojection while introducing some invalidation,
+6) temporal accumulation reduces noise while history behaves correctly.
 
 Optional tonemap-sensitive checks are available, but disabled by default because
 the debug views are captured after display mapping, which can saturate values.
@@ -27,7 +28,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 DEFAULT_SCENE = "TestScene"
-SUITES = ("reprojection", "raytrace", "all")
+SUITES = ("reprojection", "raytrace", "temporal", "all")
 
 
 def parse_args():
@@ -53,6 +54,11 @@ def parse_args():
     parser.add_argument("--raytrace_normal_std_min", type=float, default=0.03)
     parser.add_argument("--raytrace_albedo_std_min", type=float, default=0.02)
     parser.add_argument("--raytrace_depth_std_min", type=float, default=0.01)
+    parser.add_argument("--temporal_noise_ratio_max", type=float, default=0.95)
+    parser.add_argument("--temporal_history_mean_min", type=float, default=0.05)
+    parser.add_argument("--temporal_moments_std_min", type=float, default=0.01)
+    parser.add_argument("--temporal_motion_history_drop_min", type=float, default=0.005)
+    parser.add_argument("--temporal_motion_history_min_fraction", type=float, default=0.5)
     parser.add_argument(
         "--disable_motion_reprojection_check",
         action="store_true",
@@ -466,6 +472,86 @@ def run_reprojection_suite(args, extra_args, screenshot_scene):
     return not failed
 
 
+def run_temporal_suite(args, extra_args, screenshot_scene):
+    captures = {}
+    for view in ("noisy", "filtered", "history_length", "moments"):
+        captures[view] = capture_or_fail(
+            args,
+            extra_args,
+            screenshot_scene,
+            stage="temporal",
+            view=view,
+            spp=args.spp,
+            max_spp=args.max_spp,
+            runtime_args=[],
+        )
+
+    noisy_img = load_rgb01(captures["noisy"])
+    filtered_img = load_rgb01(captures["filtered"])
+    history_img = load_rgb01(captures["history_length"])
+    moments_img = load_rgb01(captures["moments"])
+
+    noisy_std = channel_std(noisy_img)
+    filtered_std = channel_std(filtered_img)
+    noise_ratio = filtered_std / max(noisy_std, 1e-6)
+    history_mean = float(np.mean(history_img[:, :, 0]))
+    moments_std = channel_std(moments_img)
+
+    motion_history = capture_or_fail(
+        args,
+        extra_args,
+        screenshot_scene,
+        stage="temporal",
+        view="history_length",
+        spp=args.spp,
+        max_spp=args.max_spp,
+        runtime_args=[
+            "--asvgf_test_camera_nudge_yaw",
+            str(args.motion_yaw_deg),
+            "--asvgf_test_camera_nudge_pitch",
+            str(args.motion_pitch_deg),
+            "--asvgf_test_post_nudge_frames",
+            str(max(args.motion_post_nudge_frames, 1)),
+        ],
+    )
+    motion_history_mean = float(np.mean(load_rgb01(motion_history)[:, :, 0]))
+
+    noise_reduced = noise_ratio <= args.temporal_noise_ratio_max
+    history_non_trivial = history_mean >= args.temporal_history_mean_min
+    moments_non_degenerate = moments_std >= args.temporal_moments_std_min
+    motion_has_drop = motion_history_mean <= (history_mean - args.temporal_motion_history_drop_min)
+    motion_keeps_majority = motion_history_mean >= (history_mean * args.temporal_motion_history_min_fraction)
+
+    print("ASVGF Temporal Metrics")
+    print(f"  noisy std: {noisy_std:.6f}")
+    print(f"  filtered std: {filtered_std:.6f}")
+    print(f"  filtered/noisy std ratio: {noise_ratio:.6f}")
+    print(f"  history mean: {history_mean:.6f}")
+    print(f"  moments std: {moments_std:.6f}")
+    print(
+        f"  history mean (small camera nudge yaw={args.motion_yaw_deg}, "
+        f"pitch={args.motion_pitch_deg}): {motion_history_mean:.6f}"
+    )
+
+    failed = False
+    if not noise_reduced:
+        print("FAIL: temporal filtered output does not reduce noise enough versus noisy.")
+        failed = True
+    if not history_non_trivial:
+        print("FAIL: temporal history_length output is too low/degenerate.")
+        failed = True
+    if not moments_non_degenerate:
+        print("FAIL: temporal moments output appears degenerate.")
+        failed = True
+    if not motion_has_drop:
+        print("FAIL: temporal history did not drop enough after deterministic camera nudge.")
+        failed = True
+    if not motion_keeps_majority:
+        print("FAIL: temporal history dropped too aggressively after deterministic camera nudge.")
+        failed = True
+    return not failed
+
+
 def main():
     args, extra_args = parse_args()
     screenshot_scene = args.screenshot_scene
@@ -481,6 +567,10 @@ def main():
 
         if suite in ("reprojection", "all"):
             if not run_reprojection_suite(args, extra_args, screenshot_scene):
+                failed = True
+
+        if suite in ("temporal", "all"):
+            if not run_temporal_suite(args, extra_args, screenshot_scene):
                 failed = True
     except RuntimeError as error:
         print(f"FAIL: {error}")

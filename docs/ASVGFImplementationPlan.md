@@ -118,6 +118,7 @@ python .\dev\asvgf_sanity_test.py --framework glfw --suite reprojection
 
 ```bash
 python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage temporal --asvgf_debug_view history_length --spp 1 --max_spp 64
+python .\dev\asvgf_sanity_test.py --framework glfw --suite temporal
 ```
 
    4. Pass criterion: history length grows in stable areas and resets on invalid reprojection; temporal noise visibly decreases.
@@ -163,14 +164,14 @@ python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_
 - [x] S1: Config + renderer scaffolding
 - [x] S2: Noisy radiance + feature buffer output
 - [x] S3: Reprojection infrastructure (previous frame state)
-- [ ] S4: Temporal accumulation and moments
+- [x] S4: Temporal accumulation and moments
 - [ ] S5: Variance estimation pass
 - [ ] S6: A-trous edge-aware filter passes
 - [ ] S7: Integration polish, tuning, and performance budget
 - [ ] S8: Final validation and documentation
 - [x] P1: Pass test - RayTraceNoisy + Features
 - [x] P2: Pass test - Reprojection
-- [ ] P3: Pass test - TemporalAccumulation + Moments
+- [x] P3: Pass test - TemporalAccumulation + Moments
 - [ ] P4: Pass test - Variance
 - [ ] P5: Pass test - A-trous iterations (1/3/5)
 - [ ] P6: Pass test - Final Compose
@@ -301,6 +302,7 @@ Test command:
 
 ```bash
 python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --spp 1 --max_spp 64 --asvgf_atrous_iterations 0
+python .\dev\asvgf_sanity_test.py --framework glfw --suite temporal
 ```
 
 Pass criterion:

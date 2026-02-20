@@ -18,8 +18,9 @@
 [[vk::binding(5, 0)]] Texture2D<uint> featurePrimitiveIdTexture;
 [[vk::binding(6, 0)]] Texture2D<float> reprojectionMaskTexture;
 [[vk::binding(7, 0)]] Texture2D<float4> historyMomentsTexture;
-[[vk::binding(8, 0)]] RWTexture2D<float4> outputImage;
-[[vk::binding(9, 0)]] Texture2D<float4> reprojectionDebugTexture;
+[[vk::binding(8, 0)]] Texture2D<float4> historyColorTexture;
+[[vk::binding(9, 0)]] RWTexture2D<float4> outputImage;
+[[vk::binding(10, 0)]] Texture2D<float4> reprojectionDebugTexture;
 
 static const uint InvalidPrimitiveId = 0xffffffffu;
 
@@ -152,6 +153,9 @@ float3 ReprojectionReasonColor(uint reason)
         color = float3(ratio_vis, 1.0 - ratio_vis, 0.0);
         break;
     }
+    case ASVGF_DEBUG_VIEW_FILTERED:
+        color = max(historyColorTexture.Load(texel).rgb, 0.0);
+        break;
     case ASVGF_DEBUG_VIEW_QUADRANT: {
         bool right = pixel.x >= (resolution_x / 2u);
         bool bottom = pixel.y >= (resolution_y / 2u);
