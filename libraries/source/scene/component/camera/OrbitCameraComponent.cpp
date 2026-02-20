@@ -49,6 +49,14 @@ void OrbitCameraComponent::SetupFromTransform()
     SetFocusDistance(radius_);
 }
 
+void OrbitCameraComponent::OffsetOrbit(float delta_pitch, float delta_yaw)
+{
+    pitch_ = std::clamp(pitch_ + delta_pitch, -90.f + Tolerance, 90.f - Tolerance);
+    yaw_ += delta_yaw;
+
+    UpdateTransform();
+}
+
 void OrbitCameraComponent::PrintPosture()
 {
     Log(Info, "radius {}. yaw {}. pitch {}.", radius_, yaw_, pitch_);

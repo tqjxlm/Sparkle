@@ -59,6 +59,8 @@ public:
 
 private:
     [[nodiscard]] bool IsSceneFullyLoaded() const;
+    [[nodiscard]] bool ShouldApplyASVGFTestCameraNudge() const;
+    void RequestASVGFTestCameraNudge();
 
     void TryAutoScreenshot();
     void RenderThreadMain();
@@ -114,5 +116,8 @@ private:
 
     bool scene_loaded_notified_ = false;
     bool auto_screenshot_taken_ = false;
+    bool asvgf_test_camera_nudge_requested_ = false;
+    std::atomic<bool> asvgf_test_camera_nudge_applied_{false};
+    uint32_t asvgf_test_post_nudge_countdown_ = 0;
 };
 } // namespace sparkle

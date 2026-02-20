@@ -65,6 +65,11 @@ struct RenderConfig : public ConfigCollection
         moments,
         variance,
         filtered,
+        reprojection_reason,
+        reprojection_uv,
+        reprojection_depth_error,
+        quadrant,
+        history_length_raw,
     };
 
     [[nodiscard]] bool IsCPURenderMode() const
@@ -108,6 +113,9 @@ struct RenderConfig : public ConfigCollection
     ASVGFDebugView asvgf_debug_view;
     bool asvgf_freeze_history;
     bool asvgf_force_clear_history;
+    float asvgf_test_camera_nudge_yaw;
+    float asvgf_test_camera_nudge_pitch;
+    uint32_t asvgf_test_post_nudge_frames;
     bool use_ssao;
     bool use_prepass;
     bool use_diffuse_ibl;

@@ -66,9 +66,14 @@ private:
     RHIResourceRef<RHIImage> asvgf_feature_albedo_metallic_texture_;
     RHIResourceRef<RHIImage> asvgf_feature_depth_texture_;
     RHIResourceRef<RHIImage> asvgf_feature_primitive_id_texture_;
+    std::array<RHIResourceRef<RHIImage>, 2> asvgf_history_feature_normal_roughness_texture_;
+    std::array<RHIResourceRef<RHIImage>, 2> asvgf_history_feature_depth_texture_;
+    std::array<RHIResourceRef<RHIImage>, 2> asvgf_history_feature_primitive_id_texture_;
     std::array<RHIResourceRef<RHIImage>, 2> asvgf_history_color_texture_;
     std::array<RHIResourceRef<RHIImage>, 2> asvgf_history_moments_texture_;
     RHIResourceRef<RHIImage> asvgf_variance_texture_;
+    RHIResourceRef<RHIImage> asvgf_reprojection_mask_texture_;
+    RHIResourceRef<RHIImage> asvgf_reprojection_debug_texture_;
     std::array<RHIResourceRef<RHIImage>, 2> asvgf_atrous_ping_pong_texture_;
     RHIResourceRef<RHIImage> asvgf_debug_texture_;
     RHIResourceRef<RHIImage> asvgf_fallback_noisy_texture_;
@@ -86,12 +91,16 @@ private:
     std::unique_ptr<class UiPass> ui_pass_;
 
     RHIResourceRef<RHIPipelineState> pipeline_state_;
+    RHIResourceRef<RHIPipelineState> asvgf_reprojection_pipeline_state_;
     RHIResourceRef<RHIPipelineState> asvgf_debug_pipeline_state_;
+    RHIResourceRef<RHIShader> asvgf_reprojection_shader_;
     RHIResourceRef<RHIShader> asvgf_debug_shader_;
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
+    RHIResourceRef<RHIBuffer> asvgf_reprojection_uniform_buffer_;
     RHIResourceRef<RHIBuffer> asvgf_debug_uniform_buffer_;
+    RHIResourceRef<RHIComputePass> asvgf_reprojection_compute_pass_;
     RHIResourceRef<RHIComputePass> asvgf_debug_compute_pass_;
 
     struct ComputePerformanceRecord
@@ -107,6 +116,11 @@ private:
 
     uint32_t asvgf_history_index_ = 0;
     bool asvgf_history_clear_pending_ = true;
+    Vector3 asvgf_previous_camera_position_ = Vector3::Zero();
+    Vector3 asvgf_previous_lower_left_ = Vector3::Zero();
+    Vector3 asvgf_previous_max_u_ = Vector3::Zero();
+    Vector3 asvgf_previous_max_v_ = Vector3::Zero();
+    bool asvgf_previous_camera_valid_ = false;
 
     RenderConfig::ASVGFDebugView last_asvgf_debug_view_ = RenderConfig::ASVGFDebugView::none;
     RenderConfig::ASVGFTestStage last_asvgf_test_stage_ = RenderConfig::ASVGFTestStage::off;

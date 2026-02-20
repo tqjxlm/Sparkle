@@ -12,9 +12,11 @@
 #include "rhi/RHI.h"
 #include "scene/Scene.h"
 #include "scene/SceneNode.h"
+#include "scene/component/camera/OrbitCameraComponent.h"
 
 #include <imgui.h>
 
+#include <cmath>
 #include <cctype>
 #include <chrono>
 #include <ctime>
@@ -375,6 +377,43 @@ bool RenderFramework::IsSceneFullyLoaded() const
     return scene_loaded_notified_;
 }
 
+bool RenderFramework::ShouldApplyASVGFTestCameraNudge() const
+{
+    constexpr float NudgeEpsilon = 1e-4f;
+    return std::abs(render_config_.asvgf_test_camera_nudge_yaw) > NudgeEpsilon ||
+           std::abs(render_config_.asvgf_test_camera_nudge_pitch) > NudgeEpsilon;
+}
+
+void RenderFramework::RequestASVGFTestCameraNudge()
+{
+    if (asvgf_test_camera_nudge_requested_)
+    {
+        return;
+    }
+
+    const float yaw_nudge = render_config_.asvgf_test_camera_nudge_yaw;
+    const float pitch_nudge = render_config_.asvgf_test_camera_nudge_pitch;
+
+    asvgf_test_camera_nudge_requested_ = true;
+
+    TaskManager::RunInMainThread(
+        [this, pitch_nudge, yaw_nudge]() {
+            auto *camera = scene_ ? scene_->GetMainCamera() : nullptr;
+            auto *orbit_camera = dynamic_cast<OrbitCameraComponent *>(camera);
+            if (!orbit_camera)
+            {
+                Log(Warn, "ASVGF test camera nudge requires OrbitCameraComponent. Skipping nudge.");
+                asvgf_test_camera_nudge_applied_.store(true);
+                return;
+            }
+
+            orbit_camera->OffsetOrbit(pitch_nudge, yaw_nudge);
+            Log(Info, "ASVGF test camera nudge applied. pitch={} yaw={}", pitch_nudge, yaw_nudge);
+            asvgf_test_camera_nudge_applied_.store(true);
+        },
+        false);
+}
+
 void RenderFramework::TryAutoScreenshot()
 {
     if (!render_config_.auto_screenshot || auto_screenshot_taken_ || !renderer_)
@@ -382,7 +421,36 @@ void RenderFramework::TryAutoScreenshot()
         return;
     }
 
-    if (!IsSceneFullyLoaded() || !renderer_->IsReadyForAutoScreenshot())
+    if (!IsSceneFullyLoaded())
+    {
+        return;
+    }
+
+    if (ShouldApplyASVGFTestCameraNudge())
+    {
+        if (!asvgf_test_camera_nudge_applied_.load())
+        {
+            if (!renderer_->IsReadyForAutoScreenshot())
+            {
+                return;
+            }
+            RequestASVGFTestCameraNudge();
+            return;
+        }
+
+        if (asvgf_test_post_nudge_countdown_ == 0)
+        {
+            // +1 guarantees at least one fully rendered frame after the nudge task is applied.
+            asvgf_test_post_nudge_countdown_ = render_config_.asvgf_test_post_nudge_frames + 1;
+        }
+
+        asvgf_test_post_nudge_countdown_--;
+        if (asvgf_test_post_nudge_countdown_ > 0)
+        {
+            return;
+        }
+    }
+    else if (!renderer_->IsReadyForAutoScreenshot())
     {
         return;
     }

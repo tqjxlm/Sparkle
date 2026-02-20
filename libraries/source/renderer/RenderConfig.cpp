@@ -43,6 +43,15 @@ static ConfigValue<bool> config_asvgf_freeze_history("asvgf_freeze_history", "fr
                                                      "renderer", false, true);
 static ConfigValue<bool> config_asvgf_force_clear_history("asvgf_force_clear_history",
                                                           "clear ASVGF history every frame", "renderer", false, true);
+static ConfigValue<float> config_asvgf_test_camera_nudge_yaw("asvgf_test_camera_nudge_yaw",
+                                                             "test-only camera yaw nudge (degrees) before auto screenshot",
+                                                             "renderer", 0.f, true);
+static ConfigValue<float> config_asvgf_test_camera_nudge_pitch(
+    "asvgf_test_camera_nudge_pitch", "test-only camera pitch nudge (degrees) before auto screenshot", "renderer", 0.f,
+    true);
+static ConfigValue<uint32_t> config_asvgf_test_post_nudge_frames(
+    "asvgf_test_post_nudge_frames", "frames to wait after test camera nudge before auto screenshot", "renderer", 1,
+    true);
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
@@ -72,6 +81,9 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_asvgf_debug_view, asvgf_debug_view);
     ConfigCollectionHelper::RegisterConfig(this, config_asvgf_freeze_history, asvgf_freeze_history);
     ConfigCollectionHelper::RegisterConfig(this, config_asvgf_force_clear_history, asvgf_force_clear_history);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_test_camera_nudge_yaw, asvgf_test_camera_nudge_yaw);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_test_camera_nudge_pitch, asvgf_test_camera_nudge_pitch);
+    ConfigCollectionHelper::RegisterConfig(this, config_asvgf_test_post_nudge_frames, asvgf_test_post_nudge_frames);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
@@ -146,6 +158,20 @@ void RenderConfig::Validate()
         Log(Warn, "asvgf_history_cap must be positive. set to 1");
         config_asvgf_history_cap.Set(1);
         asvgf_history_cap = 1;
+    }
+
+    if (asvgf_test_post_nudge_frames == 0)
+    {
+        Log(Warn, "asvgf_test_post_nudge_frames must be positive. set to 1");
+        config_asvgf_test_post_nudge_frames.Set(1);
+        asvgf_test_post_nudge_frames = 1;
+    }
+
+    if (asvgf_test_post_nudge_frames > 16)
+    {
+        Log(Warn, "asvgf_test_post_nudge_frames too large ({}). clamped to 16", asvgf_test_post_nudge_frames);
+        config_asvgf_test_post_nudge_frames.Set(16);
+        asvgf_test_post_nudge_frames = 16;
     }
 
     if (use_ssao)

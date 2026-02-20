@@ -32,6 +32,8 @@ public:
 
     void SetupFromTransform();
 
+    void OffsetOrbit(float delta_pitch, float delta_yaw);
+
     void OnAttach() override
     {
         CameraComponent::OnAttach();
@@ -53,10 +55,7 @@ public:
     {
         if (is_dragging_)
         {
-            pitch_ = std::clamp(pitch_ + dx * sensitivity_, -90.f + Tolerance, 90.f - Tolerance);
-            yaw_ -= dy * sensitivity_;
-
-            UpdateTransform();
+            OffsetOrbit(dx * sensitivity_, -dy * sensitivity_);
         }
     }
 

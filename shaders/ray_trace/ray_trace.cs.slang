@@ -268,11 +268,8 @@ void GetIntersection(RayDesc ray_desc, RayQuery<RAY_FLAG_NONE> ray_query, out In
     intersection.primitiveId = instance_id;
 }
 
-float3 SamplePixel(RayDesc ray_desc, out ASVGFFeatureOutput feature_output)
+void InitializeASVGFFeatureOutput(out ASVGFFeatureOutput feature_output)
 {
-    RayQuery<RAY_FLAG_NONE> ray_query;
-    Intersection intersection;
-
     feature_output.normal = float3(0, 0, 1);
     feature_output.roughness = 1.0;
     feature_output.albedo = 0.0;
@@ -280,6 +277,41 @@ float3 SamplePixel(RayDesc ray_desc, out ASVGFFeatureOutput feature_output)
     feature_output.depth = 0.0;
     feature_output.primitive_id = InvalidPrimitiveId;
     feature_output.valid = 0u;
+}
+
+void CaptureASVGFFeature(RayDesc ray_desc, out ASVGFFeatureOutput feature_output)
+{
+    InitializeASVGFFeatureOutput(feature_output);
+
+    RayQuery<RAY_FLAG_NONE> ray_query;
+    Intersection intersection;
+
+    ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray_desc);
+    while (ray_query.Proceed())
+    {
+    }
+
+    if (ray_query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    {
+        return;
+    }
+
+    GetIntersection(ray_desc, ray_query, intersection);
+    MaterialParameters mat_param = GetMaterial(intersection);
+
+    feature_output.normal = normalize(intersection.normal);
+    feature_output.roughness = saturate(mat_param.roughness);
+    feature_output.albedo = saturate(mat_param.base_color);
+    feature_output.metallic = saturate(mat_param.metallic);
+    feature_output.depth = ray_query.CommittedRayT();
+    feature_output.primitive_id = intersection.primitiveId;
+    feature_output.valid = 1u;
+}
+
+float3 SamplePixel(RayDesc ray_desc)
+{
+    RayQuery<RAY_FLAG_NONE> ray_query;
+    Intersection intersection;
 
     float3 pixel_color = float3(0, 0, 0);
     float3 throughput = float3(1, 1, 1);
@@ -309,17 +341,6 @@ float3 SamplePixel(RayDesc ray_desc, out ASVGFFeatureOutput feature_output)
         // get intersection details
         GetIntersection(ray_desc, ray_query, intersection);
         MaterialParameters mat_param = GetMaterial(intersection);
-
-        if (asvgf_enabled != 0u && bounce == 0)
-        {
-            feature_output.normal = normalize(intersection.normal);
-            feature_output.roughness = saturate(mat_param.roughness);
-            feature_output.albedo = saturate(mat_param.base_color);
-            feature_output.metallic = saturate(mat_param.metallic);
-            feature_output.depth = ray_query.CommittedRayT();
-            feature_output.primitive_id = intersection.primitiveId;
-            feature_output.valid = 1u;
-        }
 
         // terminal condition: emissive
         float3 emissive_color = SampleEmissive(intersection, mat_param);
@@ -441,19 +462,27 @@ float3 SamplePixel(RayDesc ray_desc, out ASVGFFeatureOutput feature_output)
     float3 all_samples = imageData[pixel].rgb;
 
     float3 this_samples = (float3)0;
-    ASVGFFeatureOutput primary_feature;
     ASVGFFeatureOutput captured_feature;
-    captured_feature.normal = float3(0, 0, 1);
-    captured_feature.roughness = 1.0;
-    captured_feature.albedo = 0.0;
-    captured_feature.metallic = 0.0;
-    captured_feature.depth = 0.0;
-    captured_feature.primitive_id = InvalidPrimitiveId;
-    captured_feature.valid = 0u;
+    InitializeASVGFFeatureOutput(captured_feature);
 
     InitRandomBase(pixel.x, pixel.y, time_seed);
 
     float2 pixel_size = 1.f / (float2(camera.resolution) - 1);
+
+    if (asvgf_enabled != 0u)
+    {
+        float2 feature_uv = (float2(pixel.x, pixel.y) + 0.5) * pixel_size;
+        feature_uv.y = 1.0f - feature_uv.y;
+
+        RayDesc feature_ray;
+        feature_ray.Origin = camera.position;
+        feature_ray.Direction = normalize(camera.lowerLeft + feature_uv.x * camera.max_u + feature_uv.y * camera.max_v -
+                                          feature_ray.Origin);
+        feature_ray.TMin = Tolerance;
+        feature_ray.TMax = 1000.0f;
+
+        CaptureASVGFFeature(feature_ray, captured_feature);
+    }
 
     for (uint i = 0; i < spp; i++)
     {
@@ -475,17 +504,13 @@ float3 SamplePixel(RayDesc ray_desc, out ASVGFFeatureOutput feature_output)
         ray_desc.TMin = Tolerance;
         ray_desc.TMax = 1000.0f;
 
-        float3 this_pixel = SamplePixel(ray_desc, primary_feature);
+        float3 this_pixel = SamplePixel(ray_desc);
 
         // firefly removal
         this_pixel = min(this_pixel, output_limit);
 
         this_samples += this_pixel;
 
-        if (asvgf_enabled != 0u && i == 0u)
-        {
-            captured_feature = primary_feature;
-        }
     }
 
     float3 noisy_samples = this_samples / float(spp);

@@ -4,9 +4,11 @@
 
 * Always read CLAUDE.md for general background info.
 * If you feel this file needs improving, edit it. This includes encountered pitfalls, possible improvement, change to the plan, change to test methods, change to pass criteria, etc.
+* All tests results should be measurable and reproducible.
 * Check git log to see if there are any relevant changes to this file.
 * After finishing a step, tick the checkbox in the plan below. If the step is too large, break it down into smaller testable steps.
 * When testing, operate all tests from previous steps to make sure no regression is introduced.
+* If your implementation keeps failing the test, consider the possibility that previous steps are not fully correct (maybe because of a biased test criteria).
 * In this repository, `TestScene` refers to the built-in standard scene. Do not pass `--scene TestScene`; omit `--scene`.
 * Use ground truth from docs/CI.md which is generated for max_spp=2048. If you want to generate ground truth locally, you should only use max_spp>2048 to make a reasonable comparison.
 * The target of asvgf is to improve converging speed. You should get at least the same quality at max_spp=2048 as the baseline. Any degradation is not acceptable.
@@ -57,13 +59,15 @@ RayTraceNoisy -> TemporalAccumulation -> Variance -> A-Trous x N -> scene_textur
 ## Pass-Level Test Strategy (Mandatory)
 
 To avoid difficult end-to-end debugging, each pass must be testable in isolation.
+Do not mark pass tests as `PASS` from visual inspection alone; require at least one quantitative check.
 
 Add these debug/test controls early (S1):
 
 1. `--asvgf_test_stage [off, raytrace, reprojection, temporal, variance, atrous_iter]`
-2. `--asvgf_debug_view [none, noisy, normal, albedo, depth, reprojection_mask, history_length, moments, variance, filtered]`
+2. `--asvgf_debug_view [none, noisy, normal, albedo, depth, reprojection_mask, history_length, moments, variance, filtered, reprojection_reason, reprojection_uv, reprojection_depth_error, quadrant, history_length_raw]`
 3. `--asvgf_freeze_history [true|false]` for deterministic reprojection debugging.
 4. `--asvgf_force_clear_history [true|false]` to verify reset behavior immediately.
+5. `--asvgf_test_camera_nudge_yaw`, `--asvgf_test_camera_nudge_pitch`, `--asvgf_test_post_nudge_frames` for deterministic small-motion reprojection checks.
 
 ### Pass Test Matrix
 
@@ -85,9 +89,27 @@ python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_
 
 ```bash
 python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_test_stage reprojection --asvgf_debug_view reprojection_mask --spp 1 --max_spp 64
+python .\dev\asvgf_sanity_test.py --framework glfw --suite reprojection
 ```
 
    4. Pass criterion: static camera has mostly valid reprojection; camera move/disocclusion shows expected invalid regions.
+   5. Quantitative gate (`dev/asvgf_sanity_test.py`, default thresholds):
+      1. `history_length` and `history_length_raw` center-line seam is not suspicious:
+         `center_percentile <= 95` or `center_to_median_ratio <= 4` on both axes.
+      2. `history_length_raw.r` matches `history_length` (MAE <= 0.03).
+      3. `history_length` and `history_length_raw` have non-degenerate midtone coverage (ratio >= 0.02).
+      4. `reprojection_mask` valid ratio is non-trivial (default range: 0.05 to 0.95).
+      5. Small deterministic camera nudge remains mostly valid while introducing some invalidation:
+         `moved_valid_ratio <= static_valid_ratio - 0.01` and
+         `moved_valid_ratio >= 0.5 * static_valid_ratio`.
+         Default sanity-test nudge is `--motion_yaw_deg 0.8` (`pitch=0`).
+         If this fails with near-zero moved ratio, treat it as a history over-reset bug on camera movement.
+      6. Temporary triage-only fallback (not a pass gate): `python .\dev\asvgf_sanity_test.py --framework glfw --suite reprojection --disable_motion_reprojection_check`
+   6. Optional diagnostic checks (`--enable_tonemap_sensitive_checks`):
+      1. History response to SPP increase.
+      2. History response to `asvgf_history_cap`.
+      3. These checks are not default gates because debug screenshots are display-mapped and can saturate/quantize values.
+      4. Run only as a secondary signal: `python .\dev\asvgf_sanity_test.py --framework glfw --suite reprojection --enable_tonemap_sensitive_checks`
 
 3. `TemporalAccumulation + Moments`
    1. Input contract: noisy current sample + valid reprojection inputs
@@ -140,14 +162,14 @@ python .\build.py --framework glfw --run --pipeline gpu -- --asvgf true --asvgf_
 - [x] S0: Baseline capture and guardrails
 - [x] S1: Config + renderer scaffolding
 - [x] S2: Noisy radiance + feature buffer output
-- [ ] S3: Reprojection infrastructure (previous frame state)
+- [x] S3: Reprojection infrastructure (previous frame state)
 - [ ] S4: Temporal accumulation and moments
 - [ ] S5: Variance estimation pass
 - [ ] S6: A-trous edge-aware filter passes
 - [ ] S7: Integration polish, tuning, and performance budget
 - [ ] S8: Final validation and documentation
 - [x] P1: Pass test - RayTraceNoisy + Features
-- [ ] P2: Pass test - Reprojection
+- [x] P2: Pass test - Reprojection
 - [ ] P3: Pass test - TemporalAccumulation + Moments
 - [ ] P4: Pass test - Variance
 - [ ] P5: Pass test - A-trous iterations (1/3/5)
