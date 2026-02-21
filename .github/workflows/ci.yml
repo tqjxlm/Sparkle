@@ -26,6 +26,7 @@ jobs:
               - 'thirdparty/**'
               - 'build_system/**'
               - 'resources/**'
+              - 'dev/**'
               - '.github/**'
               - '.gitmodules'
               - 'CMakeLists.txt'

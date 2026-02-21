@@ -2,7 +2,6 @@
 
 import argparse
 import glob
-import math
 import os
 import platform
 import subprocess
@@ -17,9 +16,7 @@ GROUND_TRUTH_URL_BASE = "https://pub-70861c9d28254fff97386336cba96153.r2.dev/spa
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 DEFAULT_SCENE = "TestScene"
 
-PSNR_THRESHOLD = 30.0
-SSIM_THRESHOLD = 0.95
-SSIM_LOW_THRESHOLD = 0.85
+FLIP_THRESHOLD = 0.1
 
 
 def parse_args():
@@ -68,10 +65,10 @@ def run_app(framework, pipeline, scene, other_args, env=None):
     if env is None:
         env = os.environ.copy()
 
-    print(f"Running: {' '.join(run_cmd)}")
+    print(f"Running: {' '.join(run_cmd)}", flush=True)
     result = subprocess.run(run_cmd, cwd=cwd, env=env)
+    print(f"App exited with code {result.returncode}", flush=True)
     if result.returncode != 0:
-        print(f"App exited with code {result.returncode}")
         sys.exit(1)
 
 
@@ -88,12 +85,12 @@ def find_screenshot(framework, scene, pipeline):
     pattern = os.path.join(screenshot_dir, f"{scene}_{pipeline}_*.png")
     matches = glob.glob(pattern)
     if not matches:
-        print(f"No screenshot found matching: {pattern}")
+        print(f"No screenshot found matching: {pattern}", flush=True)
         sys.exit(1)
 
     matches.sort(key=os.path.getmtime, reverse=True)
     chosen = matches[0]
-    print(f"Found screenshot: {chosen}")
+    print(f"Found screenshot: {chosen}", flush=True)
     return chosen
 
 
@@ -110,78 +107,28 @@ def download_ground_truth(framework, scene, pipeline):
     return dest
 
 
-def compute_ssim(img_a, img_b, window_size=11):
-    """Compute mean SSIM between two images using windowed statistics."""
+def load_image(path):
     import numpy as np
-
-    C1 = (0.01 * 255) ** 2
-    C2 = (0.03 * 255) ** 2
-
-    a = img_a.astype(np.float64)
-    b = img_b.astype(np.float64)
-    w = window_size
-
-    def box_sum(img):
-        s = np.cumsum(np.cumsum(img, axis=0), axis=1)
-        padded = np.zeros((s.shape[0] + 1, s.shape[1] + 1))
-        padded[1:, 1:] = s
-        return (padded[w:, w:]
-                - padded[:-w, w:]
-                - padded[w:, :-w]
-                + padded[:-w, :-w])
-
-    n = w * w
-    mu_a = box_sum(a) / n
-    mu_b = box_sum(b) / n
-
-    sigma_a_sq = box_sum(a * a) / n - mu_a * mu_a
-    sigma_b_sq = box_sum(b * b) / n - mu_b * mu_b
-    sigma_ab = box_sum(a * b) / n - mu_a * mu_b
-
-    ssim_map = ((2 * mu_a * mu_b + C1) * (2 * sigma_ab + C2)) / \
-               ((mu_a ** 2 + mu_b ** 2 + C1) * (sigma_a_sq + sigma_b_sq + C2))
-
-    return float(np.mean(ssim_map)), float(np.percentile(ssim_map, 1))
-
-
-def compare_images(path_a, path_b):
     from PIL import Image
-    import numpy as np
+    # Load as float32 HxWxC in [0,1], RGB (sRGB) as expected by nbflip LDR mode
+    return np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
 
-    img_a = Image.open(path_a).convert("RGB")
-    img_b = Image.open(path_b).convert("RGB")
 
-    if img_a.size != img_b.size:
-        print(
-            f"FAIL: image size mismatch — screenshot {img_a.size} vs ground truth {img_b.size}")
+def compare_images(ground_truth, screenshot):
+    print(f"Loading ground truth: {ground_truth}", flush=True)
+    gt_img = load_image(ground_truth)
+    print(f"  Shape: {gt_img.shape}", flush=True)
+    print(f"Loading screenshot: {screenshot}", flush=True)
+    ss_img = load_image(screenshot)
+    print(f"  Shape: {ss_img.shape}", flush=True)
+    if gt_img.shape != ss_img.shape:
+        print(f"Image size mismatch: {gt_img.shape} vs {ss_img.shape}", flush=True)
         sys.exit(1)
-
-    arr_a = np.array(img_a, dtype=np.float64)
-    arr_b = np.array(img_b, dtype=np.float64)
-
-    diff = np.abs(arr_a - arr_b)
-    min_diff = int(diff.min())
-    max_diff = int(diff.max())
-    mse = float(np.mean((arr_a - arr_b) ** 2))
-    psnr = float("inf") if mse == 0 else 10.0 * math.log10(255.0 * 255.0 / mse)
-
-    # Per-channel SSIM, averaged across R, G, B
-    ssim_means = []
-    ssim_lows = []
-    for ch in range(3):
-        mean_val, low_val = compute_ssim(arr_a[:, :, ch], arr_b[:, :, ch])
-        ssim_means.append(mean_val)
-        ssim_lows.append(low_val)
-    ssim = sum(ssim_means) / len(ssim_means)
-    ssim_low = min(ssim_lows)
-
-    print(f"  Min pixel diff: {min_diff}")
-    print(f"  Max pixel diff: {max_diff}")
-    print(f"  MSE:            {mse:.4f}")
-    print(f"  PSNR:           {psnr:.2f} dB")
-    print(f"  SSIM:           {ssim:.4f}  (p1: {ssim_low:.4f})")
-
-    return psnr, ssim, ssim_low
+    print("Calling nbflip.evaluate()...", flush=True)
+    from flip_evaluator import nbflip
+    _, mean_flip, _ = nbflip.evaluate(gt_img, ss_img, False, True, False, True, {})
+    print(f"  Mean FLIP error: {mean_flip:.4f}", flush=True)
+    return mean_flip
 
 
 def install_dependencies():
@@ -210,29 +157,19 @@ def main():
 
     screenshot = find_screenshot(args.framework, scene, args.pipeline)
 
-    print("Downloading ground truth...")
+    print("Downloading ground truth...", flush=True)
     ground_truth = download_ground_truth(
         args.framework, scene, args.pipeline)
+    print(f"Ground truth downloaded to: {ground_truth}", flush=True)
 
-    print("Comparing images...")
-    psnr, ssim, ssim_low = compare_images(screenshot, ground_truth)
+    print("Comparing images...", flush=True)
+    mean_flip = compare_images(ground_truth, screenshot)
 
-    passed = True
-    if psnr < PSNR_THRESHOLD:
-        print(f"FAIL: PSNR {psnr:.2f} dB < {PSNR_THRESHOLD} dB")
-        passed = False
-    if ssim < SSIM_THRESHOLD:
-        print(f"FAIL: SSIM {ssim:.4f} < {SSIM_THRESHOLD}")
-        passed = False
-    if ssim_low < SSIM_LOW_THRESHOLD:
-        print(f"FAIL: SSIM p1 {ssim_low:.4f} < {SSIM_LOW_THRESHOLD}")
-        passed = False
-
-    if passed:
-        print("PASS")
+    if mean_flip <= FLIP_THRESHOLD:
+        print("PASS", flush=True)
         return 0
 
-    print("FAIL")
+    print(f"FAIL: mean FLIP error {mean_flip:.4f} > {FLIP_THRESHOLD}")
     return 1
 
 
