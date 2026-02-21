@@ -1,5 +1,4 @@
 import shutil
-import urllib.request
 import json
 import platform
 import os
@@ -10,6 +9,8 @@ from build_system.utils import download_file, extract_archive, extract_zip
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
+_BUILD_CACHE_DIR = os.path.join(SCRIPTPATH, "..", "build_cache")
+
 is_windows = platform.system() == "Windows"
 is_macos = platform.system() == "Darwin"
 
@@ -30,12 +31,9 @@ def install_cmake():
     prerequisites = load_prerequisites_versions()
     cmake_version = prerequisites.get("cmake", "3.30.5")
 
-    # Create build_cache directory if it doesn't exist
-    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
-    os.makedirs(build_cache_dir, exist_ok=True)
+    os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
 
-    # Check if already installed in build_cache
-    cmake_dir = os.path.join(build_cache_dir, "cmake")
+    cmake_dir = os.path.join(_BUILD_CACHE_DIR, "cmake")
     cmake_executable = os.path.join(cmake_dir, "bin", "cmake")
     if is_windows:
         cmake_executable += ".exe"
@@ -54,15 +52,13 @@ def install_cmake():
                 ["brew", "install", "cmake"], capture_output=True, text=True, timeout=300)
             if result.returncode == 0:
                 print("Successfully installed CMake via Homebrew")
-                # Check if cmake is now available
                 cmake_executable_path = shutil.which("cmake")
                 if cmake_executable_path:
                     return cmake_executable_path
             else:
                 print(f"Homebrew installation failed: {result.stderr}")
         except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-            print(
-                "Homebrew not available or failed. Falling back to manual installation...")
+            print("Homebrew not available or failed. Falling back to manual installation...")
 
         # Fallback to manual installation
         print("Downloading CMake for macOS...")
@@ -80,58 +76,32 @@ def install_cmake():
         download_url = f"https://github.com/Kitware/CMake/releases/download/v{cmake_version}/{filename}"
 
     else:
-        print(
-            f"Error: Unsupported platform '{system}' for automatic CMake installation.")
-        print("Please install CMake manually using a package manager or download from: https://cmake.org/download/")
-        raise Exception()
+        print("Please install CMake manually: https://cmake.org/download/")
+        raise RuntimeError(f"Unsupported platform '{system}' for automatic CMake installation.")
 
-    try:
-        download_path = os.path.join(build_cache_dir, filename)
+    download_path = os.path.join(_BUILD_CACHE_DIR, filename)
 
-        print(f"Downloading CMake {cmake_version}...")
-        print(f"URL: {download_url}")
+    print(f"Downloading CMake {cmake_version} from: {download_url}")
+    download_file(download_url, download_path)
 
-        download_file(download_url, download_path)
+    print("Extracting CMake...")
+    tmp_dir = os.path.join(_BUILD_CACHE_DIR, "tmp")
+    extract_archive(download_path, tmp_dir)
 
-        print("Extracting CMake...")
-        tmp_dir = os.path.join(build_cache_dir, "tmp")
-        extract_archive(download_path, tmp_dir)
+    platform_suffix = {"darwin": "macos-universal", "windows": "windows-x86_64", "linux": "linux-x86_64"}
+    extracted_dir = os.path.join(tmp_dir, f"cmake-{cmake_version}-{platform_suffix[system]}")
 
-        # Find the extracted cmake directory
-        if system == "darwin":
-            extracted_dir = os.path.join(
-                tmp_dir, f"cmake-{cmake_version}-macos-universal")
-        elif system == "windows":
-            extracted_dir = os.path.join(
-                tmp_dir, f"cmake-{cmake_version}-windows-x86_64")
-        else:  # linux
-            extracted_dir = os.path.join(
-                tmp_dir, f"cmake-{cmake_version}-linux-x86_64")
+    if not os.path.exists(extracted_dir):
+        raise RuntimeError(f"Expected directory not found after extraction: {extracted_dir}")
 
-        # Move to final location
-        if os.path.exists(extracted_dir):
-            shutil.move(extracted_dir, cmake_dir)
-        else:
-            print(
-                f"Error: Expected directory not found after extraction: {extracted_dir}")
-            raise Exception()
+    shutil.move(extracted_dir, cmake_dir)
+    os.remove(download_path)
 
-        # Clean up download file
-        os.remove(download_path)
+    if not os.path.exists(cmake_executable):
+        raise RuntimeError(f"CMake executable not found after installation: {cmake_executable}")
 
-        # Verify installation
-        if os.path.exists(cmake_executable):
-            print(f"CMake {cmake_version} installed successfully!")
-            return cmake_executable
-        else:
-            print(
-                f"Error: CMake executable not found after installation: {cmake_executable}")
-            raise Exception()
-
-    except Exception as e:
-        print(f"Error installing CMake: {e}")
-        print("Please install CMake manually from: https://cmake.org/download/")
-        raise Exception()
+    print(f"CMake {cmake_version} installed successfully!")
+    return cmake_executable
 
 
 def find_cmake():
@@ -139,7 +109,6 @@ def find_cmake():
     cmake_path = os.environ.get("CMAKE_PATH")
 
     if cmake_path:
-        # Check if CMAKE_PATH points to cmake executable or directory containing cmake
         if os.path.isfile(cmake_path):
             cmake_executable = cmake_path
         else:
@@ -149,21 +118,14 @@ def find_cmake():
 
         if os.path.isfile(cmake_executable) and os.access(cmake_executable, os.X_OK):
             return cmake_executable
-        else:
-            print(
-                f"Error: CMAKE_PATH is set to '{cmake_path}' but cmake executable not found or not executable.")
-            print(
-                "Please ensure CMAKE_PATH points to the cmake executable or directory containing cmake.")
-            raise Exception()
+        raise RuntimeError(
+            f"CMAKE_PATH is set to '{cmake_path}' but cmake executable not found or not executable.")
     else:
-        # Check if cmake is in system PATH
         cmake_executable = shutil.which("cmake")
         if cmake_executable:
             return cmake_executable
-        else:
-            # CMake not found - try to install automatically
-            print("CMake not found in system PATH. Attempting automatic installation...")
-            return install_cmake()
+        print("CMake not found in system PATH. Attempting automatic installation...")
+        return install_cmake()
 
 
 def validate_vulkan_sdk(vulkan_sdk_path):
@@ -174,22 +136,15 @@ def validate_vulkan_sdk(vulkan_sdk_path):
 
 def set_vulkan_layer_path(vulkan_sdk_path):
     """Set VK_LAYER_PATH environment variable for validation layers."""
-    layer_path = os.path.join(vulkan_sdk_path, "share",
-                              "vulkan", "explicit_layer.d")
+    layer_path = os.path.join(vulkan_sdk_path, "share", "vulkan", "explicit_layer.d")
 
-    # Check if the layer directory exists
     if os.path.exists(layer_path):
-        # Get existing VK_LAYER_PATH if any
-        existing_layer_path = os.environ.get("VK_LAYER_PATH")
-
-        if existing_layer_path:
-            # Add to existing path if not already present
-            if layer_path not in existing_layer_path.split(os.pathsep):
-                os.environ["VK_LAYER_PATH"] = f"{layer_path}{os.pathsep}{existing_layer_path}"
+        existing = os.environ.get("VK_LAYER_PATH")
+        if existing:
+            if layer_path not in existing.split(os.pathsep):
+                os.environ["VK_LAYER_PATH"] = f"{layer_path}{os.pathsep}{existing}"
         else:
-            # Set new path
             os.environ["VK_LAYER_PATH"] = layer_path
-
         print(f"VK_LAYER_PATH set to include: {layer_path}")
     else:
         print(f"Warning: Validation layer directory not found at {layer_path}")
@@ -201,22 +156,15 @@ def set_vulkan_icd_filenames(vulkan_sdk_path):
     if not is_macos:
         return
 
-    icd_path = os.path.join(vulkan_sdk_path, "share",
-                            "vulkan", "icd.d", "MoltenVK_icd.json")
+    icd_path = os.path.join(vulkan_sdk_path, "share", "vulkan", "icd.d", "MoltenVK_icd.json")
 
-    # Check if the ICD file exists
     if os.path.exists(icd_path):
-        # Get existing VK_ICD_FILENAMES if any
-        existing_icd_filenames = os.environ.get("VK_ICD_FILENAMES")
-
-        if existing_icd_filenames:
-            # Add to existing path if not already present
-            if icd_path not in existing_icd_filenames.split(os.pathsep):
-                os.environ["VK_ICD_FILENAMES"] = f"{icd_path}{os.pathsep}{existing_icd_filenames}"
+        existing = os.environ.get("VK_ICD_FILENAMES")
+        if existing:
+            if icd_path not in existing.split(os.pathsep):
+                os.environ["VK_ICD_FILENAMES"] = f"{icd_path}{os.pathsep}{existing}"
         else:
-            # Set new path
             os.environ["VK_ICD_FILENAMES"] = icd_path
-
         print(f"VK_ICD_FILENAMES set to include: {icd_path}")
     else:
         print(f"Warning: MoltenVK ICD file not found at {icd_path}")
@@ -225,7 +173,6 @@ def set_vulkan_icd_filenames(vulkan_sdk_path):
 def find_and_set_vulkan_sdk():
     VULKAN_SDK = os.environ.get("VULKAN_SDK")
 
-    # If VULKAN_SDK is set and exists, we're good
     if VULKAN_SDK and os.path.exists(VULKAN_SDK):
         if validate_vulkan_sdk(VULKAN_SDK):
             set_vulkan_layer_path(VULKAN_SDK)
@@ -240,242 +187,130 @@ def find_and_set_vulkan_sdk():
                 set_vulkan_icd_filenames(VULKAN_SDK)
                 return
 
-    # If VULKAN_SDK is set but doesn't exist, show error
     if VULKAN_SDK and not os.path.exists(VULKAN_SDK):
         print(f"Error: VULKAN_SDK path {VULKAN_SDK} does not exist.")
 
-    # VULKAN_SDK not set - try to install automatically
     print("VULKAN_SDK environment variable is not set. Attempting automatic installation...")
 
-    # Create build_cache directory if it doesn't exist
-    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
-    os.makedirs(build_cache_dir, exist_ok=True)
+    os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
+    vulkan_sdk_path = install_vulkan_sdk(_BUILD_CACHE_DIR)
 
-    # Install Vulkan SDK to build_cache
-    vulkan_sdk_path = install_vulkan_sdk(build_cache_dir)
-
-    # Set VULKAN_SDK environment variable for this session
     os.environ["VULKAN_SDK"] = vulkan_sdk_path
     print(f"VULKAN_SDK set to: {vulkan_sdk_path}")
     print("Note: This is temporary for this session. To make it permanent, add to your shell profile:")
     print(f"export VULKAN_SDK={vulkan_sdk_path}")
 
-    # Set VK_LAYER_PATH for validation layers
     set_vulkan_layer_path(vulkan_sdk_path)
-
-    # Set VK_ICD_FILENAMES for driver discovery
     set_vulkan_icd_filenames(vulkan_sdk_path)
-
-
-def get_latest_vulkan_sdk_version(system, platform_name):
-    print(f"Fetching latest Vulkan SDK version for {system}...")
-    version_url = f"https://vulkan.lunarg.com/sdk/versions/{platform_name}.json"
-    with urllib.request.urlopen(version_url) as response:
-        response_data = response.read().decode()
-        versions = json.loads(response_data)
-
-    if not versions:
-        print("Error: No Vulkan SDK versions found.")
-        raise Exception()
-
-    # The JSON structure might be different than expected
-    # Try different approaches to get the version
-    if isinstance(versions, list) and len(versions) > 0:
-        if isinstance(versions[0], dict) and "version" in versions[0]:
-            latest_version = versions[0]["version"]
-        else:
-            latest_version = str(versions[0])
-    elif isinstance(versions, dict):
-        # If it's a dict, try to find version info
-        if "version" in versions:
-            latest_version = versions["version"]
-        elif "latest" in versions:
-            latest_version = versions["latest"]
-        else:
-            # Use the first key that looks like a version
-            version_keys = [k for k in versions.keys() if any(c.isdigit()
-                                                              for c in k)]
-            if version_keys:
-                latest_version = version_keys[0]
-            else:
-                print("Error: Could not determine Vulkan SDK version from response.")
-                print(f"Response: {response_data}")
-                raise Exception()
-    else:
-        print("Error: Unexpected JSON response format.")
-        print(f"Response: {response_data}")
-        raise Exception()
-
-    return latest_version
 
 
 def install_vulkan_sdk(build_cache_dir):
     """Install Vulkan SDK to build_cache directory and return the path."""
 
-    # Detect platform
     system = platform.system().lower()
-    if system == "darwin":
-        platform_name = "mac"
-    elif system == "windows":
-        platform_name = "windows"
-    elif system == "linux":
-        platform_name = "linux"
-    else:
-        print(
-            f"Error: Unsupported platform '{system}' for automatic Vulkan SDK installation.")
-        raise Exception()
+    platform_map = {"darwin": "mac", "windows": "windows", "linux": "linux"}
+    if system not in platform_map:
+        raise RuntimeError(f"Unsupported platform '{system}' for automatic Vulkan SDK installation.")
+    platform_name = platform_map[system]
 
     tmp_dir = os.path.join(build_cache_dir, "tmp")
 
-    try:
-        prerequisites = load_prerequisites_versions()
-        latest_version = prerequisites.get("VulkanSDK", "1.4.313.0")
-        print(f"Use Vulkan SDK version: {latest_version}")
+    prerequisites = load_prerequisites_versions()
+    latest_version = prerequisites.get("VulkanSDK", "1.4.313.0")
+    print(f"Use Vulkan SDK version: {latest_version}")
 
-        # Check if already installed in build_cache
-        vulkan_sdk_path = os.path.join(
-            build_cache_dir, "VulkanSDK", latest_version)
+    vulkan_sdk_path = os.path.join(build_cache_dir, "VulkanSDK", latest_version)
 
-        if os.path.exists(vulkan_sdk_path):
-            if validate_vulkan_sdk(vulkan_sdk_path):
-                print(
-                    f"Vulkan SDK {latest_version} already installed in build_cache.")
-                return vulkan_sdk_path
-            elif is_macos and validate_vulkan_sdk(os.path.join(vulkan_sdk_path, "macOS")):
-                print(
-                    f"Vulkan SDK {latest_version} already installed in build_cache.")
-                return os.path.join(vulkan_sdk_path, "macOS")
-            else:
-                print(
-                    f"Incomplete Vulkan SDK installation found. Removing {vulkan_sdk_path}")
-                shutil.rmtree(vulkan_sdk_path)
-
-        # Determine download info based on platform
-        if platform_name == "mac":
-            filename = f"vulkansdk-macos-{latest_version}.zip"
-            download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/mac/{filename}"
-        elif platform_name == "windows":
-            filename = f"vulkansdk-windows-X64-{latest_version}.exe"
-            download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/windows/{filename}"
-        elif platform_name == "linux":
-            filename = f"vulkansdk-linux-x86_64-{latest_version}.tar.xz"
-            download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/linux/{filename}"
+    if os.path.exists(vulkan_sdk_path):
+        if validate_vulkan_sdk(vulkan_sdk_path):
+            print(f"Vulkan SDK {latest_version} already installed in build_cache.")
+            return vulkan_sdk_path
+        elif is_macos and validate_vulkan_sdk(os.path.join(vulkan_sdk_path, "macOS")):
+            print(f"Vulkan SDK {latest_version} already installed in build_cache.")
+            return os.path.join(vulkan_sdk_path, "macOS")
         else:
-            print(
-                f"Error: Unsupported platform '{platform_name}' for download.")
-            raise Exception()
+            print(f"Incomplete Vulkan SDK installation found. Removing {vulkan_sdk_path}")
+            shutil.rmtree(vulkan_sdk_path)
 
-        download_path = os.path.join(build_cache_dir, filename)
+    if platform_name == "mac":
+        filename = f"vulkansdk-macos-{latest_version}.zip"
+        download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/mac/{filename}"
+    elif platform_name == "windows":
+        filename = f"vulkansdk-windows-X64-{latest_version}.exe"
+        download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/windows/{filename}"
+    else:  # linux
+        filename = f"vulkansdk-linux-x86_64-{latest_version}.tar.xz"
+        download_url = f"https://sdk.lunarg.com/sdk/download/{latest_version}/linux/{filename}"
 
-        print(f"Downloading Vulkan SDK {latest_version}...")
-        print(f"URL: {download_url}")
+    download_path = os.path.join(build_cache_dir, filename)
 
-        # download if not exists
-        if os.path.exists(download_path):
-            # TODO: check hash
-            print(f"Vulkan SDK {latest_version} already downloaded.")
-        else:
-            download_file(download_url, download_path)
+    print(f"Downloading Vulkan SDK {latest_version} from: {download_url}")
 
-        # Extract/Install SDK
-        if platform_name == "linux":
-            print("Extracting Vulkan SDK...")
-            extract_archive(download_path, tmp_dir)
+    if os.path.exists(download_path):
+        # TODO: check hash
+        print(f"Vulkan SDK {latest_version} already downloaded.")
+    else:
+        download_file(download_url, download_path)
 
-            # Find the extracted directory structure: tmp/{SDKVERSION}/x86_64
-            extracted_dir = os.path.join(tmp_dir, latest_version)
-            if os.path.exists(extracted_dir):
-                x86_64_dir = os.path.join(extracted_dir, "x86_64")
-                if os.path.exists(x86_64_dir):
-                    # Move contents from x86_64 directory to target SDK path
-                    os.makedirs(vulkan_sdk_path, exist_ok=True)
-                    for item in os.listdir(x86_64_dir):
-                        src = os.path.join(x86_64_dir, item)
-                        dst = os.path.join(vulkan_sdk_path, item)
-                        shutil.copytree(src, dst)
-                else:
-                    raise Exception(
-                        f"Expected x86_64 directory not found in {extracted_dir}")
-            else:
-                raise Exception(
-                    f"Extraction failed. Expected path is {tmp_dir}")
+    if platform_name == "linux":
+        print("Extracting Vulkan SDK...")
+        extract_archive(download_path, tmp_dir)
 
-            # Verify installation by checking for key files
-            vulkan_include = os.path.join(
-                vulkan_sdk_path, "include", "vulkan", "vulkan.h")
-            if not os.path.exists(vulkan_include):
-                raise Exception(
-                    f"Vulkan SDK installation verification failed: {vulkan_include} not found")
+        extracted_dir = os.path.join(tmp_dir, latest_version)
+        x86_64_dir = os.path.join(extracted_dir, "x86_64")
+        if not os.path.exists(x86_64_dir):
+            raise RuntimeError(f"Expected x86_64 directory not found in {extracted_dir}")
 
-        elif platform_name == "mac":
-            print("Extracting Vulkan SDK...")
-            extract_archive(download_path, tmp_dir)
+        os.makedirs(vulkan_sdk_path, exist_ok=True)
+        for item in os.listdir(x86_64_dir):
+            shutil.copytree(os.path.join(x86_64_dir, item), os.path.join(vulkan_sdk_path, item))
 
-            # Install SDK components
-            print("Installing Vulkan SDK core and iOS components...")
-            installer_path = os.path.join(
-                tmp_dir, f"vulkansdk-macOS-{latest_version}.app", "Contents", "MacOS", f"vulkansdk-macOS-{latest_version}")
+        vulkan_include = os.path.join(vulkan_sdk_path, "include", "vulkan", "vulkan.h")
+        if not os.path.exists(vulkan_include):
+            raise RuntimeError(f"Vulkan SDK verification failed: {vulkan_include} not found")
 
-            # Make installer executable
-            os.chmod(installer_path, 0o755)
+    elif platform_name == "mac":
+        print("Extracting Vulkan SDK...")
+        extract_archive(download_path, tmp_dir)
 
-            # Install core and iOS components to target directory
-            install_cmd = [
-                installer_path,
-                "install",
-                "com.lunarg.vulkan.core",
-                "--root", vulkan_sdk_path,
-                "--accept-licenses",
-                "--default-answer",
-                "--confirm-command"
-            ]
+        print("Installing Vulkan SDK core and iOS components...")
+        installer_path = os.path.join(
+            tmp_dir, f"vulkansdk-macOS-{latest_version}.app", "Contents", "MacOS",
+            f"vulkansdk-macOS-{latest_version}")
 
-            print(f"Running installer command: {' '.join(install_cmd)}")
+        os.chmod(installer_path, 0o755)
 
-            result = subprocess.run(
-                install_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                raise Exception(
-                    f"Vulkan SDK installation failed: {result.stderr}")
+        install_cmd = [
+            installer_path, "install", "com.lunarg.vulkan.core",
+            "--root", vulkan_sdk_path,
+            "--accept-licenses", "--default-answer", "--confirm-command"
+        ]
 
-        elif platform_name == "windows":
-            # Install SDK components
-            print("Installing Vulkan SDK core...")
-            installer_path = download_path
+        print(f"Running installer command: {' '.join(install_cmd)}")
+        result = subprocess.run(install_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Vulkan SDK installation failed: {result.stderr}")
 
-            install_cmd = [
-                installer_path,
-                "install",
-                "com.lunarg.vulkan.core",
-                "--root", vulkan_sdk_path,
-                "--accept-licenses",
-                "--default-answer",
-                "--confirm-command"
-            ]
+    elif platform_name == "windows":
+        print("Installing Vulkan SDK core...")
+        install_cmd = [
+            download_path, "install", "com.lunarg.vulkan.core",
+            "--root", vulkan_sdk_path,
+            "--accept-licenses", "--default-answer", "--confirm-command"
+        ]
 
-            print(f"Running installer command: {' '.join(install_cmd)}")
+        print(f"Running installer command: {' '.join(install_cmd)}")
+        result = subprocess.run(install_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError("Vulkan SDK installation failed. Please run as administrator.")
 
-            result = subprocess.run(
-                install_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                raise Exception(
-                    "Vulkan SDK installation failed. Please run as administrator.")
+    os.remove(download_path)
 
-        # Clean up download file
-        os.remove(download_path)
+    if is_macos:
+        vulkan_sdk_path = os.path.join(vulkan_sdk_path, "macOS")
 
-        if is_macos:
-            vulkan_sdk_path = os.path.join(vulkan_sdk_path, "macOS")
-
-        print(f"Vulkan SDK {latest_version} installed successfully!")
-        return vulkan_sdk_path
-
-    except Exception as e:
-        print(f"Error installing Vulkan SDK: {e}")
-
-        print("Please install the Vulkan SDK manually from: https://vulkan.lunarg.com/sdk/home")
-
-        raise Exception()
+    print(f"Vulkan SDK {latest_version} installed successfully!")
+    return vulkan_sdk_path
 
 
 def install_slangc(build_cache_dir):
@@ -500,59 +335,40 @@ def install_slangc(build_cache_dir):
     elif machine in ("arm64", "aarch64"):
         arch = "aarch64"
     else:
-        print(
-            f"Error: Unsupported architecture '{machine}' for slangc installation.")
-        raise Exception()
+        raise RuntimeError(f"Unsupported architecture '{machine}' for slangc installation.")
 
-    if system == "windows":
-        platform_name = "windows"
-    elif system == "darwin":
-        platform_name = "macos"
-    elif system == "linux":
-        platform_name = "linux"
-    else:
-        print(
-            f"Error: Unsupported platform '{system}' for slangc installation.")
-        raise Exception()
+    platform_name_map = {"windows": "windows", "darwin": "macos", "linux": "linux"}
+    if system not in platform_name_map:
+        raise RuntimeError(f"Unsupported platform '{system}' for slangc installation.")
+    platform_name = platform_name_map[system]
 
     filename = f"slang-{slang_version}-{platform_name}-{arch}.zip"
     download_url = f"https://github.com/shader-slang/slang/releases/download/v{slang_version}/{filename}"
 
-    try:
-        download_path = os.path.join(build_cache_dir, filename)
+    download_path = os.path.join(build_cache_dir, filename)
 
-        print(f"Downloading slangc {slang_version}...")
-        print(f"URL: {download_url}")
+    print(f"Downloading slangc {slang_version} from: {download_url}")
+    download_file(download_url, download_path)
 
-        download_file(download_url, download_path)
+    print("Extracting slangc...")
+    os.makedirs(slang_dir, exist_ok=True)
+    extract_zip(download_path, slang_dir)
 
-        print("Extracting slangc...")
-        os.makedirs(slang_dir, exist_ok=True)
-        extract_zip(download_path, slang_dir)
+    if not is_windows:
+        os.chmod(slangc_executable, 0o755)
 
-        if not is_windows:
-            os.chmod(slangc_executable, 0o755)
+    os.remove(download_path)
 
-        os.remove(download_path)
+    if not os.path.exists(slangc_executable):
+        raise RuntimeError(f"slangc executable not found after installation: {slangc_executable}")
 
-        if os.path.exists(slangc_executable):
-            print(f"slangc {slang_version} installed successfully!")
-            return slangc_executable
-        else:
-            print(
-                f"Error: slangc executable not found after installation: {slangc_executable}")
-            raise Exception()
-
-    except Exception as e:
-        print(f"Error installing slangc: {e}")
-        print("Please install slangc manually from: https://github.com/shader-slang/slang/releases")
-        raise Exception()
+    print(f"slangc {slang_version} installed successfully!")
+    return slangc_executable
 
 
 def find_slangc():
     """Find slangc or install it automatically. Returns the path to the slangc executable."""
-    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
-    slang_dir = os.path.join(build_cache_dir, "slang")
+    slang_dir = os.path.join(_BUILD_CACHE_DIR, "slang")
     slangc_executable = os.path.join(slang_dir, "bin", "slangc")
     if is_windows:
         slangc_executable += ".exe"
@@ -561,8 +377,8 @@ def find_slangc():
         return slangc_executable
 
     print("slangc not found. Installing to build_cache...")
-    os.makedirs(build_cache_dir, exist_ok=True)
-    return install_slangc(build_cache_dir)
+    os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
+    return install_slangc(_BUILD_CACHE_DIR)
 
 
 def find_llvm_path():
@@ -570,24 +386,19 @@ def find_llvm_path():
     if is_windows:
         return None  # Windows uses clang-cl from Visual Studio
 
-    # Check for user override first
     llvm_path_override = os.environ.get("LLVM")
     if llvm_path_override:
         if os.path.exists(llvm_path_override):
-            clang_path = os.path.join(llvm_path_override, "bin", "clang")
-            clangpp_path = os.path.join(llvm_path_override, "bin", "clang++")
-            if os.path.exists(clang_path) and os.path.exists(clangpp_path):
+            if (os.path.exists(os.path.join(llvm_path_override, "bin", "clang")) and
+                    os.path.exists(os.path.join(llvm_path_override, "bin", "clang++"))):
                 return llvm_path_override
         print(
             f"Warning: LLVM environment variable set to '{llvm_path_override}' but path is invalid.")
         print("Falling back to automatic detection...")
 
-    # macOS-specific handling: prefer Xcode clang, fallback to Homebrew LLVM
     if platform.system() == "Darwin":
         # 1. Try Xcode system clang first
-        xcode_clang_path = "/usr/bin/clang"
-        xcode_clangpp_path = "/usr/bin/clang++"
-        if os.path.exists(xcode_clang_path) and os.path.exists(xcode_clangpp_path):
+        if os.path.exists("/usr/bin/clang") and os.path.exists("/usr/bin/clang++"):
             print("Found Xcode clang at: /usr")
             return "/usr"
 
@@ -597,9 +408,8 @@ def find_llvm_path():
             "/usr/local/opt/llvm",     # Intel Mac
         ]
         for llvm_path in homebrew_paths:
-            clang_path = os.path.join(llvm_path, "bin", "clang")
-            clangpp_path = os.path.join(llvm_path, "bin", "clang++")
-            if os.path.exists(clang_path) and os.path.exists(clangpp_path):
+            if (os.path.exists(os.path.join(llvm_path, "bin", "clang")) and
+                    os.path.exists(os.path.join(llvm_path, "bin", "clang++"))):
                 print(f"Found LLVM via Homebrew at: {llvm_path}")
                 return llvm_path
 
@@ -610,53 +420,39 @@ def find_llvm_path():
                 ["brew", "install", "llvm"], capture_output=True, text=True, timeout=300)
             if result.returncode == 0:
                 print("Successfully installed LLVM via Homebrew")
-                # Re-check Homebrew paths after installation
                 for llvm_path in homebrew_paths:
-                    clang_path = os.path.join(llvm_path, "bin", "clang")
-                    clangpp_path = os.path.join(llvm_path, "bin", "clang++")
-                    if os.path.exists(clang_path) and os.path.exists(clangpp_path):
+                    if (os.path.exists(os.path.join(llvm_path, "bin", "clang")) and
+                            os.path.exists(os.path.join(llvm_path, "bin", "clang++"))):
                         print(f"Found LLVM via Homebrew at: {llvm_path}")
                         return llvm_path
             else:
-                raise Exception(result.stderr)
+                raise RuntimeError(result.stderr)
         except Exception as e:
-            print("Failed to install LLVM via Homebrew. Please install manually.")
-            print(f"Error: {e}")
+            print(f"Failed to install LLVM via Homebrew. Please install manually. Error: {e}")
 
         return None
 
-    # Try to find clang in PATH (non-macOS or fallback)
+    # Try to find clang in PATH (non-macOS)
     try:
         clang_result = subprocess.run(
             ["which", "clang"], capture_output=True, text=True, timeout=5)
         if clang_result.returncode == 0:
             clang_path = clang_result.stdout.strip()
-            # Extract LLVM root from clang path (e.g., /usr/local/bin/clang -> /usr/local)
             bin_dir = os.path.dirname(clang_path)
             llvm_root = os.path.dirname(bin_dir)
-            clangpp_path = os.path.join(bin_dir, "clang++")
-            if os.path.exists(clangpp_path):
+            if os.path.exists(os.path.join(bin_dir, "clang++")):
                 print(f"Found LLVM via PATH at: {llvm_root}")
                 return llvm_root
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
         pass
 
-    # Try common Linux distribution paths
-    common_paths = [
-        "/usr/local/llvm",
-        "/opt/llvm",
-    ]
-
-    for llvm_path in common_paths:
-        clang_path = os.path.join(llvm_path, "bin", "clang")
-        clangpp_path = os.path.join(llvm_path, "bin", "clang++")
-        if os.path.exists(clang_path) and os.path.exists(clangpp_path):
+    for llvm_path in ("/usr/local/llvm", "/opt/llvm"):
+        if (os.path.exists(os.path.join(llvm_path, "bin", "clang")) and
+                os.path.exists(os.path.join(llvm_path, "bin", "clang++"))):
             print(f"Found LLVM at: {llvm_path}")
             return llvm_path
 
-    # Non-macOS platforms: auto-installation not supported
     print("LLVM auto-installation not supported on this platform. Please make sure it is installed manually, preferably via a native package manager.")
-
     return None
 
 
@@ -665,17 +461,14 @@ def find_visual_studio_path():
     if not is_windows:
         return None
 
-    # Check for user override first
     vs_path_override = os.environ.get("VS_PATH")
     if vs_path_override:
         if os.path.exists(vs_path_override):
             return vs_path_override
-        else:
-            print(
-                f"Warning: VS_PATH environment variable set to '{vs_path_override}' but path does not exist.")
-            print("Falling back to automatic detection...")
+        print(
+            f"Warning: VS_PATH environment variable set to '{vs_path_override}' but path does not exist.")
+        print("Falling back to automatic detection...")
 
-    # Try vswhere.exe first (most reliable method)
     vswhere_paths = [
         r"C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
         r"C:\\Program Files\\Microsoft Visual Studio\\Installer\\vswhere.exe"
@@ -684,7 +477,6 @@ def find_visual_studio_path():
     for vswhere_path in vswhere_paths:
         if os.path.exists(vswhere_path):
             try:
-                # Get both installation path and version to verify VS 2022
                 result = subprocess.run([
                     vswhere_path, "-latest", "-products", "*",
                     "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
@@ -695,7 +487,6 @@ def find_visual_studio_path():
                 if result.returncode == 0 and result.stdout.strip():
                     vs_path = result.stdout.strip()
 
-                    # Double-check version by querying it separately
                     version_result = subprocess.run([
                         vswhere_path, "-path", vs_path,
                         "-property", "catalog_productDisplayVersion", "-format", "value"
@@ -704,26 +495,21 @@ def find_visual_studio_path():
                     if version_result.returncode == 0 and version_result.stdout.strip():
                         version = version_result.stdout.strip()
                         if not version.startswith("17."):
-                            print(
-                                f"Found Visual Studio {version} but VS 2022 (17.x) is required.")
+                            print(f"Found Visual Studio {version} but VS 2022 (17.x) is required.")
                             continue
 
-                    vcvars_path = os.path.join(
-                        vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
+                    vcvars_path = os.path.join(vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
                     if os.path.exists(vcvars_path):
                         print(f"Found Visual Studio 2022 at: {vs_path}")
                         return vs_path
             except (subprocess.TimeoutExpired, subprocess.SubprocessError):
                 continue
 
-    # Fallback to common installation paths (VS 2022 only)
-    common_paths = [
+    for path in (
         r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional",
         r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community",
-        r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise"
-    ]
-
-    for path in common_paths:
+        r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise",
+    ):
         if os.path.exists(path):
             return path
 
@@ -734,112 +520,76 @@ def install_vcpkg(build_cache_dir):
     """Install vcpkg to build_cache directory and return the path."""
 
     vcpkg_dir = os.path.join(build_cache_dir, "vcpkg")
-
-    # Check if already installed
-    vcpkg_executable = "vcpkg.exe" if is_windows else "vcpkg"
-    vcpkg_exe_path = os.path.join(vcpkg_dir, vcpkg_executable)
+    vcpkg_exe_path = os.path.join(vcpkg_dir, "vcpkg.exe" if is_windows else "vcpkg")
 
     if os.path.exists(vcpkg_exe_path):
         print("vcpkg already installed in build_cache.")
         return vcpkg_dir
 
-    try:
-        print("Cloning vcpkg repository...")
+    print("Cloning vcpkg repository...")
+    result = subprocess.run(
+        ["git", "clone", "https://github.com/Microsoft/vcpkg.git", vcpkg_dir],
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to clone vcpkg: {result.stderr}")
 
-        # Clone vcpkg repository
-        clone_cmd = [
-            "git", "clone",
-            "https://github.com/Microsoft/vcpkg.git",
-            vcpkg_dir
-        ]
+    print("Building vcpkg...")
+    if is_windows:
+        bootstrap_script = os.path.join(vcpkg_dir, "bootstrap-vcpkg.bat")
+    else:
+        bootstrap_script = os.path.join(vcpkg_dir, "bootstrap-vcpkg.sh")
+        os.chmod(bootstrap_script, 0o755)
 
-        result = subprocess.run(clone_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception(f"Failed to clone vcpkg: {result.stderr}")
+    result = subprocess.run([bootstrap_script], cwd=vcpkg_dir, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to build vcpkg: {result.stderr}")
 
-        print("Building vcpkg...")
+    if not os.path.exists(vcpkg_exe_path):
+        raise RuntimeError(f"vcpkg executable not found after build: {vcpkg_exe_path}")
 
-        # Build vcpkg
-        if is_windows:
-            bootstrap_script = os.path.join(vcpkg_dir, "bootstrap-vcpkg.bat")
-            build_cmd = [bootstrap_script]
-        else:
-            bootstrap_script = os.path.join(vcpkg_dir, "bootstrap-vcpkg.sh")
-            # Make bootstrap script executable
-            os.chmod(bootstrap_script, 0o755)
-            build_cmd = [bootstrap_script]
-
-        result = subprocess.run(build_cmd, cwd=vcpkg_dir,
-                                capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception(f"Failed to build vcpkg: {result.stderr}")
-
-        # Verify vcpkg was built successfully
-        if not os.path.exists(vcpkg_exe_path):
-            raise Exception(
-                f"vcpkg executable not found after build: {vcpkg_exe_path}")
-
-        print(f"vcpkg installed successfully to: {vcpkg_dir}")
-        return vcpkg_dir
-
-    except Exception as e:
-        print(f"Error installing vcpkg: {e}")
-        print("Please install vcpkg manually from: https://github.com/Microsoft/vcpkg")
-        raise Exception()
+    print(f"vcpkg installed successfully to: {vcpkg_dir}")
+    return vcpkg_dir
 
 
 def find_vcpkg():
     if not is_windows:
         return None
 
-    vcpkg_executable = "vcpkg.exe" if is_windows else "vcpkg"
+    vcpkg_executable = "vcpkg.exe"
 
-    # Check for user override first
     vcpkg_dir = os.environ.get("VCPKG_PATH")
     if vcpkg_dir:
         if os.path.exists(os.path.join(vcpkg_dir, vcpkg_executable)):
             return vcpkg_dir
-        print(
-            f"VCPKG_PATH is set to '{vcpkg_dir}' but path does not exist. try auto-detecting...")
+        print(f"VCPKG_PATH is set to '{vcpkg_dir}' but path does not exist. try auto-detecting...")
 
-    # Check if already installed in build_cache
-    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
-    vcpkg_dir = os.path.join(build_cache_dir, "vcpkg")
+    vcpkg_dir = os.path.join(_BUILD_CACHE_DIR, "vcpkg")
     if os.path.exists(os.path.join(vcpkg_dir, vcpkg_executable)):
         print("Use locally cached vcpkg installation.")
         return vcpkg_dir
 
-    # Check for vcpkg in common system locations
     system_vcpkg = shutil.which(vcpkg_executable)
     if system_vcpkg:
         return os.path.dirname(system_vcpkg)
 
-    # Still no? Try to install locally
     print("vcpkg not found. Installing locally to build_cache/vcpkg...")
-    os.makedirs(build_cache_dir, exist_ok=True)
-    vcpkg_install_path = install_vcpkg(build_cache_dir)
-
-    return vcpkg_install_path
+    os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
+    return install_vcpkg(_BUILD_CACHE_DIR)
 
 
 def find_or_install_ninja():
     """Find ninja executable in PATH or install it to build_cache and return the path."""
 
-    # Check if ninja is already in PATH
     ninja_executable = shutil.which("ninja")
     if ninja_executable:
         return ninja_executable
 
-    # Ninja not found in PATH, try to install to build_cache
     prerequisites = load_prerequisites_versions()
     ninja_version = prerequisites.get("ninja", "1.12.1")
 
-    # Create build_cache directory if it doesn't exist
-    build_cache_dir = os.path.join(SCRIPTPATH, "..", "build_cache")
-    os.makedirs(build_cache_dir, exist_ok=True)
+    os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
 
-    # Check if already installed in build_cache
-    ninja_dir = os.path.join(build_cache_dir, "ninja")
+    ninja_dir = os.path.join(_BUILD_CACHE_DIR, "ninja")
     ninja_exe_path = os.path.join(ninja_dir, "ninja")
     if is_windows:
         ninja_exe_path += ".exe"
@@ -848,55 +598,32 @@ def find_or_install_ninja():
         print("Ninja already installed in build_cache.")
         return ninja_exe_path
 
-    # Determine download URL based on platform
     system = platform.system().lower()
+    platform_suffix = {"windows": "win", "darwin": "mac", "linux": "linux"}
+    if system not in platform_suffix:
+        print("Please install Ninja manually: https://github.com/ninja-build/ninja/releases")
+        raise RuntimeError(f"Unsupported platform '{system}' for automatic Ninja installation.")
 
-    if system == "windows":
-        filename = f"ninja-win.zip"
-        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
-    elif system == "darwin":
-        filename = f"ninja-mac.zip"
-        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
-    elif system == "linux":
-        filename = f"ninja-linux.zip"
-        download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
-    else:
-        print(
-            f"Error: Unsupported platform '{system}' for automatic Ninja installation.")
-        print("Please install Ninja manually from: https://github.com/ninja-build/ninja/releases")
-        raise Exception()
+    filename = f"ninja-{platform_suffix[system]}.zip"
+    download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
+    download_path = os.path.join(_BUILD_CACHE_DIR, filename)
 
-    try:
-        download_path = os.path.join(build_cache_dir, filename)
+    print(f"Downloading Ninja {ninja_version} from: {download_url}")
+    download_file(download_url, download_path)
 
-        print(f"Downloading Ninja {ninja_version}...")
-        print(f"URL: {download_url}")
+    print("Extracting Ninja...")
+    extract_archive(download_path, ninja_dir)
 
-        download_file(download_url, download_path)
+    if not is_windows:
+        os.chmod(ninja_exe_path, 0o755)
 
-        print("Extracting Ninja...")
-        extract_archive(download_path, ninja_dir)
+    os.remove(download_path)
 
-        # Make ninja executable on Unix systems
-        if not is_windows:
-            os.chmod(ninja_exe_path, 0o755)
+    if not os.path.exists(ninja_exe_path):
+        raise RuntimeError(f"Ninja executable not found after installation: {ninja_exe_path}")
 
-        # Clean up download file
-        os.remove(download_path)
-
-        # Verify installation
-        if os.path.exists(ninja_exe_path):
-            print(f"Ninja {ninja_version} installed successfully!")
-            return ninja_exe_path
-        else:
-            print(
-                f"Error: Ninja executable not found after installation: {ninja_exe_path}")
-            raise Exception()
-
-    except Exception as e:
-        print(f"Error installing Ninja: {e}")
-        print("Please install Ninja manually from: https://github.com/ninja-build/ninja/releases")
-        raise Exception()
+    print(f"Ninja {ninja_version} installed successfully!")
+    return ninja_exe_path
 
 
 def install_glfw():
@@ -904,18 +631,14 @@ def install_glfw():
         print("Installing GLFW via vcpkg...")
         vcpkg_path = find_vcpkg()
         if vcpkg_path:
-            vcpkg_executable = "vcpkg.exe" if is_windows else "vcpkg"
-            vcpkg_exe_path = os.path.join(vcpkg_path, vcpkg_executable)
-            install_cmd = [vcpkg_exe_path, "install", "glfw3:x64-windows"]
+            vcpkg_exe_path = os.path.join(vcpkg_path, "vcpkg.exe")
             result = subprocess.run(
-                install_cmd, capture_output=True, text=True)
+                [vcpkg_exe_path, "install", "glfw3:x64-windows"], capture_output=True, text=True)
             if result.returncode != 0:
-                print(f"Failed to install GLFW via vcpkg: {result.stderr}")
-                raise Exception()
+                raise RuntimeError(f"Failed to install GLFW via vcpkg: {result.stderr}")
             print("GLFW installed successfully via vcpkg!")
         else:
-            print("Failed to install GLFW via vcpkg. vcpkg not found.")
-            raise Exception()
+            raise RuntimeError("Failed to install GLFW via vcpkg. vcpkg not found.")
     elif is_macos:
         print("Installing GLFW via Homebrew...")
         try:
@@ -924,7 +647,7 @@ def install_glfw():
             if result.returncode == 0:
                 print("Successfully installed GLFW via Homebrew")
             else:
-                raise Exception(result.stderr)
+                raise RuntimeError(result.stderr)
         except Exception as e:
             print(
                 "Failed to install GLFW via Homebrew. Please make sure it is installed manually.")
@@ -947,35 +670,28 @@ def setup_android_validation(script_dir):
         print("Android validation binaries are up-to-date, skipping setup.")
         return
 
-    print(
-        f"Setting up Android validation binaries for Vulkan SDK {vulkan_version}...")
+    print(f"Setting up Android validation binaries for Vulkan SDK {vulkan_version}...")
 
-    # Download validation binaries
     download_file(url, zip_path)
 
-    # Remove existing jniLibs directory
     if os.path.exists(app_jni_dir):
         print(f"Removing existing directory: {app_jni_dir}")
         shutil.rmtree(app_jni_dir)
     os.makedirs(app_jni_dir, exist_ok=True)
 
-    # Extract zip to jniLibs
     try:
         extract_zip(zip_path, app_jni_dir)
     except Exception as e:
         print(f"Failed to extract zip file: {e}")
-        # Clean up downloaded file
         if os.path.exists(zip_path):
             os.remove(zip_path)
-        raise Exception()
+        raise
 
     # Flatten directory structure (move all subdirs/files up one level)
-    # Find the first subdirectory in jniLibs
-    subdirs = [d for d in os.listdir(app_jni_dir) if os.path.isdir(
-        os.path.join(app_jni_dir, d))]
+    subdirs = [d for d in os.listdir(app_jni_dir)
+               if os.path.isdir(os.path.join(app_jni_dir, d))]
     if subdirs:
         parent_dir = os.path.join(app_jni_dir, subdirs[0])
-        # Move all contents up one level
         for item in os.listdir(parent_dir):
             src = os.path.join(parent_dir, item)
             dst = os.path.join(app_jni_dir, item)
@@ -985,7 +701,6 @@ def setup_android_validation(script_dir):
                 else:
                     os.remove(dst)
             shutil.move(src, dst)
-        # Remove now-empty parent directory
         shutil.rmtree(parent_dir)
 
     print("Android validation binaries setup completed.")
