@@ -24,39 +24,35 @@ def get_output_dir():
     return os.path.join(SCRIPTPATH, "output", "build")
 
 
+def get_app_path():
+    return os.path.join(get_output_dir(), "sparkle.app")
+
+
 def run_on_device(app_path):
     # Install and run on device using xcrun devicectl
     try:
-        # List connected devices
         list_devices_cmd = ["xcrun", "devicectl", "list", "devices"]
         result = subprocess.run(
             list_devices_cmd, capture_output=True, text=True, env=os.environ.copy())
 
         if result.returncode != 0:
-            print(
-                "Error: Failed to list devices. Make sure a device is connected and trusted.")
-            raise Exception("Failed to list devices")
+            raise RuntimeError("Failed to list devices. Make sure a device is connected and trusted.")
 
         # Parse device output to find connected devices
         devices = []
         for line in result.stdout.split('\n'):
             if ('iPhone' in line or 'iPad' in line) and ('connected' in line):
-                # Extract device identifier
-                parts = line.split()
-                for part in parts:
+                for part in line.split():
                     if len(part) == 36 and '-' in part:  # Device UDID format
                         devices.append(part)
                         break
 
         if not devices:
-            print(
-                "No iOS devices found. Please connect and trust an iOS device.")
-            raise Exception("Failed to find devices")
+            raise RuntimeError("No iOS devices found. Please connect and trust an iOS device.")
 
-        device_id = devices[0]  # Use first available device
+        device_id = devices[0]
         print(f"\nInstalling app on device: {device_id}")
 
-        # Install the app
         install_cmd = ["xcrun", "devicectl", "device", "install", "app",
                        "--device", device_id, app_path]
 
@@ -65,14 +61,12 @@ def run_on_device(app_path):
             install_cmd, capture_output=True, text=True, env=os.environ.copy())
         if install_result.returncode != 0:
             print(f"Error installing app: {install_result.stderr}")
-            print(
-                "The app may already be installed or there may be signing issues.")
+            print("The app may already be installed or there may be signing issues.")
             print("Try manually installing through Xcode.")
-            raise Exception("Failed to install app")
+            raise RuntimeError("Failed to install app")
 
         print("App installed successfully!")
 
-        # Launch the app
         bundle_id = "io.tqjxlm.sparkle"
         launch_cmd = ["xcrun", "devicectl", "device", "process", "launch",
                       "--device", device_id, bundle_id]
@@ -102,13 +96,6 @@ def run_on_device(app_path):
     print("3. Build and run from Xcode")
 
 
-def get_app_path():
-    output_dir = get_output_dir()
-    app_name = "sparkle.app"
-    # CMake outputs to the same directory regardless of config (RUNTIME_OUTPUT_DIRECTORY)
-    return os.path.join(output_dir, app_name)
-
-
 class IosBuilder(FrameworkBuilder):
     """iOS framework builder implementation."""
 
@@ -134,12 +121,10 @@ class IosBuilder(FrameworkBuilder):
             "../../..",
         ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args
 
-        print("Configuring CMake for clangd (iOS) with command:",
-              " ".join(cmake_cmd))
+        print("Configuring CMake for clangd (iOS) with command:", " ".join(cmake_cmd))
         result = subprocess.run(cmake_cmd, env=os.environ.copy())
         if result.returncode != 0:
-            print("CMake configure failed.")
-            raise Exception()
+            raise RuntimeError("CMake configure failed.")
 
         print(f"Configuration complete in {output_dir}")
 
@@ -155,15 +140,14 @@ class IosBuilder(FrameworkBuilder):
 
         sign_args = []
         if args.get("apple_auto_sign", False):
-            # Require a team id to sign automatically. It will be used by cmake later.
             team_id = os.environ.get("APPLE_DEVELOPER_TEAM_ID")
             if team_id:
                 sign_args = ["-DENABLE_APPLE_AUTO_SIGN=ON"]
             else:
-                print(
-                    "Error: APPLE_DEVELOPER_TEAM_ID environment variable is not set."
-                    "Please set APPLE_DEVELOPER_TEAM_ID. https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
-                raise Exception()
+                raise RuntimeError(
+                    "APPLE_DEVELOPER_TEAM_ID environment variable is not set. "
+                    "Please set APPLE_DEVELOPER_TEAM_ID. "
+                    "https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
 
         generator_args = ["-G Xcode"]
 
@@ -175,18 +159,15 @@ class IosBuilder(FrameworkBuilder):
         print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
         result = subprocess.run(cmake_cmd, env=os.environ.copy())
         if result.returncode != 0:
-            print("CMake project generation failed.")
-            raise Exception()
+            raise RuntimeError("CMake project generation failed.")
 
-        print(
-            f"Xcode project is generated at {output_dir}. Open with command:")
+        print(f"Xcode project is generated at {output_dir}. Open with command:")
         print(f"open {output_dir}/sparkle.xcodeproj")
 
     def build(self, args):
         """Build the project."""
         self.generate_project(args)
 
-        # Build
         build_cmd = [args["cmake_executable"], "--build", ".", "--config",
                      args["config"], "--target", "sparkle"]
 
@@ -220,11 +201,8 @@ class IosBuilder(FrameworkBuilder):
         """Run the built project."""
         app_path = get_app_path()
 
-        if os.path.exists(app_path):
-            print(f"\nBuilt app bundle is available at: {app_path}")
-            run_on_device(app_path)
-        else:
-            print(
-                f"\nWarning: App bundle not found at expected location: {app_path}")
-            print("Check the build output directory for the actual location.")
-            raise Exception("App bundle not found")
+        if not os.path.exists(app_path):
+            raise RuntimeError(f"App bundle not found at expected location: {app_path}")
+
+        print(f"\nBuilt app bundle is available at: {app_path}")
+        run_on_device(app_path)

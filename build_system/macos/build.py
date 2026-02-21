@@ -117,8 +117,7 @@ class MacosBuilder(FrameworkBuilder):
         print("Configuring CMake for clangd with command:", " ".join(cmake_cmd))
         result = subprocess.run(cmake_cmd, env=os.environ.copy())
         if result.returncode != 0:
-            print("CMake configure failed.")
-            raise Exception()
+            raise RuntimeError("CMake configure failed.")
 
         print(f"Configuration complete in {output_dir}")
 
@@ -142,8 +141,7 @@ class MacosBuilder(FrameworkBuilder):
         print("Generating Xcode project with command:", " ".join(cmake_cmd))
         result = subprocess.run(cmake_cmd, env=os.environ.copy())
         if result.returncode != 0:
-            print("CMake project generation failed.")
-            raise Exception()
+            raise RuntimeError("CMake project generation failed.")
 
         print(
             f"Xcode project is generated at {output_dir}. Open with command:")
@@ -190,8 +188,6 @@ class MacosBuilder(FrameworkBuilder):
                 run_cmd = [executable_path] + args["unknown_args"]
                 subprocess.run(run_cmd, env=os.environ.copy())
             else:
-                print(f"Error: Executable not found at {executable_path}")
-                raise Exception()
+                raise RuntimeError(f"Executable not found at {executable_path}")
         else:
-            print(f"Error: Application bundle not found at {app_path}")
-            raise Exception()
+            raise RuntimeError(f"Application bundle not found at {app_path}")

@@ -1,8 +1,9 @@
 import os
+import re
 import subprocess
+import urllib.request
 import platform
 from pathlib import Path
-import os
 
 from build_system.utils import run_command_with_logging, download_file, extract_zip, robust_rmtree
 from build_system.builder_interface import FrameworkBuilder
@@ -18,47 +19,37 @@ def download_gradle_wrapper():
         SCRIPTPATH, "gradle", "wrapper", "gradle-wrapper.jar")
 
     if os.path.exists(wrapper_jar_path):
-        return  # Already exists
+        return
 
     print("Gradle wrapper JAR not found, downloading...")
 
-    # Read gradle version from properties file
     properties_path = os.path.join(
         SCRIPTPATH, "gradle", "wrapper", "gradle-wrapper.properties")
     if not os.path.exists(properties_path):
-        print(
-            f"Error: gradle-wrapper.properties not found at {properties_path}")
-        raise Exception()
+        raise RuntimeError(f"gradle-wrapper.properties not found at {properties_path}")
 
-    # Extract gradle version from properties
     gradle_version = None
     with open(properties_path, 'r') as f:
         for line in f:
             if line.startswith('distributionUrl='):
-                # Extract version from URL like gradle-8.11.1-bin.zip
-                import re
                 match = re.search(r'gradle-([0-9.]+)-', line)
                 if match:
                     gradle_version = match.group(1)
                     break
 
     if not gradle_version:
-        print("Error: Could not determine Gradle version from gradle-wrapper.properties")
-        raise Exception()
+        raise RuntimeError("Could not determine Gradle version from gradle-wrapper.properties")
 
-    # Download gradle-wrapper.jar
     wrapper_url = f"https://raw.githubusercontent.com/gradle/gradle/v{gradle_version}/gradle/wrapper/gradle-wrapper.jar"
 
     try:
-        import urllib.request
         os.makedirs(os.path.dirname(wrapper_jar_path), exist_ok=True)
         print(f"Downloading gradle-wrapper.jar for Gradle {gradle_version}...")
         urllib.request.urlretrieve(wrapper_url, wrapper_jar_path)
         print("Gradle wrapper downloaded successfully.")
     except Exception as e:
-        print(f"Failed to download gradle-wrapper.jar: {e}")
-        print("Please download it manually or ensure internet connection.")
-        raise Exception()
+        raise RuntimeError(f"Failed to download gradle-wrapper.jar: {e}. "
+                           "Please download it manually or ensure internet connection.")
 
 
 def prepare_environment(args=None):
@@ -68,30 +59,19 @@ def prepare_environment(args=None):
     print("Touching to force CMake re-run:", cmake_file)
     cmake_file.touch()
 
-    # Check for JAVA_HOME (can be set in environment or use default Android Studio path)
     java_home = os.environ.get("JAVA_HOME")
 
     if not java_home:
-        # Try default Android Studio paths
         if platform.system() == "Darwin":
             possible_paths = [
                 "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
                 "/Applications/Android Studio.app/Contents/jre/Contents/Home",
             ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    java_home = path
-                    break
         elif platform.system() == "Windows":
-            # Common Windows Android Studio paths
             possible_paths = [
                 "C:/Program Files/Android/Android Studio/jbr",
                 "C:/Program Files/Android/Android Studio/jre",
             ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    java_home = path
-                    break
         elif platform.system() == "Linux":
             possible_paths = [
                 "/usr/lib/jvm/temurin-17-jdk-amd64",
@@ -101,10 +81,13 @@ def prepare_environment(args=None):
                 os.path.expanduser("~/android-studio/jbr"),
                 "/snap/android-studio/current/android-studio/jbr",
             ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    java_home = path
-                    break
+        else:
+            possible_paths = []
+
+        for path in possible_paths:
+            if os.path.exists(path):
+                java_home = path
+                break
 
     if java_home and os.path.exists(java_home):
         os.environ["JAVA_HOME"] = java_home
@@ -126,31 +109,24 @@ def prepare_environment(args=None):
         elif platform.system() == "Linux":
             print(
                 "   Example: export JAVA_HOME='/usr/lib/jvm/java-17-openjdk-amd64'")
-        raise Exception()
+        raise RuntimeError("Java environment not found")
 
-    # Ensure gradle-wrapper.jar exists
     download_gradle_wrapper()
 
-    # Check for gradlew
     gradlew_path = os.path.join(
         SCRIPTPATH, "gradlew" if platform.system() != "Windows" else "gradlew.bat")
     if not os.path.exists(gradlew_path):
-        print(f"Error: gradlew not found at {gradlew_path}")
-        raise Exception()
+        raise RuntimeError(f"gradlew not found at {gradlew_path}")
 
-    # Make sure gradlew is executable on Unix systems
     if platform.system() != "Windows":
         os.chmod(gradlew_path, 0o755)
 
-    # Create output directory
     output_dir = os.path.join(SCRIPTPATH, "output")
 
     if args and args.get("clean", False):
         robust_rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
-
-    # Change to Android project directory for Gradle sync
     os.chdir(SCRIPTPATH)
 
     return gradlew_path, output_dir
@@ -159,10 +135,9 @@ def prepare_environment(args=None):
 def get_apk_path(args):
     """Get the path to the APK based on build configuration."""
     config = args["config"]
-    if config == "Debug":
-        return os.path.join(SCRIPTPATH, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
-    else:
-        return os.path.join(SCRIPTPATH, "app", "build", "outputs", "apk", "release", "app-release.apk")
+    variant = "debug" if config == "Debug" else "release"
+    apk_name = f"app-{variant}.apk"
+    return os.path.join(SCRIPTPATH, "app", "build", "outputs", "apk", variant, apk_name)
 
 
 def run_on_device(args):
@@ -172,59 +147,44 @@ def run_on_device(args):
     apk_path = get_apk_path(args)
 
     print("Installing APK...")
-    install_cmd = ["adb", "install", apk_path]
-    result = subprocess.run(install_cmd)
+    result = subprocess.run(["adb", "install", apk_path])
     if result.returncode != 0:
         print("APK installation failed!")
         return
 
     print("Starting application...")
-    start_cmd = ["adb", "shell", "am", "start", "-n", activity_name]
-    result = subprocess.run(start_cmd)
+    result = subprocess.run(["adb", "shell", "am", "start", "-n", activity_name])
     if result.returncode != 0:
         print("Failed to start application!")
         return
 
     print("Monitoring application logs (Ctrl+C to stop)...")
     try:
-        logcat_cmd = ["adb", "logcat", "-s", "sparkle"]
-        subprocess.run(logcat_cmd)
+        subprocess.run(["adb", "logcat", "-s", "sparkle"])
     except KeyboardInterrupt:
         print("\nStopping log monitoring...")
 
-    # Try to pull output log
     print("Pulling application output log...")
-    pull_cmd = ["adb", "pull",
-                f"/sdcard/Android/data/{package_name}/files/logs/output.log", "."]
-    subprocess.run(pull_cmd)
+    subprocess.run(["adb", "pull",
+                    f"/sdcard/Android/data/{package_name}/files/logs/output.log", "."])
 
 
 def sync_only(args):
     """Trigger Gradle sync without building to generate CMake files."""
     gradlew_path, output_dir = prepare_environment(args)
 
-    # Prepare Gradle sync command - use generateJsonModelDebug to trigger CMake configure
     config = args["config"]
     cmake_args = args["cmake_options"]
+    gradle_task = "generateJsonModelDebug" if config == "Debug" else "generateJsonModelRelease"
 
-    if config == "Debug":
-        sync_cmd = [
-            gradlew_path,
-            "generateJsonModelDebug",
-            f"-PcmakeArgs={' '.join(cmake_args)}",
-            "--info",
-        ]
-    else:
-        sync_cmd = [
-            gradlew_path,
-            "generateJsonModelRelease",
-            f"-PcmakeArgs={' '.join(cmake_args)}",
-            "--info",
-        ]
+    sync_cmd = [
+        gradlew_path,
+        gradle_task,
+        f"-PcmakeArgs={' '.join(cmake_args)}",
+        "--info",
+    ]
 
     log_file = os.path.join(output_dir, "sync.log")
-
-    # Run Gradle sync with logging
     run_command_with_logging(sync_cmd, log_file, "Syncing Android project")
     print("Gradle sync successful! CMake files generated.")
 
@@ -249,16 +209,10 @@ class AndroidBuilder(FrameworkBuilder):
 
         gradlew_path, output_dir = prepare_environment(args)
 
-        # Prepare Gradle command
         config = args["config"]
         cmake_args = args["cmake_options"]
+        gradle_task = "assembleDebug" if config == "Debug" else "assembleRelease"
 
-        if config == "Debug":
-            gradle_task = "assembleDebug"
-        else:
-            gradle_task = "assembleRelease"
-
-        # Build command
         build_cmd = [
             gradlew_path,
             gradle_task,
@@ -267,22 +221,13 @@ class AndroidBuilder(FrameworkBuilder):
         ]
 
         log_file = os.path.join(output_dir, "build.log")
+        run_command_with_logging(build_cmd, log_file, "Building Android APK")
 
-        # Run Gradle build with logging
-        try:
-            run_command_with_logging(
-                build_cmd, log_file, "Building Android APK")
-
-            apk_path = get_apk_path(args)
-            print(f"Build successful! APK created at: {apk_path}")
-
-        except Exception as e:
-            print(f"Build failed with exception: {e}")
-            raise Exception()
+        apk_path = get_apk_path(args)
+        print(f"Build successful! APK created at: {apk_path}")
 
     def archive(self, args):
         """Archive the built project."""
-        # For Android, the archive is the APK itself
         return get_apk_path(args)
 
     def run(self, args):

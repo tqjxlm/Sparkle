@@ -52,7 +52,9 @@ def compress_zip(source_path, zip_path):
     print(f"Compressing {source_path} to {zip_path} ...")
     
     # Ensure the destination directory exists
-    os.makedirs(os.path.dirname(zip_path), exist_ok=True)
+    parent = os.path.dirname(zip_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
         if os.path.isfile(source_path):
@@ -106,31 +108,26 @@ def run_command_with_logging(cmd, log_file_path, description):
     print(f"{description}... See {log_file_path} for detailed logs.")
     print(f"Running: {' '.join(cmd)}")
 
-    try:
-        with open(log_file_path, "w") as log:
-            process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                universal_newlines=True, bufsize=1)
+    with open(log_file_path, "w") as log:
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            universal_newlines=True, bufsize=1)
 
-            # Read output line by line and write to both console and file
-            if process.stdout:
-                for line in process.stdout:
-                    print(line, end='')  # Print to console
-                    log.write(line)      # Write to log file
-                    log.flush()          # Ensure immediate write
+        # Read output line by line and write to both console and file
+        if process.stdout:
+            for line in process.stdout:
+                print(line, end='')  # Print to console
+                log.write(line)      # Write to log file
+                log.flush()          # Ensure immediate write
 
-            return_code = process.wait()
+        return_code = process.wait()
 
-        if return_code != 0:
-            print(f"{description} failed! Check {log_file_path} for details.")
-            raise Exception()
+    if return_code != 0:
+        raise RuntimeError(
+            f"{description} failed with return code {return_code}. Check {log_file_path} for details.")
 
-        print(f"{description} completed successfully!")
-        return return_code
-
-    except Exception as e:
-        print(f"{description} failed with exception: {e}")
-        raise Exception()
+    print(f"{description} completed successfully!")
+    return return_code
 
 
 def force_remove_readonly(func, path, exc_info):
@@ -182,16 +179,16 @@ def robust_rmtree(path, max_retries=3, retry_delay=1.0):
                                 try:
                                     os.chmod(
                                         file_path, stat.S_IWRITE | stat.S_IREAD)
-                                except:
+                                except OSError:
                                     pass
                             for name in dirs:
                                 dir_path = os.path.join(root, name)
                                 try:
                                     os.chmod(dir_path, stat.S_IWRITE |
                                              stat.S_IREAD | stat.S_IEXEC)
-                                except:
+                                except OSError:
                                     pass
-                    except:
+                    except OSError:
                         pass
             else:
                 print(

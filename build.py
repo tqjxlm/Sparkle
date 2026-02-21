@@ -1,5 +1,6 @@
 import os
 import platform
+import shlex
 import subprocess
 import sys
 import argparse
@@ -20,8 +21,6 @@ def construct_additional_cmake_options(parsed_args, cmake_args=None):
 
     # Add additional CMake arguments if provided
     if cmake_args:
-        # Split the cmake_args string into individual arguments
-        import shlex
         additional_args = shlex.split(cmake_args)
         cmake_options.extend(additional_args)
 
@@ -93,9 +92,8 @@ def check_environment(args):
 
     # Exit if framework is macos or ios but not running on macOS
     if args["framework"] in ("macos", "ios") and sys.platform != "darwin":
-        print(
-            f"Error: Framework '{args['framework']}' requires macOS, but current system is not macOS.")
-        raise Exception()
+        raise RuntimeError(
+            f"Framework '{args['framework']}' requires macOS, but current system is not macOS.")
 
 
 def run_git_submodule_update():
@@ -131,7 +129,7 @@ def copy_build_products(product_archive_path, args):
     elif platform.system() == "Darwin":
         system_name = "macos"
     else:
-        raise Exception()
+        raise RuntimeError(f"Unsupported platform: {platform.system()}")
     extension = ''.join(Path(product_archive_path).suffixes)
     product_final_name = f"{system_name}-{args['framework']}-{args['config']}{extension}"
 
