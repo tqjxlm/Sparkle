@@ -52,5 +52,3 @@
 * [ ] event based input handling
 
 ## Known Issues
-
-* [ ] ImGui scrolling not working on android and ios

@@ -29,6 +29,7 @@ public:
     void Shutdown();
 
     bool IsHandlingMouseEvent();
+    bool IsPointerOverUi(float x, float y);
 
     bool IsHanldingKeyboradEvent();
 
