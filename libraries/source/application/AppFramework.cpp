@@ -473,14 +473,62 @@ void AppFramework::DebugNextFrame()
 void AppFramework::ResetInputEvents()
 {
     current_pressing_ = false;
+    ui_mouse_sequence_active_ = false;
     last_x_ = -1;
     last_y_ = -1;
 }
 
+bool AppFramework::ShouldConsumeSceneMouseInput(MouseInputType input_type, double x, double y, bool has_pointer_position)
+{
+    if (!ui_manager_)
+    {
+        return false;
+    }
+
+    const bool pointer_over_ui =
+        has_pointer_position && ui_manager_->IsPointerOverUi(static_cast<float>(x), static_cast<float>(y));
+    const bool ui_wants_mouse = ui_manager_->IsHandlingMouseEvent();
+    const bool ui_interacting = ui_wants_mouse || pointer_over_ui || ui_mouse_sequence_active_;
+
+    if (input_type == MouseInputType::Press)
+    {
+        ui_mouse_sequence_active_ = ui_wants_mouse || pointer_over_ui;
+        return ui_mouse_sequence_active_;
+    }
+
+    if (input_type == MouseInputType::Release)
+    {
+        const bool consume_release = ui_interacting;
+        ui_mouse_sequence_active_ = false;
+        return consume_release;
+    }
+
+    return ui_interacting;
+}
+
+void AppFramework::CancelScenePointerInteraction()
+{
+    if (!current_pressing_)
+    {
+        return;
+    }
+
+    if (auto *camera = GetMainCamera())
+    {
+        camera->OnPointerUp();
+    }
+
+    current_pressing_ = false;
+}
+
 void AppFramework::CursorPositionCallback(double xPos, double yPos)
 {
-    if (ui_manager_ && ui_manager_->IsHandlingMouseEvent())
+    const auto last_point = GetLastClickPoint();
+    SetLastClickPoint(static_cast<float>(xPos), static_cast<float>(yPos));
+
+    if (ShouldConsumeSceneMouseInput(MouseInputType::Move, xPos, yPos, true))
     {
+        CancelScenePointerInteraction();
         return;
     }
 
@@ -490,12 +538,10 @@ void AppFramework::CursorPositionCallback(double xPos, double yPos)
         return;
     }
 
-    if (current_pressing_)
+    if (current_pressing_ && last_point.x() >= 0.f && last_point.y() >= 0.f)
     {
-        auto last_point = GetLastClickPoint();
         camera->OnPointerMove(static_cast<float>(yPos) - last_point.y(), last_point.x() - static_cast<float>(xPos));
     }
-    SetLastClickPoint(static_cast<float>(xPos), static_cast<float>(yPos));
 }
 
 void AppFramework::FrameBufferResizeCallback(int width, int height) const
@@ -508,9 +554,11 @@ void AppFramework::FrameBufferResizeCallback(int width, int height) const
     });
 }
 
-void AppFramework::ScrollCallback(double /*xoffset*/, double yoffset) const
+void AppFramework::ScrollCallback(double /*xoffset*/, double yoffset)
 {
-    if (ui_manager_ && ui_manager_->IsHandlingMouseEvent())
+    const bool has_pointer_position = last_x_ >= 0.f && last_y_ >= 0.f;
+    if (ShouldConsumeSceneMouseInput(MouseInputType::Scroll, static_cast<double>(last_x_),
+                                     static_cast<double>(last_y_), has_pointer_position))
     {
         return;
     }
@@ -526,8 +574,17 @@ void AppFramework::ScrollCallback(double /*xoffset*/, double yoffset) const
 
 void AppFramework::MouseButtonCallback(ClickButton button, KeyAction action, uint32_t mods)
 {
-    if (ui_manager_ && ui_manager_->IsHandlingMouseEvent())
+    MouseInputType input_type = MouseInputType::Move;
+    if (button == ClickButton::Primary_Left)
     {
+        input_type = action == KeyAction::Press ? MouseInputType::Press : MouseInputType::Release;
+    }
+
+    const bool has_pointer_position = last_x_ >= 0.f && last_y_ >= 0.f;
+    if (ShouldConsumeSceneMouseInput(input_type, static_cast<double>(last_x_), static_cast<double>(last_y_),
+                                     has_pointer_position))
+    {
+        CancelScenePointerInteraction();
         return;
     }
 
@@ -541,7 +598,10 @@ void AppFramework::MouseButtonCallback(ClickButton button, KeyAction action, uin
     {
         if (action == KeyAction::Release)
         {
-            ASSERT(current_pressing_ == true);
+            if (!current_pressing_)
+            {
+                return;
+            }
             current_pressing_ = false;
             camera->OnPointerUp();
 

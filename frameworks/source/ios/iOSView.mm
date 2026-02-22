@@ -4,11 +4,24 @@
 
 #include "application/AppFramework.h"
 #include "core/Exception.h"
-#include "core/math/Types.h"
 
 #include <UIKit/UIKit.h>
 
 @implementation iOSView
+
+- (CGPoint)scaledLocationInAppCoordinates:(CGPoint)location
+{
+    const auto &render_config = app_->GetRenderConfig();
+    const CGSize view_size = self.bounds.size;
+    if (view_size.width <= 0.f || view_size.height <= 0.f)
+    {
+        return location;
+    }
+
+    const double scale_x = static_cast<double>(render_config.image_width) / static_cast<double>(view_size.width);
+    const double scale_y = static_cast<double>(render_config.image_height) / static_cast<double>(view_size.height);
+    return CGPointMake(location.x * scale_x, location.y * scale_y);
+}
 
 - (void)didMoveToWindow
 {
@@ -19,18 +32,24 @@
     {
         UIPinchGestureRecognizer *recognizer =
             [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handlePinch:)];
+        recognizer.name = @"scene_pinch";
+        recognizer.delegate = self;
         [self addGestureRecognizer:recognizer];
     }
 
     {
         UITapGestureRecognizer *recognizer = [[UITapGestureRecognizer alloc] initWithTarget:self
                                                                                      action:@selector(handleTap:)];
+        recognizer.name = @"scene_tap";
+        recognizer.delegate = self;
         [self addGestureRecognizer:recognizer];
     }
 
     {
         UITapGestureRecognizer *recognizer =
             [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleFourFingersTap:)];
+        recognizer.name = @"scene_four_fingers_tap";
+        recognizer.delegate = self;
         [recognizer setNumberOfTouchesRequired:4];
         [self addGestureRecognizer:recognizer];
     }
@@ -38,6 +57,8 @@
     {
         UIPanGestureRecognizer *recognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self
                                                                                      action:@selector(handlePan:)];
+        recognizer.name = @"scene_pan";
+        recognizer.delegate = self;
         [recognizer setMaximumNumberOfTouches:1];
         [self addGestureRecognizer:recognizer];
     }
@@ -61,7 +82,13 @@
 {
     if (recognizer.state == UIGestureRecognizerStateRecognized)
     {
-        app_->ClickCallback();
+        auto location = [recognizer locationInView:self];
+        auto scaled_location = [self scaledLocationInAppCoordinates:location];
+        app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
+        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
+                                  sparkle::AppFramework::KeyAction::Press, 0);
+        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
+                                  sparkle::AppFramework::KeyAction::Release, 0);
     }
 }
 
@@ -75,19 +102,17 @@
 
 - (void)handlePan:(UIPanGestureRecognizer *)recognizer
 {
-    const float sensitivity = 3.f;
-
     auto location = [recognizer locationInView:self];
-    sparkle::Vector2Int scaled_location{location.x * sensitivity, location.y * sensitivity};
+    auto scaled_location = [self scaledLocationInAppCoordinates:location];
     switch (recognizer.state)
     {
     case UIGestureRecognizerStateBegan:
-        app_->CursorPositionCallback(scaled_location.x(), scaled_location.y());
+        app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
         app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
                                   sparkle::AppFramework::KeyAction::Press, 0);
         break;
     case UIGestureRecognizerStateChanged:
-        app_->CursorPositionCallback(scaled_location.x(), scaled_location.y());
+        app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
         break;
     case UIGestureRecognizerStateEnded:
         app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
@@ -102,7 +127,8 @@
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
     shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
 {
-    // Always return YES for simultaneous gestures
+    (void)gestureRecognizer;
+    (void)otherGestureRecognizer;
     return YES;
 }
 

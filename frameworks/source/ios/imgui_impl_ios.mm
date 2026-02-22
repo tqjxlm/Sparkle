@@ -5,7 +5,7 @@
 
 #ifndef IMGUI_DISABLE
 
-#include "core/math/Utilities.h"
+#include "core/Exception.h"
 #import "iOSView.h"
 
 #import <CoreFoundation/CoreFoundation.h>
@@ -13,6 +13,7 @@
 #include <UIKit/UIGestureRecognizer.h>
 #include <UIKit/UIKit.h>
 
+#include <cfloat>
 #include <ctime>
 
 static CFTimeInterval GetMachAbsoluteTimeInSeconds()
@@ -20,17 +21,17 @@ static CFTimeInterval GetMachAbsoluteTimeInSeconds()
     return (CFTimeInterval)(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9);
 }
 
-static sparkle::Vector2Int LocalViewToUiViewCoordinates(ImGuiIO &io, iOSView *view, const CGPoint &point)
+static CGPoint LocalViewToUiViewCoordinates(const ImGuiIO &io, const iOSView *view, const CGPoint &point)
 {
-    const float scale = io.DisplaySize.y / view.bounds.size.height;
-    return {point.x * scale, point.y * scale};
-}
+    const float view_height = static_cast<float>(view.bounds.size.height);
+    if (view_height <= 0.f)
+    {
+        return point;
+    }
 
-struct ImGuiMouseEvent
-{
-    sparkle::Vector2Int position;
-    bool down;
-};
+    const float scale = io.DisplaySize.y / view_height;
+    return CGPointMake(static_cast<CGFloat>(point.x * scale), static_cast<CGFloat>(point.y * scale));
+}
 
 @interface ImGuiEventHandler : NSObject
 
@@ -50,10 +51,12 @@ struct ImGuiMouseEvent
 - (void)RegisterEventHandlers
 {
     tap_recognizer_ = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
+    tap_recognizer_.name = @"imgui_tap";
     tap_recognizer_.delegate = view_;
     [view_ addGestureRecognizer:tap_recognizer_];
 
     pan_recognizer_ = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    pan_recognizer_.name = @"imgui_pan";
     pan_recognizer_.delegate = view_;
     [pan_recognizer_ setMaximumNumberOfTouches:1];
     [view_ addGestureRecognizer:pan_recognizer_];
@@ -71,26 +74,52 @@ struct ImGuiMouseEvent
     auto scaled_location = LocalViewToUiViewCoordinates(io, view_, location);
 
     io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
-    io.AddMousePosEvent(scaled_location.x(), scaled_location.y());
+    io.AddMousePosEvent(static_cast<float>(scaled_location.x), static_cast<float>(scaled_location.y));
     io.AddMouseButtonEvent(0, true);
     io.AddMouseButtonEvent(0, false);
 
     // reset mouse position to avoid hovering
-    io.AddMousePosEvent(-1, -1);
+    io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)recognizer
 {
-    if (recognizer.state == UIGestureRecognizerStateChanged || recognizer.state == UIGestureRecognizerStateBegan ||
-        recognizer.state == UIGestureRecognizerStateRecognized)
-    {
-        ImGuiIO &io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
+    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
 
+    constexpr float PixelsPerWheelStep = 80.f;
+
+    if (recognizer.state == UIGestureRecognizerStateBegan)
+    {
+        auto location = [recognizer locationInView:view_];
+        auto scaled_location = LocalViewToUiViewCoordinates(io, view_, location);
+        io.AddMousePosEvent(static_cast<float>(scaled_location.x), static_cast<float>(scaled_location.y));
+
+        [recognizer setTranslation:CGPointMake(0.f, 0.f) inView:view_];
+        return;
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateChanged)
+    {
+        // Keep wheel and pointer-move events separated to avoid trickling-induced wheel latency.
         auto translation = [recognizer translationInView:view_];
         auto scaled_translation = LocalViewToUiViewCoordinates(io, view_, translation);
+        const float wheel_x = static_cast<float>(scaled_translation.x) / PixelsPerWheelStep;
+        const float wheel_y = static_cast<float>(scaled_translation.y) / PixelsPerWheelStep;
+        if (wheel_x != 0.f || wheel_y != 0.f)
+        {
+            io.AddMouseWheelEvent(wheel_x, wheel_y);
+        }
 
-        io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
-        io.AddMouseWheelEvent(scaled_translation.x(), scaled_translation.y());
+        [recognizer setTranslation:CGPointMake(0.f, 0.f) inView:view_];
+        return;
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateEnded || recognizer.state == UIGestureRecognizerStateCancelled ||
+        recognizer.state == UIGestureRecognizerStateFailed)
+    {
+        // Avoid stale hover after a touch scroll ends.
+        io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
     }
 }
 

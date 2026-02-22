@@ -7,6 +7,7 @@
 
 #include <IconsFontAwesome7.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace sparkle
 {
@@ -261,6 +262,19 @@ bool UiManager::IsHandlingMouseEvent()
         return false;
     }
     return io_->WantCaptureMouse;
+}
+
+bool UiManager::IsPointerOverUi(float x, float y)
+{
+    if (!io_)
+    {
+        return false;
+    }
+
+    ImGuiWindow *hovered_window = nullptr;
+    ImGuiWindow *hovered_window_under_moving_window = nullptr;
+    ImGui::FindHoveredWindowEx(ImVec2(x, y), false, &hovered_window, &hovered_window_under_moving_window);
+    return hovered_window != nullptr;
 }
 
 bool UiManager::IsHanldingKeyboradEvent()

@@ -10,6 +10,8 @@
 
 #include <imgui_impl_android.h>
 
+#include <cfloat>
+
 extern "C" bool KeyEventFilter(const GameActivityKeyEvent * /*event*/)
 {
     return false;
@@ -22,9 +24,20 @@ extern "C" bool MotionEventFilter(const GameActivityMotionEvent * /*event*/)
 
 namespace sparkle
 {
+static bool IsTouchToolType(int32_t tool_type)
+{
+    return tool_type == AMOTION_EVENT_TOOL_TYPE_FINGER || tool_type == AMOTION_EVENT_TOOL_TYPE_UNKNOWN;
+}
+
 static void ImGuiHandleAndroidInputEvent(const GameActivityMotionEvent *input_event, const Vector2 &gui_scale)
 {
     ImGuiIO &io = ImGui::GetIO();
+    constexpr float PixelsPerWheelStep = 80.f;
+    constexpr float TouchScrollStartDistance = 8.f;
+    static int32_t touch_pointer_id = -1;
+    static Vector2 touch_start_pos = Vector2::Zero();
+    static Vector2 last_touch_pos = Vector2::Zero();
+    static bool touch_scrolling = false;
 
     int32_t event_action = input_event->action;
     int32_t event_pointer_index =
@@ -58,13 +71,43 @@ static void ImGuiHandleAndroidInputEvent(const GameActivityMotionEvent *input_ev
         // AMOTION_EVENT_ACTION_DOWN/_UP, but we have to process them separately to identify the actual button pressed.
         // This is done below via AMOTION_EVENT_ACTION_BUTTON_PRESS/_RELEASE. Here, we only process "FINGER" input (and
         // "UNKNOWN", as a fallback).
-        if (tool_type == AMOTION_EVENT_TOOL_TYPE_FINGER || tool_type == AMOTION_EVENT_TOOL_TYPE_UNKNOWN)
+        if (IsTouchToolType(tool_type))
         {
-            io.AddMousePosEvent(event_pos.x(), event_pos.y());
-            io.AddMouseButtonEvent(0, flags == AMOTION_EVENT_ACTION_DOWN);
+            if (flags == AMOTION_EVENT_ACTION_DOWN)
+            {
+                io.AddMousePosEvent(event_pos.x(), event_pos.y());
+                touch_pointer_id = axis.id;
+                touch_start_pos = event_pos;
+                last_touch_pos = event_pos;
+                touch_scrolling = false;
+            }
+            else
+            {
+                const bool is_active_touch = touch_pointer_id == axis.id;
+                if (is_active_touch && !touch_scrolling)
+                {
+                    // Treat a short single-finger gesture as a tap/click.
+                    io.AddMousePosEvent(event_pos.x(), event_pos.y());
+                    io.AddMouseButtonEvent(0, true);
+                    io.AddMouseButtonEvent(0, false);
+                }
+                touch_pointer_id = -1;
+                touch_scrolling = false;
+                io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+            }
         }
         break;
     }
+    case AMOTION_EVENT_ACTION_POINTER_DOWN:
+    case AMOTION_EVENT_ACTION_POINTER_UP:
+    case AMOTION_EVENT_ACTION_CANCEL:
+        if (IsTouchToolType(tool_type))
+        {
+            touch_pointer_id = -1;
+            touch_scrolling = false;
+            io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+        }
+        break;
     case AMOTION_EVENT_ACTION_BUTTON_PRESS:
     case AMOTION_EVENT_ACTION_BUTTON_RELEASE: {
         int32_t button_state = input_event->buttonState;
@@ -74,11 +117,41 @@ static void ImGuiHandleAndroidInputEvent(const GameActivityMotionEvent *input_ev
         break;
     }
     case AMOTION_EVENT_ACTION_HOVER_MOVE: // Hovering: Tool moves while NOT pressed (such as a physical mouse)
-    case AMOTION_EVENT_ACTION_MOVE:       // Touch pointer moves while DOWN
         io.AddMousePosEvent(event_pos.x(), event_pos.y());
         break;
+    case AMOTION_EVENT_ACTION_MOVE: { // Touch pointer moves while DOWN
+        const bool is_touch_tool = IsTouchToolType(tool_type);
+        const bool is_single_touch_pointer =
+            is_touch_tool && input_event->pointerCount == 1 && touch_pointer_id == axis.id;
+        if (is_single_touch_pointer)
+        {
+            auto touch_delta = event_pos - last_touch_pos;
+            if (!touch_scrolling)
+            {
+                io.AddMousePosEvent(event_pos.x(), event_pos.y());
+                auto touch_drag = event_pos - touch_start_pos;
+                if (touch_drag.squaredNorm() >= TouchScrollStartDistance * TouchScrollStartDistance)
+                {
+                    touch_scrolling = true;
+                }
+            }
+
+            if (touch_scrolling && touch_delta.squaredNorm() > 0.f)
+            {
+                auto wheel_delta = touch_delta / PixelsPerWheelStep;
+                io.AddMouseWheelEvent(wheel_delta.x(), wheel_delta.y());
+            }
+
+            last_touch_pos = event_pos;
+            break;
+        }
+
+        io.AddMousePosEvent(event_pos.x(), event_pos.y());
+        break;
+    }
     case AMOTION_EVENT_ACTION_SCROLL:
-        io.AddMouseWheelEvent(event_pos.x(), event_pos.y());
+        io.AddMouseWheelEvent(GameActivityPointerAxes_getAxisValue(&axis, AMOTION_EVENT_AXIS_HSCROLL),
+                              GameActivityPointerAxes_getAxisValue(&axis, AMOTION_EVENT_AXIS_VSCROLL));
         break;
     default:
         break;
@@ -165,6 +238,9 @@ bool AndroidNativeView::CreateVulkanSurface(void *in_instance, void *out_surface
 
 void AndroidNativeView::InitUiSystem()
 {
+    GameActivityPointerAxes_enableAxis(AMOTION_EVENT_AXIS_HSCROLL);
+    GameActivityPointerAxes_enableAxis(AMOTION_EVENT_AXIS_VSCROLL);
+
     ImGui_ImplAndroid_Init(view_.get());
     ui_enabled_ = true;
 }
@@ -252,12 +328,19 @@ void AndroidNativeView::ResetInputEvents()
     auto *main_app = static_cast<AppFramework *>(app_state_->userData);
     is_draging_ = false;
     is_pinching_ = false;
+    pinch_length_ = 0.f;
+    drag_detector_ = DragDetector{};
+    pinch_detector_ = PinchDetector{};
 
     main_app->ResetInputEvents();
 }
 
 void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramework *main_app)
 {
+    auto to_app_space = [this](const Vector2 &point) {
+        return Vector2{point.x() * gui_scale_.x(), point.y() * gui_scale_.y()};
+    };
+
     GESTURE_STATE drag_state = drag_detector_.Detect(&event);
     GESTURE_STATE pinch_state = pinch_detector_.Detect(&event);
 
@@ -268,7 +351,8 @@ void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramewo
         {
             Vector2 v;
             drag_detector_.GetPointer(v);
-            main_app->CursorPositionCallback(v.x(), v.y());
+            auto app_v = to_app_space(v);
+            main_app->CursorPositionCallback(app_v.x(), app_v.y());
 
             main_app->MouseButtonCallback(AppFramework::ClickButton::Primary_Left, AppFramework::KeyAction::Press, 0);
 
@@ -280,7 +364,8 @@ void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramewo
 
             Vector2 v;
             drag_detector_.GetPointer(v);
-            main_app->CursorPositionCallback(v.x(), v.y());
+            auto app_v = to_app_space(v);
+            main_app->CursorPositionCallback(app_v.x(), app_v.y());
         }
         else if (drag_state & GESTURE_STATE_END)
         {
@@ -327,7 +412,8 @@ void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramewo
                 is_draging_ = true;
                 Vector2 v;
                 pinch_detector_.GetPointer(v);
-                main_app->CursorPositionCallback(v.x(), v.y());
+                auto app_v = to_app_space(v);
+                main_app->CursorPositionCallback(app_v.x(), app_v.y());
                 main_app->MouseButtonCallback(AppFramework::ClickButton::Primary_Left, AppFramework::KeyAction::Press,
                                               0);
             }

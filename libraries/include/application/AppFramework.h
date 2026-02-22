@@ -108,11 +108,22 @@ public:
     void CursorPositionCallback(double xPos, double yPos);
     void MouseButtonCallback(ClickButton button, KeyAction action, uint32_t mods);
     void ClickCallback();
-    void ScrollCallback(double xoffset, double yoffset) const;
+    void ScrollCallback(double xoffset, double yoffset);
     void KeyboardCallback(int key, KeyAction action, bool shift_on) const;
     void CaptureNextFrames(int count);
 
 private:
+    enum class MouseInputType : uint8_t
+    {
+        Move,
+        Press,
+        Release,
+        Scroll
+    };
+
+    bool ShouldConsumeSceneMouseInput(MouseInputType input_type, double x, double y, bool has_pointer_position);
+    void CancelScenePointerInteraction();
+
     void AdvanceFrame(float main_thread_time);
 
     void DebugNextFrame();
@@ -146,6 +157,7 @@ private:
 
     // event handler
     bool current_pressing_ = false;
+    bool ui_mouse_sequence_active_ = false;
     float last_x_ = -1.f;
     float last_y_ = -1.f;
     Timer click_timer_;
