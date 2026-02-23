@@ -111,7 +111,7 @@ python3 build.py --framework glfw --config Release
 
 ``` shell
 # make a GLFW MacOS debug build with llvm toolchain
-export VULKAN_SDK=D:/SDKs/VulkanSDK/1.4.313.0
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.313.0
 python3 build.py --framework glfw
 ```
 
@@ -176,33 +176,6 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 * `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)
 * `--help` - Show all usage help.
 * `--run` - Run after building. For mobile builds, it tries to run on a connected device.
-
-**Common run options:**
-
-* `--pipeline` - Rendering pipeline to use (cpu, gpu, forward, deferred).
-* `--scene` - Scene to render. Empty for the standard testing scene. Other values for models under resources (e.g. models/WaterBottle/WaterBottle.gltf).
-* `--validation` - Enable graphics API validation.
-* `--load_last_session` - Load last session on startup, including all configs and camera state. This will override current command line arguments.
-* `--auto_screenshot` - Take a screenshot after the scene is fully loaded and a frame is fully rendered. The screenshot is saved to generated/screenshots/ and named with the scene name and pipeline. This is very useful when you work with a bot. It's also used in CI/CD.
-* `--help` - Show all usage help.
-
-### Configs
-
-#### How to use config
-
-* Default config: copied from resources/config/config.json to final package on every build.
-* User config: generated at [InternalStoragePath]/generated/config/config.json on first run of the built package. It overrides the default config.
-* Commandline arguments: given in command line if available. It overrides all config files. example:
-
-#### Important configs
-
-* pipeline: rendering pipeline to use (cpu, gpu, forward, forward_rt)
-* scene: scene to render. empty for the standard testing scene. other values for models under resources/models.
-* validation: enable graphics API validation.
-* max-spp: max sample per pixel
-* thread: num threads to use for cpu pipeline
-
-Search across the project for keyword "ConfigValue" for more available configs.
 
 ## Work with IDE
 
