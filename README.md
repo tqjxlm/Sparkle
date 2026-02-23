@@ -71,9 +71,13 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 You can try the latest builds on [Github releases](https://github.com/tqjxlm/Sparkle/releases).
 
+For detailed usage of the app, please refer to [docs/Run.md](docs/Run.md);
+
 ## Development Guide
 
-For how to build and run the project, please refer to [docs/Development.md](docs/Development.md).
+For how to build the project, please refer to [docs/Build.md](docs/Build.md).
+
+For project architecture, please refer to [docs/Architecture.md](docs/Architecture.md).
 
 ## Todo List & Known Issues
 

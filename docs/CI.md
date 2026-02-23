@@ -27,12 +27,12 @@
 
 ```bash
 # General usage (does not trigger build automatically)
-python .\dev\functional_test.py --framework [glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]
+python3 .\dev\functional_test.py --framework [glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]
 ```
 
 ```bash
 # On Windows without a physical GPU (does not trigger build automatically)
-python .\dev\functional_test.py --framework glfw --pipeline forward --software
+python3 .\dev\functional_test.py --framework glfw --pipeline forward --software
 ```
 
 ### TestScene
