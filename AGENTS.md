@@ -25,6 +25,7 @@ See [docs/Build.md](docs/Build.md) for all build and run commands.
 
 * Apply strictly [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 * Apply Linus Torvalds-level scrutiny to all changes.
+* Always use formatters to format any change when possible. Do not format manually!
 
 ## Documentation
 
