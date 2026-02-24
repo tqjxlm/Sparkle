@@ -4,7 +4,7 @@ Provides a unified interface for all framework builders using polymorphism.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class FrameworkBuilder(ABC):
@@ -38,6 +38,6 @@ class FrameworkBuilder(ABC):
         pass
 
     @abstractmethod
-    def run(self, args: Dict[str, Any]) -> None:
-        """Run the built project."""
+    def run(self, args: Dict[str, Any]) -> Optional[int]:
+        """Run the built project. Returns the process exit code, or None."""
         pass

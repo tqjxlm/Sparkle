@@ -27,6 +27,10 @@ struct AppConfig : public ConfigCollection
     bool load_last_session;
     bool headless;
 
+#if ENABLE_TEST_CASES
+    std::string test_case;
+#endif
+
 protected:
     void Validate() override
     {

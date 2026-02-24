@@ -68,7 +68,11 @@
     if (sparkle::CoreStates::IsExiting())
     {
 #if FRAMEWORK_MACOS
+#if ENABLE_TEST_CASES
+        exit(app_->GetExitCode());
+#else
         [[NSApplication sharedApplication] terminate:nil];
+#endif
 #else
         // TODO(tqjxlm): exit gracefully for other platforms
         exit(0);

@@ -178,4 +178,5 @@ class GlfwBuilder(FrameworkBuilder):
         output_dir = get_output_dir(False)
         run_cmd = [os.path.join(output_dir, "build", exe_name)] + args["unknown_args"]
         print(f"Running executable: {run_cmd}")
-        subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"), env=os.environ.copy())
+        result = subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"), env=os.environ.copy())
+        return result.returncode

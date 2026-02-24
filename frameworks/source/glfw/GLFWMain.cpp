@@ -27,7 +27,11 @@ int main(int argc, char *argv[])
 
     app.Cleanup();
 
+#if ENABLE_TEST_CASES
+    return app.GetExitCode();
+#else
     return 0;
+#endif
 }
 
 #endif

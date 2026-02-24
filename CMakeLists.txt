@@ -12,6 +12,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(USE_GLFW "Use GLFW instead of the native window system" OFF)
 option(ENABLE_PROFILER "Build with profiler support" OFF)
+option(ENABLE_TEST_CASES "Build with test case support" OFF)
 option(ENABLE_APPLE_AUTO_SIGN "Configure xcode project to manage signing automatically" OFF)
 
 macro(assign_bool var)
@@ -85,6 +86,15 @@ FILE(GLOB_RECURSE HEADERS
 FILE(GLOB_RECURSE SOURCES
     "libraries/source/*.cpp"
 )
+
+if(ENABLE_TEST_CASES)
+    target_compile_definitions(sparkle PRIVATE ENABLE_TEST_CASES=1)
+    FILE(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
+    target_sources(sparkle PRIVATE ${TEST_SOURCES})
+    target_include_directories(sparkle PRIVATE "tests/")
+else()
+    target_compile_definitions(sparkle PRIVATE ENABLE_TEST_CASES=0)
+endif()
 
 # ------------------ compiler configuration ------------------
 
@@ -428,6 +438,12 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
     FILES ${SOURCES}
 )
+
+if(ENABLE_TEST_CASES)
+    source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
+        FILES ${TEST_SOURCES}
+    )
+endif()
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty
     PREFIX "thirdparty"
