@@ -87,6 +87,7 @@ error; the first registration wins.
 
 ## Built-in Test Cases
 
-| Name    | File                                                      | What it does                                                                        |
-| ------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `smoke` | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp) | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline. |
+| Name         | File                                                                          | What it does                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `smoke`      | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp)                     | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline.                                           |
+| `screenshot` | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp) | Waits for renderer ready, clears old matching screenshots, captures one, then passes. Used by functional tests and visual QA. |

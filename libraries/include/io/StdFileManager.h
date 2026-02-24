@@ -18,6 +18,9 @@ public:
     std::vector<char> Read(const Path &file) override;
     std::string Write(const Path &file, const char *data, uint64_t size) override;
     bool TryCreateDirectory(const Path &file) override;
+    bool IsDirectory(const Path &path) override;
+    bool IsRegularFile(const Path &path) override;
+    bool Remove(const Path &path) override;
     std::vector<Path> ListDirectory(const Path &dirpath) override;
 
 protected:

@@ -5,7 +5,7 @@ then runs the app executable. Importable as a module for the env setup.
 
 Usage:
     python dev/run_without_gpu.py [app args...]
-    python dev/run_without_gpu.py --auto_screenshot true --pipeline forward
+    python dev/run_without_gpu.py --test --test_case screenshot --pipeline forward
 """
 
 import os

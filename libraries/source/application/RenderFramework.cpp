@@ -133,7 +133,7 @@ void RenderFramework::RenderLoop()
 
             renderer_->Render();
 
-            TryAutoScreenshot();
+            ProcessScreenshotRequest();
 
             EndFrame();
         }
@@ -384,9 +384,19 @@ bool RenderFramework::IsSceneFullyLoaded() const
     return scene_loaded_notified_;
 }
 
-void RenderFramework::TryAutoScreenshot()
+void RenderFramework::RequestTakeScreenshot()
 {
-    if (!render_config_.auto_screenshot || auto_screenshot_taken_ || !renderer_)
+    screenshot_requested_ = true;
+}
+
+bool RenderFramework::IsScreenshotCompleted() const
+{
+    return screenshot_completed_.load();
+}
+
+void RenderFramework::ProcessScreenshotRequest()
+{
+    if (!screenshot_requested_ || screenshot_in_progress_ || !renderer_)
     {
         return;
     }
@@ -396,32 +406,11 @@ void RenderFramework::TryAutoScreenshot()
         return;
     }
 
-    if (render_config_.clear_screenshots)
-    {
-        auto scene_name = SanitizeFileNameToken(scene_->GetRootNode()->GetName());
-        auto prefix = std::format("{}_{}_", scene_name, Enum2Str(render_config_.pipeline));
-        auto screenshot_dir =
-            FileManager::GetNativeFileManager()->ResolvePath(Path::External("screenshots"));
-
-        if (std::filesystem::is_directory(screenshot_dir))
-        {
-            for (const auto &entry : std::filesystem::directory_iterator(screenshot_dir))
-            {
-                if (entry.is_regular_file() && entry.path().extension() == ".png" &&
-                    entry.path().filename().string().starts_with(prefix))
-                {
-                    Log(Info, "Clearing old screenshot: {}", entry.path().filename().string());
-                    std::filesystem::remove(entry.path());
-                }
-            }
-        }
-    }
-
     auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline);
-    Log(Info, "Auto screenshot triggered: {}", screenshot_name);
+    Log(Info, "Screenshot requested: {}", screenshot_name);
     renderer_->RequestSaveScreenshot(screenshot_name, false,
-                                     []() { CoreStates::Instance().SetAppState(CoreStates::AppState::Exiting); });
-    auto_screenshot_taken_ = true;
+                                     [this]() { screenshot_completed_.store(true); });
+    screenshot_in_progress_ = true;
 }
 
 void RenderFramework::DrawUi()
