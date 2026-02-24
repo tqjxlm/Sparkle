@@ -8,9 +8,13 @@ This file provides guidance to AI coding agents when working with this repositor
 ## Test Driven Development
 
 * Always run build tests and functional tests to ensure quality. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) and [docs/CI.md](docs/CI.md) for details.
-* Always write tests for newly implemented features. Before implementing anything, figure out how to test it. Before fixing any bug, figure out how to reproduce it.
+* Always make sure you have the ability to test with confidence before actual implementation. If in doubt, ask the user to clarify.
+* Create new test cases that exactly test against new features or reproduce a bug. Improve existing test cases when necessary.
+* Do not ignore any crashes or errors. If it is not related to current task, report it and record it to [docs/TODO.md](docs/TODO.md). Otherwise fix them before continuing.
 
-See [docs/Build.md](docs/Build.md) for all build and run commands.
+See [docs/Build.md](docs/Build.md) for all build commands.
+
+See [docs/Run.md](docs/Run.md) for run arguments, log location, path conventions, etc..
 
 ## Visual QA
 
@@ -41,4 +45,3 @@ See [docs/Build.md](docs/Build.md) for all build and run commands.
 * **Shader errors**: Check both SPIRV compilation and Metal conversion logs
 * **RHI resources**: Use deferred deletion pattern for GPU resource cleanup
 * **Cross-platform paths**: Use `FileManager` abstraction, never raw path separators
-* ./dev/functional_test.py does not trigger building. If any code change is made, run build.py first
