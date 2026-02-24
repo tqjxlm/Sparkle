@@ -34,28 +34,29 @@ The base storage path varies by platform:
 
 ### Important Configs
 
-| cvar                | type   | default    | pipelines         | description                                                                                |
-| ------------------- | ------ | ---------- | ----------------- | ------------------------------------------------------------------------------------------ |
-| `pipeline`          | string | `forward`  | all               | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                    |
-| `scene`             | string | *(empty)*  | all               | Scene to render. Empty = default test scene. Other values = path under `resources/models/` |
-| `width` / `height`  | uint   | 1280 / 720 | all               | Render resolution                                                                          |
-| `max-spp`           | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                          |
-| `spp`               | uint   | 1          | cpu, gpu          | Rays per sample per frame                                                                  |
-| `bounce`            | uint   | 8          | cpu, gpu          | Max ray bounces per path                                                                   |
-| `thread`            | uint   | 64         | cpu               | Max threads for CPU path tracer                                                            |
-| `validation`        | bool   | false      | vulkan only       | Enable Vulkan validation layers                                                            |
-| `vsync`             | bool   | false      | all               | Enable vsync                                                                               |
-| `ssao`              | bool   | false      | forward, deferred | Enable SSAO                                                                                |
-| `diffuse_ibl`       | bool   | true       | forward, deferred | Enable diffuse IBL                                                                         |
-| `specular_ibl`      | bool   | true       | forward, deferred | Enable specular IBL                                                                        |
-| `spatial_denoise`   | bool   | false      | gpu               | Spatial denoise post-process                                                               |
-| `enable_nee`        | bool   | false      | gpu               | Next event estimation                                                                      |
-| `debug_mode`        | string | *(empty)*  | all               | Renderer debug output mode                                                                 |
-| `screen_log`        | bool   | true       | all               | On-screen log overlay                                                                      |
-| `rebuild_cache`     | bool   | false      | all               | Force rebuild all cook caches                                                              |
-| `target_framerate`  | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                 |
-| `load_last_session` | bool   | false      | all               | Restore last session (camera, config) on startup                                           |
-| `auto_screenshot`   | bool   | false      | all               | Auto-capture screenshot after scene is fully loaded                                        |
+| cvar                | type   | default    | pipelines         | description                                                                                  |
+| ------------------- | ------ | ---------- | ----------------- | -------------------------------------------------------------------------------------------- |
+| `pipeline`          | string | `forward`  | all               | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                      |
+| `scene`             | string | *(empty)*  | all               | Scene to render. Empty = default test scene. Other values = path under `resources/models/`   |
+| `width` / `height`  | uint   | 1280 / 720 | all               | Render resolution                                                                            |
+| `max-spp`           | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                            |
+| `spp`               | uint   | 1          | cpu, gpu          | Rays per sample per frame                                                                    |
+| `bounce`            | uint   | 8          | cpu, gpu          | Max ray bounces per path                                                                     |
+| `thread`            | uint   | 64         | cpu               | Max threads for CPU path tracer                                                              |
+| `validation`        | bool   | false      | vulkan only       | Enable Vulkan validation layers                                                              |
+| `vsync`             | bool   | false      | all               | Enable vsync                                                                                 |
+| `ssao`              | bool   | false      | forward, deferred | Enable SSAO                                                                                  |
+| `diffuse_ibl`       | bool   | true       | forward, deferred | Enable diffuse IBL                                                                           |
+| `specular_ibl`      | bool   | true       | forward, deferred | Enable specular IBL                                                                          |
+| `spatial_denoise`   | bool   | false      | gpu               | Spatial denoise post-process                                                                 |
+| `enable_nee`        | bool   | false      | gpu               | Next event estimation                                                                        |
+| `debug_mode`        | string | *(empty)*  | all               | Renderer debug output mode                                                                   |
+| `screen_log`        | bool   | true       | all               | On-screen log overlay                                                                        |
+| `rebuild_cache`     | bool   | false      | all               | Force rebuild all cook caches                                                                |
+| `target_framerate`  | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                   |
+| `load_last_session` | bool   | false      | all               | Restore last session (camera, config) on startup                                             |
+| `headless`          | bool   | false      | all               | Run without creating a window and without input (desktop GLFW and macOS frameworks; not supported on mobile) |
+| `auto_screenshot`   | bool   | false      | all               | Auto-capture screenshot after scene is fully loaded                                          |
 
 Search across the project for keyword "ConfigValue" for more available configs.
 

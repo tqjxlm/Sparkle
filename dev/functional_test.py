@@ -30,6 +30,8 @@ def parse_args():
                         help="Skip running the app (use existing screenshot)")
     parser.add_argument("--software", action="store_true",
                         help="Use Mesa Lavapipe software Vulkan rendering (Windows only)")
+    parser.add_argument("--headless", action="store_true",
+                        help="Run without creating a window (desktop GLFW and macOS frameworks)")
 
     return parser.parse_known_args()
 
@@ -49,7 +51,7 @@ def get_executable(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_app(framework, pipeline, scene, other_args, env=None):
+def run_app(framework, pipeline, scene, other_args, headless=False, env=None):
     exe_path, cwd = get_executable(framework)
     if not os.path.exists(exe_path):
         print(f"Executable not found: {exe_path}")
@@ -58,6 +60,9 @@ def run_app(framework, pipeline, scene, other_args, env=None):
 
     run_cmd = [exe_path, "--auto_screenshot", "true",
                "--pipeline", pipeline] + other_args
+
+    if headless:
+        run_cmd += ["--headless", "true"]
 
     if scene:
         run_cmd += ["--scene", scene]
@@ -149,7 +154,7 @@ def main():
 
     if not args.skip_run:
         run_app(args.framework, args.pipeline,
-                args.scene, unknown_args, env=env)
+                args.scene, unknown_args, headless=args.headless, env=env)
     else:
         print("Skipping app run, using existing screenshot.")
 

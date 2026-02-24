@@ -34,6 +34,11 @@ public:
         return is_valid_;
     }
 
+    [[nodiscard]] virtual bool IsHeadless() const
+    {
+        return false;
+    }
+
     // setup platform-specific environment, e.g. callbacks
     virtual void InitGUI(AppFramework *app) = 0;
 

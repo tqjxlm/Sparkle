@@ -18,6 +18,10 @@ public:
     bool ShouldClose() override;
     void Tick() override;
     void SetTitle(const char *title) override;
+    [[nodiscard]] bool IsHeadless() const override
+    {
+        return headless_;
+    }
 #if ENABLE_VULKAN
     bool CreateVulkanSurface(void *in_instance, void *out_surface) override;
     void GetVulkanRequiredExtensions(std::vector<const char *> &required_extensions) override;
@@ -38,7 +42,8 @@ private:
 
     static void ScrollCallback(GLFWwindow *window, double xoffset, double yoffset);
 
-    GLFWwindow *view_;
+    GLFWwindow *view_ = nullptr;
+    bool headless_ = false;
 };
 } // namespace sparkle
 #endif

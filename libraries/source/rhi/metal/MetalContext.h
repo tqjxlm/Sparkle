@@ -11,7 +11,8 @@ namespace sparkle
 class MetalContext
 {
 public:
-    MetalContext(MetalRHI *context, MetalView *mtk_view);
+    MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
+                 uint32_t headless_height);
 
     [[nodiscard]] id<MTLDevice> GetDevice() const
     {
@@ -38,9 +39,23 @@ public:
         return view_;
     }
 
+    [[nodiscard]] CGSize GetDrawableSize() const
+    {
+        if (headless_)
+        {
+            return CGSizeMake(headless_width_, headless_height_);
+        }
+        return view_.drawableSize;
+    }
+
     [[nodiscard]] MetalRHI *GetRHI() const
     {
         return rhi_;
+    }
+
+    [[nodiscard]] bool IsHeadless() const
+    {
+        return headless_;
     }
 
     void CreateBackBuffer();
@@ -77,6 +92,9 @@ private:
 
     uint32_t num_frames_to_capture_ = 0;
     bool is_capturing_frame_ = false;
+    bool headless_ = false;
+    uint32_t headless_width_ = 0;
+    uint32_t headless_height_ = 0;
 };
 
 // this static member is used to simplify code structure

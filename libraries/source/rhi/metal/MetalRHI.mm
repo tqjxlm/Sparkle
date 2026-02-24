@@ -43,8 +43,15 @@ bool MetalRHI::InitRHI(NativeView *inWindow, std::string &error)
             return false;
         }
 
-        auto *metal_view = static_cast<AppleNativeView *>(inWindow)->GetMetalView();
-        context = std::make_unique<MetalContext>(this, metal_view);
+        auto *native_view = static_cast<AppleNativeView *>(inWindow);
+        auto *metal_view = native_view->GetMetalView();
+
+        int width = 0;
+        int height = 0;
+        native_view->GetFrameBufferSize(width, height);
+
+        context = std::make_unique<MetalContext>(this, metal_view, IsHeadless(), static_cast<uint32_t>(width),
+                                                 static_cast<uint32_t>(height));
 
         if (context->GetDevice() == nullptr)
         {
@@ -80,8 +87,8 @@ void MetalRHI::InitRenderResources()
 {
     context->CreateBackBuffer();
 
-    back_buffer_rt_ =
-        CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetView().drawableSize), "BackBufferRT");
+    auto rt_name = IsHeadless() ? "HeadlessBackBufferRT" : "BackBufferRT";
+    back_buffer_rt_ = CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetDrawableSize()), rt_name);
 }
 
 void MetalRHI::CleanupInternal()
