@@ -36,6 +36,9 @@ static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU 
 static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
 static ConfigValue<bool> config_auto_screenshot("auto_screenshot", "auto screenshot after scene is fully loaded",
                                                 "renderer", false);
+static ConfigValue<bool> config_clear_screenshots("clear_screenshots",
+                                                  "clear old screenshots before taking a new auto screenshot",
+                                                  "renderer", false);
 
 void RenderConfig::Init()
 {
@@ -58,6 +61,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_gpu_budget_ratio, gpu_time_budget_ratio);
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
     ConfigCollectionHelper::RegisterConfig(this, config_auto_screenshot, auto_screenshot);
+    ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
 
     if (auto_screenshot)
     {
