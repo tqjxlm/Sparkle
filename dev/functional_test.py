@@ -3,7 +3,6 @@
 import argparse
 import glob
 import os
-import platform
 import subprocess
 import sys
 import tempfile
@@ -32,33 +31,21 @@ def parse_args():
                         help="Use Mesa Lavapipe software Vulkan rendering (Windows only)")
     parser.add_argument("--headless", action="store_true",
                         help="Run without creating a window (desktop GLFW and macOS frameworks)")
+    parser.add_argument("--skip_build", action="store_true",
+                        help="Skip building before running (assumes already built)")
 
     return parser.parse_known_args()
 
 
-def get_executable(framework):
-    if framework == "glfw":
-        exe_name = "sparkle.exe" if platform.system() == "Windows" else "sparkle"
-        build_dir = os.path.join(
-            PROJECT_ROOT, "build_system", "glfw", "output", "build")
-        exe_path = os.path.join(build_dir, exe_name)
-        return exe_path, build_dir
-    if framework == "macos":
-        app_path = os.path.join(
-            PROJECT_ROOT, "build_system", "macos", "output", "build", "sparkle.app")
-        exe_path = os.path.join(app_path, "Contents", "MacOS", "sparkle")
-        return exe_path, None
-    raise ValueError(f"Unsupported framework: {framework}")
-
-
-def run_app(framework, pipeline, scene, other_args, headless=False, env=None):
-    exe_path, cwd = get_executable(framework)
-    if not os.path.exists(exe_path):
-        print(f"Executable not found: {exe_path}")
-        print("Build the project first with: python3 build.py --framework " + framework)
-        sys.exit(1)
-
-    run_cmd = [exe_path, "--auto_screenshot", "true",
+def build_and_run(framework, pipeline, scene, other_args, headless=False, env=None, skip_build=False):
+    build_py = os.path.join(PROJECT_ROOT, "build.py")
+    run_cmd = [sys.executable, build_py,
+               "--framework", framework]
+    if skip_build:
+        run_cmd.append("--skip_build")
+    run_cmd += ["--run",
+               "--auto_screenshot", "true",
+               "--clear_screenshots", "true",
                "--pipeline", pipeline] + other_args
 
     if headless:
@@ -71,7 +58,7 @@ def run_app(framework, pipeline, scene, other_args, headless=False, env=None):
         env = os.environ.copy()
 
     print(f"Running: {' '.join(run_cmd)}", flush=True)
-    result = subprocess.run(run_cmd, cwd=cwd, env=env)
+    result = subprocess.run(run_cmd, cwd=PROJECT_ROOT, env=env)
     print(f"App exited with code {result.returncode}", flush=True)
     if result.returncode != 0:
         sys.exit(1)
@@ -153,8 +140,9 @@ def main():
         env = setup_lavapipe()
 
     if not args.skip_run:
-        run_app(args.framework, args.pipeline,
-                args.scene, unknown_args, headless=args.headless, env=env)
+        build_and_run(args.framework, args.pipeline,
+                args.scene, unknown_args, headless=args.headless, env=env,
+                skip_build=args.skip_build)
     else:
         print("Skipping app run, using existing screenshot.")
 

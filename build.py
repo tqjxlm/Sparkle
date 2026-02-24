@@ -158,10 +158,9 @@ def build_project(args):
     else:
         if args["skip_build"]:
             print("Skipping build.")
-            return
-
-        print("Building...")
-        builder.build(args)
+        else:
+            print("Building...")
+            builder.build(args)
 
         if args["archive"]:
             print("Archiving...")
@@ -182,7 +181,6 @@ def main():
 
     check_environment(args)
 
-    # Run build process
     build_project(args)
 
 

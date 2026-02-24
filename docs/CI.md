@@ -28,18 +28,13 @@
 ### Test Command
 
 ```bash
-# General usage (does not trigger build automatically)
-python3 .\dev\functional_test.py --framework [glfw, macos, ios, android] --pipeline [forward, deferred, gpu, cpu]
+# General usage (will trigger build unless with --skip_build)
+python3 ./dev/functional_test.py --framework [glfw, macos] --config Release --pipeline [forward, deferred, gpu, cpu] --headless
 ```
 
 ```bash
-# On Windows without a physical GPU (does not trigger build automatically)
-python3 .\dev\functional_test.py --framework glfw --pipeline forward --software --headless
-```
-
-```bash
-# On macOS framework (does not trigger build automatically)
-python3 .\dev\functional_test.py --framework macos --pipeline forward --headless
+# On Windows without a physical GPU (will trigger build unless with --skip_build)
+python3 ./dev/functional_test.py --framework glfw --config Release --pipeline forward --software --headless
 ```
 
 ### TestScene

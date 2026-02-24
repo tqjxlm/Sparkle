@@ -3,6 +3,8 @@
 #include "application/NativeView.h"
 #include "application/UiManager.h"
 #include "core/CoreStates.h"
+#include "core/FileManager.h"
+#include "core/Path.h"
 #include "core/Profiler.h"
 #include "core/ThreadManager.h"
 #include "core/task/TaskDispatcher.h"
@@ -18,6 +20,7 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <filesystem>
 #include <mutex>
 
 constexpr float LogInterval = 1.f;
@@ -391,6 +394,27 @@ void RenderFramework::TryAutoScreenshot()
     if (!IsSceneFullyLoaded() || !renderer_->IsReadyForAutoScreenshot())
     {
         return;
+    }
+
+    if (render_config_.clear_screenshots)
+    {
+        auto scene_name = SanitizeFileNameToken(scene_->GetRootNode()->GetName());
+        auto prefix = std::format("{}_{}_", scene_name, Enum2Str(render_config_.pipeline));
+        auto screenshot_dir =
+            FileManager::GetNativeFileManager()->ResolvePath(Path::External("screenshots"));
+
+        if (std::filesystem::is_directory(screenshot_dir))
+        {
+            for (const auto &entry : std::filesystem::directory_iterator(screenshot_dir))
+            {
+                if (entry.is_regular_file() && entry.path().extension() == ".png" &&
+                    entry.path().filename().string().starts_with(prefix))
+                {
+                    Log(Info, "Clearing old screenshot: {}", entry.path().filename().string());
+                    std::filesystem::remove(entry.path());
+                }
+            }
+        }
     }
 
     auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline);
