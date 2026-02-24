@@ -16,10 +16,13 @@
 #include "VulkanSwapChain.h"
 #include "VulkanTimer.h"
 #include "VulkanUi.h"
+#include "application/NativeView.h"
 #include "core/Logger.h"
 
 namespace sparkle
 {
+constexpr unsigned HeadlessFramesInFlight = 2;
+
 static std::vector<RHIResourceWeakRef<VulkanRenderPass>> render_passes;
 
 void VulkanRHI::WaitForDeviceIdle()
@@ -65,13 +68,13 @@ void VulkanRHI::EndFrameInternal()
 
     auto result = context->EndFrame();
 
-    bool should_recrate_swapchain = result == VK_ERROR_OUT_OF_DATE_KHR || frame_buffer_resized_;
+    bool should_recreate_swapchain = !IsHeadless() && (result == VK_ERROR_OUT_OF_DATE_KHR || frame_buffer_resized_);
 
-    if (result == VK_SUBOPTIMAL_KHR)
+    if (!IsHeadless() && result == VK_SUBOPTIMAL_KHR)
     {
         if (GetConfig().enable_pre_transform)
         {
-            should_recrate_swapchain = true;
+            should_recreate_swapchain = true;
         }
         else
         {
@@ -80,7 +83,7 @@ void VulkanRHI::EndFrameInternal()
         }
     }
 
-    if (should_recrate_swapchain)
+    if (should_recreate_swapchain)
     {
         frame_buffer_resized_ = false;
         RecreateSwapChain();
@@ -144,6 +147,12 @@ bool VulkanRHI::SupportsHardwareRayTracing()
 
 void VulkanRHI::RecreateSwapChain()
 {
+    if (IsHeadless())
+    {
+        Log(Warn, "RecreateSwapChain is ignored in headless mode.");
+        return;
+    }
+
     Log(Info, "Recreating swap chain, frame index {}", total_frame_);
 
     WaitForDeviceIdle();
@@ -196,12 +205,43 @@ static auto CreateBackBufferDepth(VkExtent2D extent)
 
 void VulkanRHI::CreateBackBufferRenderTarget()
 {
-    context->RecreateSwapChain();
-
     ASSERT(!back_buffer_rt_);
 
-    back_buffer_rt_ =
-        CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetSwapChain()->GetExtent()), "BackBufferRT");
+    if (IsHeadless())
+    {
+        int width = 0;
+        int height = 0;
+        GetHardwareInterface()->GetFrameBufferSize(width, height);
+        ASSERT_F(width > 0 && height > 0, "Invalid headless render size [{}, {}]", width, height);
+
+        VkExtent2D extent{.width = static_cast<uint32_t>(width), .height = static_cast<uint32_t>(height)};
+        SetMaxFramesInFlight(HeadlessFramesInFlight);
+
+        RHIImage::Attribute color_attribute;
+        color_attribute.format = PixelFormat::B8G8R8A8_SRGB;
+        color_attribute.width = extent.width;
+        color_attribute.height = extent.height;
+        color_attribute.mip_levels = 1;
+        color_attribute.msaa_samples = 1;
+        color_attribute.usages = RHIImage::ImageUsage::ColorAttachment;
+        color_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+                                   .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                                   .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                                   .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
+        auto color_image = CreateImage(color_attribute, "HeadlessBackBufferColor");
+        auto depth_image = CreateBackBufferDepth(extent);
+
+        RHIRenderTarget::ColorImageArray color_images{};
+        color_images[0] = color_image;
+        back_buffer_rt_ = CreateRenderTarget({}, color_images, depth_image, "HeadlessBackBufferRT");
+    }
+    else
+    {
+        context->RecreateSwapChain();
+        back_buffer_rt_ =
+            CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetSwapChain()->GetExtent()), "BackBufferRT");
+    }
 
     back_buffer_dirty_ = true;
 }

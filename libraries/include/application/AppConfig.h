@@ -25,6 +25,7 @@ struct AppConfig : public ConfigCollection
     bool default_skybox;
     bool render_thread;
     bool load_last_session;
+    bool headless;
 
 protected:
     void Validate() override

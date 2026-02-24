@@ -7,6 +7,7 @@
 #endif
 
 #include "application/AppFramework.h"
+#include "core/Logger.h"
 
 #if FRAMEWORK_MACOS
 #import <imgui_impl_osx.h>
@@ -20,6 +21,18 @@ namespace sparkle
 void AppleNativeView::InitGUI(AppFramework *app)
 {
     app_ = app;
+
+    const auto &app_config = app_->GetAppConfig();
+    const auto &render_config = app_->GetRenderConfig();
+    headless_ = app_config.headless;
+    if (headless_)
+    {
+        headless_width_ = static_cast<int>(render_config.image_width);
+        headless_height_ = static_cast<int>(render_config.image_height);
+        window_scale_ = Vector2::Ones();
+        can_render_ = true;
+        is_valid_ = true;
+    }
 }
 
 void AppleNativeView::Cleanup()
@@ -37,6 +50,11 @@ void AppleNativeView::Tick()
 
 void AppleNativeView::InitUiSystem()
 {
+    if (headless_)
+    {
+        return;
+    }
+
 #if FRAMEWORK_MACOS
     ImGui_ImplOSX_Init(view_);
 #elif FRAMEWORK_IOS
@@ -48,6 +66,11 @@ void AppleNativeView::InitUiSystem()
 
 void AppleNativeView::ShutdownUiSystem()
 {
+    if (headless_)
+    {
+        return;
+    }
+
 #if FRAMEWORK_MACOS
     ImGui_ImplOSX_Shutdown();
 #elif FRAMEWORK_IOS
@@ -59,6 +82,11 @@ void AppleNativeView::ShutdownUiSystem()
 
 void AppleNativeView::TickUiSystem()
 {
+    if (headless_)
+    {
+        return;
+    }
+
 #if FRAMEWORK_MACOS
     ImGui_ImplOSX_NewFrame(view_);
 #elif FRAMEWORK_IOS
@@ -73,6 +101,11 @@ void AppleNativeView::TickUiSystem()
 
 void AppleNativeView::SetTitle([[maybe_unused]] const char *title)
 {
+    if (headless_)
+    {
+        return;
+    }
+
 #if FRAMEWORK_MACOS
     auto new_title = [NSString stringWithUTF8String:title];
 
@@ -85,6 +118,12 @@ void AppleNativeView::SetTitle([[maybe_unused]] const char *title)
 #if ENABLE_VULKAN
 bool AppleNativeView::CreateVulkanSurface(void *in_instance, void *out_surface)
 {
+    if (headless_)
+    {
+        Log(Error, "CreateVulkanSurface should not be called in headless mode");
+        return false;
+    }
+
 #if FRAMEWORK_MACOS
     VkMacOSSurfaceCreateInfoMVK surface_create_info = {};
 #endif
@@ -110,6 +149,11 @@ bool AppleNativeView::CreateVulkanSurface(void *in_instance, void *out_surface)
 
 void AppleNativeView::GetVulkanRequiredExtensions(std::vector<const char *> &required_extensions)
 {
+    if (headless_)
+    {
+        return;
+    }
+
 #if FRAMEWORK_MACOS
     required_extensions.push_back(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
 #endif
@@ -125,6 +169,13 @@ void AppleNativeView::GetVulkanRequiredExtensions(std::vector<const char *> &req
 
 void AppleNativeView::GetFrameBufferSize(int &width, int &height)
 {
+    if (headless_)
+    {
+        width = headless_width_;
+        height = headless_height_;
+        return;
+    }
+
     auto rect = [view_ drawableSize];
 
     width = rect.width;
@@ -136,6 +187,7 @@ void AppleNativeView::SetMetalView(MetalView *view)
     view_ = view;
 
     can_render_ = true;
+    is_valid_ = true;
 
 #if FRAMEWORK_MACOS
     auto scale = [view_.window backingScaleFactor];

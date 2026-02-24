@@ -19,12 +19,26 @@ runs:
       if: inputs.build_type == 'Release' && inputs.framework == 'glfw' && contains(inputs.os, 'windows')
       uses: ./.github/actions/setup-mesa
 
-    - name: Run Functional Test
+    - name: Run Functional Test (Headless)
       if: >-
         inputs.build_type == 'Release' &&
         (inputs.framework == 'glfw' && contains(inputs.os, 'windows'))
       shell: bash
-      run: python3 dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward
+      run: |
+        set -euo pipefail
+
+        VENV_DIR="build_cache/venv/functional-test/${{ inputs.framework }}-${{ inputs.os }}"
+        mkdir -p "$VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+
+        if [[ "${{ inputs.os }}" == *"windows"* ]]; then
+          VENV_PY="$VENV_DIR/Scripts/python.exe"
+        else
+          VENV_PY="$VENV_DIR/bin/python"
+        fi
+
+        "$VENV_PY" --version
+        "$VENV_PY" dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward --headless
 
     - name: Upload Test Screenshot
       if: >-
@@ -32,7 +46,7 @@ runs:
         (inputs.framework == 'glfw' && contains(inputs.os, 'windows'))
       uses: actions/upload-artifact@v4
       with:
-        name: functional-test-screenshot-${{ inputs.framework }}
+        name: functional-test-screenshot-${{ inputs.framework }}-${{ inputs.os }}
         path: |
           build_system/${{ inputs.framework }}/output/build/generated/screenshots/
           ~/Documents/sparkle/screenshots/

@@ -293,9 +293,15 @@ bool RenderFramework::BeginFrame()
         return false;
     }
 
-    ui_manager_->BeginRenderThread();
-
-    render_config_.render_ui = UiManager::HasDataToDraw();
+    if (ui_manager_)
+    {
+        ui_manager_->BeginRenderThread();
+        render_config_.render_ui = UiManager::HasDataToDraw();
+    }
+    else
+    {
+        render_config_.render_ui = false;
+    }
 
     RecreateRendererIfNecessary();
 

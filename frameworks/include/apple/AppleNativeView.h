@@ -13,6 +13,11 @@ namespace sparkle
 class AppleNativeView : public NativeView
 {
 public:
+    [[nodiscard]] bool IsHeadless() const override
+    {
+        return headless_;
+    }
+
     void InitGUI(AppFramework *app) override;
     void Cleanup() override;
     bool ShouldClose() override;
@@ -35,7 +40,10 @@ public:
     }
 
 private:
-    MetalView *view_;
+    bool headless_ = false;
+    int headless_width_ = 0;
+    int headless_height_ = 0;
+    MetalView *view_ = nullptr;
 };
 } // namespace sparkle
 #endif

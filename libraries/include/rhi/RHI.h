@@ -48,6 +48,8 @@ public:
         return initialization_success_;
     }
 
+    [[nodiscard]] bool IsHeadless() const;
+
     [[nodiscard]] bool IsBackBufferDirty() const
     {
         return back_buffer_dirty_;

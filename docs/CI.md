@@ -17,8 +17,10 @@
 ## Functional Test
 
 * Functional test is run on every push and PR. It runs the built app with different frameworks and pipelines, and compare the auto-generated screenshot with the ground truth.
-* For now we only run functional test with glfw-forward mode on windows. Other combinations are coming soon. (I am looking for a provider to run CI with a physical GPU).
-* On Windows, the functional test uses [Mesa lavapipe](https://github.com/pal1000/mesa-dist-win) (a software Vulkan driver) since GitHub Actions runners have no GPU.
+* For now we run functional test with forward pipeline in headless mode (`--headless`) on:
+  * windows + glfw
+  * macos + macos
+* On Windows, the CI functional test uses [Mesa lavapipe](https://github.com/pal1000/mesa-dist-win) (a software Vulkan driver) since GitHub Actions runners have no GPU.
 * For now we only have ground truth for TestScene.
 * Ground truth are updated manually for now. Please let me know if you want to update them.
 * It is always recommended to run functional test locally with available hardware before pushing. See below for details.
@@ -32,7 +34,12 @@ python3 .\dev\functional_test.py --framework [glfw, macos, ios, android] --pipel
 
 ```bash
 # On Windows without a physical GPU (does not trigger build automatically)
-python3 .\dev\functional_test.py --framework glfw --pipeline forward --software
+python3 .\dev\functional_test.py --framework glfw --pipeline forward --software --headless
+```
+
+```bash
+# On macOS framework (does not trigger build automatically)
+python3 .\dev\functional_test.py --framework macos --pipeline forward --headless
 ```
 
 ### TestScene

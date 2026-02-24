@@ -6,16 +6,22 @@
 
 namespace sparkle
 {
+constexpr unsigned HeadlessFramesInFlight = 2;
+
 void MetalContext::SwapBuffer()
 {
+    ASSERT(!headless_);
+
     back_buffer_color_->SetImage(current_drawable_.texture);
 }
 
 void MetalContext::CreateBackBuffer()
 {
+    auto drawable_size = GetDrawableSize();
+
     RHIImage::Attribute attribute;
-    attribute.width = view_.drawableSize.width;
-    attribute.height = view_.drawableSize.height;
+    attribute.width = drawable_size.width;
+    attribute.height = drawable_size.height;
     attribute.mip_levels = 1;
     attribute.msaa_samples = 1;
     attribute.format = PixelFormat::B8G8R8A8_SRGB;
@@ -29,8 +35,27 @@ void MetalContext::CreateBackBuffer()
     back_buffer_color_ = context->GetRHI()->CreateResource<MetalImage>(attribute, nullptr, "BackBufferColor");
 }
 
-MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view) : view_(mtk_view), rhi_(context)
+MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
+                           uint32_t headless_height)
+    : view_(mtk_view), rhi_(context), headless_(is_headless), headless_width_(headless_width),
+      headless_height_(headless_height)
 {
+    if (headless_)
+    {
+        ASSERT_F(headless_width_ > 0 && headless_height_ > 0, "Invalid headless render size [{}, {}]", headless_width_,
+                 headless_height_);
+
+        device_ = MTLCreateSystemDefaultDevice();
+        if (!device_)
+        {
+            return;
+        }
+
+        command_queue_ = [device_ newCommandQueue];
+        rhi_->SetMaxFramesInFlight(HeadlessFramesInFlight);
+        return;
+    }
+
     device_ = view_.device;
     command_queue_ = [device_ newCommandQueue];
     current_drawable_ = [view_ currentDrawable];
@@ -40,9 +65,11 @@ MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view) : view_(mtk_v
 
 void MetalContext::BeginFrame()
 {
-    current_drawable_ = [view_ getNextDrawable];
-
-    SwapBuffer();
+    if (!headless_)
+    {
+        current_drawable_ = [view_ getNextDrawable];
+        SwapBuffer();
+    }
 
     if (num_frames_to_capture_ > 0)
     {
@@ -54,11 +81,14 @@ void MetalContext::BeginFrame()
 
 void MetalContext::EndFrame()
 {
-    [current_command_buffer_ presentDrawable:current_drawable_];
+    if (!headless_)
+    {
+        [current_command_buffer_ presentDrawable:current_drawable_];
 
-    [current_command_buffer_ addCompletedHandler:^(id<MTLCommandBuffer>) {
-      dispatch_semaphore_signal([view_ getInFlightSemaphore]);
-    }];
+        [current_command_buffer_ addCompletedHandler:^(id<MTLCommandBuffer>) {
+          dispatch_semaphore_signal([view_ getInFlightSemaphore]);
+        }];
+    }
 
     SubmitCommandBuffer();
 

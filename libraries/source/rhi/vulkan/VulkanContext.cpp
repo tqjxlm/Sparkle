@@ -172,7 +172,8 @@ static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
     return acceleration_structure_features.accelerationStructure != 0;
 }
 
-static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std::vector<const char *> &deviceExtensions)
+static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std::vector<const char *> &deviceExtensions,
+                             bool require_surface)
 {
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(device, &device_properties);
@@ -184,8 +185,8 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
 
     bool const extensions_supported = CheckDeviceExtensionSupport(device, deviceExtensions);
 
-    bool swap_chain_adequate = false;
-    if (extensions_supported)
+    bool swap_chain_adequate = !require_surface;
+    if (extensions_supported && require_surface)
     {
         SwapChainSupportDetails const swap_chain_support = QuerySwapChainSupport(device, surface);
         swap_chain_adequate = !swap_chain_support.formats.empty() && !swap_chain_support.presentModes.empty();
@@ -201,7 +202,7 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     {
         fail_reason = "Extension missing";
     }
-    else if (!swap_chain_adequate)
+    else if (require_surface && !swap_chain_adequate)
     {
         fail_reason = "Swap chain not adequate";
     }
@@ -234,6 +235,11 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
 
 VulkanContext::VulkanContext(VulkanRHI *in_rhi) : rhi_(in_rhi)
 {
+    if (!rhi_->IsHeadless())
+    {
+        device_extensions_.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+
     descriptor_set_manager_ = std::make_unique<VulkanDescriptorSetManager>();
 }
 
@@ -343,6 +349,14 @@ void VulkanContext::ReleaseRenderResources()
 
 bool VulkanContext::RecreateSurface()
 {
+    if (rhi_->IsHeadless())
+    {
+        DestroySurface();
+        surface_ = VK_NULL_HANDLE;
+        Log(Info, "Headless mode: skip Vulkan surface creation");
+        return true;
+    }
+
     DestroySurface();
     auto success = rhi_->GetHardwareInterface()->CreateVulkanSurface(instance_, static_cast<void *>(&surface_));
     ASSERT(surface_);
@@ -364,6 +378,22 @@ void VulkanContext::DestroySurface()
 void VulkanContext::BeginFrame()
 {
     auto frame_index = rhi_->GetFrameIndex();
+
+    if (rhi_->IsHeadless())
+    {
+        CHECK_VK_ERROR(vkWaitForFences(device_, 1, &queue_finish_fences_[frame_index], VK_TRUE, UINT64_MAX));
+        CHECK_VK_ERROR(vkResetFences(device_, 1, &queue_finish_fences_[frame_index]));
+
+        VkCommandBufferBeginInfo begin_info{};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = 0;
+        begin_info.pInheritanceInfo = nullptr;
+
+        CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
+
+        current_command_buffer_ = command_buffers_[frame_index];
+        return;
+    }
 
     // Find an available acquire semaphore (not currently in use)
     VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
@@ -395,16 +425,37 @@ void VulkanContext::BeginFrame()
 
 VkResult VulkanContext::EndFrame()
 {
-    auto image_index = swap_chain_->GetCurrentImageIndex();
     auto frame_index = rhi_->GetFrameIndex();
 
+    if (rhi_->IsHeadless())
+    {
+        CHECK_VK_ERROR(vkEndCommandBuffer(current_command_buffer_));
+
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &current_command_buffer_;
+
+        CHECK_VK_ERROR(vkQueueSubmit(graphics_queue_, 1, &submit_info, queue_finish_fences_[frame_index]));
+
+        current_command_buffer_ = nullptr;
+
+        while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
+        {
+            pending_command_buffer_resources_.pop();
+        }
+
+        return VK_SUCCESS;
+    }
+
+    auto image_index = swap_chain_->GetCurrentImageIndex();
     auto back_buffer_color = swap_chain_->GetImage(image_index);
 
     back_buffer_color->TransitionLayout(current_command_buffer_, {.target_layout = RHIImageLayout::Present,
                                                                   .after_stage = RHIPipelineStage::ColorOutput,
                                                                   .before_stage = RHIPipelineStage::Bottom});
 
-    vkEndCommandBuffer(current_command_buffer_);
+    CHECK_VK_ERROR(vkEndCommandBuffer(current_command_buffer_));
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -445,8 +496,6 @@ VkResult VulkanContext::EndFrame()
 
     const VkResult result = vkQueuePresentKHR(present_queue_, &present_info);
 
-    // No longer need acquire_index_ since we use per-image semaphores
-
     current_command_buffer_ = nullptr;
 
     while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
@@ -472,6 +521,21 @@ void VulkanContext::InitRenderResources()
     CHECK_VK_ERROR(vkAllocateCommandBuffers(device_, &alloc_info, command_buffers_.data()));
 
     const uint32_t swapchain_image_count = rhi_->GetMaxFramesInFlight();
+    queue_finish_fences_.resize(swapchain_image_count);
+
+    VkFenceCreateInfo fence_info{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    for (auto &fence : queue_finish_fences_)
+    {
+        CHECK_VK_ERROR(vkCreateFence(device_, &fence_info, nullptr, &fence));
+    }
+
+    if (rhi_->IsHeadless())
+    {
+        return;
+    }
 
     // Create more acquire semaphores than swapchain images to avoid reuse conflicts
     const uint32_t acquire_semaphore_count = swapchain_image_count * 2;
@@ -479,15 +543,10 @@ void VulkanContext::InitRenderResources()
 
     acquire_semaphores_in_use_.resize(swapchain_image_count, VK_NULL_HANDLE);
     commands_finish_semaphores_per_image_.resize(swapchain_image_count);
-    queue_finish_fences_.resize(swapchain_image_count);
     queue_finish_fences_for_image_.resize(swapchain_image_count);
 
     VkSemaphoreCreateInfo semaphore_info{};
     semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkFenceCreateInfo fence_info{};
-    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (auto &semaphore : image_acquire_semaphores_per_image_)
     {
@@ -497,11 +556,6 @@ void VulkanContext::InitRenderResources()
     for (auto &semaphore : commands_finish_semaphores_per_image_)
     {
         CHECK_VK_ERROR(vkCreateSemaphore(device_, &semaphore_info, nullptr, &semaphore));
-    }
-
-    for (auto &fence : queue_finish_fences_)
-    {
-        CHECK_VK_ERROR(vkCreateFence(device_, &fence_info, nullptr, &fence));
     }
 
     std::ranges::fill(queue_finish_fences_for_image_, VK_NULL_HANDLE);
@@ -625,7 +679,7 @@ bool VulkanContext::PickPhysicalDevice()
                                       ray_tracing_extensions.end());
         }
 
-        if (IsDeviceSuitable(device, GetSurface(), device_extensions_))
+        if (IsDeviceSuitable(device, GetSurface(), device_extensions_, !rhi_->IsHeadless()))
         {
             physical_device_ = device;
             enable_ray_tracing_ = can_enable_ray_tracing;
@@ -869,7 +923,10 @@ uint32_t VulkanContext::GetMaxUsableSampleCount()
 void VulkanContext::GetRequiredInstanceExtensions()
 {
     std::vector<const char *> required_extensions;
-    rhi_->GetHardwareInterface()->GetVulkanRequiredExtensions(required_extensions);
+    if (!rhi_->IsHeadless())
+    {
+        rhi_->GetHardwareInterface()->GetVulkanRequiredExtensions(required_extensions);
+    }
 
     for (const auto *required_extension : required_extensions)
     {
@@ -899,6 +956,11 @@ void VulkanContext::SetDebugInfo(uint64_t objectHandle, VkObjectType objectType,
 
 void VulkanContext::RecreateSwapChain()
 {
+    if (rhi_->IsHeadless())
+    {
+        return;
+    }
+
     if (swap_chain_)
     {
         swap_chain_->Recreate();

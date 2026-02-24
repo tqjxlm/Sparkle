@@ -98,7 +98,10 @@ void DeferredRenderer::InitRenderResources()
                                                           .depth_texture = scene_depth_,
                                                       });
 
-    ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, screen_color_rt_);
+    if (!rhi_->IsHeadless())
+    {
+        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, screen_color_rt_);
+    }
 }
 
 void DeferredRenderer::Render()
@@ -167,8 +170,10 @@ void DeferredRenderer::Render()
 
         bool has_readback =
             ReadbackFinalOutputIfRequested(screen_color_rt_.get(), false, RHIPipelineStage::ColorOutput);
+        const bool has_readback_without_ui = has_readback;
+        const bool rendered_ui = render_config_.render_ui && ui_pass_;
 
-        if (render_config_.render_ui)
+        if (rendered_ui)
         {
             if (has_readback)
             {
@@ -182,10 +187,18 @@ void DeferredRenderer::Render()
 
         has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), true, RHIPipelineStage::ColorOutput);
 
+        RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
+        if (has_readback)
+        {
+            final_after_stage = RHIPipelineStage::Transfer;
+        }
+        else if (!rendered_ui && has_readback_without_ui)
+        {
+            final_after_stage = RHIPipelineStage::Transfer;
+        }
+
         screen_color_->Transition(
-            {.target_layout = RHIImageLayout::Read,
-             .after_stage = has_readback ? RHIPipelineStage::Transfer : RHIPipelineStage::ColorOutput,
-             .before_stage = RHIPipelineStage::PixelShader});
+            {.target_layout = RHIImageLayout::Read, .after_stage = final_after_stage, .before_stage = RHIPipelineStage::PixelShader});
     }
 
     // screen pass: copy screen_color to final buffer

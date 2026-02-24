@@ -38,13 +38,22 @@ inline QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT)
         {
             indices.graphicsFamily = i;
+
+            if (surface == VK_NULL_HANDLE)
+            {
+                // In headless mode there is no present surface, use graphics queue for submission.
+                indices.presentFamily = i;
+            }
         }
 
-        VkBool32 present_support = 0u;
-        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &present_support);
-        if (present_support)
+        if (surface != VK_NULL_HANDLE)
         {
-            indices.presentFamily = i;
+            VkBool32 present_support = 0u;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &present_support);
+            if (present_support)
+            {
+                indices.presentFamily = i;
+            }
         }
 
         if (indices.IsComplete())

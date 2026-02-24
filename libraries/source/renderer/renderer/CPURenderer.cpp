@@ -65,7 +65,10 @@ void CPURenderer::InitRenderResources()
     screen_quad_pass_ =
         PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, screen_texture_, rhi_->GetBackBufferRenderTarget());
 
-    ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, screen_rt_);
+    if (!rhi_->IsHeadless())
+    {
+        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, screen_rt_);
+    }
 
     gbuffer_.Resize(image_size_.x(), image_size_.y());
     ping_pong_buffer_.resize(image_size_.y(), std::vector<Vector4>(image_size_.x()));
@@ -129,7 +132,7 @@ void CPURenderer::Render()
 
     // post process: ui
     {
-        if (render_config_.render_ui)
+        if (render_config_.render_ui && ui_pass_)
         {
             screen_texture_->Transition({.target_layout = RHIImageLayout::ColorOutput,
                                          .after_stage = RHIPipelineStage::Transfer,

@@ -1,15 +1,16 @@
 #include "rhi/RHI.h"
 
+#include "core/Exception.h"
+#include "core/Profiler.h"
+#include "io/Image.h"
+#include "application/NativeView.h"
+
 #if FRAMEWORK_APPLE
 #include "rhi/MetalRHI.h"
 #endif
 #if ENABLE_VULKAN
 #include "rhi/VulkanRHI.h"
 #endif
-
-#include "core/Exception.h"
-#include "core/Profiler.h"
-#include "io/Image.h"
 
 namespace sparkle
 {
@@ -43,6 +44,11 @@ std::unique_ptr<RHIContext> RHIContext::CreateRHI(const RHIConfig &config)
 
 RHIContext::RHIContext(const RHIConfig &config) : config_(config)
 {
+}
+
+bool RHIContext::IsHeadless() const
+{
+    return view_ && view_->IsHeadless();
 }
 
 void RHIContext::Cleanup()

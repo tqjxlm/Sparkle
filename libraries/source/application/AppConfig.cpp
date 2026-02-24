@@ -14,6 +14,7 @@ static ConfigValue<bool> config_load_last_session("load_last_session",
                                                   "load last session on startup, including all configs and camera "
                                                   "state. this will override current command line arguments.",
                                                   "app", false);
+static ConfigValue<bool> config_headless("headless", "run without creating a window (desktop only)", "app", false);
 
 void AppConfig::Init()
 {
@@ -36,5 +37,6 @@ void AppConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_default_skybox, default_skybox);
     ConfigCollectionHelper::RegisterConfig(this, config_render_thread, render_thread);
     ConfigCollectionHelper::RegisterConfig(this, config_load_last_session, load_last_session);
+    ConfigCollectionHelper::RegisterConfig(this, config_headless, headless);
 }
 } // namespace sparkle

@@ -110,7 +110,10 @@ void GPURenderer::InitRenderResources()
     screen_quad_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, tone_mapping_output_,
                                                              rhi_->GetBackBufferRenderTarget());
 
-    ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, tone_mapping_rt_);
+    if (!rhi_->IsHeadless())
+    {
+        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, tone_mapping_rt_);
+    }
 
     performance_history_.resize(rhi_->GetMaxFramesInFlight());
 
@@ -155,8 +158,10 @@ void GPURenderer::Render()
         tone_mapping_pass_->Render();
 
         bool has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, false, RHIPipelineStage::ColorOutput);
+        const bool has_readback_without_ui = has_readback;
+        const bool rendered_ui = render_config_.render_ui && ui_pass_;
 
-        if (render_config_.render_ui)
+        if (rendered_ui)
         {
             if (has_readback)
             {
@@ -170,10 +175,18 @@ void GPURenderer::Render()
 
         has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, true, RHIPipelineStage::ColorOutput);
 
+        RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
+        if (has_readback)
+        {
+            final_after_stage = RHIPipelineStage::Transfer;
+        }
+        else if (!rendered_ui && has_readback_without_ui)
+        {
+            final_after_stage = RHIPipelineStage::Transfer;
+        }
+
         tone_mapping_output_->Transition(
-            {.target_layout = RHIImageLayout::Read,
-             .after_stage = has_readback ? RHIPipelineStage::Transfer : RHIPipelineStage::ColorOutput,
-             .before_stage = RHIPipelineStage::PixelShader});
+            {.target_layout = RHIImageLayout::Read, .after_stage = final_after_stage, .before_stage = RHIPipelineStage::PixelShader});
     }
 
     // screen pass: render texture on a screen quad

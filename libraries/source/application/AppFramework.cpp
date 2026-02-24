@@ -88,6 +88,20 @@ bool AppFramework::Init()
     ASSERT_F(core_initialized_, "Core is not initialized. Call InitCore first");
     ASSERT_F(view_, "No valid native view. Call SetNativeView first");
 
+    if (app_config_.headless)
+    {
+        if (app_config_.platform == AppConfig::NativePlatform::iOS ||
+            app_config_.platform == AppConfig::NativePlatform::Android)
+        {
+            Log(Error, "Headless mode is not supported on mobile platforms.");
+            return false;
+        }
+#if !FRAMEWORK_GLFW && !FRAMEWORK_MACOS
+        Log(Error, "Headless mode is currently supported only on GLFW and macOS frameworks.");
+        return false;
+#endif
+    }
+
     {
         PROFILE_SCOPE_LOG("Init native view");
 
@@ -99,7 +113,10 @@ bool AppFramework::Init()
     {
         PROFILE_SCOPE_LOG("Init GUI");
 
-        ui_manager_ = std::make_unique<UiManager>(view_);
+        if (!view_->IsHeadless())
+        {
+            ui_manager_ = std::make_unique<UiManager>(view_);
+        }
     }
 
     {
@@ -227,6 +244,11 @@ static void DrawVerticalIconTabs(const std::vector<VerticalIconTab> &tabs, unsig
 
 void AppFramework::DrawUi()
 {
+    if (!ui_manager_)
+    {
+        return;
+    }
+
     if (!renderer_ready_)
     {
         // imgui depends on rhi context, so we need to wait for it to be created
@@ -343,8 +365,11 @@ bool AppFramework::MainLoop()
     {
         PROFILE_SCOPE("MainLoop render ui");
 
-        DrawUi();
-        ui_manager_->Render();
+        if (ui_manager_)
+        {
+            DrawUi();
+            ui_manager_->Render();
+        }
     }
 
     AdvanceFrame(static_cast<float>(main_thread_timer.ElapsedMicroSecond()) * 1e-3f);
