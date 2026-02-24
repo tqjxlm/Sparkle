@@ -159,13 +159,6 @@ void GLFWNativeView::GetVulkanRequiredExtensions(std::vector<const char *> &requ
     {
         required_extensions.push_back(extensions[i]);
     }
-
-#ifdef __APPLE__
-#if VK_KHR_portability_enumeration
-    required_extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    required_extensions.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
-#endif
-#endif
 }
 #endif
 

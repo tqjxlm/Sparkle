@@ -936,6 +936,15 @@ void VulkanContext::GetRequiredInstanceExtensions()
     // TODO(tqjxlm): we may want to disable it in release builds
     instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
+#ifdef __APPLE__
+#if VK_KHR_portability_enumeration
+    // Required on macOS regardless of headless mode, since CreateInstance always
+    // sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.
+    instance_extensions_.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
+#endif
+#endif
+
     Log(Info, "enabled instance extensions:");
     for (const auto *instance_extension : instance_extensions_)
     {
