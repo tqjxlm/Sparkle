@@ -85,7 +85,6 @@ struct RenderConfig : public ConfigCollection
     bool render_ui = false;
     bool use_dynamic_spp;
     bool enable_nee;
-    bool auto_screenshot;
     bool clear_screenshots;
     float target_framerate;
     float gpu_time_budget_ratio;

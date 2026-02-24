@@ -9,6 +9,7 @@
 #include "core/CoreStates.h"
 #include "core/Event.h"
 #include "core/FileManager.h"
+#include "core/Path.h"
 #include "core/Profiler.h"
 #include "core/task/TaskManager.h"
 #include "rhi/RHI.h"
@@ -800,6 +801,38 @@ void AppFramework::CaptureNextFrames(int count)
 {
     rhi_->CaptureNextFrames(count);
 }
+
+#if ENABLE_TEST_CASES
+void AppFramework::RequestTakeScreenshot()
+{
+    render_framework_->RequestTakeScreenshot();
+}
+
+void AppFramework::ClearScreenshots()
+{
+    auto *fm = FileManager::GetNativeFileManager();
+    auto screenshot_dir = Path::External("screenshots");
+
+    if (!fm->IsDirectory(screenshot_dir))
+    {
+        return;
+    }
+
+    for (const auto &entry : fm->ListDirectory(screenshot_dir))
+    {
+        if (fm->IsRegularFile(entry))
+        {
+            Log(Info, "Clearing screenshot: {}", entry.path.filename().string());
+            fm->Remove(entry);
+        }
+    }
+}
+
+bool AppFramework::IsScreenshotCompleted() const
+{
+    return render_framework_->IsScreenshotCompleted();
+}
+#endif
 
 CameraComponent *AppFramework::GetMainCamera() const
 {

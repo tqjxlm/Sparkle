@@ -123,6 +123,29 @@ bool StdFileManager::TryCreateDirectory(const Path &file)
     return true;
 }
 
+bool StdFileManager::IsDirectory(const Path &path)
+{
+    ASSERT(path.IsValid());
+    return fs::is_directory(path.Resolved());
+}
+
+bool StdFileManager::IsRegularFile(const Path &path)
+{
+    ASSERT(path.IsValid());
+    return fs::is_regular_file(path.Resolved());
+}
+
+bool StdFileManager::Remove(const Path &path)
+{
+    if (path.type == PathType::Resource)
+    {
+        Log(Error, "Cannot remove resource file: {}", path.path.string());
+        return false;
+    }
+
+    return fs::remove(path.Resolved());
+}
+
 std::vector<Path> StdFileManager::ListDirectory(const Path &dirpath)
 {
     std::vector<Path> entries;
