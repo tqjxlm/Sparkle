@@ -171,6 +171,7 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 * `--generate_only` - Generate IDE project files without building.
 * `--clangd` - Generate compile_commands.json for clangd intellisense support.
 * `--profile` - Enable Tracy profiler.
+* `--test` - Enable TestCase support. See [Test.md](Test.md) for details.
 * `--asan` - Enable AddressSanitizer.
 * `--clean` - Clean output directory before configure, which resolves some build errors.
 * `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)

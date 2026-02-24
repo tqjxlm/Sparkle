@@ -1,5 +1,9 @@
 #pragma once
 
+#if ENABLE_TEST_CASES
+#include "application/TestCase.h"
+#endif
+
 #include "application/AppConfig.h"
 #include "core/Timer.h"
 #include "core/math/Types.h"
@@ -112,6 +116,13 @@ public:
     void KeyboardCallback(int key, KeyAction action, bool shift_on) const;
     void CaptureNextFrames(int count);
 
+#if ENABLE_TEST_CASES
+    [[nodiscard]] int GetExitCode() const
+    {
+        return exit_code_;
+    }
+#endif
+
 private:
     enum class MouseInputType : uint8_t
     {
@@ -181,5 +192,10 @@ private:
     bool renderer_ready_ = false;
     bool scene_file_loaded_ = false;
     bool scene_async_tasks_completed_ = false;
+
+#if ENABLE_TEST_CASES
+    std::unique_ptr<TestCase> test_case_;
+    int exit_code_ = 0;
+#endif
 };
 } // namespace sparkle

@@ -186,7 +186,8 @@ class MacosBuilder(FrameworkBuilder):
             if os.path.exists(executable_path):
                 print(f"Running application: {executable_path}")
                 run_cmd = [executable_path] + args["unknown_args"]
-                subprocess.run(run_cmd, env=os.environ.copy())
+                result = subprocess.run(run_cmd, env=os.environ.copy())
+                return result.returncode
             else:
                 raise RuntimeError(f"Executable not found at {executable_path}")
         else:

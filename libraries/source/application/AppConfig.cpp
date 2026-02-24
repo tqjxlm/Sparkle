@@ -16,6 +16,10 @@ static ConfigValue<bool> config_load_last_session("load_last_session",
                                                   "app", false);
 static ConfigValue<bool> config_headless("headless", "run without creating a window (desktop only)", "app", false);
 
+#if ENABLE_TEST_CASES
+static ConfigValue<std::string> config_test_case("test_case", "name of test case to run on scene load", "app", "");
+#endif
+
 void AppConfig::Init()
 {
 #if PLATFORM_MACOS
@@ -38,5 +42,9 @@ void AppConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_render_thread, render_thread);
     ConfigCollectionHelper::RegisterConfig(this, config_load_last_session, load_last_session);
     ConfigCollectionHelper::RegisterConfig(this, config_headless, headless);
+
+#if ENABLE_TEST_CASES
+    ConfigCollectionHelper::RegisterConfig(this, config_test_case, test_case);
+#endif
 }
 } // namespace sparkle

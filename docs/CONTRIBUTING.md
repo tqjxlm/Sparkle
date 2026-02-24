@@ -4,6 +4,11 @@
 
 You must conform to CI/CD requirements. See [CI.md](CI.md) for details.
 
+## Writing Tests
+
+Use the TestCase system for in-process functional verification. See [Test.md](Test.md)
+for how to write test cases and run them locally before pushing.
+
 ## Coding Style
 
 Follow the coding style already used in the codebase.

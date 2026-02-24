@@ -17,6 +17,10 @@
 #include "scene/component/camera/CameraComponent.h"
 #include "scene/material/MaterialManager.h"
 
+#if ENABLE_TEST_CASES
+#include "application/TestCase.h"
+#endif
+
 #include <IconsFontAwesome7.h>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -171,6 +175,18 @@ bool AppFramework::Init()
     initialized_ = true;
 
     Log(Info, "Init success. Main loop started");
+
+#if ENABLE_TEST_CASES
+    if (!app_config_.test_case.empty())
+    {
+        test_case_ = TestCaseRegistry::Create(app_config_.test_case);
+        if (!test_case_)
+        {
+            return false;
+        }
+        Log(Info, "Test case '{}' loaded", app_config_.test_case);
+    }
+#endif
 
     return true;
 }
@@ -355,6 +371,24 @@ bool AppFramework::MainLoop()
         render_framework_->NotifySceneLoaded();
     }
 
+#if ENABLE_TEST_CASES
+    if (test_case_ && scene_async_tasks_completed_)
+    {
+        const auto result = test_case_->Tick(*this);
+        if (result == TestCase::Result::Pass)
+        {
+            Log(Info, "TestCase PASS");
+            RequestExit();
+        }
+        else if (result == TestCase::Result::Fail)
+        {
+            Log(Error, "TestCase FAIL");
+            exit_code_ = 1;
+            RequestExit();
+        }
+    }
+#endif
+
     {
         PROFILE_SCOPE("MainLoop tick scene");
 
@@ -503,7 +537,8 @@ void AppFramework::ResetInputEvents()
     last_y_ = -1;
 }
 
-bool AppFramework::ShouldConsumeSceneMouseInput(MouseInputType input_type, double x, double y, bool has_pointer_position)
+bool AppFramework::ShouldConsumeSceneMouseInput(MouseInputType input_type, double x, double y,
+                                                bool has_pointer_position)
 {
     if (!ui_manager_)
     {
@@ -582,8 +617,8 @@ void AppFramework::FrameBufferResizeCallback(int width, int height) const
 void AppFramework::ScrollCallback(double /*xoffset*/, double yoffset)
 {
     const bool has_pointer_position = last_x_ >= 0.f && last_y_ >= 0.f;
-    if (ShouldConsumeSceneMouseInput(MouseInputType::Scroll, static_cast<double>(last_x_),
-                                     static_cast<double>(last_y_), has_pointer_position))
+    if (ShouldConsumeSceneMouseInput(MouseInputType::Scroll, static_cast<double>(last_x_), static_cast<double>(last_y_),
+                                     has_pointer_position))
     {
         return;
     }
