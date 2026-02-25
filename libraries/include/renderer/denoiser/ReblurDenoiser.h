@@ -72,6 +72,8 @@ private:
     void CreateTextures();
     void CreatePipelines();
     void ClassifyTiles(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
+    void Blur(const ReblurInputBuffers &inputs, const ReblurSettings &settings, uint32_t pass_index,
+              RHIImage *in_diff, RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec);
 
     RHIContext *rhi_;
     uint32_t width_;
@@ -85,10 +87,21 @@ private:
     RHIResourceRef<RHIImage> denoised_diffuse_;
     RHIResourceRef<RHIImage> denoised_specular_;
 
+    // Ping-pong temp textures for blur passes
+    RHIResourceRef<RHIImage> diff_temp1_;
+    RHIResourceRef<RHIImage> diff_temp2_;
+    RHIResourceRef<RHIImage> spec_temp1_;
+    RHIResourceRef<RHIImage> spec_temp2_;
+
     // ClassifyTiles pass
     RHIResourceRef<RHIImage> tiles_;
     RHIResourceRef<RHIShader> classify_tiles_shader_;
     RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_;
     RHIResourceRef<RHIBuffer> classify_tiles_ub_;
+
+    // Blur pass (shared by PrePass, Blur, PostBlur)
+    RHIResourceRef<RHIShader> blur_shader_;
+    RHIResourceRef<RHIPipelineState> blur_pipeline_;
+    RHIResourceRef<RHIBuffer> blur_ub_;
 };
 } // namespace sparkle

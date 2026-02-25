@@ -751,10 +751,10 @@ void GPURenderer::RenderReblurPath()
 
     // Transition denoised output to Read and scene_texture to StorageWrite for composite
     reblur_->GetDenoisedDiffuse()->Transition({.target_layout = RHIImageLayout::Read,
-                                               .after_stage = RHIPipelineStage::Transfer,
+                                               .after_stage = RHIPipelineStage::ComputeShader,
                                                .before_stage = RHIPipelineStage::ComputeShader});
     reblur_->GetDenoisedSpecular()->Transition({.target_layout = RHIImageLayout::Read,
-                                                .after_stage = RHIPipelineStage::Transfer,
+                                                .after_stage = RHIPipelineStage::ComputeShader,
                                                 .before_stage = RHIPipelineStage::ComputeShader});
     scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                 .after_stage = RHIPipelineStage::ComputeShader,
