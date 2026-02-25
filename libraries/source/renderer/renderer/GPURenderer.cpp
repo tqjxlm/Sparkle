@@ -749,7 +749,7 @@ void GPURenderer::RenderReblurPath()
     };
     ReblurSettings settings;
     ReblurMatrices matrices;
-    reblur_->Denoise(inputs, settings, matrices, dispatched_sample_count_);
+    reblur_->Denoise(inputs, settings, matrices, dispatched_sample_count_, render_config_.reblur_debug_pass);
 
     // Bind denoised output to composite and dispatch
     auto *comp_resources = composite_pipeline_->GetShaderResource<ReblurCompositeShader>();
