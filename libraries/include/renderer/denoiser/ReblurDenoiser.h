@@ -60,8 +60,10 @@ public:
     ReblurDenoiser(RHIContext *rhi, uint32_t width, uint32_t height);
     ~ReblurDenoiser();
 
+    static constexpr uint32_t DebugPassDisabled = 99;
+
     void Denoise(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices,
-                 uint32_t frame_index);
+                 uint32_t frame_index, uint32_t debug_pass = DebugPassDisabled);
 
     [[nodiscard]] RHIImage *GetDenoisedDiffuse() const;
     [[nodiscard]] RHIImage *GetDenoisedSpecular() const;
@@ -72,8 +74,10 @@ private:
     void CreateTextures();
     void CreatePipelines();
     void ClassifyTiles(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
-    void Blur(const ReblurInputBuffers &inputs, const ReblurSettings &settings, uint32_t pass_index,
-              RHIImage *in_diff, RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec);
+    void Blur(const ReblurInputBuffers &inputs, const ReblurSettings &settings, uint32_t pass_index, RHIImage *in_diff,
+              RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec);
+    void CopyToOutput(RHIImage *diff, RHIImage *spec);
+    void CopyPreviousFrameData(const ReblurInputBuffers &inputs);
 
     RHIContext *rhi_;
     uint32_t width_;
@@ -93,15 +97,20 @@ private:
     RHIResourceRef<RHIImage> spec_temp1_;
     RHIResourceRef<RHIImage> spec_temp2_;
 
+    // Previous-frame buffers (for future temporal accumulation)
+    RHIResourceRef<RHIImage> prev_view_z_;
+    RHIResourceRef<RHIImage> prev_normal_roughness_;
+
     // ClassifyTiles pass
     RHIResourceRef<RHIImage> tiles_;
     RHIResourceRef<RHIShader> classify_tiles_shader_;
     RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_;
     RHIResourceRef<RHIBuffer> classify_tiles_ub_;
 
-    // Blur pass (shared by PrePass, Blur, PostBlur)
+    // Blur passes (separate pipelines to avoid descriptor set conflicts within a frame)
+    static constexpr uint32_t BlurPassCount = 3; // 0=PrePass, 1=Blur, 2=PostBlur
     RHIResourceRef<RHIShader> blur_shader_;
-    RHIResourceRef<RHIPipelineState> blur_pipeline_;
-    RHIResourceRef<RHIBuffer> blur_ub_;
+    RHIResourceRef<RHIPipelineState> blur_pipelines_[BlurPassCount];
+    RHIResourceRef<RHIBuffer> blur_ubs_[BlurPassCount];
 };
 } // namespace sparkle

@@ -1,7 +1,7 @@
+#include "poisson_samples.h.slang"
 #include "reblur_common.h.slang"
 #include "reblur_config.h.slang"
 #include "reblur_data.h.slang"
-#include "poisson_samples.h.slang"
 
 [[vk::binding(0, 0)]] cbuffer ubo
 {
@@ -15,6 +15,8 @@
     float4 rotator; // cos, sin, -sin, cos
     uint frame_index;
     uint blur_pass_index; // 0=pre, 1=blur, 2=post
+    float diffuse_prepass_blur_radius;
+    float specular_prepass_blur_radius;
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> inDiffuse;
@@ -26,10 +28,7 @@
 
 float2 RotateVector(float4 rotator_val, float2 v)
 {
-    return float2(
-        v.x * rotator_val.x - v.y * rotator_val.y,
-        v.x * rotator_val.y + v.y * rotator_val.x
-    );
+    return float2(v.x * rotator_val.x - v.y * rotator_val.y, v.x * rotator_val.y + v.y * rotator_val.x);
 }
 
 float GetGeometryWeight(float3 center_normal, float center_viewZ, float3 sample_pos_vs, float sensitivity)
@@ -60,10 +59,7 @@ float GetGaussianWeight(float distance_sq)
     return exp(-0.5 * distance_sq);
 }
 
-[shader("compute")]
-[numthreads(16, 16, 1)]
-void main(uint3 DTid : SV_DispatchThreadID)
-{
+[shader("compute")][numthreads(16, 16, 1)] void main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = DTid.xy;
     if (pixel.x >= resolution.x || pixel.y >= resolution.y)
         return;
@@ -112,11 +108,15 @@ void main(uint3 DTid : SV_DispatchThreadID)
         radius_scale = 1.0;
     }
 
-    float diff_radius = max_blur_radius * sqrt(diff_hit_factor * non_linear_accum_speed) * radius_scale;
-    float spec_radius = max_blur_radius * sqrt(spec_hit_factor * non_linear_accum_speed) * radius_scale;
+    // PrePass uses separate diffuse/specular radii; Blur and PostBlur use shared max_blur_radius
+    float diff_max_radius = blur_pass_index == 0 ? diffuse_prepass_blur_radius : max_blur_radius;
+    float spec_max_radius = blur_pass_index == 0 ? specular_prepass_blur_radius : max_blur_radius;
 
-    diff_radius = clamp(diff_radius, min_blur_radius, max_blur_radius * radius_scale);
-    spec_radius = clamp(spec_radius, min_blur_radius, max_blur_radius * radius_scale);
+    float diff_radius = diff_max_radius * sqrt(diff_hit_factor * non_linear_accum_speed) * radius_scale;
+    float spec_radius = spec_max_radius * sqrt(spec_hit_factor * non_linear_accum_speed) * radius_scale;
+
+    diff_radius = clamp(diff_radius, min_blur_radius, diff_max_radius * radius_scale);
+    spec_radius = clamp(spec_radius, min_blur_radius, spec_max_radius * radius_scale);
 
     // Accumulate weighted samples
     float3 diff_sum = center_diff.rgb;
@@ -150,7 +150,8 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
             // Compute bilateral weights
             float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
-            float w_geom = exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
+            float w_geom =
+                exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
             float w_hit = GetHitDistWeight(center_diff_hit, sample_diff.a, min_hit_dist_weight);
             float w_gauss = GetGaussianWeight(dot(offset, offset));
 
@@ -178,7 +179,8 @@ void main(uint3 DTid : SV_DispatchThreadID)
             float4 sample_spec = inSpecular[sample_pixel];
 
             float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
-            float w_geom = exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
+            float w_geom =
+                exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
             float w_hit = GetHitDistWeight(center_spec_hit, sample_spec.a, min_hit_dist_weight);
             float w_gauss = GetGaussianWeight(dot(offset, offset));
 
