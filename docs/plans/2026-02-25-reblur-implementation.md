@@ -12,6 +12,37 @@
 
 ---
 
+## Rules
+
+1. **Tests before commits.** Before every commit, build and run all applicable tests. Do not commit if any test fails — fix the failure first.
+
+   **Always run (smoke + no-regression against ground truth):**
+   ```bash
+   python3 build.py --framework glfw --run --test_case smoke --headless true
+   python3 dev/functional_test.py --framework glfw --pipeline gpu --headless --skip_build -- --use_reblur false --spp 1 --max_spp 2048
+   ```
+   The `functional_test.py` run downloads ground truth from CDN, captures a screenshot, and compares via FLIP (threshold 0.1). This ensures the GPU pipeline with reblur disabled is not regressed.
+
+   **After M1 (split path exists):** also run a crash/screenshot test for the reblur path:
+   ```bash
+   python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 64
+   ```
+   Note: This only checks that the reblur path runs without crashing and produces a screenshot. It does **not** compare against ground truth — the reblur output is expected to diverge from ground truth until temporal accumulation is implemented (M3+).
+
+   **After M5 (reblur_smoke test exists):** also run:
+   ```bash
+   python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1
+   ```
+
+2. **Verify logs confirm the intended code path.** After each test run, check the output for these log lines:
+   - `--pipeline gpu` tests must show: `GPURenderer initializing`
+   - `--use_reblur true` tests must show: `REBLUR denoiser enabled` and `ReblurDenoiser: ready`
+   - `--use_reblur false` tests must show: `REBLUR denoiser disabled`
+
+   If these lines are missing, the test is not exercising the intended path and the result is invalid.
+
+---
+
 ## Milestone 1: Infrastructure
 
 ### Task 1: Add `use_reblur` config value
@@ -504,10 +535,10 @@ else
 **Step 5: Build and test**
 
 Run: `python build.py --framework glfw`
-Run: app with `--pipeline gpu --use_reblur true --test --test_case screenshot --headless true`
+Run: `python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur true`
 Expected: Screenshot captured (may be black/incorrect since denoiser is skeleton).
 
-Run: app with `--pipeline gpu --use_reblur false --test --test_case screenshot --headless true`
+Run: `python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur false`
 Expected: Screenshot matches existing baseline (no regression).
 
 **Step 6: Commit**
@@ -627,12 +658,11 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, ...)
 
 ```bash
 # Original path
-python build.py --framework glfw --test
-# run with --pipeline gpu --use_reblur false --spp 1 --max_spp 64 --test --test_case screenshot --headless true
+python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur false --spp 1 --max_spp 64
 # save screenshot as baseline
 
 # Split path (passthrough denoiser)
-# run with --pipeline gpu --use_reblur true --spp 1 --max_spp 64 --test --test_case screenshot --headless true
+python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 64
 # compare screenshots
 ```
 
@@ -964,7 +994,7 @@ RHIResourceRef<RHIImage> prev_normal_roughness_;
 
 **Step 4: Take screenshot and verify edge preservation**
 
-Run: `--use_reblur true --spp 1 --max_spp 4 --test --test_case screenshot`
+Run: `python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 4`
 Expected: Denoised image with preserved edges (no blur across normal boundaries).
 
 **Step 5: Commit**
@@ -1095,7 +1125,7 @@ git commit -m "feat(reblur): implement HistoryFix pass for disoccluded region re
 **Step 1: Build**
 
 ```bash
-python build.py --framework glfw --test
+python3 build.py --framework glfw
 ```
 
 **Step 2: Take screenshots at different convergence states**
@@ -1201,7 +1231,9 @@ git commit -m "tune(reblur): adjust default parameters for FLIP <= 0.08 target"
 
 ```cpp
 #include "application/TestCase.h"
+
 #include "application/AppFramework.h"
+#include "core/Logger.h"
 
 namespace sparkle
 {
@@ -1225,6 +1257,14 @@ public:
             requested_ = true;
         }
 
+        // Safety timeout (honours test_timeout cvar from CI)
+        uint32_t timeout = app.GetAppConfig().test_timeout;
+        if (timeout > 0 && frame_count_ > timeout)
+        {
+            Log(Error, "ReblurSmokeTest timed out after {} frames", timeout);
+            return Result::Fail;
+        }
+
         return Result::Pending;
     }
 
@@ -1240,8 +1280,7 @@ static TestCaseRegistrar<ReblurSmokeTest> reblur_smoke_registrar("reblur_smoke")
 **Step 2: Verify test runs**
 
 ```bash
-python build.py --framework glfw --test
-# run with --pipeline gpu --use_reblur true --spp 1 --test --test_case reblur_smoke --headless true
+python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1
 ```
 
 **Step 3: Commit**
@@ -1258,8 +1297,8 @@ git commit -m "test(reblur): add REBLUR smoke test (waits 30 frames then screens
 **Step 1: Verify no regression when disabled**
 
 ```bash
-# Run original pipeline
-# run with --pipeline gpu --use_reblur false --spp 1 --max_spp 2048 --test --test_case screenshot --headless true
+# Run original pipeline (no REBLUR) and capture screenshot
+python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur false --spp 1 --max_spp 2048
 # Compare against known ground truth
 ```
 
@@ -1268,8 +1307,8 @@ Expected: FLIP <= 0.005 (essentially identical).
 **Step 2: Verify quality target**
 
 ```bash
-# Run REBLUR pipeline
-# run with --pipeline gpu --use_reblur true --spp 1 --max_spp 64 --test --test_case reblur_smoke --headless true
+# Run REBLUR pipeline and capture screenshot
+python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 64
 # Compare denoised output against 2048spp ground truth
 ```
 

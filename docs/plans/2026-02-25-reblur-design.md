@@ -341,18 +341,17 @@ bool use_reblur;  // --use_reblur true/false (default: false)
 ### Test Execution
 
 ```bash
-# Build with tests
-python build.py --framework glfw --test
+# Build
+python3 build.py --framework glfw
 
 # Smoke test
-python dev/functional_test.py --framework glfw --pipeline gpu --use_reblur true --headless
+python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1
 
 # Quality test
-python dev/functional_test.py --framework glfw --pipeline gpu --use_reblur true \
-    --spp 1 --max_spp 64 --headless
+python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 64
 
 # Regression test (disabled)
-python dev/functional_test.py --framework glfw --pipeline gpu --use_reblur false --headless
+python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur false --spp 1 --max_spp 2048
 ```
 
 ---

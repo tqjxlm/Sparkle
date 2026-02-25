@@ -1,5 +1,6 @@
 #include "renderer/renderer/GPURenderer.h"
 
+#include "core/Logger.h"
 #include "core/Profiler.h"
 #include "renderer/BindlessManager.h"
 #include "renderer/denoiser/ReblurDenoiser.h"
@@ -129,6 +130,7 @@ GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
 
 void GPURenderer::InitRenderResources()
 {
+    Log(Info, "GPURenderer initializing ({}x{})", image_size_.x(), image_size_.y());
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
     scene_texture_ = rhi_->CreateImage(
@@ -191,6 +193,11 @@ void GPURenderer::InitRenderResources()
     if (render_config_.use_reblur)
     {
         InitReblurResources();
+        Log(Info, "GPURenderer: REBLUR denoiser enabled");
+    }
+    else
+    {
+        Log(Info, "GPURenderer: REBLUR denoiser disabled, using unified path");
     }
 }
 

@@ -1,5 +1,6 @@
 #include "renderer/denoiser/ReblurDenoiser.h"
 
+#include "core/Logger.h"
 #include "rhi/RHI.h"
 
 #include <cmath>
@@ -63,8 +64,10 @@ public:
 ReblurDenoiser::ReblurDenoiser(RHIContext *rhi, uint32_t width, uint32_t height)
     : rhi_(rhi), width_(width), height_(height)
 {
+    Log(Info, "ReblurDenoiser: creating ({}x{})", width, height);
     CreateTextures();
     CreatePipelines();
+    Log(Info, "ReblurDenoiser: ready");
 }
 
 ReblurDenoiser::~ReblurDenoiser() = default;
