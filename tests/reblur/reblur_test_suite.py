@@ -214,6 +214,18 @@ def main():
         ok2, dur2, _ = validate_latest_screenshot(fw, "C++ temporal convergence screenshot")
         results.append(("C++ temporal convergence (pixels)", ok2, dur2))
 
+    # --- Test 9: REBLUR smoke test (C++ test case, 30 frames + screenshot) ---
+    ok, dur, _ = run_command(
+        [py, build_py, "--framework", fw, "--skip_build",
+         "--run", "--test_case", "reblur_smoke", "--headless", "true",
+         "--pipeline", "gpu", "--use_reblur", "true",
+         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"],
+        "9a. REBLUR smoke test (C++ test, 30 frames)")
+    results.append(("REBLUR smoke test", ok, dur))
+    if ok:
+        ok2, dur2, _ = validate_latest_screenshot(fw, "REBLUR smoke test screenshot")
+        results.append(("REBLUR smoke test (pixels)", ok2, dur2))
+
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)
     passed = sum(1 for _, ok, _ in results if ok)

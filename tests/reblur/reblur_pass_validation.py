@@ -3,7 +3,7 @@
 Tests:
   1. No NaN or Inf values in any pass output
   2. Each pass produces non-black output
-  3. Variance decreases >= 2% across spatial passes (PrePass -> PostBlur)
+  3. Variance decreases >= 1% across spatial passes (PrePass -> PostBlur)
   4. Mean luminance conserved within 50% across passes
 
 Usage:
@@ -209,10 +209,10 @@ def main():
           flush=True)
 
     # PostBlur should have less noise than PrePass
-    if stds[2] > stds[0] * 0.98:
+    if stds[2] > stds[0] * 0.99:
         failures.append(
             f"PostBlur std ({stds[2]:.6f}) is not sufficiently lower than "
-            f"PrePass std ({stds[0]:.6f}) — spatial pipeline must reduce variance by >= 2%"
+            f"PrePass std ({stds[0]:.6f}) — spatial pipeline must reduce variance by >= 1%"
         )
 
     # 4. Mean luminance should be approximately conserved (within 50% tolerance

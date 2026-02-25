@@ -410,6 +410,23 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
         return;
     }
 
+    // Save the TemporalAccum+HistoryFix result to history BEFORE spatial blur.
+    // This prevents compounding blur: temporal accumulation should blend the
+    // pre-blur signal, not the spatially-filtered output.
+    CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());
+
+    // CopyHistoryData leaves temp1 and internal_data in TransferSrc; transition
+    // back to Read for the Blur pass (which expects ComputeShader as prior stage).
+    diff_temp1_->Transition({.target_layout = RHIImageLayout::Read,
+                             .after_stage = RHIPipelineStage::Transfer,
+                             .before_stage = RHIPipelineStage::ComputeShader});
+    spec_temp1_->Transition({.target_layout = RHIImageLayout::Read,
+                             .after_stage = RHIPipelineStage::Transfer,
+                             .before_stage = RHIPipelineStage::ComputeShader});
+    internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::Transfer,
+                                .before_stage = RHIPipelineStage::ComputeShader});
+
     // Blur: temp1 → temp2 (primary spatial filter, uses new accumSpeed)
     Blur(inputs, settings, 1, diff_temp1_.get(), spec_temp1_.get(), diff_temp2_.get(), spec_temp2_.get(),
          internal_data_.get(), true);
@@ -417,7 +434,6 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     if (debug_pass == 1)
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
-        CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
         CopyPreviousFrameData(inputs);
         internal_frame_index_++;
         history_valid_ = true;
@@ -428,37 +444,15 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     Blur(inputs, settings, 2, diff_temp2_.get(), spec_temp2_.get(), denoised_diffuse_.get(), denoised_specular_.get(),
          internal_data_.get(), true);
 
-    if (debug_pass == 2)
-    {
-        // PostBlur already wrote to denoised_diffuse_/denoised_specular_ (StorageWrite layout).
-        // Transition to Read for the composite pass; skip stabilization and history.
-        denoised_diffuse_->Transition({.target_layout = RHIImageLayout::Read,
-                                       .after_stage = RHIPipelineStage::ComputeShader,
-                                       .before_stage = RHIPipelineStage::ComputeShader});
-        denoised_specular_->Transition({.target_layout = RHIImageLayout::Read,
-                                        .after_stage = RHIPipelineStage::ComputeShader,
-                                        .before_stage = RHIPipelineStage::ComputeShader});
-        internal_frame_index_++;
-        return;
-    }
-
     // TemporalStabilization: denoised output → stabilized output (variance clamping)
-    if (settings.max_stabilized_frame_num > 0)
+    // Skipped for debug_pass==2 (isolate PostBlur output)
+    if (debug_pass != 2 && settings.max_stabilized_frame_num > 0)
     {
-        // TemporalStabilize reads denoised_diffuse_/denoised_specular_ (from PostBlur)
         TemporalStabilize(inputs, settings);
-
-        // Save PostBlur output to history for next frame's temporal accumulation
-        // (denoised_* were transitioned to Read by TemporalStabilize)
-        CopyHistoryData(denoised_diffuse_.get(), denoised_specular_.get());
 
         // Copy stabilized result into denoised_diffuse_/denoised_specular_ for composite
         uint32_t cur_idx = stab_ping_pong_;
         CopyStabilizedHistory(diff_stabilized_[cur_idx].get(), spec_stabilized_[cur_idx].get());
-    }
-    else
-    {
-        CopyHistoryData(denoised_diffuse_.get(), denoised_specular_.get());
     }
 
     CopyPreviousFrameData(inputs);
