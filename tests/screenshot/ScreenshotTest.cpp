@@ -17,10 +17,6 @@ public:
 
         if (!requested_)
         {
-            if (app.GetRenderConfig().clear_screenshots)
-            {
-                AppFramework::ClearScreenshots();
-            }
             app.RequestTakeScreenshot();
             requested_ = true;
         }

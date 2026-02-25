@@ -26,11 +26,29 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
-#include <format>
-
 namespace sparkle
 {
 constexpr float LogInterval = 1.f;
+
+static void ClearScreenshots()
+{
+    auto *fm = FileManager::GetNativeFileManager();
+    auto screenshot_dir = Path::External("screenshots");
+
+    if (!fm->IsDirectory(screenshot_dir))
+    {
+        return;
+    }
+
+    for (const auto &entry : fm->ListDirectory(screenshot_dir))
+    {
+        if (fm->IsRegularFile(entry))
+        {
+            Log(Info, "Clearing screenshot: {}", entry.path.filename().string());
+            fm->Remove(entry);
+        }
+    }
+}
 
 AppFramework::AppFramework()
     : frame_rate_monitor_(LogInterval, false, [this](float delta_time) { MeasurePerformance(delta_time); })
@@ -84,6 +102,11 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     Logger::LogToScreen("Usage", "Double click to toggle config");
 
     core_initialized_ = true;
+
+    if (render_config_.clear_screenshots)
+    {
+        ClearScreenshots();
+    }
 
     return true;
 }
@@ -802,37 +825,15 @@ void AppFramework::CaptureNextFrames(int count)
     rhi_->CaptureNextFrames(count);
 }
 
-#if ENABLE_TEST_CASES
 void AppFramework::RequestTakeScreenshot()
 {
     render_framework_->RequestTakeScreenshot();
-}
-
-void AppFramework::ClearScreenshots()
-{
-    auto *fm = FileManager::GetNativeFileManager();
-    auto screenshot_dir = Path::External("screenshots");
-
-    if (!fm->IsDirectory(screenshot_dir))
-    {
-        return;
-    }
-
-    for (const auto &entry : fm->ListDirectory(screenshot_dir))
-    {
-        if (fm->IsRegularFile(entry))
-        {
-            Log(Info, "Clearing screenshot: {}", entry.path.filename().string());
-            fm->Remove(entry);
-        }
-    }
 }
 
 bool AppFramework::IsScreenshotCompleted() const
 {
     return render_framework_->IsScreenshotCompleted();
 }
-#endif
 
 CameraComponent *AppFramework::GetMainCamera() const
 {

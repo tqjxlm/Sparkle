@@ -38,7 +38,7 @@ runs:
         fi
 
         "$VENV_PY" --version
-        "$VENV_PY" dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward --headless --test_timeout 6000
+        "$VENV_PY" dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward --headless
 
     - name: Upload Test Screenshot
       if: >-
