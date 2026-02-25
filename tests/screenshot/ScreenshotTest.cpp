@@ -36,7 +36,7 @@ public:
     }
 
 private:
-    static constexpr uint32_t MaxFrames = 600;
+    static constexpr uint32_t MaxFrames = 3000;
     bool requested_ = false;
     uint32_t frame_ = 0;
 };

@@ -12,7 +12,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(USE_GLFW "Use GLFW instead of the native window system" OFF)
 option(ENABLE_PROFILER "Build with profiler support" OFF)
-option(ENABLE_TEST_CASES "Build with test case support" OFF)
+option(ENABLE_TEST_CASES "Build with test case support" ON)
 option(ENABLE_APPLE_AUTO_SIGN "Configure xcode project to manage signing automatically" OFF)
 
 macro(assign_bool var)
