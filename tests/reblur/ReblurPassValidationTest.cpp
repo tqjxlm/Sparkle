@@ -32,10 +32,6 @@ public:
 
         if (!screenshot_requested_)
         {
-            if (app.GetRenderConfig().clear_screenshots)
-            {
-                AppFramework::ClearScreenshots();
-            }
             Log(Info, "ReblurPassValidationTest: requesting screenshot at frame {}", frame_);
             app.RequestTakeScreenshot();
             screenshot_requested_ = true;

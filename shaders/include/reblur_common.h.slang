@@ -36,9 +36,4 @@ float3 DecodeNormalOct(float2 f)
     return normalize(n);
 }
 
-float ReblurGetLuminance(float3 color)
-{
-    return dot(color, float3(0.2126, 0.7152, 0.0722));
-}
-
 #endif // REBLUR_COMMON_H

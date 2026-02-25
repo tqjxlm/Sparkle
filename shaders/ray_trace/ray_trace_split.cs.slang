@@ -278,7 +278,6 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     float3 throughput = float3(1, 1, 1);
     float bsdf_mis_weight = 1.f;
     bool is_diffuse_path = false;
-    bool primary_hit_stored = false;
     float primary_hit_dist = 0;
 
     [loop] for (int bounce = 0; bounce <= camera.max_bounce; bounce++)
@@ -331,8 +330,6 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
             // View-space Z: transform hit position by view matrix and take Z
             float4 view_pos = mul(view_matrix, float4(intersection.position, 1.0));
             result.view_z = view_pos.z;
-
-            primary_hit_stored = true;
         }
 
         if (bounce == 1)
@@ -439,10 +436,9 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     }
 
     // Demodulate: divide out albedo from diffuse
-    if (primary_hit_stored)
+    if (result.is_hit)
     {
         float3 albedo = result.albedo;
-        float albedo_luma = max(max(albedo.r, max(albedo.g, albedo.b)), 1e-6);
         result.diffuse_radiance /= max(albedo, float3(1e-6, 1e-6, 1e-6));
 
         // Normalize hit distance

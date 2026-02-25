@@ -1,5 +1,3 @@
-#include "reblur_common.h.slang"
-
 [[vk::binding(0, 0)]] cbuffer ubo
 {
     uint2 resolution;

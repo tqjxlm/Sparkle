@@ -1,7 +1,6 @@
 #include "poisson_samples.h.slang"
 #include "reblur_common.h.slang"
 #include "reblur_config.h.slang"
-#include "reblur_data.h.slang"
 
 [[vk::binding(0, 0)]] cbuffer ubo
 {
@@ -140,26 +139,26 @@ float GetGaussianWeight(float distance_sq)
             sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
 
             float sample_viewZ = inViewZ[sample_pixel];
-            if (sample_viewZ > denoising_range)
-                continue;
+            if (sample_viewZ <= denoising_range)
+            {
+                float4 sample_nr = inNormalRoughness[sample_pixel];
+                float3 sample_normal = DecodeNormalOct(sample_nr.xy);
 
-            float4 sample_nr = inNormalRoughness[sample_pixel];
-            float3 sample_normal = DecodeNormalOct(sample_nr.xy);
+                float4 sample_diff = inDiffuse[sample_pixel];
 
-            float4 sample_diff = inDiffuse[sample_pixel];
+                // Compute bilateral weights
+                float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
+                float w_geom =
+                    exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
+                float w_hit = GetHitDistWeight(center_diff_hit, sample_diff.a, min_hit_dist_weight);
+                float w_gauss = GetGaussianWeight(dot(offset, offset));
 
-            // Compute bilateral weights
-            float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
-            float w_geom =
-                exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
-            float w_hit = GetHitDistWeight(center_diff_hit, sample_diff.a, min_hit_dist_weight);
-            float w_gauss = GetGaussianWeight(dot(offset, offset));
+                float w = w_normal * w_geom * w_hit * w_gauss;
 
-            float w = w_normal * w_geom * w_hit * w_gauss;
-
-            diff_sum += sample_diff.rgb * w;
-            diff_hit_sum += sample_diff.a * w;
-            diff_weight_sum += w;
+                diff_sum += sample_diff.rgb * w;
+                diff_hit_sum += sample_diff.a * w;
+                diff_weight_sum += w;
+            }
         }
 
         // Specular sample (tighter radius for low roughness)
@@ -170,25 +169,25 @@ float GetGaussianWeight(float distance_sq)
             sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
 
             float sample_viewZ = inViewZ[sample_pixel];
-            if (sample_viewZ > denoising_range)
-                continue;
+            if (sample_viewZ <= denoising_range)
+            {
+                float4 sample_nr = inNormalRoughness[sample_pixel];
+                float3 sample_normal = DecodeNormalOct(sample_nr.xy);
 
-            float4 sample_nr = inNormalRoughness[sample_pixel];
-            float3 sample_normal = DecodeNormalOct(sample_nr.xy);
+                float4 sample_spec = inSpecular[sample_pixel];
 
-            float4 sample_spec = inSpecular[sample_pixel];
+                float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
+                float w_geom =
+                    exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
+                float w_hit = GetHitDistWeight(center_spec_hit, sample_spec.a, min_hit_dist_weight);
+                float w_gauss = GetGaussianWeight(dot(offset, offset));
 
-            float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
-            float w_geom =
-                exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
-            float w_hit = GetHitDistWeight(center_spec_hit, sample_spec.a, min_hit_dist_weight);
-            float w_gauss = GetGaussianWeight(dot(offset, offset));
+                float w = w_normal * w_geom * w_hit * w_gauss;
 
-            float w = w_normal * w_geom * w_hit * w_gauss;
-
-            spec_sum += sample_spec.rgb * w;
-            spec_hit_sum += sample_spec.a * w;
-            spec_weight_sum += w;
+                spec_sum += sample_spec.rgb * w;
+                spec_hit_sum += sample_spec.a * w;
+                spec_weight_sum += w;
+            }
         }
     }
 

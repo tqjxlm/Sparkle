@@ -132,12 +132,12 @@ void ReblurDenoiser::CreatePipelines()
     ct_resources->outTiles().BindResource(tiles_->GetDefaultView(rhi_));
 
     // Blur pipelines (separate per pass to avoid descriptor set conflicts within a frame)
-    static constexpr const char *pass_names[] = {"PrePass", "Blur", "PostBlur"};
+    static constexpr const char *PassNames[] = {"PrePass", "Blur", "PostBlur"};
     blur_shader_ = rhi_->CreateShader<ReblurBlurShader>();
     for (uint32_t i = 0; i < BlurPassCount; i++)
     {
         blur_pipelines_[i] = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute,
-                                                       std::string("ReblurBlur") + pass_names[i] + "Pipeline");
+                                                       std::string("ReblurBlur") + PassNames[i] + "Pipeline");
         blur_pipelines_[i]->SetShader<RHIShaderStage::Compute>(blur_shader_);
         blur_pipelines_[i]->Compile();
 
@@ -145,7 +145,7 @@ void ReblurDenoiser::CreatePipelines()
                                            .usages = RHIBuffer::BufferUsage::UniformBuffer,
                                            .mem_properties = RHIMemoryProperty::None,
                                            .is_dynamic = true},
-                                          std::string("ReblurBlur") + pass_names[i] + "UBO");
+                                          std::string("ReblurBlur") + PassNames[i] + "UBO");
 
         auto *blur_resources = blur_pipelines_[i]->GetShaderResource<ReblurBlurShader>();
         blur_resources->ubo().BindResource(blur_ubs_[i]);
