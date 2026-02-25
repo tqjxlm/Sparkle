@@ -8,13 +8,13 @@ exits with code `0` or `1` respectively.
 
 ### Build
 
-```bash
-# Build with TestCase support compiled in (adds ENABLE_TEST_CASES=1)
-python3 build.py --framework [glfw, macos] --test
-```
+TestCase support is compiled in by default (`ENABLE_TEST_CASES=1`).
+Use `--strip_test` to exclude it from the binary for production builds:
 
-Without `--test` the `TestCase` classes are excluded from the binary entirely
-(`ENABLE_TEST_CASES=0`), so there is zero impact on production builds.
+```bash
+# Build without TestCase support (production)
+python3 build.py --framework [glfw, macos] --strip_test
+```
 
 ### Run
 
@@ -23,7 +23,7 @@ Without `--test` the `TestCase` classes are excluded from the binary entirely
 
 ```bash
 # Build & Run the smoke test (exits 0 on pass, 1 on fail)
-python3 build.py --framework [glfw, macos] --test --run --test_case smoke --headless true
+python3 build.py --framework [glfw, macos] --run --test_case smoke --headless true
 echo "Exit code: $?"
 ```
 
@@ -76,7 +76,7 @@ static TestCaseRegistrar<MyFeatureTest> my_feature_test_registrar("my_feature");
 Then run it:
 
 ```bash
-python3 build.py --framework macos --test --run --test_case my_feature
+python3 build.py --framework macos --run --test_case my_feature
 ```
 
 ### Naming Rules

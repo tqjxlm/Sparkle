@@ -43,7 +43,7 @@ def build_and_run(framework, pipeline, scene, other_args, headless=False, env=No
                "--framework", framework]
     if skip_build:
         run_cmd.append("--skip_build")
-    run_cmd += ["--test", "--run",
+    run_cmd += ["--run",
                "--test_case", "screenshot",
                "--clear_screenshots", "true",
                "--pipeline", pipeline] + other_args
