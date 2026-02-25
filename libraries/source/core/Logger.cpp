@@ -38,6 +38,8 @@ Logger::Logger()
 
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path, true);
         logger_->sinks().push_back(file_sink);
+
+        printf("[LOG_FILE] %s\n", log_file_path.c_str());
     }
 
     // TODO(tqjxlm): copy the file instead of writing to two files at runtime

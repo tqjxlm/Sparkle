@@ -1,10 +1,10 @@
 """REBLUR per-pass validation: runs the denoiser with debug output at each stage and validates properties.
 
 Tests:
-  1. Each pass produces non-black output
-  2. Pixel-level variance decreases across passes (PrePass -> Blur -> PostBlur)
-  3. Mean luminance is approximately conserved across passes
-  4. No NaN or Inf values in any pass output
+  1. No NaN or Inf values in any pass output
+  2. Each pass produces non-black output
+  3. Variance decreases >= 2% across spatial passes (PrePass -> PostBlur)
+  4. Mean luminance conserved within 50% across passes
 
 Usage:
   python tests/reblur/reblur_pass_validation.py --framework glfw [--skip_build]
@@ -23,6 +23,9 @@ from PIL import Image
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+sys.path.insert(0, PROJECT_ROOT)
+
+from dev.utils import extract_log_path
 
 PASS_NAMES = {0: "PrePass", 1: "Blur", 2: "PostBlur"}
 MAX_SPP = 4  # low SPP to see denoiser effect clearly
@@ -70,11 +73,12 @@ def run_with_debug_pass(framework, debug_pass, skip_build, output_dir):
     print(f"Running with debug_pass={debug_pass} ({name})", flush=True)
     print(f"{'='*60}", flush=True)
     result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    log_path = extract_log_path(result.stdout)
+    log_info = f" — log: {log_path}" if log_path else ""
     if result.returncode != 0:
-        print(f"FAIL: App crashed with debug_pass={debug_pass}", flush=True)
-        print(result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout,
-              flush=True)
+        print(f"FAIL: App crashed with debug_pass={debug_pass}{log_info}", flush=True)
         return None
+    print(f"  OK{log_info}", flush=True)
 
     # Find the screenshot
     screenshot_dir = get_screenshot_dir(framework)
@@ -150,10 +154,13 @@ def main():
         build_py = os.path.join(PROJECT_ROOT, "build.py")
         result = subprocess.run(
             [sys.executable, build_py, "--framework", args.framework],
-            cwd=PROJECT_ROOT,
+            cwd=PROJECT_ROOT, capture_output=True, text=True,
         )
         if result.returncode != 0:
             print("FAIL: Build failed", flush=True)
+            if result.stderr:
+                for line in result.stderr.strip().splitlines()[-10:]:
+                    print(f"  {line}", flush=True)
             return 1
 
     # Run each debug pass and collect screenshots (saved to temp dir)
@@ -201,21 +208,21 @@ def main():
     print(f"\nVariance progression: PrePass={stds[0]:.6f} -> Blur={stds[1]:.6f} -> PostBlur={stds[2]:.6f}",
           flush=True)
 
-    # PostBlur should have less or similar noise than PrePass
-    if stds[2] > stds[0] * 1.5:
+    # PostBlur should have less noise than PrePass
+    if stds[2] > stds[0] * 0.98:
         failures.append(
-            f"PostBlur std ({stds[2]:.6f}) is significantly higher than "
-            f"PrePass std ({stds[0]:.6f}) — spatial pipeline may not be filtering"
+            f"PostBlur std ({stds[2]:.6f}) is not sufficiently lower than "
+            f"PrePass std ({stds[0]:.6f}) — spatial pipeline must reduce variance by >= 2%"
         )
 
     # 4. Mean luminance should be approximately conserved (within 50% tolerance
     #    since tone mapping is nonlinear)
     prepass_luma = metrics[0]["mean_luminance"]
     full_luma = metrics[99]["mean_luminance"]
-    if prepass_luma > 0 and abs(full_luma - prepass_luma) / prepass_luma > 1.0:
+    if prepass_luma > 0 and abs(full_luma - prepass_luma) / prepass_luma > 0.5:
         failures.append(
             f"Mean luminance changed too much: PrePass={prepass_luma:.6f} vs "
-            f"FullPipeline={full_luma:.6f}"
+            f"FullPipeline={full_luma:.6f} (ratio={abs(full_luma - prepass_luma) / prepass_luma:.4f} > 0.5)"
         )
 
     # Report results

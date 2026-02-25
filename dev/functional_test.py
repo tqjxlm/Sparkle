@@ -8,6 +8,9 @@ import tempfile
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, PROJECT_ROOT)
+
+from dev.utils import extract_log_path
 
 GROUND_TRUTH_URL_BASE = "https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle"
 
@@ -57,9 +60,15 @@ def build_and_run(framework, pipeline, scene, other_args, headless=False, env=No
         env = os.environ.copy()
 
     print(f"Running: {' '.join(run_cmd)}", flush=True)
-    result = subprocess.run(run_cmd, cwd=PROJECT_ROOT, env=env)
-    print(f"App exited with code {result.returncode}", flush=True)
+    result = subprocess.run(run_cmd, cwd=PROJECT_ROOT, env=env,
+                            capture_output=True, text=True)
+    log_path = extract_log_path(result.stdout)
+    log_info = f" — log: {log_path}" if log_path else ""
+    print(f"App exited with code {result.returncode}{log_info}", flush=True)
     if result.returncode != 0:
+        if result.stderr:
+            for line in result.stderr.strip().splitlines()[-10:]:
+                print(f"  {line}", flush=True)
         sys.exit(1)
 
 

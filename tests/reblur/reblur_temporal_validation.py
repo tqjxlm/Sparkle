@@ -1,10 +1,11 @@
 """REBLUR temporal pipeline validation: validates TemporalAccumulation and HistoryFix passes.
 
 Tests:
-  1. TemporalAccum output (debug_pass=3) is non-degenerate (no NaN/Inf, not all black)
-  2. HistoryFix output (debug_pass=4) is non-degenerate
-  3. Temporal convergence: output at 64 frames has less variance than at 4 frames
-  4. History fix does not amplify noise: HistoryFix std <= TemporalAccum std * tolerance
+  1. No NaN or Inf in any output
+  2. No output is all black
+  3. Temporal convergence: 64-frame std <= 4-frame std * 1.1
+  4. HistoryFix does not amplify noise: HistoryFix std <= TemporalAccum std * 1.5
+  5. Mean luminance conserved within 50% across temporal passes
 
 Usage:
   python tests/reblur/reblur_temporal_validation.py --framework glfw [--skip_build]
@@ -23,6 +24,9 @@ from PIL import Image
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+sys.path.insert(0, PROJECT_ROOT)
+
+from dev.utils import extract_log_path
 
 PASS_NAMES = {
     3: "TemporalAccum",
@@ -69,11 +73,12 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label):
     print(f"{'='*60}", flush=True)
 
     result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    log_path = extract_log_path(result.stdout)
+    log_info = f" — log: {log_path}" if log_path else ""
     if result.returncode != 0:
-        print(f"FAIL: App crashed — {label}", flush=True)
-        combined = result.stdout + result.stderr
-        print(combined[-2000:] if len(combined) > 2000 else combined, flush=True)
+        print(f"FAIL: App crashed — {label}{log_info}", flush=True)
         return None
+    print(f"  OK{log_info}", flush=True)
 
     # Find and copy screenshot
     screenshot_dir = get_screenshot_dir(framework)
@@ -129,10 +134,13 @@ def main():
         build_py = os.path.join(PROJECT_ROOT, "build.py")
         result = subprocess.run(
             [sys.executable, build_py, "--framework", args.framework],
-            cwd=PROJECT_ROOT,
+            cwd=PROJECT_ROOT, capture_output=True, text=True,
         )
         if result.returncode != 0:
             print("FAIL: Build failed", flush=True)
+            if result.stderr:
+                for line in result.stderr.strip().splitlines()[-10:]:
+                    print(f"  {line}", flush=True)
             return 1
 
     output_dir = tempfile.mkdtemp(prefix="reblur_temporal_")
@@ -222,10 +230,10 @@ def main():
         ratio = abs(full_mean - ta_mean) / ta_mean
         print(f"Luminance conservation: TemporalAccum mean={ta_mean:.6f}, "
               f"FullPipeline mean={full_mean:.6f} (ratio={ratio:.4f})", flush=True)
-        if ratio > 1.0:
+        if ratio > 0.5:
             failures.append(
                 f"Mean luminance changed too much: TemporalAccum={ta_mean:.6f} vs "
-                f"FullPipeline={full_mean:.6f}"
+                f"FullPipeline={full_mean:.6f} (ratio={ratio:.4f} > 0.5)"
             )
 
     # --- Report ---

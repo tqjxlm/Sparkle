@@ -6,15 +6,16 @@ Tests included:
   3. Split-merge equivalence — split shader with debug_pass 255 matches ground truth (FLIP <= 0.1)
   4. REBLUR screenshot — split path + full denoiser pipeline runs without crash
   5. REBLUR per-pass validation — spatial passes produce valid output with decreasing variance
-  6. REBLUR pass validation (C++) — native test case exercises full spatial pipeline
+  6. REBLUR pass validation (C++) — native test case + screenshot pixel validation
   7. REBLUR temporal validation — TemporalAccum/HistoryFix produce valid output, convergence
-  8. REBLUR temporal convergence (C++) — 30+ frames temporal pipeline without crash
+  8. REBLUR temporal convergence (C++) — 30+ frames temporal pipeline + screenshot pixel validation
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
 """
 
 import argparse
+import glob
 import os
 import subprocess
 import sys
@@ -22,6 +23,9 @@ import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+sys.path.insert(0, PROJECT_ROOT)
+
+from dev.utils import extract_log_path
 
 
 def parse_args():
@@ -32,31 +36,86 @@ def parse_args():
     return parser.parse_args()
 
 
-def run_command(cmd, label, cwd=PROJECT_ROOT):
-    """Run a command and return (success: bool, duration_seconds: float, output: str)."""
+def run_command(cmd, label, cwd=PROJECT_ROOT, show_output=False):
+    """Run a command and return (success: bool, duration_seconds: float, log_path: str).
+
+    When *show_output* is True the subprocess stdout is forwarded to the
+    console.  Use this for sub-test scripts whose output IS the test report.
+    """
     print(f"\n{'='*70}", flush=True)
     print(f"  {label}", flush=True)
     print(f"{'='*70}", flush=True)
     print(f"  cmd: {' '.join(cmd)}", flush=True)
-    print(flush=True)
 
     start = time.time()
     result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     duration = time.time() - start
 
-    # Show output (truncated for very long output)
-    combined = result.stdout + result.stderr
-    if len(combined) > 4000:
-        # Show last 4000 chars for long output
-        print(f"  ... (truncated, showing last 4000 chars) ...", flush=True)
-        print(combined[-4000:], flush=True)
-    else:
-        print(combined, flush=True)
-
+    log_path = extract_log_path(result.stdout)
     success = result.returncode == 0
     status = "PASS" if success else "FAIL"
-    print(f"  [{status}] {label} ({duration:.1f}s)", flush=True)
-    return success, duration, combined
+    log_info = f" — log: {log_path}" if log_path else ""
+    print(f"  [{status}] {label} ({duration:.1f}s){log_info}", flush=True)
+    if show_output and result.stdout:
+        print(result.stdout, flush=True)
+    if not success and result.stderr:
+        for line in result.stderr.strip().splitlines()[-10:]:
+            print(f"    {line}", flush=True)
+    return success, duration, log_path or ""
+
+
+def get_screenshot_dir(framework):
+    if framework == "glfw":
+        return os.path.join(PROJECT_ROOT, "build_system", "glfw", "output",
+                            "build", "generated", "screenshots")
+    if framework == "macos":
+        return os.path.expanduser("~/Documents/sparkle/screenshots")
+    raise ValueError(f"Unsupported framework: {framework}")
+
+
+def validate_latest_screenshot(framework, label):
+    """Load the most recent screenshot and validate it is not all-black.
+
+    Returns (success, duration, message).
+    """
+    import numpy as np
+    from PIL import Image
+
+    start = time.time()
+    screenshot_dir = get_screenshot_dir(framework)
+    pattern = os.path.join(screenshot_dir, "TestScene_gpu_*.png")
+    matches = glob.glob(pattern)
+    if not matches:
+        return False, time.time() - start, f"No screenshot found matching {pattern}"
+
+    matches.sort(key=os.path.getmtime, reverse=True)
+    path = matches[0]
+
+    img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    mean_luma = float(np.mean(luma))
+    has_nan = bool(np.any(np.isnan(img)))
+    has_inf = bool(np.any(np.isinf(img)))
+
+    dur = time.time() - start
+    failures = []
+    if has_nan:
+        failures.append("contains NaN values")
+    if has_inf:
+        failures.append("contains Inf values")
+    if mean_luma < 1e-4:
+        failures.append(f"output is all black (mean_luma={mean_luma:.6f})")
+
+    print(f"  Screenshot: {path}", flush=True)
+    print(f"  Mean luminance: {mean_luma:.6f}", flush=True)
+
+    if failures:
+        msg = f"{label}: " + "; ".join(failures)
+        print(f"  FAIL: {msg}", flush=True)
+        return False, dur, msg
+
+    print(f"  PASS: screenshot pixel validation OK", flush=True)
+    return True, dur, ""
 
 
 def main():
@@ -120,32 +179,40 @@ def main():
     # --- Test 5: Per-pass validation (Python) ---
     ok, dur, _ = run_command(
         [py, pass_validation_py, "--framework", fw, "--skip_build"],
-        "5. REBLUR per-pass validation (PrePass/Blur/PostBlur)")
+        "5. REBLUR per-pass validation (PrePass/Blur/PostBlur)",
+        show_output=True)
     results.append(("Per-pass validation", ok, dur))
 
-    # --- Test 6: REBLUR pass validation (C++ test case) ---
+    # --- Test 6: REBLUR pass validation (C++ test case + screenshot validation) ---
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_pass_validation", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
          "--spp", "1", "--max_spp", "4", "--test_timeout", "60"],
-        "6. REBLUR pass validation (C++ test case)")
+        "6a. REBLUR pass validation (C++ test case)")
     results.append(("C++ pass validation", ok, dur))
+    if ok:
+        ok2, dur2, _ = validate_latest_screenshot(fw, "C++ pass validation screenshot")
+        results.append(("C++ pass validation (pixels)", ok2, dur2))
 
     # --- Test 7: Temporal validation (Python) ---
     ok, dur, _ = run_command(
         [py, temporal_validation_py, "--framework", fw, "--skip_build"],
-        "7. REBLUR temporal validation (TemporalAccum/HistoryFix/convergence)")
+        "7. REBLUR temporal validation (TemporalAccum/HistoryFix/convergence)",
+        show_output=True)
     results.append(("Temporal validation", ok, dur))
 
-    # --- Test 8: Temporal convergence (C++ test case) ---
+    # --- Test 8: Temporal convergence (C++ test case + screenshot validation) ---
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_temporal_convergence", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
          "--spp", "1", "--max_spp", "64", "--test_timeout", "120"],
-        "8. REBLUR temporal convergence (C++ test, 30+ frames)")
+        "8a. REBLUR temporal convergence (C++ test, 30+ frames)")
     results.append(("C++ temporal convergence", ok, dur))
+    if ok:
+        ok2, dur2, _ = validate_latest_screenshot(fw, "C++ temporal convergence screenshot")
+        results.append(("C++ temporal convergence (pixels)", ok2, dur2))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)
