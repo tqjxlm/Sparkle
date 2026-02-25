@@ -216,6 +216,11 @@ void GPURenderer::Update()
         bound_sky_proxy_ = sky_light;
         auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
 
+        // Reset accumulation when sky light changes so early frames rendered
+        // with a dummy black cubemap don't drag down the running average.
+        scene_render_proxy_->GetCamera()->MarkPixelDirty();
+        dispatched_sample_count_ = 0;
+
         if ((sky_light != nullptr) && sky_light->GetSkyMap())
         {
             auto sky_map = sky_light->GetSkyMap();
