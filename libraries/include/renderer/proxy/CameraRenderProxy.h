@@ -73,6 +73,8 @@ public:
     void MarkPixelDirty()
     {
         pixels_dirty_ = true;
+        cumulated_sample_count_ = 0;
+        pending_sample_count_ = 0;
     }
 
     void AccumulateSample(uint32_t sample_count)
