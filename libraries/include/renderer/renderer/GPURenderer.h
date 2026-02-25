@@ -89,6 +89,7 @@ private:
     RHIResourceRef<RHIShader> composite_shader_;
     RHIResourceRef<RHIPipelineState> composite_pipeline_;
     RHIResourceRef<RHIBuffer> composite_uniform_buffer_;
+    RHIResourceRef<RHIComputePass> reblur_compute_pass_;
 
     struct ComputePerformanceRecord
     {

@@ -107,7 +107,6 @@ class ReblurCompositeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(denoisedDiffuse, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(denoisedSpecular, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(albedoMetallic, RHIShaderResourceReflection::ResourceType::Texture2D)
-    USE_SHADER_RESOURCE(linearSampler, RHIShaderResourceReflection::ResourceType::Sampler)
     USE_SHADER_RESOURCE(outputImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
     END_SHADER_RESOURCE_TABLE
@@ -684,7 +683,9 @@ void GPURenderer::InitReblurResources()
     auto *comp_resources = composite_pipeline_->GetShaderResource<ReblurCompositeShader>();
     comp_resources->ubo().BindResource(composite_uniform_buffer_);
     comp_resources->outputImage().BindResource(scene_texture_->GetDefaultView(rhi_));
-    comp_resources->linearSampler().BindResource(diffuse_signal_->GetSampler());
+
+    // Compute pass for REBLUR dispatches (no timestamp to avoid query reuse within frame)
+    reblur_compute_pass_ = rhi_->CreateComputePass("ReblurGPUComputePass", false);
 
     // Create REBLUR denoiser
     reblur_ = std::make_unique<ReblurDenoiser>(rhi_, width, height);
@@ -712,9 +713,9 @@ void GPURenderer::RenderReblurPath()
     transition_aux_to_write(albedo_metallic_.get());
 
     // Dispatch split path tracer
-    rhi_->BeginComputePass(compute_pass_);
+    rhi_->BeginComputePass(reblur_compute_pass_);
     rhi_->DispatchCompute(split_pt_pipeline_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
-    rhi_->EndComputePass(compute_pass_);
+    rhi_->EndComputePass(reblur_compute_pass_);
 
     // Transition auxiliary buffers to Read for denoiser
     auto transition_aux_to_read = [](RHIImage *image) {
@@ -761,9 +762,9 @@ void GPURenderer::RenderReblurPath()
                                 .before_stage = RHIPipelineStage::ComputeShader});
 
     // Dispatch composite
-    rhi_->BeginComputePass(compute_pass_);
+    rhi_->BeginComputePass(reblur_compute_pass_);
     rhi_->DispatchCompute(composite_pipeline_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
-    rhi_->EndComputePass(compute_pass_);
+    rhi_->EndComputePass(reblur_compute_pass_);
 
     // Transition scene_texture to Read for tone mapping
     scene_texture_->Transition({.target_layout = RHIImageLayout::Read,

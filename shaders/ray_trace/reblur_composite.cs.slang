@@ -8,8 +8,7 @@
 [[vk::binding(1, 0)]] Texture2D<float4> denoisedDiffuse;
 [[vk::binding(2, 0)]] Texture2D<float4> denoisedSpecular;
 [[vk::binding(3, 0)]] Texture2D<float4> albedoMetallic;
-[[vk::binding(4, 0)]] SamplerState linearSampler;
-[[vk::binding(5, 0)]] RWTexture2D<float4> outputImage;
+[[vk::binding(4, 0)]] RWTexture2D<float4> outputImage;
 
 [shader("compute")]
 [numthreads(16, 16, 1)]

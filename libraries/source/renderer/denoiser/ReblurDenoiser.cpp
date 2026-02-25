@@ -16,7 +16,6 @@ class ReblurClassifyTilesShader : public RHIShaderInfo
 
     USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
     USE_SHADER_RESOURCE(inViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
-    USE_SHADER_RESOURCE(pointSampler, RHIShaderResourceReflection::ResourceType::Sampler)
     USE_SHADER_RESOURCE(outTiles, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
     END_SHADER_RESOURCE_TABLE
@@ -40,7 +39,6 @@ class ReblurBlurShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(inSpecular, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(inNormalRoughness, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(inViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
-    USE_SHADER_RESOURCE(pointSampler, RHIShaderResourceReflection::ResourceType::Sampler)
     USE_SHADER_RESOURCE(outDiffuse, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(outSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
@@ -157,7 +155,6 @@ void ReblurDenoiser::ClassifyTiles(const ReblurInputBuffers &inputs, const Reblu
 {
     auto *resources = classify_tiles_pipeline_->GetShaderResource<ReblurClassifyTilesShader>();
     resources->inViewZ().BindResource(inputs.view_z->GetDefaultView(rhi_));
-    resources->pointSampler().BindResource(inputs.view_z->GetSampler());
 
     ReblurClassifyTilesShader::UniformBufferData ubo{
         .resolution = {width_, height_},
@@ -190,7 +187,6 @@ void ReblurDenoiser::Blur(const ReblurInputBuffers &inputs, const ReblurSettings
     resources->inSpecular().BindResource(in_spec->GetDefaultView(rhi_));
     resources->inNormalRoughness().BindResource(inputs.normal_roughness->GetDefaultView(rhi_));
     resources->inViewZ().BindResource(inputs.view_z->GetDefaultView(rhi_));
-    resources->pointSampler().BindResource(inputs.view_z->GetSampler());
     resources->outDiffuse().BindResource(out_diff->GetDefaultView(rhi_));
     resources->outSpecular().BindResource(out_spec->GetDefaultView(rhi_));
 

@@ -21,9 +21,8 @@
 [[vk::binding(2, 0)]] Texture2D<float4> inSpecular;
 [[vk::binding(3, 0)]] Texture2D<float4> inNormalRoughness;
 [[vk::binding(4, 0)]] Texture2D<float> inViewZ;
-[[vk::binding(5, 0)]] SamplerState pointSampler;
-[[vk::binding(6, 0)]] RWTexture2D<float4> outDiffuse;
-[[vk::binding(7, 0)]] RWTexture2D<float4> outSpecular;
+[[vk::binding(5, 0)]] RWTexture2D<float4> outDiffuse;
+[[vk::binding(6, 0)]] RWTexture2D<float4> outSpecular;
 
 float2 RotateVector(float4 rotator_val, float2 v)
 {

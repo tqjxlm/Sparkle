@@ -7,8 +7,7 @@
 };
 
 [[vk::binding(1, 0)]] Texture2D<float> inViewZ;
-[[vk::binding(2, 0)]] SamplerState pointSampler;
-[[vk::binding(3, 0)]] RWTexture2D<float> outTiles;
+[[vk::binding(2, 0)]] RWTexture2D<float> outTiles;
 
 groupshared uint s_isSky;
 
