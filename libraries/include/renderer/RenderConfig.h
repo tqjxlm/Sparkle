@@ -77,6 +77,7 @@ struct RenderConfig : public ConfigCollection
     uint32_t image_height;
     uint32_t shadow_map_resolution;
     bool spatial_denoise;
+    bool use_reblur;
     bool use_ssao;
     bool use_prepass;
     bool use_diffuse_ibl;

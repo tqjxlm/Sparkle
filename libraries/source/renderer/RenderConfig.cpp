@@ -30,6 +30,8 @@ static ConfigValue<uint32_t> config_shadow_map_resolution("shadow_map_resolution
                                                           1024);
 static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial denoise in ray tracing procedures",
                                                 "renderer", true, true);
+static ConfigValue<bool> config_use_reblur("use_reblur", "use REBLUR denoiser for GPU ray tracing", "renderer", false,
+                                           true);
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
@@ -52,6 +54,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_width, image_width);
     ConfigCollectionHelper::RegisterConfig(this, config_height, image_height);
     ConfigCollectionHelper::RegisterConfig(this, config_spatial_denoise, spatial_denoise);
+    ConfigCollectionHelper::RegisterConfig(this, config_use_reblur, use_reblur);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
@@ -99,6 +102,13 @@ void RenderConfig::Validate()
             config_ssao.Set(false);
             use_ssao = false;
         }
+    }
+
+    if (use_reblur && !IsRayTracingMode())
+    {
+        Log(Warn, "reblur requires gpu pipeline. disabling");
+        config_use_reblur.Set(false);
+        use_reblur = false;
     }
 
     if (use_ssao)
