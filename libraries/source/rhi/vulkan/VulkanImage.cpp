@@ -90,6 +90,8 @@ void VulkanImage::TransitionLayout(VkCommandBuffer command_buffer, const Transit
         case PixelFormat::R32_UINT:
         case PixelFormat::R32_FLOAT:
         case PixelFormat::RGBAUInt32:
+        case PixelFormat::RG16Float:
+        case PixelFormat::RG32Float:
             barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             break;
         case PixelFormat::D24_S8:

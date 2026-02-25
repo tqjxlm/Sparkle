@@ -209,6 +209,10 @@ inline VkFormat GetVkPixelFormat(PixelFormat format)
         return VK_FORMAT_R32_UINT;
     case PixelFormat::R32_FLOAT:
         return VK_FORMAT_R32_SFLOAT;
+    case PixelFormat::RG16Float:
+        return VK_FORMAT_R16G16_SFLOAT;
+    case PixelFormat::RG32Float:
+        return VK_FORMAT_R32G32_SFLOAT;
     default:
         ASSERT_F(false, "Unsupported image format {}", static_cast<int>(format));
         return VK_FORMAT_UNDEFINED;
@@ -305,6 +309,10 @@ inline PixelFormat VkFormatToPixelFormat(VkFormat format)
         return PixelFormat::R32_FLOAT;
     case VK_FORMAT_R32G32B32A32_UINT:
         return PixelFormat::RGBAUInt32;
+    case VK_FORMAT_R16G16_SFLOAT:
+        return PixelFormat::RG16Float;
+    case VK_FORMAT_R32G32_SFLOAT:
+        return PixelFormat::RG32Float;
     default:
         UnImplemented(format);
         return PixelFormat::Count;
