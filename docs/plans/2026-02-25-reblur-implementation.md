@@ -14,25 +14,23 @@
 
 ## Rules
 
-1. **Tests before commits.** Before every commit, build and run all applicable tests. Do not commit if any test fails — fix the failure first.
+1. **Tests before commits.** Before every commit, build and run the REBLUR test suite. Do not commit if any test fails — fix the failure first.
 
-   **Always run (smoke + no-regression against ground truth):**
    ```bash
-   python3 build.py --framework glfw --run --test_case smoke --headless true
-   python3 dev/functional_test.py --framework glfw --pipeline gpu --headless --skip_build -- --use_reblur false --spp 1 --max_spp 2048
+   python3 dev/reblur_test_suite.py --framework glfw
    ```
-   The `functional_test.py` run downloads ground truth from CDN, captures a screenshot, and compares via FLIP (threshold 0.1). This ensures the GPU pipeline with reblur disabled is not regressed.
 
-   **After M1 (split path exists):** also run a crash/screenshot test for the reblur path:
-   ```bash
-   python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 64
-   ```
-   Note: This only checks that the reblur path runs without crashing and produces a screenshot. It does **not** compare against ground truth — the reblur output is expected to diverge from ground truth until temporal accumulation is implemented (M3+).
+   The test suite (`dev/reblur_test_suite.py`) builds once and runs all applicable tests in sequence. It reports a summary table with pass/fail status and timing for each test.
 
-   **After M5 (reblur_smoke test exists):** also run:
-   ```bash
-   python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1
-   ```
+   **Current tests in the suite:**
+   1. Smoke test — app launches without crash
+   2. Vanilla functional test — GPU pipeline without REBLUR matches CDN ground truth (FLIP <= 0.1)
+   3. Split-merge equivalence — split shader with `debug_pass 255` matches CDN ground truth (FLIP ~0.00)
+   4. REBLUR screenshot — full denoiser pipeline runs without crash and produces a screenshot
+   5. Per-pass validation — spatial passes produce valid output (no NaN/Inf, decreasing variance)
+   6. C++ pass validation — native test case exercises full spatial pipeline without crash
+
+   **Maintaining the test suite:** Whenever a new test case is added to this plan (e.g. a new milestone introduces a new validation), the corresponding test **must** also be added to `dev/reblur_test_suite.py`. The suite is the single source of truth for what gets run before commits — individual test commands listed in task descriptions are for documentation only.
 
 2. **Verify logs confirm the intended code path.** After each test run, check the output for these log lines:
    - `--pipeline gpu` tests must show: `GPURenderer initializing`
@@ -625,7 +623,7 @@ After denoiser runs, dispatch composite to write into `scene_texture_`.
 
 **Step 4: Build and test**
 
-Run with `--use_reblur true`. The output should show something (even if the denoiser is passthrough, the composite should produce diff*albedo + spec).
+Run with `--use_reblur true`. The output should show something (the composite produces diff*albedo + spec from the denoised signals).
 
 **Step 5: Commit**
 
@@ -637,41 +635,44 @@ git commit -m "feat(reblur): add composite pass for demodulated signal remodulat
 
 ---
 
-### Task 7: Verify split output → composite roundtrip
+### Task 7: Verify split-merge equivalence with vanilla pipeline
 
-Validate that the split path tracer's output, when composited without any denoising, produces an image comparable to the original combined path tracer.
+Validate that the split path tracer produces an image identical to the vanilla GPU pipeline when the denoiser and composite are bypassed. This catches bugs in radiance accumulation, sky handling, emissive handling, and NEE in the split shader.
 
-**Step 1: Implement passthrough in ReblurDenoiser**
+**Approach:** The split shader accumulates a `total_radiance` field that mirrors vanilla's `pixel_color` exactly (same contributions, same order). In `main()`, this is clamped and written to `imageData` using the same moving-average logic as vanilla. Debug pass 255 in `GPURenderer::RenderReblurPath()` returns early after the split shader dispatch, skipping the denoiser and composite entirely.
 
-Modify `Denoise()` to simply copy input diffuse/specular to output (no filtering):
+**Step 1: Add `total_radiance` to `SplitPathOutput`**
 
-```cpp
-void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, ...)
-{
-    // Passthrough: copy input to output
-    inputs.diffuse_radiance_hit_dist->CopyToImage(denoised_diffuse_.get());
-    inputs.specular_radiance_hit_dist->CopyToImage(denoised_specular_.get());
-}
+Add a `float3 total_radiance` field, initialize to zero, and accumulate at every radiance event (sky, emissive, NEE) before demodulation — matching vanilla's `pixel_color` accumulation.
+
+**Step 2: Fix `imageData` write in `main()`**
+
+Replace the broken remodulation-based `imageData` write with:
+```slang
+float3 combined_clamped = min(output.total_radiance, output_limit);
+this_combined += combined_clamped;
+// ... after SPP loop:
+float moving_average = (float)total_sample_count / (total_sample_count + spp);
+float3 all_samples = lerp(this_combined / float(spp), imageData[pixel].rgb, moving_average);
+imageData[pixel] = float4(all_samples, 1.f);
 ```
 
-**Step 2: Run both paths and compare**
+**Step 3: Add debug pass 255 early return in GPURenderer**
+
+After the split shader dispatch, check `render_config_.reblur_debug_pass == 255` and return early, transitioning `scene_texture_` to Read for tone mapping.
+
+**Step 4: Run equivalence test**
 
 ```bash
-# Original path
-python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur false --spp 1 --max_spp 64
-# save screenshot as baseline
-
-# Split path (passthrough denoiser)
-python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 64
-# compare screenshots
+python3 dev/functional_test.py --framework glfw --pipeline gpu --headless --skip_build -- --use_reblur true --reblur_debug_pass 255
 ```
 
-Expected: The two screenshots should be visually similar. The split/remodulated path may have minor floating-point differences but should be within FLIP <= 0.02.
+Expected FLIP ~0.00 against CDN ground truth. The split shader's `imageData` output should be bit-identical to vanilla's (same RNG seed, same accumulation logic).
 
-**Step 3: Commit**
+**Step 5: Commit**
 
 ```bash
-git commit -m "test(reblur): verify split path tracer roundtrip matches original"
+git commit -m "fix(reblur): lossless split-merge debug pass for M1 equivalence test"
 ```
 
 ---
@@ -852,7 +853,7 @@ tiles_ = make_image(PixelFormat::R32_FLOAT, tile_w, tile_h, "ReblurTiles");
 void ReblurDenoiser::Denoise(...)
 {
     ClassifyTiles(inputs, settings);
-    // ... rest of pipeline (still passthrough for now)
+    // ... rest of pipeline (spatial passes follow)
 }
 ```
 
@@ -1277,16 +1278,20 @@ static TestCaseRegistrar<ReblurSmokeTest> reblur_smoke_registrar("reblur_smoke")
 } // namespace sparkle
 ```
 
-**Step 2: Verify test runs**
+**Step 2: Add test to the suite**
+
+Add the `reblur_smoke` test as a new entry in `dev/reblur_test_suite.py` so it runs as part of the standard pre-commit suite.
+
+**Step 3: Verify via suite**
 
 ```bash
-python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1
+python3 dev/reblur_test_suite.py --framework glfw
 ```
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
-git add tests/reblur/ReblurSmokeTest.cpp
+git add tests/reblur/ReblurSmokeTest.cpp dev/reblur_test_suite.py
 git commit -m "test(reblur): add REBLUR smoke test (waits 30 frames then screenshots)"
 ```
 
@@ -1294,37 +1299,25 @@ git commit -m "test(reblur): add REBLUR smoke test (waits 30 frames then screens
 
 ### Task 19: Run all end-to-end tests
 
-**Step 1: Verify no regression when disabled**
+Run the full test suite and ensure all tests pass:
 
 ```bash
-# Run original pipeline (no REBLUR) and capture screenshot
-python3 build.py --framework glfw --run --test_case screenshot --headless true --pipeline gpu --use_reblur false --spp 1 --max_spp 2048
-# Compare against known ground truth
+python3 dev/reblur_test_suite.py --framework glfw
 ```
 
-Expected: FLIP <= 0.005 (essentially identical).
+At this point the suite should include all tests from M1-M5. Verify the summary shows 0 failures.
 
-**Step 2: Verify quality target**
+**Additional quality checks (not yet in suite — add when implemented):**
 
-```bash
-# Run REBLUR pipeline and capture screenshot
-python3 build.py --framework glfw --run --test_case reblur_smoke --headless true --pipeline gpu --use_reblur true --spp 1 --max_spp 64
-# Compare denoised output against 2048spp ground truth
-```
+1. **Quality target:** REBLUR denoised output at 64 SPP should achieve FLIP <= 0.08 against 2048 SPP ground truth.
 
-Expected: FLIP <= 0.08.
+2. **Temporal stability:** Capture 10 consecutive screenshots after convergence. Per-pixel luminance std-dev should be < 0.02.
 
-**Step 3: Verify temporal stability**
-
-Capture 10 consecutive screenshots after convergence. Compute per-pixel luminance standard deviation.
-
-Expected: std-dev < 0.02.
-
-**Step 4: Document results**
+**Step 1: Document results**
 
 Update the design doc with actual measured metrics.
 
-**Step 5: Commit**
+**Step 2: Commit**
 
 ```bash
 git commit -m "test(reblur): all end-to-end tests passing within thresholds"

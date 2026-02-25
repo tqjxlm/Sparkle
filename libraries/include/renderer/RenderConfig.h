@@ -87,7 +87,7 @@ struct RenderConfig : public ConfigCollection
     bool use_dynamic_spp;
     bool enable_nee;
     bool clear_screenshots;
-    uint32_t reblur_debug_pass; // 99=full pipeline (default), 0=after PrePass, 1=after Blur, 2=after PostBlur
+    uint32_t reblur_debug_pass; // 99=full pipeline (default), 0=after PrePass, 1=after Blur, 2=after PostBlur, 255=passthrough (no denoising)
     float target_framerate;
     float gpu_time_budget_ratio;
 

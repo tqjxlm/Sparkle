@@ -724,6 +724,16 @@ void GPURenderer::RenderReblurPath()
     rhi_->DispatchCompute(split_pt_pipeline_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
     rhi_->EndComputePass(reblur_compute_pass_);
 
+    // Debug pass 255: passthrough merge — skip denoiser and composite,
+    // use the split shader's imageData accumulation directly
+    if (render_config_.reblur_debug_pass == 255)
+    {
+        scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::ComputeShader,
+                                    .before_stage = RHIPipelineStage::PixelShader});
+        return;
+    }
+
     // Transition auxiliary buffers to Read for denoiser
     auto transition_aux_to_read = [](RHIImage *image) {
         image->Transition({.target_layout = RHIImageLayout::Read,

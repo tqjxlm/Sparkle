@@ -255,6 +255,7 @@ struct SplitPathOutput
     float view_z;
     float3 albedo;
     float metallic;
+    float3 total_radiance;  // combined radiance mirroring vanilla's pixel_color
     bool is_hit;
 };
 
@@ -273,6 +274,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     result.view_z = 1e6;
     result.albedo = float3(0, 0, 0);
     result.metallic = 0;
+    result.total_radiance = float3(0, 0, 0);
     result.is_hit = false;
 
     float3 throughput = float3(1, 1, 1);
@@ -294,6 +296,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
             if (bounce == 0)
             {
                 // Sky pixel: no geometry hit
+                result.total_radiance += sky_contrib;
                 return result;
             }
 
@@ -304,6 +307,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
             }
 
             // Accumulate into the appropriate channel
+            result.total_radiance += sky_contrib;
             if (is_diffuse_path)
             {
                 result.diffuse_radiance += sky_contrib;
@@ -346,10 +350,12 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
             if (bounce == 0)
             {
                 // Emissive primary hit: put in diffuse channel
+                result.total_radiance += emissive_contrib;
                 result.diffuse_radiance += emissive_contrib;
                 return result;
             }
 
+            result.total_radiance += emissive_contrib;
             if (is_diffuse_path)
             {
                 result.diffuse_radiance += emissive_contrib;
@@ -372,6 +378,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
             float3 nee_radiance = SampleLights(intersection, mat_param, -ray_desc.Direction, light_pdf);
             float light_mis_weight = GetMISWeight(light_pdf, bsdf_pdf);
             float3 nee_contrib = nee_radiance * throughput * light_mis_weight;
+            result.total_radiance += nee_contrib;
 
             if (bounce == 0)
             {
@@ -471,6 +478,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
 
     float4 diff_accum = float4(0, 0, 0, 0);
     float4 spec_accum = float4(0, 0, 0, 0);
+    float3 this_combined = float3(0, 0, 0);
 
     // G-buffer from last sample (single sample per pixel typically for denoiser input)
     SplitPathOutput last_output;
@@ -492,6 +500,10 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         ray_desc.TMax = 1000.0f;
 
         SplitPathOutput output = SamplePixelSplit(ray_desc);
+
+        // Accumulate combined radiance (identical to vanilla's per-sample clamping)
+        float3 combined_clamped = min(output.total_radiance, output_limit);
+        this_combined += combined_clamped;
 
         // Firefly removal
         float3 diff_clamped = min(output.diffuse_radiance, output_limit);
@@ -531,11 +543,8 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     // Motion vectors: zero for static camera
     motionVectorOutput[pixel] = float2(0, 0);
 
-    // Also write combined output to imageData for the original accumulation path
-    float3 combined = last_output.is_hit
-        ? diff_accum.rgb * last_output.albedo + spec_accum.rgb
-        : float3(0, 0, 0);
+    // Write combined output to imageData (identical to vanilla accumulation)
     float moving_average = (float)total_sample_count / (total_sample_count + spp);
-    float3 all_samples = lerp(combined, imageData[pixel].rgb, moving_average);
+    float3 all_samples = lerp(this_combined / float(spp), imageData[pixel].rgb, moving_average);
     imageData[pixel] = float4(all_samples, 1.f);
 }
