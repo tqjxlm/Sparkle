@@ -39,7 +39,9 @@ static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event esti
 static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear all existing screenshots", "renderer",
                                                   false);
 static ConfigValue<uint32_t> config_reblur_debug_pass(
-    "reblur_debug_pass", "REBLUR debug: output after pass N (99=full, 0=PrePass, 1=Blur, 2=PostBlur, 255=passthrough)", "renderer", 99);
+    "reblur_debug_pass",
+    "REBLUR debug: output after pass N (99=full, 0=PrePass, 1=Blur, 2=PostBlur, 3=TemporalAccum, 4=HistoryFix, 255=passthrough)",
+    "renderer", 99);
 
 void RenderConfig::Init()
 {

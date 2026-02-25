@@ -320,8 +320,12 @@ bool use_reblur;  // --use_reblur true/false (default: false)
 | `reblur_tiles` | 1 (Classify) | Sky tiles flagged correctly | Debug output tile map | Sky=1.0, geometry=0.0; matches viewZ > range |
 | `reblur_prepass` | 2 (PrePass) | Noise reduction without edge loss | Compare luminance variance: prepass < raw | Variance reduced by >30%; edge FLIP < 0.05 |
 | `reblur_temporal_static` | 3 (TemporalAccum) | Accumulation converges under static camera | Run 30 frames, compare against ground truth | FLIP <= 0.12 after 30 frames |
+| `reblur_temporal_accum_valid` | 3 (TemporalAccum) | Output is non-degenerate | `debug_pass=3`, 64 frames, check NaN/Inf/black | No NaN/Inf, mean_luma > 0 |
+| `reblur_temporal_convergence` | 3 (TemporalAccum) | Noise decreases over frames | Compare std at 4 vs 64 frames | std(64f) <= std(4f) * 1.1 |
 | `reblur_history_length` | 3 (TemporalAccum) | Frame counter increases | Debug-visualize accumSpeed | Monotonically increasing to maxAccumulatedFrameNum |
 | `reblur_history_fix` | 4 (HistoryFix) | Disoccluded regions filled | Force history reset (frame 0), check next frame | No black pixels in geometry regions |
+| `reblur_history_fix_valid` | 4 (HistoryFix) | Output is non-degenerate | `debug_pass=4`, 64 frames, check NaN/Inf/black | No NaN/Inf, mean_luma > 0 |
+| `reblur_history_fix_stable` | 4 (HistoryFix) | No noise amplification | Compare std of HistoryFix vs TemporalAccum | hf_std <= ta_std * 1.5 |
 | `reblur_blur_converge` | 5 (Blur) | Blur radius decreases over time | Compare spatial variance at frame 5 vs frame 30 | Frame 30 variance < frame 5 variance; edges sharper |
 | `reblur_bilateral_edges` | 5 (Blur) | Edges preserved | Check normal discontinuity regions | No visible blur across material boundaries |
 | `reblur_post_blur` | 6 (PostBlur) | History written correctly | Verify history buffers are non-zero after first frame | All history textures populated |
@@ -385,7 +389,14 @@ libraries/source/renderer/denoiser/
     ReblurDenoiser.cpp
 
 tests/reblur/
-    ReblurSmokeTest.cpp               # Smoke + screenshot test
+    ReblurPassValidationTest.cpp      # Spatial pipeline crash test (10 frames)
+    ReblurTemporalConvergenceTest.cpp # Temporal pipeline crash test (30+ frames)
+
+dev/
+    reblur_test_suite.py              # Master test suite (8 tests, run before every commit)
+    reblur_pass_validation.py         # Per-pass spatial validation (debug_pass 0/1/2/99)
+    reblur_temporal_validation.py     # Per-pass temporal validation (debug_pass 3/4, convergence)
+    functional_test.py                # FLIP comparison against ground truth
 ```
 
 ### Modified Files

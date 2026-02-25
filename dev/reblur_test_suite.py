@@ -7,6 +7,8 @@ Tests included:
   4. REBLUR screenshot — split path + full denoiser pipeline runs without crash
   5. REBLUR per-pass validation — spatial passes produce valid output with decreasing variance
   6. REBLUR pass validation (C++) — native test case exercises full spatial pipeline
+  7. REBLUR temporal validation — TemporalAccum/HistoryFix produce valid output, convergence
+  8. REBLUR temporal convergence (C++) — 30+ frames temporal pipeline without crash
 
 Usage:
   python dev/reblur_test_suite.py --framework glfw [--skip_build]
@@ -64,6 +66,7 @@ def main():
     build_py = os.path.join(PROJECT_ROOT, "build.py")
     functional_test_py = os.path.join(PROJECT_ROOT, "dev", "functional_test.py")
     pass_validation_py = os.path.join(PROJECT_ROOT, "dev", "reblur_pass_validation.py")
+    temporal_validation_py = os.path.join(PROJECT_ROOT, "dev", "reblur_temporal_validation.py")
 
     results = []
 
@@ -128,6 +131,21 @@ def main():
          "--spp", "1", "--max_spp", "4", "--test_timeout", "60"],
         "6. REBLUR pass validation (C++ test case)")
     results.append(("C++ pass validation", ok, dur))
+
+    # --- Test 7: Temporal validation (Python) ---
+    ok, dur, _ = run_command(
+        [py, temporal_validation_py, "--framework", fw, "--skip_build"],
+        "7. REBLUR temporal validation (TemporalAccum/HistoryFix/convergence)")
+    results.append(("Temporal validation", ok, dur))
+
+    # --- Test 8: Temporal convergence (C++ test case) ---
+    ok, dur, _ = run_command(
+        [py, build_py, "--framework", fw, "--skip_build",
+         "--run", "--test_case", "reblur_temporal_convergence", "--headless", "true",
+         "--pipeline", "gpu", "--use_reblur", "true",
+         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"],
+        "8. REBLUR temporal convergence (C++ test, 30+ frames)")
+    results.append(("C++ temporal convergence", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)

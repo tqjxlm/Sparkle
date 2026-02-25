@@ -323,8 +323,28 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     // Temporal Accumulation: temp1 + history → temp2, writes internal_data
     TemporalAccumulate(inputs, settings);
 
+    if (debug_pass == 3)
+    {
+        CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
+        CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
+        CopyPreviousFrameData(inputs);
+        internal_frame_index_++;
+        history_valid_ = true;
+        return;
+    }
+
     // History Fix: temp2 → temp1 (wide-stride bilateral for disoccluded regions)
     HistoryFix(inputs, settings);
+
+    if (debug_pass == 4)
+    {
+        CopyToOutput(diff_temp1_.get(), spec_temp1_.get());
+        CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());
+        CopyPreviousFrameData(inputs);
+        internal_frame_index_++;
+        history_valid_ = true;
+        return;
+    }
 
     // Blur: temp1 → temp2 (primary spatial filter, uses new accumSpeed)
     Blur(inputs, settings, 1, diff_temp1_.get(), spec_temp1_.get(), diff_temp2_.get(), spec_temp2_.get(),
@@ -333,6 +353,7 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     if (debug_pass == 1)
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
+        CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
         CopyPreviousFrameData(inputs);
         internal_frame_index_++;
         history_valid_ = true;

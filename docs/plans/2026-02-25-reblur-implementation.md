@@ -29,6 +29,8 @@
    4. REBLUR screenshot — full denoiser pipeline runs without crash and produces a screenshot
    5. Per-pass validation — spatial passes produce valid output (no NaN/Inf, decreasing variance)
    6. C++ pass validation — native test case exercises full spatial pipeline without crash
+   7. Temporal validation — TemporalAccum/HistoryFix produce valid output; multi-frame convergence verified
+   8. C++ temporal convergence — 30+ frames temporal pipeline without crash, history buffer cycling
 
    **Maintaining the test suite:** Whenever a new test case is added to this plan (e.g. a new milestone introduces a new validation), the corresponding test **must** also be added to `dev/reblur_test_suite.py`. The suite is the single source of truth for what gets run before commits — individual test commands listed in task descriptions are for documentation only.
 
