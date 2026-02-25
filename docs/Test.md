@@ -30,6 +30,9 @@ echo "Exit code: $?"
 The `--test_case <name>` argument is passed straight through to the app's config system.
 Any other cvars (e.g. `--scene`, `--pipeline`) work alongside it as normal.
 
+Use `--test_timeout <frames>` to set a frame budget for the test. If the test does not
+finish within the given number of frames it is reported as `Fail`. Default is `0` (no limit).
+
 ### Exit Codes
 
 | Code | Meaning                                           |
