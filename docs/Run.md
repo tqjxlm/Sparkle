@@ -55,7 +55,7 @@ The base storage path varies by platform:
 | `rebuild_cache`     | bool   | false      | all               | Force rebuild all cook caches                                                                                |
 | `target_framerate`  | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                                   |
 | `load_last_session` | bool   | false      | all               | Restore last session (camera, config) on startup                                                             |
-| `clear_screenshots` | bool   | false      | all               | Clear old screenshots (matching scene/pipeline) before taking a new screenshot                               |
+| `clear_screenshots` | bool   | false      | all               | Clear old screenshots in the screenshots directory before taking a new screenshot                            |
 | `headless`          | bool   | false      | all               | Run without creating a window and without input (desktop GLFW and macOS frameworks; not supported on mobile) |
 
 Search across the project for keyword "ConfigValue" for more available configs.

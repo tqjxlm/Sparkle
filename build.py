@@ -173,7 +173,7 @@ def build_project(args):
         if args["run"]:
             print("Running...")
             exit_code = builder.run(args)
-            if exit_code:
+            if exit_code is not None and exit_code != 0:
                 sys.exit(exit_code)
 
 

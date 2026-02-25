@@ -2,6 +2,7 @@
 
 #if ENABLE_TEST_CASES
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>

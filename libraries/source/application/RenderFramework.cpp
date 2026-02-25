@@ -386,7 +386,7 @@ bool RenderFramework::IsSceneFullyLoaded() const
 
 void RenderFramework::RequestTakeScreenshot()
 {
-    screenshot_requested_ = true;
+    screenshot_requested_.store(true);
 }
 
 bool RenderFramework::IsScreenshotCompleted() const
@@ -396,7 +396,7 @@ bool RenderFramework::IsScreenshotCompleted() const
 
 void RenderFramework::ProcessScreenshotRequest()
 {
-    if (!screenshot_requested_ || screenshot_in_progress_ || !renderer_)
+    if (!screenshot_requested_.load() || screenshot_in_progress_ || !renderer_)
     {
         return;
     }

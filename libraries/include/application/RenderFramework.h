@@ -120,7 +120,7 @@ private:
     std::string last_saved_screenshot_path_;
 
     bool scene_loaded_notified_ = false;
-    bool screenshot_requested_ = false;
+    std::atomic<bool> screenshot_requested_{false};
     bool screenshot_in_progress_ = false;
     std::atomic<bool> screenshot_completed_{false};
 };
