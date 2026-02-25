@@ -21,7 +21,7 @@ Follow the coding style already used in the codebase.
 
 ### Formatters
 
-Always use formatters in the environment or IDE to format code and documents after edit. Read diagostic errors/warnings from the IDE.
+Always use formatters in the environment or IDE to format code and documents after edit. Read diagnostic errors/warnings from the IDE.
 
 * c++/objc/slang: `.clang-format` (clang-format)
 * markdown: `.markdownlint.json` (markdownlint)

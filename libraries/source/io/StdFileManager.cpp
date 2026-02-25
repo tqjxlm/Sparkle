@@ -126,13 +126,15 @@ bool StdFileManager::TryCreateDirectory(const Path &file)
 bool StdFileManager::IsDirectory(const Path &path)
 {
     ASSERT(path.IsValid());
-    return fs::is_directory(path.Resolved());
+    std::error_code ec;
+    return fs::is_directory(path.Resolved(), ec);
 }
 
 bool StdFileManager::IsRegularFile(const Path &path)
 {
     ASSERT(path.IsValid());
-    return fs::is_regular_file(path.Resolved());
+    std::error_code ec;
+    return fs::is_regular_file(path.Resolved(), ec);
 }
 
 bool StdFileManager::Remove(const Path &path)
@@ -143,7 +145,14 @@ bool StdFileManager::Remove(const Path &path)
         return false;
     }
 
-    return fs::remove(path.Resolved());
+    std::error_code ec;
+    bool removed = fs::remove(path.Resolved(), ec);
+    if (ec)
+    {
+        Log(Error, "Failed to remove {}: {}", path.path.string(), ec.message());
+        return false;
+    }
+    return removed;
 }
 
 std::vector<Path> StdFileManager::ListDirectory(const Path &dirpath)

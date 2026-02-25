@@ -116,11 +116,11 @@ public:
     void KeyboardCallback(int key, KeyAction action, bool shift_on) const;
     void CaptureNextFrames(int count);
 
+#if ENABLE_TEST_CASES
     void RequestTakeScreenshot();
     static void ClearScreenshots();
     [[nodiscard]] bool IsScreenshotCompleted() const;
 
-#if ENABLE_TEST_CASES
     [[nodiscard]] int GetExitCode() const
     {
         return exit_code_;

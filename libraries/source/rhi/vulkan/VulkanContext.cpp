@@ -941,7 +941,23 @@ void VulkanContext::GetRequiredInstanceExtensions()
     // Required on macOS regardless of headless mode, since CreateInstance always
     // sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.
     instance_extensions_.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
+
+    // Only add VK_EXT_layer_settings if the loader exposes it.
+    {
+        uint32_t ext_count = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, nullptr);
+        std::vector<VkExtensionProperties> exts(ext_count);
+        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data());
+
+        bool layer_settings_available =
+            std::ranges::any_of(exts, [](const VkExtensionProperties &e) {
+                return std::string_view(e.extensionName) == VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
+            });
+        if (layer_settings_available)
+        {
+            instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
+        }
+    }
 #endif
 #endif
 
