@@ -8,9 +8,12 @@
 #include "rhi/RHIRayTracing.h"
 #include "rhi/RHIShader.h"
 
+#include <memory>
+
 namespace sparkle
 {
 class SkyRenderProxy;
+class ReblurDenoiser;
 
 class GPURenderer : public Renderer
 {
@@ -39,6 +42,12 @@ private:
 
     void MeasurePerformance();
 
+    void InitReblurResources();
+
+    void RenderReblurPath();
+
+    void BindSplitBindlessResources();
+
     RHIResourceRef<RHIShader> compute_shader_;
     RHIResourceRef<RHIComputePass> compute_pass_;
 
@@ -59,6 +68,27 @@ private:
     RHIResourceRef<RHIPipelineState> pipeline_state_;
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
+
+    // REBLUR denoiser (null when disabled)
+    std::unique_ptr<ReblurDenoiser> reblur_;
+
+    // Auxiliary buffers for split path tracer
+    RHIResourceRef<RHIImage> diffuse_signal_;
+    RHIResourceRef<RHIImage> specular_signal_;
+    RHIResourceRef<RHIImage> normal_roughness_;
+    RHIResourceRef<RHIImage> view_z_;
+    RHIResourceRef<RHIImage> motion_vectors_;
+    RHIResourceRef<RHIImage> albedo_metallic_;
+
+    // Split path tracer pipeline
+    RHIResourceRef<RHIShader> split_pt_shader_;
+    RHIResourceRef<RHIPipelineState> split_pt_pipeline_;
+    RHIResourceRef<RHIBuffer> split_pt_uniform_buffer_;
+
+    // Composite pipeline
+    RHIResourceRef<RHIShader> composite_shader_;
+    RHIResourceRef<RHIPipelineState> composite_pipeline_;
+    RHIResourceRef<RHIBuffer> composite_uniform_buffer_;
 
     struct ComputePerformanceRecord
     {
