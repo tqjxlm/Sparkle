@@ -79,9 +79,11 @@ private:
               bool has_temporal_data);
     void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
     void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
+    void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
     void CopyToOutput(RHIImage *diff, RHIImage *spec);
     void CopyPreviousFrameData(const ReblurInputBuffers &inputs);
     void CopyHistoryData(RHIImage *diff, RHIImage *spec);
+    void CopyStabilizedHistory(RHIImage *diff, RHIImage *spec);
 
     RHIContext *rhi_;
     uint32_t width_;
@@ -128,6 +130,16 @@ private:
     RHIResourceRef<RHIShader> classify_tiles_shader_;
     RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_;
     RHIResourceRef<RHIBuffer> classify_tiles_ub_;
+
+    // Temporal stabilization pass
+    RHIResourceRef<RHIShader> temporal_stab_shader_;
+    RHIResourceRef<RHIPipelineState> temporal_stab_pipeline_;
+    RHIResourceRef<RHIBuffer> temporal_stab_ub_;
+
+    // Stabilized history (ping-pong)
+    RHIResourceRef<RHIImage> diff_stabilized_[2];
+    RHIResourceRef<RHIImage> spec_stabilized_[2];
+    uint32_t stab_ping_pong_ = 0;
 
     // Blur passes (separate pipelines to avoid descriptor set conflicts within a frame)
     static constexpr uint32_t BlurPassCount = 3; // 0=PrePass, 1=Blur, 2=PostBlur

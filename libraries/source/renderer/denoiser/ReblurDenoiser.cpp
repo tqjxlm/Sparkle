@@ -131,6 +131,39 @@ public:
     };
 };
 
+class ReblurTemporalStabShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ReblurTemporalStabShader, RHIShaderStage::Compute,
+                     "shaders/ray_trace/reblur_temporal_stabilization.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(inDiffuse, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inSpecular, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inInternalData, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevStabilizedDiff, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevStabilizedSpec, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(outDiffuse, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(outSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+public:
+    struct UniformBufferData
+    {
+        Vector2UInt resolution;
+        float stabilization_strength;
+        float fast_history_sigma_scale;
+        float antilag_sigma_scale;
+        float antilag_sensitivity;
+        float denoising_range;
+        uint32_t frame_index;
+        uint32_t max_stabilized_frame_num;
+    };
+};
+
 ReblurDenoiser::ReblurDenoiser(RHIContext *rhi, uint32_t width, uint32_t height)
     : rhi_(rhi), width_(width), height_(height)
 {
@@ -152,6 +185,11 @@ ReblurDenoiser::ReblurDenoiser(RHIContext *rhi, uint32_t width, uint32_t height)
     init_to_read(prev_internal_data_.get());
     init_to_read(prev_view_z_.get());
     init_to_read(prev_normal_roughness_.get());
+    for (int i = 0; i < 2; i++)
+    {
+        init_to_read(diff_stabilized_[i].get());
+        init_to_read(spec_stabilized_[i].get());
+    }
 
     Log(Info, "ReblurDenoiser: ready");
 }
@@ -196,6 +234,16 @@ void ReblurDenoiser::CreateTextures()
     // Previous-frame buffers
     prev_view_z_ = make_image(PixelFormat::R32_FLOAT, width_, height_, "ReblurPrevViewZ");
     prev_normal_roughness_ = make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurPrevNormalRoughness");
+
+    // Stabilized history (ping-pong)
+    for (int i = 0; i < 2; i++)
+    {
+        std::string suffix = std::to_string(i);
+        diff_stabilized_[i] =
+            make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurDiffStabilized" + suffix);
+        spec_stabilized_[i] =
+            make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurSpecStabilized" + suffix);
+    }
 
     uint32_t tile_w = (width_ + 15) / 16;
     uint32_t tile_h = (height_ + 15) / 16;
@@ -254,6 +302,22 @@ void ReblurDenoiser::CreatePipelines()
 
     auto *hf_resources = history_fix_pipeline_->GetShaderResource<ReblurHistoryFixShader>();
     hf_resources->ubo().BindResource(history_fix_ub_);
+
+    // Temporal stabilization pipeline
+    temporal_stab_shader_ = rhi_->CreateShader<ReblurTemporalStabShader>();
+    temporal_stab_pipeline_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurTemporalStabPipeline");
+    temporal_stab_pipeline_->SetShader<RHIShaderStage::Compute>(temporal_stab_shader_);
+    temporal_stab_pipeline_->Compile();
+
+    temporal_stab_ub_ = rhi_->CreateBuffer({.size = sizeof(ReblurTemporalStabShader::UniformBufferData),
+                                            .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                            .mem_properties = RHIMemoryProperty::None,
+                                            .is_dynamic = true},
+                                           "ReblurTemporalStabUBO");
+
+    auto *ts_resources = temporal_stab_pipeline_->GetShaderResource<ReblurTemporalStabShader>();
+    ts_resources->ubo().BindResource(temporal_stab_ub_);
 
     // Blur pipelines (separate per pass to avoid descriptor set conflicts within a frame)
     static constexpr const char *PassNames[] = {"PrePass", "Blur", "PostBlur"};
@@ -364,8 +428,39 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     Blur(inputs, settings, 2, diff_temp2_.get(), spec_temp2_.get(), denoised_diffuse_.get(), denoised_specular_.get(),
          internal_data_.get(), true);
 
-    // Save history and frame data for next frame
-    CopyHistoryData(denoised_diffuse_.get(), denoised_specular_.get());
+    if (debug_pass == 2)
+    {
+        // PostBlur already wrote to denoised_diffuse_/denoised_specular_ (StorageWrite layout).
+        // Transition to Read for the composite pass; skip stabilization and history.
+        denoised_diffuse_->Transition({.target_layout = RHIImageLayout::Read,
+                                       .after_stage = RHIPipelineStage::ComputeShader,
+                                       .before_stage = RHIPipelineStage::ComputeShader});
+        denoised_specular_->Transition({.target_layout = RHIImageLayout::Read,
+                                        .after_stage = RHIPipelineStage::ComputeShader,
+                                        .before_stage = RHIPipelineStage::ComputeShader});
+        internal_frame_index_++;
+        return;
+    }
+
+    // TemporalStabilization: denoised output → stabilized output (variance clamping)
+    if (settings.max_stabilized_frame_num > 0)
+    {
+        // TemporalStabilize reads denoised_diffuse_/denoised_specular_ (from PostBlur)
+        TemporalStabilize(inputs, settings);
+
+        // Save PostBlur output to history for next frame's temporal accumulation
+        // (denoised_* were transitioned to Read by TemporalStabilize)
+        CopyHistoryData(denoised_diffuse_.get(), denoised_specular_.get());
+
+        // Copy stabilized result into denoised_diffuse_/denoised_specular_ for composite
+        uint32_t cur_idx = stab_ping_pong_;
+        CopyStabilizedHistory(diff_stabilized_[cur_idx].get(), spec_stabilized_[cur_idx].get());
+    }
+    else
+    {
+        CopyHistoryData(denoised_diffuse_.get(), denoised_specular_.get());
+    }
+
     CopyPreviousFrameData(inputs);
 
     internal_frame_index_++;
@@ -568,6 +663,101 @@ void ReblurDenoiser::HistoryFix(const ReblurInputBuffers &inputs, const ReblurSe
     rhi_->EndComputePass(compute_pass_);
 }
 
+void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings)
+{
+    auto *resources = temporal_stab_pipeline_->GetShaderResource<ReblurTemporalStabShader>();
+
+    uint32_t prev_idx = stab_ping_pong_;
+    uint32_t cur_idx = 1 - stab_ping_pong_;
+
+    // Bind inputs (denoised output from PostBlur, currently in denoised_diffuse_/denoised_specular_)
+    resources->inDiffuse().BindResource(denoised_diffuse_->GetDefaultView(rhi_));
+    resources->inSpecular().BindResource(denoised_specular_->GetDefaultView(rhi_));
+    resources->inViewZ().BindResource(inputs.view_z->GetDefaultView(rhi_));
+    resources->inInternalData().BindResource(internal_data_->GetDefaultView(rhi_));
+
+    // Bind stabilized history (previous frame)
+    resources->prevStabilizedDiff().BindResource(diff_stabilized_[prev_idx]->GetDefaultView(rhi_));
+    resources->prevStabilizedSpec().BindResource(spec_stabilized_[prev_idx]->GetDefaultView(rhi_));
+
+    // Bind outputs (current stabilized)
+    resources->outDiffuse().BindResource(diff_stabilized_[cur_idx]->GetDefaultView(rhi_));
+    resources->outSpecular().BindResource(spec_stabilized_[cur_idx]->GetDefaultView(rhi_));
+
+    ReblurTemporalStabShader::UniformBufferData ubo{
+        .resolution = {width_, height_},
+        .stabilization_strength = settings.stabilization_strength,
+        .fast_history_sigma_scale = settings.fast_history_sigma_scale,
+        .antilag_sigma_scale = settings.antilag_sigma_scale,
+        .antilag_sensitivity = settings.antilag_sensitivity,
+        .denoising_range = 1000.f,
+        .frame_index = internal_frame_index_,
+        .max_stabilized_frame_num = settings.max_stabilized_frame_num,
+    };
+    temporal_stab_ub_->Upload(rhi_, &ubo);
+
+    // Transition inputs to Read
+    denoised_diffuse_->Transition({.target_layout = RHIImageLayout::Read,
+                                   .after_stage = RHIPipelineStage::ComputeShader,
+                                   .before_stage = RHIPipelineStage::ComputeShader});
+    denoised_specular_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::ComputeShader,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
+    internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::ComputeShader,
+                                .before_stage = RHIPipelineStage::ComputeShader});
+
+    // Transition outputs to StorageWrite
+    diff_stabilized_[cur_idx]->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                           .after_stage = RHIPipelineStage::Top,
+                                           .before_stage = RHIPipelineStage::ComputeShader});
+    spec_stabilized_[cur_idx]->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                           .after_stage = RHIPipelineStage::Top,
+                                           .before_stage = RHIPipelineStage::ComputeShader});
+
+    rhi_->BeginComputePass(compute_pass_);
+    rhi_->DispatchCompute(temporal_stab_pipeline_, {width_, height_, 1u}, {16u, 16u, 1u});
+    rhi_->EndComputePass(compute_pass_);
+
+    // Flip ping-pong
+    stab_ping_pong_ = cur_idx;
+}
+
+void ReblurDenoiser::CopyStabilizedHistory(RHIImage *diff, RHIImage *spec)
+{
+    // Copy stabilized output to denoised output for composite
+    diff->Transition({.target_layout = RHIImageLayout::TransferSrc,
+                      .after_stage = RHIPipelineStage::ComputeShader,
+                      .before_stage = RHIPipelineStage::Transfer});
+    denoised_diffuse_->Transition({.target_layout = RHIImageLayout::TransferDst,
+                                   .after_stage = RHIPipelineStage::ComputeShader,
+                                   .before_stage = RHIPipelineStage::Transfer});
+    diff->CopyToImage(denoised_diffuse_.get());
+
+    spec->Transition({.target_layout = RHIImageLayout::TransferSrc,
+                      .after_stage = RHIPipelineStage::ComputeShader,
+                      .before_stage = RHIPipelineStage::Transfer});
+    denoised_specular_->Transition({.target_layout = RHIImageLayout::TransferDst,
+                                    .after_stage = RHIPipelineStage::ComputeShader,
+                                    .before_stage = RHIPipelineStage::Transfer});
+    spec->CopyToImage(denoised_specular_.get());
+
+    // Transition stabilized back to Read for next frame
+    diff->Transition({.target_layout = RHIImageLayout::Read,
+                      .after_stage = RHIPipelineStage::Transfer,
+                      .before_stage = RHIPipelineStage::ComputeShader});
+    spec->Transition({.target_layout = RHIImageLayout::Read,
+                      .after_stage = RHIPipelineStage::Transfer,
+                      .before_stage = RHIPipelineStage::ComputeShader});
+
+    denoised_diffuse_->Transition({.target_layout = RHIImageLayout::Read,
+                                   .after_stage = RHIPipelineStage::Transfer,
+                                   .before_stage = RHIPipelineStage::ComputeShader});
+    denoised_specular_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::Transfer,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
+}
+
 void ReblurDenoiser::CopyHistoryData(RHIImage *diff, RHIImage *spec)
 {
     // Copy denoised output to history for next frame's temporal accumulation
@@ -656,5 +846,6 @@ void ReblurDenoiser::Reset()
 {
     internal_frame_index_ = 0;
     history_valid_ = false;
+    stab_ping_pong_ = 0;
 }
 } // namespace sparkle
