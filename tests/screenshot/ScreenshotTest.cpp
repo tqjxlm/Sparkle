@@ -26,9 +26,10 @@ public:
         }
 
         ++frame_;
-        if (frame_ > MaxFrames)
+        uint32_t timeout = app.GetAppConfig().test_timeout;
+        if (timeout > 0 && frame_ > timeout)
         {
-            Log(Error, "ScreenshotTest timed out after {} frames", MaxFrames);
+            Log(Error, "ScreenshotTest timed out after {} frames", timeout);
             return Result::Fail;
         }
 
@@ -36,7 +37,6 @@ public:
     }
 
 private:
-    static constexpr uint32_t MaxFrames = 3000;
     bool requested_ = false;
     uint32_t frame_ = 0;
 };

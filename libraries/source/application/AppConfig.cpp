@@ -18,6 +18,7 @@ static ConfigValue<bool> config_headless("headless", "run without creating a win
 
 #if ENABLE_TEST_CASES
 static ConfigValue<std::string> config_test_case("test_case", "name of test case to run on scene load", "app", "");
+static ConfigValue<uint32_t> config_test_timeout("test_timeout", "max frames before a test case is considered timed out (0 = no limit)", "app", 0);
 #endif
 
 void AppConfig::Init()
@@ -45,6 +46,7 @@ void AppConfig::Init()
 
 #if ENABLE_TEST_CASES
     ConfigCollectionHelper::RegisterConfig(this, config_test_case, test_case);
+    ConfigCollectionHelper::RegisterConfig(this, config_test_timeout, test_timeout);
 #endif
 }
 } // namespace sparkle
