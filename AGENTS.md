@@ -18,7 +18,7 @@ See [docs/Run.md](docs/Run.md) for run arguments, log location, path conventions
 
 ## Visual QA
 
-* Use `--test --test_case screenshot` as run arguments to automatically take a screenshot after the scene is fully loaded and a frame is fully rendered. This is the main method of visual QA.
+* Use `--test_case screenshot` as run arguments to automatically take a screenshot after the scene is fully loaded and a frame is fully rendered. This is the main method of visual QA.
 * The screenshot is saved to generated/screenshots/ and named with the scene name and pipeline.
 * You can modify configs and the code to get another screenshot to visualize the changes.
 * You can modify the render pipeline to output different images to the screenshot for debugging.

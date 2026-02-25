@@ -17,7 +17,7 @@ def construct_additional_cmake_options(parsed_args, cmake_args=None):
     profile_settings = "-DENABLE_PROFILER=ON" if parsed_args.profile else "-DENABLE_PROFILER=OFF"
     shader_debug_settings = "-DSHADER_DEBUG=ON" if parsed_args.shader_debug else "-DSHADER_DEBUG=OFF"
     asan_settings = "-DENABLE_ASAN=ON" if parsed_args.asan else "-DENABLE_ASAN=OFF"
-    test_settings = "-DENABLE_TEST_CASES=ON" if parsed_args.test else "-DENABLE_TEST_CASES=OFF"
+    test_settings = "-DENABLE_TEST_CASES=OFF" if parsed_args.strip_test else "-DENABLE_TEST_CASES=ON"
     cmake_options = [profile_settings, shader_debug_settings, asan_settings, test_settings]
 
     # Add additional CMake arguments if provided
@@ -52,8 +52,8 @@ def parse_args(args=None):
                         help="Run the built executable after building")
     parser.add_argument("--skip_build", action="store_true",
                         help="Do every thing but skip building")
-    parser.add_argument("--test", action="store_true",
-                        help="Enable test case support")
+    parser.add_argument("--strip_test", action="store_true",
+                        help="Disable test case support (enabled by default)")
     parser.add_argument("--clean", action="store_true",
                         help="Clean output directory before configure")
     parser.add_argument("--apple_auto_sign", action="store_true",
