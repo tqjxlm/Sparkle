@@ -29,6 +29,7 @@ struct AppConfig : public ConfigCollection
 
 #if ENABLE_TEST_CASES
     std::string test_case;
+    uint32_t test_timeout = 0;
 #endif
 
 protected:
