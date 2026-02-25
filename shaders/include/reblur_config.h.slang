@@ -12,4 +12,9 @@
 #define REBLUR_DENOISING_RANGE                1000.0
 #define REBLUR_TILE_SIZE                      16
 
+// Anti-firefly constants
+#define REBLUR_ANTI_FIREFLY_SIGMA_SCALE       2.0
+#define REBLUR_FIREFLY_SUPPRESSOR_MAX_RELATIVE_INTENSITY 38.0
+#define REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE 0.3
+
 #endif

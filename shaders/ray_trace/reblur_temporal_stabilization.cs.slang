@@ -28,8 +28,11 @@
 [[vk::binding(7, 0)]] RWTexture2D<float4> outDiffuse;
 [[vk::binding(8, 0)]] RWTexture2D<float4> outSpecular;
 
-// Shared memory for neighborhood luminance computation
-#define BORDER 1
+// Accumulation speed writeback (antilag may reduce speeds)
+[[vk::binding(9, 0)]] RWTexture2D<float2> outInternalData;
+
+// Shared memory for neighborhood luminance computation (5x5 = BORDER=2)
+#define BORDER 2
 #define TILE_SIZE 16
 #define BUFFER_X (TILE_SIZE + 2 * BORDER)
 #define BUFFER_Y (TILE_SIZE + 2 * BORDER)
@@ -41,7 +44,7 @@ groupshared float s_SpecLuma[BUFFER_Y][BUFFER_X];
 [numthreads(TILE_SIZE, TILE_SIZE, 1)]
 void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
 {
-    // Load neighborhood into shared memory (tile + 1-pixel border)
+    // Load neighborhood into shared memory (tile + 2-pixel border for 5x5)
     int2 tile_origin = int2(Gid.xy) * TILE_SIZE - BORDER;
 
     for (int i = int(GTid.y * TILE_SIZE + GTid.x); i < BUFFER_X * BUFFER_Y; i += TILE_SIZE * TILE_SIZE)
@@ -65,11 +68,17 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
 
     float center_viewZ = inViewZ[pixel];
 
+    // Read internal data for writeback
+    float2 packed = inInternalData[pixel];
+    float diff_accum_speed, spec_accum_speed;
+    UnpackInternalData(packed, diff_accum_speed, spec_accum_speed);
+
     // Sky pixels: pass through
     if (center_viewZ > denoising_range)
     {
         outDiffuse[pixel] = inDiffuse[pixel];
         outSpecular[pixel] = inSpecular[pixel];
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
     }
 
@@ -78,13 +87,14 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     {
         outDiffuse[pixel] = inDiffuse[pixel];
         outSpecular[pixel] = inSpecular[pixel];
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
     }
 
     float4 current_diff = inDiffuse[pixel];
     float4 current_spec = inSpecular[pixel];
 
-    // Compute local mean and variance from shared memory neighborhood
+    // Compute local mean and variance from shared memory 5x5 neighborhood
     int2 smem_center = int2(GTid.xy) + BORDER;
 
     float diff_luma_sum = 0.0;
@@ -123,14 +133,43 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float4 stab_diff = prevStabilizedDiff[pixel];
     float4 stab_spec = prevStabilizedSpec[pixel];
 
-    // Clamp stabilized history to local color box
     float stab_diff_luma = GetLuminance(stab_diff.rgb);
     float stab_spec_luma = GetLuminance(stab_spec.rgb);
 
-    float diff_lo = diff_mean - diff_sigma * fast_history_sigma_scale;
-    float diff_hi = diff_mean + diff_sigma * fast_history_sigma_scale;
-    float spec_lo = spec_mean - spec_sigma * fast_history_sigma_scale;
-    float spec_hi = spec_mean + spec_sigma * fast_history_sigma_scale;
+    // Antilag detection: when history diverges from current neighborhood,
+    // reduce accumulation speed to forget stale history faster
+    float diff_antilag = 1.0;
+    float spec_antilag = 1.0;
+    {
+        // Compute how far history luminance is from current neighborhood
+        float diff_deviation = abs(stab_diff_luma - diff_mean);
+        float diff_threshold = diff_sigma * antilag_sigma_scale;
+        diff_antilag = saturate(1.0 - (diff_deviation - diff_threshold) /
+                                       max(diff_mean * antilag_sensitivity, 1e-6));
+
+        float spec_deviation = abs(stab_spec_luma - spec_mean);
+        float spec_threshold = spec_sigma * antilag_sigma_scale;
+        spec_antilag = saturate(1.0 - (spec_deviation - spec_threshold) /
+                                       max(spec_mean * antilag_sensitivity, 1e-6));
+
+        // Reduce accumulation speed when antilag detects divergence
+        float diff_min_accum = 0.0;
+        float spec_min_accum = 0.0;
+        diff_accum_speed = lerp(diff_min_accum, diff_accum_speed, diff_antilag);
+        spec_accum_speed = lerp(spec_min_accum, spec_accum_speed, spec_antilag);
+    }
+
+    // Adaptive sigma scale: tighter clamping as more history accumulates
+    float diff_non_linear = GetNonLinearAccumSpeed(diff_accum_speed);
+    float spec_non_linear = GetNonLinearAccumSpeed(spec_accum_speed);
+    float diff_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * diff_non_linear);
+    float spec_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * spec_non_linear);
+
+    // Clamp stabilized history to local color box
+    float diff_lo = diff_mean - diff_sigma * diff_sigma_scale;
+    float diff_hi = diff_mean + diff_sigma * diff_sigma_scale;
+    float spec_lo = spec_mean - spec_sigma * spec_sigma_scale;
+    float spec_hi = spec_mean + spec_sigma * spec_sigma_scale;
 
     // Clamp history color based on luminance box
     float clamped_diff_luma = clamp(stab_diff_luma, diff_lo, diff_hi);
@@ -146,20 +185,19 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     if (stab_spec_luma < 1e-6)
         clamped_spec_color = current_spec.rgb;
 
-    // Read accumulation speed from internal data to modulate blend
-    float2 packed = inInternalData[pixel];
-    float accum_speed, accum_speed_fast;
-    UnpackInternalData(packed, accum_speed, accum_speed_fast);
-
     // Stabilization blend weight: stronger with more history
-    float stab_frames = min(float(max_stabilized_frame_num), accum_speed);
-    float blend = stab_frames / (stab_frames + 1.0);
-    blend *= stabilization_strength;
+    float diff_stab_frames = min(float(max_stabilized_frame_num), diff_accum_speed);
+    float spec_stab_frames = min(float(max_stabilized_frame_num), spec_accum_speed);
+    float diff_blend = diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
+    float spec_blend = spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
 
     // Blend current with clamped history
-    float3 final_diff = lerp(current_diff.rgb, clamped_diff_color, blend);
-    float3 final_spec = lerp(current_spec.rgb, clamped_spec_color, blend);
+    float3 final_diff = lerp(current_diff.rgb, clamped_diff_color, diff_blend);
+    float3 final_spec = lerp(current_spec.rgb, clamped_spec_color, spec_blend);
 
     outDiffuse[pixel] = float4(final_diff, current_diff.a);
     outSpecular[pixel] = float4(final_spec, current_spec.a);
+
+    // Write back modified accumulation speed (antilag may have reduced it)
+    outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
 }

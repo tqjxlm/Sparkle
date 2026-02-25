@@ -6,11 +6,11 @@
 {
     uint2 resolution;
     float max_accumulated_frame_num;
-    float max_fast_accumulated_frame_num;
     float disocclusion_threshold;
     float denoising_range;
     uint frame_index;
     uint reset_history;
+    uint enable_firefly_suppression;
 };
 
 // Current frame inputs (from PrePass)
@@ -65,6 +65,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     }
 
     // For static camera: previous pixel = current pixel (no motion vector reprojection)
+    // TODO: Add bilinear history sampling with occlusion-aware weights (Issue #5)
     uint2 prev_pixel = pixel;
 
     // Read previous frame data
@@ -73,8 +74,8 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float3 prev_normal = DecodeNormalOct(prev_nr.xy);
     float2 prev_packed = prevInternalData[prev_pixel];
 
-    float prev_accum_speed, prev_accum_speed_fast;
-    UnpackInternalData(prev_packed, prev_accum_speed, prev_accum_speed_fast);
+    float prev_diff_accum_speed, prev_spec_accum_speed;
+    UnpackInternalData(prev_packed, prev_diff_accum_speed, prev_spec_accum_speed);
 
     // Disocclusion test
     bool disoccluded = false;
@@ -91,33 +92,56 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // Previous pixel was sky
     disoccluded = disoccluded || (prev_z > denoising_range);
 
-    // Compute new accumulation speed
-    float accum_speed, accum_speed_fast;
+    // Compute new accumulation speeds - separate per channel
+    float diff_accum_speed, spec_accum_speed;
     if (disoccluded)
     {
-        accum_speed = 0.0;
-        accum_speed_fast = 0.0;
+        diff_accum_speed = 0.0;
+        spec_accum_speed = 0.0;
     }
     else
     {
-        accum_speed = min(prev_accum_speed + 1.0, max_accumulated_frame_num);
-        accum_speed_fast = min(prev_accum_speed_fast + 1.0, max_fast_accumulated_frame_num);
+        diff_accum_speed = min(prev_diff_accum_speed + 1.0, max_accumulated_frame_num);
+        spec_accum_speed = min(prev_spec_accum_speed + 1.0, max_accumulated_frame_num);
     }
 
-    // Blend weight: 1 / (1 + accumSpeed) = weight of new sample
-    float weight = 1.0 / (1.0 + accum_speed);
-    float weight_fast = 1.0 / (1.0 + accum_speed_fast);
+    // Separate blend weights per channel
+    float diff_weight = 1.0 / (1.0 + diff_accum_speed);
+    float spec_weight = 1.0 / (1.0 + spec_accum_speed);
 
     // Read history
     float4 hist_diff = prevDiffHistory[prev_pixel];
     float4 hist_spec = prevSpecHistory[prev_pixel];
 
     // Linear accumulation: lerp(history, current, weight)
-    float4 acc_diff = lerp(hist_diff, current_diff, weight);
-    float4 acc_spec = lerp(hist_spec, current_spec, weight);
+    float4 acc_diff = lerp(hist_diff, current_diff, diff_weight);
+    float4 acc_spec = lerp(hist_spec, current_spec, spec_weight);
+
+    // Firefly suppression: clamp outlier luminance against history
+    // Only apply when we have valid history (accumSpeed > 0)
+    if (enable_firefly_suppression != 0 && !disoccluded)
+    {
+        // Diffuse firefly suppression
+        float diff_max_relative = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE +
+            REBLUR_FIREFLY_SUPPRESSOR_MAX_RELATIVE_INTENSITY / (diff_accum_speed + 1.0);
+        float diff_luma = GetLuminance(acc_diff.rgb);
+        float hist_diff_luma = GetLuminance(hist_diff.rgb);
+        float diff_luma_clamped = min(diff_luma, max(hist_diff_luma, 1e-6) * diff_max_relative);
+        if (diff_luma > 1e-6)
+            acc_diff.rgb = ChangeLuma(acc_diff.rgb, diff_luma_clamped);
+
+        // Specular firefly suppression
+        float spec_max_relative = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE +
+            REBLUR_FIREFLY_SUPPRESSOR_MAX_RELATIVE_INTENSITY / (spec_accum_speed + 1.0);
+        float spec_luma = GetLuminance(acc_spec.rgb);
+        float hist_spec_luma = GetLuminance(hist_spec.rgb);
+        float spec_luma_clamped = min(spec_luma, max(hist_spec_luma, 1e-6) * spec_max_relative);
+        if (spec_luma > 1e-6)
+            acc_spec.rgb = ChangeLuma(acc_spec.rgb, spec_luma_clamped);
+    }
 
     // Write outputs
     outDiffuse[pixel] = acc_diff;
     outSpecular[pixel] = acc_spec;
-    outInternalData[pixel] = PackInternalData(accum_speed, accum_speed_fast);
+    outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
 }

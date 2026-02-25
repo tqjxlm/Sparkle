@@ -17,8 +17,7 @@ struct ReblurSettings
     float min_blur_radius = 1.f;
     float diffuse_prepass_blur_radius = 30.f;
     float specular_prepass_blur_radius = 50.f;
-    uint32_t max_accumulated_frame_num = 30;
-    uint32_t max_fast_accumulated_frame_num = 6;
+    uint32_t max_accumulated_frame_num = 63;
     uint32_t max_stabilized_frame_num = 63;
     uint32_t history_fix_frame_num = 3;
     float history_fix_stride = 14.f;
@@ -74,11 +73,11 @@ private:
     void CreateTextures();
     void CreatePipelines();
     void ClassifyTiles(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
-    void Blur(const ReblurInputBuffers &inputs, const ReblurSettings &settings, uint32_t pass_index, RHIImage *in_diff,
-              RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec, RHIImage *internal_data,
-              bool has_temporal_data);
+    void Blur(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices,
+              uint32_t pass_index, RHIImage *in_diff, RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec,
+              RHIImage *internal_data, bool has_temporal_data);
     void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
-    void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
+    void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices);
     void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
     void CopyToOutput(RHIImage *diff, RHIImage *spec);
     void CopyPreviousFrameData(const ReblurInputBuffers &inputs);

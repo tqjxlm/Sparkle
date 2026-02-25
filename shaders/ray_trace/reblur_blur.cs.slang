@@ -18,6 +18,15 @@
     float diffuse_prepass_blur_radius;
     float specular_prepass_blur_radius;
     uint has_temporal_data;
+    float min_rect_dim_mul_unproject;
+    float roughness_fraction;
+    float unproject_x;
+    float unproject_y;
+    // std140: float4 auto-pads to 16-byte alignment here
+    float4 hit_dist_params;
+    float4 view_row0;
+    float4 view_row1;
+    float4 view_row2;
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> inDiffuse;
@@ -33,18 +42,51 @@ float2 RotateVector(float4 rotator_val, float2 v)
     return float2(v.x * rotator_val.x - v.y * rotator_val.y, v.x * rotator_val.y + v.y * rotator_val.x);
 }
 
-float GetGeometryWeight(float3 center_normal, float center_viewZ, float3 sample_pos_vs, float sensitivity)
+// Transform world normal to view space using view matrix rows
+float3 WorldToViewNormal(float3 world_normal)
 {
-    float plane_dist = abs(dot(center_normal, sample_pos_vs));
-    float relative_plane_dist = plane_dist / max(abs(center_viewZ), 1e-6);
-    return exp(-relative_plane_dist * relative_plane_dist / max(sensitivity * sensitivity, 1e-6));
+    return float3(dot(view_row0.xyz, world_normal),
+                  dot(view_row1.xyz, world_normal),
+                  dot(view_row2.xyz, world_normal));
 }
 
+// Reconstruct view-space position from pixel coordinates and viewZ
+float3 GetViewSpacePosition(uint2 px, float view_z)
+{
+    float2 uv = (float2(px) + 0.5) / float2(resolution);
+    float2 ndc = uv * 2.0 - 1.0;
+    return float3(ndc.x * unproject_x * view_z, ndc.y * unproject_y * view_z, view_z);
+}
+
+// Plane-distance geometry weight (NRD approach)
+// Measures distance from sample's view-space position to center's tangent plane
+float GetPlaneDistanceWeight(float3 center_Nv, float3 center_Xv, float3 sample_Xv,
+                             float sensitivity, float frustum_size)
+{
+    float plane_dist = abs(dot(center_Nv, sample_Xv - center_Xv));
+    float threshold = sensitivity * frustum_size;
+    return smoothstep(1.0, 0.0, plane_dist / max(threshold, 1e-6));
+}
+
+// Normal weight using specular lobe half-angle for specular, fixed fraction for diffuse
 float GetNormalWeight(float3 center_normal, float3 sample_normal, float fraction)
 {
     float cos_angle = saturate(dot(center_normal, sample_normal));
     float angle = acos(cos_angle);
     float threshold = fraction * 3.14159265;
+    return smoothstep(threshold, 0.0, angle);
+}
+
+// Specular normal weight derived from the actual lobe shape
+float GetSpecNormalWeight(float3 center_normal, float3 sample_normal, float roughness,
+                          float fraction, float non_linear_accum_speed)
+{
+    float lobe_half_angle = atan(GetSpecularLobeTanHalfAngle(roughness, 0.75));
+    float threshold = max(lobe_half_angle * fraction, 0.01);
+    // Widen threshold when history is short (non_linear_accum_speed is large)
+    threshold = lerp(threshold, 3.14159265 * fraction, non_linear_accum_speed);
+    float cos_angle = saturate(dot(center_normal, sample_normal));
+    float angle = acos(cos_angle);
     return smoothstep(threshold, 0.0, angle);
 }
 
@@ -83,20 +125,38 @@ float GetGaussianWeight(float distance_sq)
     float center_roughness = nr.z;
 
     // Hit distance is in alpha channel (normalized)
-    float center_diff_hit = center_diff.a;
-    float center_spec_hit = center_spec.a;
+    float center_diff_hit_norm = center_diff.a;
+    float center_spec_hit_norm = center_spec.a;
 
-    // Compute blur radius using temporal accumulation speed
-    float non_linear_accum_speed = 1.0;
+    // Compute frustum size at this depth
+    float frustum_size = GetFrustumSize(min_rect_dim_mul_unproject, center_viewZ);
+
+    // Denormalize hit distance to world space, then compute frustum-relative factor
+    HitDistanceParams hdp;
+    hdp.A = hit_dist_params.x;
+    hdp.B = hit_dist_params.y;
+    hdp.C = hit_dist_params.z;
+    hdp.D = hit_dist_params.w;
+
+    float diff_hit_world = DenormalizeHitDistance(center_diff_hit_norm, center_viewZ, 1.0, hdp);
+    float spec_hit_world = DenormalizeHitDistance(center_spec_hit_norm, center_viewZ, center_roughness, hdp);
+
+    float diff_hit_factor = GetHitDistFactor(diff_hit_world, frustum_size);
+    float spec_hit_factor = GetHitDistFactor(spec_hit_world, frustum_size);
+
+    // Read separate accumulation speeds per channel
+    float diff_accum_speed = 0;
+    float spec_accum_speed = 0;
     if (has_temporal_data != 0)
     {
         float2 packed = inInternalData[pixel];
-        float accum_speed, accum_speed_fast;
-        UnpackInternalData(packed, accum_speed, accum_speed_fast);
-        non_linear_accum_speed = GetNonLinearAccumSpeed(accum_speed);
+        UnpackInternalData(packed, diff_accum_speed, spec_accum_speed);
     }
-    float diff_hit_factor = saturate(center_diff_hit);
-    float spec_hit_factor = saturate(center_spec_hit);
+    float diff_non_linear = GetNonLinearAccumSpeed(diff_accum_speed);
+    float spec_non_linear = GetNonLinearAccumSpeed(spec_accum_speed);
+
+    // GetSpecMagicCurve modulates specular behavior based on roughness
+    float smc = GetSpecMagicCurve(center_roughness);
 
     float fraction_scale;
     float radius_scale;
@@ -120,19 +180,38 @@ float GetGaussianWeight(float distance_sq)
     float diff_max_radius = blur_pass_index == 0 ? diffuse_prepass_blur_radius : max_blur_radius;
     float spec_max_radius = blur_pass_index == 0 ? specular_prepass_blur_radius : max_blur_radius;
 
-    float diff_radius = diff_max_radius * sqrt(diff_hit_factor * non_linear_accum_speed) * radius_scale;
-    float spec_radius = spec_max_radius * sqrt(spec_hit_factor * non_linear_accum_speed) * radius_scale;
+    // Radius formula: sqrt(hitFactor * nonLinearAccumSpeed) * maxRadius * radiusScale
+    float diff_radius = diff_max_radius * sqrt(diff_hit_factor * diff_non_linear) * radius_scale;
+    float spec_radius = spec_max_radius * sqrt(spec_hit_factor * spec_non_linear) * radius_scale;
 
+    // Apply GetSpecMagicCurve to specular radius (mirror-like → near zero, rough → full)
+    spec_radius *= smc;
+
+    // Clamp radii
     diff_radius = clamp(diff_radius, min_blur_radius, diff_max_radius * radius_scale);
-    spec_radius = clamp(spec_radius, min_blur_radius, spec_max_radius * radius_scale);
+    spec_radius = clamp(spec_radius, min_blur_radius * smc, spec_max_radius * radius_scale);
+
+    // Lobe trimming for PreBlur: cap specular radius to specular lobe extent
+    if (blur_pass_index == 0 && center_roughness < 1.0)
+    {
+        float lobe_tan_half = GetSpecularLobeTanHalfAngle(center_roughness, 0.3);
+        float lobe_radius = spec_hit_world * lobe_tan_half;
+        // Convert world-space lobe radius to pixel radius
+        float lobe_pixel_radius = lobe_radius / max(frustum_size / min(float(resolution.x), float(resolution.y)), 1e-6);
+        spec_radius = min(spec_radius, max(lobe_pixel_radius, min_blur_radius * smc));
+    }
+
+    // Compute view-space position and normal for plane distance weight
+    float3 center_Xv = GetViewSpacePosition(pixel, center_viewZ);
+    float3 center_Nv = WorldToViewNormal(center_normal);
 
     // Accumulate weighted samples
     float3 diff_sum = center_diff.rgb;
-    float diff_hit_sum = center_diff_hit;
+    float diff_hit_sum = center_diff_hit_norm;
     float diff_weight_sum = 1.0;
 
     float3 spec_sum = center_spec.rgb;
-    float spec_hit_sum = center_spec_hit;
+    float spec_hit_sum = center_spec_hit_norm;
     float spec_weight_sum = 1.0;
 
     float adjusted_lobe_fraction = lobe_angle_fraction * fraction_scale;
@@ -155,11 +234,18 @@ float GetGaussianWeight(float distance_sq)
 
                 float4 sample_diff = inDiffuse[sample_pixel];
 
-                // Compute bilateral weights
+                // Plane-distance geometry weight
+                float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
+                float w_geom = GetPlaneDistanceWeight(center_Nv, center_Xv, sample_Xv,
+                                                       plane_dist_sensitivity, frustum_size);
+
+                // Normal weight
                 float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
-                float w_geom =
-                    exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
-                float w_hit = GetHitDistWeight(center_diff_hit, sample_diff.a, min_hit_dist_weight);
+
+                // Hit distance weight
+                float w_hit = GetHitDistWeight(center_diff_hit_norm, sample_diff.a, min_hit_dist_weight);
+
+                // Gaussian spatial weight
                 float w_gauss = GetGaussianWeight(dot(offset, offset));
 
                 float w = w_normal * w_geom * w_hit * w_gauss;
@@ -170,10 +256,9 @@ float GetGaussianWeight(float distance_sq)
             }
         }
 
-        // Specular sample (tighter radius for low roughness)
+        // Specular sample
         {
-            float spec_radius_adj = spec_radius * lerp(0.3, 1.0, center_roughness);
-            float2 sample_uv_offset = offset * spec_radius_adj;
+            float2 sample_uv_offset = offset * spec_radius;
             int2 sample_pixel = int2(pixel) + int2(round(sample_uv_offset));
             sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
 
@@ -182,16 +267,30 @@ float GetGaussianWeight(float distance_sq)
             {
                 float4 sample_nr = inNormalRoughness[sample_pixel];
                 float3 sample_normal = DecodeNormalOct(sample_nr.xy);
+                float sample_roughness = sample_nr.z;
 
                 float4 sample_spec = inSpecular[sample_pixel];
 
-                float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
-                float w_geom =
-                    exp(-abs(center_viewZ - sample_viewZ) / max(abs(center_viewZ) * plane_dist_sensitivity, 1e-6));
-                float w_hit = GetHitDistWeight(center_spec_hit, sample_spec.a, min_hit_dist_weight);
+                // Plane-distance geometry weight
+                float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
+                float w_geom = GetPlaneDistanceWeight(center_Nv, center_Xv, sample_Xv,
+                                                       plane_dist_sensitivity, frustum_size);
+
+                // Specular normal weight using lobe half-angle
+                float w_normal = GetSpecNormalWeight(center_normal, sample_normal, center_roughness,
+                                                      adjusted_lobe_fraction, spec_non_linear);
+
+                // Hit distance weight modulated by specular magic curve
+                float spec_min_hit_weight = min_hit_dist_weight * fraction_scale * smc;
+                float w_hit = GetHitDistWeight(center_spec_hit_norm, sample_spec.a, spec_min_hit_weight);
+
+                // Roughness weight for specular: prevents blur leaking across roughness boundaries
+                float w_roughness = GetRoughnessWeight(center_roughness, sample_roughness, roughness_fraction);
+
+                // Gaussian spatial weight
                 float w_gauss = GetGaussianWeight(dot(offset, offset));
 
-                float w = w_normal * w_geom * w_hit * w_gauss;
+                float w = w_normal * w_geom * w_hit * w_roughness * w_gauss;
 
                 spec_sum += sample_spec.rgb * w;
                 spec_hit_sum += sample_spec.a * w;

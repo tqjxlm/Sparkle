@@ -3,20 +3,24 @@
 
 #include "reblur_common.h.slang"
 
-// Internal data packing: accumSpeed (6 bits) + accumSpeedFast (6 bits)
+// Internal data packing: diffAccumSpeed (6 bits) + specAccumSpeed (6 bits)
 // Stored in RG16Float as normalized [0,1] values
+// NRD tracks accumulation speed independently per channel because:
+// - Specular has virtual motion reprojection that may succeed/fail independently
+// - Roughness affects specular accumulation speed via GetSpecMagicCurve
+// - Blur radius for each channel depends on its own accumulation speed
 #define REBLUR_ACCUMSPEED_BITS    6
 #define REBLUR_MAX_ACCUM_FRAME    ((1 << REBLUR_ACCUMSPEED_BITS) - 1)
 
-float2 PackInternalData(float accum_speed, float accum_speed_fast)
+float2 PackInternalData(float diff_accum_speed, float spec_accum_speed)
 {
-    return float2(accum_speed / REBLUR_MAX_ACCUM_FRAME, accum_speed_fast / REBLUR_MAX_ACCUM_FRAME);
+    return float2(diff_accum_speed / REBLUR_MAX_ACCUM_FRAME, spec_accum_speed / REBLUR_MAX_ACCUM_FRAME);
 }
 
-void UnpackInternalData(float2 packed, out float accum_speed, out float accum_speed_fast)
+void UnpackInternalData(float2 packed, out float diff_accum_speed, out float spec_accum_speed)
 {
-    accum_speed = packed.x * REBLUR_MAX_ACCUM_FRAME;
-    accum_speed_fast = packed.y * REBLUR_MAX_ACCUM_FRAME;
+    diff_accum_speed = packed.x * REBLUR_MAX_ACCUM_FRAME;
+    spec_accum_speed = packed.y * REBLUR_MAX_ACCUM_FRAME;
 }
 
 // Non-linear accumulation speed: f = 1 / (1 + N)
