@@ -1,8 +1,11 @@
 #pragma once
 
 #include "core/math/Types.h"
+#include "rhi/RHIComputePass.h"
 #include "rhi/RHIImage.h"
+#include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIResource.h"
+#include "rhi/RHIShader.h"
 
 namespace sparkle
 {
@@ -67,6 +70,8 @@ public:
 
 private:
     void CreateTextures();
+    void CreatePipelines();
+    void ClassifyTiles(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
 
     RHIContext *rhi_;
     uint32_t width_;
@@ -74,7 +79,16 @@ private:
     uint32_t internal_frame_index_ = 0;
     bool history_valid_ = false;
 
+    RHIResourceRef<RHIComputePass> compute_pass_;
+
+    // Denoised output
     RHIResourceRef<RHIImage> denoised_diffuse_;
     RHIResourceRef<RHIImage> denoised_specular_;
+
+    // ClassifyTiles pass
+    RHIResourceRef<RHIImage> tiles_;
+    RHIResourceRef<RHIShader> classify_tiles_shader_;
+    RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_;
+    RHIResourceRef<RHIBuffer> classify_tiles_ub_;
 };
 } // namespace sparkle
