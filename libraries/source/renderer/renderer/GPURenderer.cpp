@@ -606,7 +606,7 @@ void GPURenderer::InitReblurResources()
                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
                 .width = width,
                 .height = height,
-                .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+                .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::TransferSrc,
                 .memory_properties = RHIMemoryProperty::DeviceLocal,
             },
             name);
@@ -751,10 +751,10 @@ void GPURenderer::RenderReblurPath()
 
     // Transition denoised output to Read and scene_texture to StorageWrite for composite
     reblur_->GetDenoisedDiffuse()->Transition({.target_layout = RHIImageLayout::Read,
-                                               .after_stage = RHIPipelineStage::ComputeShader,
+                                               .after_stage = RHIPipelineStage::Transfer,
                                                .before_stage = RHIPipelineStage::ComputeShader});
     reblur_->GetDenoisedSpecular()->Transition({.target_layout = RHIImageLayout::Read,
-                                                .after_stage = RHIPipelineStage::ComputeShader,
+                                                .after_stage = RHIPipelineStage::Transfer,
                                                 .before_stage = RHIPipelineStage::ComputeShader});
     scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                 .after_stage = RHIPipelineStage::ComputeShader,
