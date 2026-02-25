@@ -7,7 +7,7 @@ Tests:
   4. History fix does not amplify noise: HistoryFix std <= TemporalAccum std * tolerance
 
 Usage:
-  python dev/reblur_temporal_validation.py --framework glfw [--skip_build]
+  python tests/reblur/reblur_temporal_validation.py --framework glfw [--skip_build]
 """
 
 import argparse
@@ -22,7 +22,7 @@ import numpy as np
 from PIL import Image
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 PASS_NAMES = {
     3: "TemporalAccum",

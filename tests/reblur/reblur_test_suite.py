@@ -11,7 +11,7 @@ Tests included:
   8. REBLUR temporal convergence (C++) — 30+ frames temporal pipeline without crash
 
 Usage:
-  python dev/reblur_test_suite.py --framework glfw [--skip_build]
+  python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
 """
 
 import argparse
@@ -21,7 +21,7 @@ import sys
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 
 def parse_args():
@@ -65,8 +65,8 @@ def main():
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
     functional_test_py = os.path.join(PROJECT_ROOT, "dev", "functional_test.py")
-    pass_validation_py = os.path.join(PROJECT_ROOT, "dev", "reblur_pass_validation.py")
-    temporal_validation_py = os.path.join(PROJECT_ROOT, "dev", "reblur_temporal_validation.py")
+    pass_validation_py = os.path.join(SCRIPT_DIR, "reblur_pass_validation.py")
+    temporal_validation_py = os.path.join(SCRIPT_DIR, "reblur_temporal_validation.py")
 
     results = []
 

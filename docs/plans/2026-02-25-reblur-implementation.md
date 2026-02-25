@@ -17,10 +17,10 @@
 1. **Tests before commits.** Before every commit, build and run the REBLUR test suite. Do not commit if any test fails — fix the failure first.
 
    ```bash
-   python3 dev/reblur_test_suite.py --framework glfw
+   python3 tests/reblur/reblur_test_suite.py --framework glfw
    ```
 
-   The test suite (`dev/reblur_test_suite.py`) builds once and runs all applicable tests in sequence. It reports a summary table with pass/fail status and timing for each test.
+   The test suite (`tests/reblur/reblur_test_suite.py`) builds once and runs all applicable tests in sequence. It reports a summary table with pass/fail status and timing for each test.
 
    **Current tests in the suite:**
    1. Smoke test — app launches without crash
@@ -32,7 +32,7 @@
    7. Temporal validation — TemporalAccum/HistoryFix produce valid output; multi-frame convergence verified
    8. C++ temporal convergence — 30+ frames temporal pipeline without crash, history buffer cycling
 
-   **Maintaining the test suite:** Whenever a new test case is added to this plan (e.g. a new milestone introduces a new validation), the corresponding test **must** also be added to `dev/reblur_test_suite.py`. The suite is the single source of truth for what gets run before commits — individual test commands listed in task descriptions are for documentation only.
+   **Maintaining the test suite:** Whenever a new test case is added to this plan (e.g. a new milestone introduces a new validation), the corresponding test **must** also be added to `tests/reblur/reblur_test_suite.py`. The suite is the single source of truth for what gets run before commits — individual test commands listed in task descriptions are for documentation only.
 
 2. **Verify logs confirm the intended code path.** After each test run, check the output for these log lines:
    - `--pipeline gpu` tests must show: `GPURenderer initializing`
@@ -1282,18 +1282,18 @@ static TestCaseRegistrar<ReblurSmokeTest> reblur_smoke_registrar("reblur_smoke")
 
 **Step 2: Add test to the suite**
 
-Add the `reblur_smoke` test as a new entry in `dev/reblur_test_suite.py` so it runs as part of the standard pre-commit suite.
+Add the `reblur_smoke` test as a new entry in `tests/reblur/reblur_test_suite.py` so it runs as part of the standard pre-commit suite.
 
 **Step 3: Verify via suite**
 
 ```bash
-python3 dev/reblur_test_suite.py --framework glfw
+python3 tests/reblur/reblur_test_suite.py --framework glfw
 ```
 
 **Step 4: Commit**
 
 ```bash
-git add tests/reblur/ReblurSmokeTest.cpp dev/reblur_test_suite.py
+git add tests/reblur/ReblurSmokeTest.cpp tests/reblur/reblur_test_suite.py
 git commit -m "test(reblur): add REBLUR smoke test (waits 30 frames then screenshots)"
 ```
 
@@ -1304,7 +1304,7 @@ git commit -m "test(reblur): add REBLUR smoke test (waits 30 frames then screens
 Run the full test suite and ensure all tests pass:
 
 ```bash
-python3 dev/reblur_test_suite.py --framework glfw
+python3 tests/reblur/reblur_test_suite.py --framework glfw
 ```
 
 At this point the suite should include all tests from M1-M5. Verify the summary shows 0 failures.

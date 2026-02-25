@@ -7,7 +7,7 @@ Tests:
   4. No NaN or Inf values in any pass output
 
 Usage:
-  python dev/reblur_pass_validation.py --framework glfw [--skip_build]
+  python tests/reblur/reblur_pass_validation.py --framework glfw [--skip_build]
 """
 
 import argparse
@@ -22,7 +22,7 @@ import numpy as np
 from PIL import Image
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 PASS_NAMES = {0: "PrePass", 1: "Blur", 2: "PostBlur"}
 MAX_SPP = 4  # low SPP to see denoiser effect clearly

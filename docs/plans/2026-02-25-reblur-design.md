@@ -392,7 +392,7 @@ tests/reblur/
     ReblurPassValidationTest.cpp      # Spatial pipeline crash test (10 frames)
     ReblurTemporalConvergenceTest.cpp # Temporal pipeline crash test (30+ frames)
 
-dev/
+tests/reblur/
     reblur_test_suite.py              # Master test suite (8 tests, run before every commit)
     reblur_pass_validation.py         # Per-pass spatial validation (debug_pass 0/1/2/99)
     reblur_temporal_validation.py     # Per-pass temporal validation (debug_pass 3/4, convergence)
