@@ -1,6 +1,7 @@
 #include "poisson_samples.h.slang"
 #include "reblur_common.h.slang"
 #include "reblur_config.h.slang"
+#include "reblur_data.h.slang"
 
 [[vk::binding(0, 0)]] cbuffer ubo
 {
@@ -16,6 +17,7 @@
     uint blur_pass_index; // 0=pre, 1=blur, 2=post
     float diffuse_prepass_blur_radius;
     float specular_prepass_blur_radius;
+    uint has_temporal_data;
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> inDiffuse;
@@ -24,6 +26,7 @@
 [[vk::binding(4, 0)]] Texture2D<float> inViewZ;
 [[vk::binding(5, 0)]] RWTexture2D<float4> outDiffuse;
 [[vk::binding(6, 0)]] RWTexture2D<float4> outSpecular;
+[[vk::binding(7, 0)]] Texture2D<float2> inInternalData;
 
 float2 RotateVector(float4 rotator_val, float2 v)
 {
@@ -83,9 +86,15 @@ float GetGaussianWeight(float distance_sq)
     float center_diff_hit = center_diff.a;
     float center_spec_hit = center_spec.a;
 
-    // Compute blur radius
-    // Without temporal accumulation, nonLinearAccumSpeed = 1.0
+    // Compute blur radius using temporal accumulation speed
     float non_linear_accum_speed = 1.0;
+    if (has_temporal_data != 0)
+    {
+        float2 packed = inInternalData[pixel];
+        float accum_speed, accum_speed_fast;
+        UnpackInternalData(packed, accum_speed, accum_speed_fast);
+        non_linear_accum_speed = GetNonLinearAccumSpeed(accum_speed);
+    }
     float diff_hit_factor = saturate(center_diff_hit);
     float spec_hit_factor = saturate(center_spec_hit);
 

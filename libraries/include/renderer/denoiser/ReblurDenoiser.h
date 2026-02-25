@@ -75,9 +75,13 @@ private:
     void CreatePipelines();
     void ClassifyTiles(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
     void Blur(const ReblurInputBuffers &inputs, const ReblurSettings &settings, uint32_t pass_index, RHIImage *in_diff,
-              RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec);
+              RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec, RHIImage *internal_data,
+              bool has_temporal_data);
+    void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
+    void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
     void CopyToOutput(RHIImage *diff, RHIImage *spec);
     void CopyPreviousFrameData(const ReblurInputBuffers &inputs);
+    void CopyHistoryData(RHIImage *diff, RHIImage *spec);
 
     RHIContext *rhi_;
     uint32_t width_;
@@ -97,9 +101,27 @@ private:
     RHIResourceRef<RHIImage> spec_temp1_;
     RHIResourceRef<RHIImage> spec_temp2_;
 
-    // Previous-frame buffers (for future temporal accumulation)
+    // History buffers (persistent across frames)
+    RHIResourceRef<RHIImage> diff_history_;
+    RHIResourceRef<RHIImage> spec_history_;
+
+    // Internal data: packed accumSpeed (slow + fast)
+    RHIResourceRef<RHIImage> internal_data_;
+    RHIResourceRef<RHIImage> prev_internal_data_;
+
+    // Previous-frame buffers
     RHIResourceRef<RHIImage> prev_view_z_;
     RHIResourceRef<RHIImage> prev_normal_roughness_;
+
+    // Temporal accumulation pass
+    RHIResourceRef<RHIShader> temporal_accum_shader_;
+    RHIResourceRef<RHIPipelineState> temporal_accum_pipeline_;
+    RHIResourceRef<RHIBuffer> temporal_accum_ub_;
+
+    // History fix pass
+    RHIResourceRef<RHIShader> history_fix_shader_;
+    RHIResourceRef<RHIPipelineState> history_fix_pipeline_;
+    RHIResourceRef<RHIBuffer> history_fix_ub_;
 
     // ClassifyTiles pass
     RHIResourceRef<RHIImage> tiles_;
