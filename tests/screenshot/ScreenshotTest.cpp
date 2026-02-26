@@ -15,7 +15,7 @@ public:
             return Result::Pass;
         }
 
-        if (!requested_)
+        if (!requested_ && app.IsReadyForAutoScreenshot())
         {
             app.RequestTakeScreenshot();
             requested_ = true;
