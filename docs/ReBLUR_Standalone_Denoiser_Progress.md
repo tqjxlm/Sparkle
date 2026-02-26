@@ -286,3 +286,54 @@ Date: 2026-02-26
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Phase 2 Module C is complete. Next step is Module D (pre-pass) with D1/D2/D3 quantitative coverage.
+
+Date: 2026-02-26
+- Scope: Phase 2 Module D implementation (pre-pass spatial pre-accumulation + objective D1/D2/D3 tests).
+- Milestone: Implemented standalone ReBLUR pre-pass with diffuse/specular bilateral filtering and spec hit-distance tracking output, then integrated Module D quantitative checks into the dedicated ReBLUR suite.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_prepass.cs.slang` and wired it into `ReblurDenoiser::Dispatch` after hit-distance reconstruction.
+  - `ReblurDenoiser` now allocates pre-pass outputs:
+    - `ReblurPrePassDiffRadianceHitDist`
+    - `ReblurPrePassSpecRadianceHitDist`
+    - `ReblurSpecHitDistForTracking` (`R32_FLOAT`)
+  - Added runtime controls and validation for Module D radii:
+    - `reblur_prepass_diffuse_radius`
+    - `reblur_prepass_specular_radius`
+    - `reblur_prepass_spec_tracking_radius`
+  - Module D metrics from the latest suite run:
+    - D1 variance reduction ratio = `19.896658`
+    - D2 edge leakage = `0.003988`
+    - D3 jitter reduction ratio = `0.222898` (`baseline=0.056225`, `tracking=0.012533`)
+  - Existing baseline behavior remains stable:
+    - S0.2 pass-through equivalence still bit-exact (`max_abs_diff=0`, `mean_abs_diff=0`, `rmse=0`)
+    - GPU functional output with denoiser enabled remains within baseline (`Mean FLIP error: 0.0032`).
+- Trials:
+  - Extended `ReblurDenoiser::Settings` and `RenderConfig`/`GPURenderer` wiring for Module D radius controls.
+  - Extended `dev/denoiser_metrics.py` with pre-pass shader-equivalent logic.
+  - Extended `dev/denoiser_module_tests.py` with D1/D2/D3 fixtures and assertions.
+  - Extended `dev/reblur_test_suite.py` to execute and gate Module D checks.
+- Pitfalls:
+  - Initial suite build failed due:
+    - ambiguous `utilities::Clamp` overload resolution for float radius clamping,
+    - float direct-comparison warnings treated as errors,
+    - binding pre-pass inputs via `const RHIImage*` while calling non-const `GetDefaultView`.
+  - Fixed by switching to `std::clamp`, epsilon-based float comparisons, and `RHIResourceRef<RHIImage>` bindings.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_prepass.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `libraries/include/renderer/RenderConfig.h`
+  - Updated: `libraries/source/renderer/RenderConfig.cpp`
+  - Updated: `libraries/source/renderer/renderer/GPURenderer.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Updated: `docs/Run.md`
+  - Executed:
+    - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+    - `python dev/denoiser_module_tests.py`
+    - `python build.py --framework glfw --config Release`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 2 Module D is complete. Next planned target in this phase is Module G (blur) with G1/G2/G3 quantitative coverage.

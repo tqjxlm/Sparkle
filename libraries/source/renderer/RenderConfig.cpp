@@ -2,6 +2,8 @@
 
 #include "core/Logger.h"
 #include "rhi/RHI.h"
+#include <algorithm>
+#include <cmath>
 #if FRAMEWORK_ANDROID || FRAMEWORK_IOS
 #include "application/NativeView.h"
 #endif
@@ -33,6 +35,15 @@ static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial 
 static ConfigValue<uint32_t> config_reblur_hit_distance_reconstruction_mode(
     "reblur_hit_distance_reconstruction_mode",
     "standalone ReBLUR hit-distance reconstruction mode (0=off, 1=3x3, 2=5x5)", "renderer", 1, true);
+static ConfigValue<float> config_reblur_prepass_diffuse_radius("reblur_prepass_diffuse_radius",
+                                                               "standalone ReBLUR pre-pass diffuse radius (0-4)",
+                                                               "renderer", 2.0f, true);
+static ConfigValue<float> config_reblur_prepass_specular_radius("reblur_prepass_specular_radius",
+                                                                "standalone ReBLUR pre-pass specular radius (0-4)",
+                                                                "renderer", 2.0f, true);
+static ConfigValue<float> config_reblur_prepass_spec_tracking_radius(
+    "reblur_prepass_spec_tracking_radius", "standalone ReBLUR spec hit-distance tracking radius (0-4)", "renderer",
+    2.0f, true);
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
@@ -57,6 +68,10 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_spatial_denoise, spatial_denoise);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_hit_distance_reconstruction_mode,
                                            reblur_hit_distance_reconstruction_mode);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_prepass_diffuse_radius, reblur_prepass_diffuse_radius);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_prepass_specular_radius, reblur_prepass_specular_radius);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_prepass_spec_tracking_radius,
+                                           reblur_prepass_spec_tracking_radius);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
@@ -122,6 +137,42 @@ void RenderConfig::Validate()
             reblur_hit_distance_reconstruction_mode);
         config_reblur_hit_distance_reconstruction_mode.Set(1u);
         reblur_hit_distance_reconstruction_mode = 1u;
+    }
+
+    auto sanitize_prepass_radius = [](float value, float fallback) {
+        if (!std::isfinite(value))
+        {
+            return fallback;
+        }
+
+        return std::clamp(value, 0.0f, 4.0f);
+    };
+
+    float clamped_diffuse_radius = sanitize_prepass_radius(reblur_prepass_diffuse_radius, 2.0f);
+    if (std::abs(clamped_diffuse_radius - reblur_prepass_diffuse_radius) > 1e-6f)
+    {
+        Log(Warn, "reblur_prepass_diffuse_radius={} is invalid. clamped to {}", reblur_prepass_diffuse_radius,
+            clamped_diffuse_radius);
+        config_reblur_prepass_diffuse_radius.Set(clamped_diffuse_radius);
+        reblur_prepass_diffuse_radius = clamped_diffuse_radius;
+    }
+
+    float clamped_specular_radius = sanitize_prepass_radius(reblur_prepass_specular_radius, 2.0f);
+    if (std::abs(clamped_specular_radius - reblur_prepass_specular_radius) > 1e-6f)
+    {
+        Log(Warn, "reblur_prepass_specular_radius={} is invalid. clamped to {}", reblur_prepass_specular_radius,
+            clamped_specular_radius);
+        config_reblur_prepass_specular_radius.Set(clamped_specular_radius);
+        reblur_prepass_specular_radius = clamped_specular_radius;
+    }
+
+    float clamped_spec_tracking_radius = sanitize_prepass_radius(reblur_prepass_spec_tracking_radius, 2.0f);
+    if (std::abs(clamped_spec_tracking_radius - reblur_prepass_spec_tracking_radius) > 1e-6f)
+    {
+        Log(Warn, "reblur_prepass_spec_tracking_radius={} is invalid. clamped to {}",
+            reblur_prepass_spec_tracking_radius, clamped_spec_tracking_radius);
+        config_reblur_prepass_spec_tracking_radius.Set(clamped_spec_tracking_radius);
+        reblur_prepass_spec_tracking_radius = clamped_spec_tracking_radius;
     }
 
 #if FRAMEWORK_ANDROID || FRAMEWORK_IOS

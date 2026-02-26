@@ -207,8 +207,12 @@ void GPURenderer::InitRenderResources()
             "ReblurOutput");
 
         reblur_denoiser_ = std::make_unique<ReblurDenoiser>(rhi_);
-        reblur_denoiser_->SetSettings({.hit_distance_reconstruction_mode = ToReblurHitDistanceReconstructionMode(
-                                           render_config_.reblur_hit_distance_reconstruction_mode)});
+        reblur_denoiser_->SetSettings(
+            {.hit_distance_reconstruction_mode =
+                 ToReblurHitDistanceReconstructionMode(render_config_.reblur_hit_distance_reconstruction_mode),
+             .prepass_diffuse_radius = render_config_.reblur_prepass_diffuse_radius,
+             .prepass_specular_radius = render_config_.reblur_prepass_specular_radius,
+             .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius});
         reblur_denoiser_->Initialize(image_size_);
     }
 
@@ -301,8 +305,12 @@ void GPURenderer::Render()
         {
             ASSERT(reblur_denoiser_);
             ASSERT(denoiser_output_texture_);
-            reblur_denoiser_->SetSettings({.hit_distance_reconstruction_mode = ToReblurHitDistanceReconstructionMode(
-                                               render_config_.reblur_hit_distance_reconstruction_mode)});
+            reblur_denoiser_->SetSettings(
+                {.hit_distance_reconstruction_mode =
+                     ToReblurHitDistanceReconstructionMode(render_config_.reblur_hit_distance_reconstruction_mode),
+                 .prepass_diffuse_radius = render_config_.reblur_prepass_diffuse_radius,
+                 .prepass_specular_radius = render_config_.reblur_prepass_specular_radius,
+                 .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius});
 
             scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                         .after_stage = RHIPipelineStage::ComputeShader,

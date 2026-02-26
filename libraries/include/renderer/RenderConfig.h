@@ -77,6 +77,9 @@ struct RenderConfig : public ConfigCollection
     uint32_t image_height;
     uint32_t shadow_map_resolution;
     uint32_t reblur_hit_distance_reconstruction_mode;
+    float reblur_prepass_diffuse_radius;
+    float reblur_prepass_specular_radius;
+    float reblur_prepass_spec_tracking_radius;
     bool spatial_denoise;
     bool use_ssao;
     bool use_prepass;

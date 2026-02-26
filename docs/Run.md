@@ -50,6 +50,9 @@ The base storage path varies by platform:
 | `specular_ibl`      | bool   | true       | forward, deferred | Enable specular IBL                                                                                          |
 | `spatial_denoise`   | bool   | false      | gpu               | Spatial denoise post-process                                                                                 |
 | `reblur_hit_distance_reconstruction_mode` | uint | 1 | gpu | ReBLUR hit-distance reconstruction mode (`0`=off, `1`=3x3, `2`=5x5)                                        |
+| `reblur_prepass_diffuse_radius` | float | 2.0 | gpu | ReBLUR pre-pass diffuse radius (`0`-`4`)                                                                      |
+| `reblur_prepass_specular_radius` | float | 2.0 | gpu | ReBLUR pre-pass specular radius (`0`-`4`)                                                                     |
+| `reblur_prepass_spec_tracking_radius` | float | 2.0 | gpu | ReBLUR spec hit-distance tracking radius (`0`-`4`)                                                            |
 | `enable_nee`        | bool   | false      | gpu               | Next event estimation                                                                                        |
 | `debug_mode`        | string | *(empty)*  | all               | Renderer debug output mode                                                                                   |
 | `screen_log`        | bool   | true       | all               | On-screen log overlay                                                                                        |

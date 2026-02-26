@@ -19,6 +19,7 @@ from denoiser_metrics import (
     normalized_rmse,
     pack_normal_roughness,
     pack_radiance_and_norm_hit_dist,
+    prepass_shader_equivalent,
     project_world_to_pixel,
     reconstruct_hit_distance_shader_equivalent,
     rmse,
@@ -72,6 +73,22 @@ class ModuleCTestResults:
     @property
     def passed(self) -> bool:
         return self.c1_pass and self.c2_pass and self.c3_pass
+
+
+@dataclass
+class ModuleDTestResults:
+    d1_pass: bool
+    d1_variance_reduction_ratio: float
+    d2_pass: bool
+    d2_edge_leakage: float
+    d3_pass: bool
+    d3_jitter_reduction_ratio: float
+    d3_baseline_jitter: float
+    d3_tracking_jitter: float
+
+    @property
+    def passed(self) -> bool:
+        return self.d1_pass and self.d2_pass and self.d3_pass
 
 
 def run_module_a_tests(seed: int = 7) -> ModuleATestResults:
@@ -494,10 +511,259 @@ def run_module_c_tests(seed: int = 31) -> ModuleCTestResults:
     )
 
 
+def _build_module_d_flat_fixture(seed: int, width: int, height: int) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(seed)
+
+    view_z = np.full((height, width), 40.0, dtype=np.float32)
+    normals = np.zeros((height, width, 3), dtype=np.float32)
+    normals[..., 2] = 1.0
+    roughness = np.full((height, width), 0.35, dtype=np.float32)
+    packed_normal_roughness = pack_normal_roughness(normals, roughness)
+
+    clean_diff = np.zeros((height, width, 4), dtype=np.float32)
+    clean_spec = np.zeros((height, width, 4), dtype=np.float32)
+    clean_diff[..., 0] = 0.42
+    clean_diff[..., 1] = 0.03
+    clean_diff[..., 2] = -0.01
+    clean_diff[..., 3] = 0.30
+    clean_spec[..., 0] = 0.28
+    clean_spec[..., 1] = 0.02
+    clean_spec[..., 2] = -0.02
+    clean_spec[..., 3] = 0.55
+
+    noisy_diff = clean_diff.copy()
+    noisy_spec = clean_spec.copy()
+    noisy_diff[..., :3] += rng.normal(0.0, 0.08,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_spec[..., :3] += rng.normal(0.0, 0.09,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_diff[..., 3] = np.clip(
+        noisy_diff[..., 3] + rng.normal(0.0, 0.04, size=(height, width)), 0.0, 1.0)
+    noisy_spec[..., 3] = np.clip(
+        noisy_spec[..., 3] + rng.normal(0.0, 0.05, size=(height, width)), 0.0, 1.0)
+
+    tile_mask = classify_tiles_reference(view_z, denoising_range=300.0)
+    eval_mask = np.zeros((height, width), dtype=bool)
+    eval_mask[height // 4: (height * 3) // 4, width //
+              4: (width * 3) // 4] = True
+
+    return {
+        "tile_mask": tile_mask,
+        "packed_normal_roughness": packed_normal_roughness,
+        "view_z": view_z,
+        "noisy_diff": noisy_diff.astype(np.float32),
+        "noisy_spec": noisy_spec.astype(np.float32),
+        "clean_diff": clean_diff,
+        "clean_spec": clean_spec,
+        "eval_mask": eval_mask,
+    }
+
+
+def _build_module_d_edge_fixture(seed: int, width: int, height: int) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    mid = width // 2
+
+    view_z = np.full((height, width), 30.0, dtype=np.float32)
+    view_z[:, mid:] = 95.0
+
+    normals = np.zeros((height, width, 3), dtype=np.float32)
+    normals[..., 2] = 1.0
+    right_normal = np.array([0.6, 0.0, 0.8], dtype=np.float32)
+    right_normal /= np.linalg.norm(right_normal)
+    normals[:, mid:, :] = right_normal
+
+    roughness = np.full((height, width), 0.2, dtype=np.float32)
+    roughness[:, mid:] = 0.75
+    packed_normal_roughness = pack_normal_roughness(normals, roughness)
+
+    clean_diff = np.zeros((height, width, 4), dtype=np.float32)
+    clean_spec = np.zeros((height, width, 4), dtype=np.float32)
+    clean_diff[:, :mid, 0] = 0.18
+    clean_diff[:, mid:, 0] = 0.82
+    clean_diff[..., 1] = 0.02
+    clean_diff[..., 2] = -0.01
+    clean_diff[:, :mid, 3] = 0.26
+    clean_diff[:, mid:, 3] = 0.62
+
+    clean_spec[:, :mid, 0] = 0.14
+    clean_spec[:, mid:, 0] = 0.68
+    clean_spec[..., 1] = 0.02
+    clean_spec[..., 2] = -0.02
+    clean_spec[:, :mid, 3] = 0.20
+    clean_spec[:, mid:, 3] = 0.72
+
+    noisy_diff = clean_diff.copy()
+    noisy_spec = clean_spec.copy()
+    noisy_diff[..., :3] += rng.normal(0.0, 0.05,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_spec[..., :3] += rng.normal(0.0, 0.06,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_diff[..., 3] = np.clip(
+        noisy_diff[..., 3] + rng.normal(0.0, 0.03, size=(height, width)), 0.0, 1.0)
+    noisy_spec[..., 3] = np.clip(
+        noisy_spec[..., 3] + rng.normal(0.0, 0.03, size=(height, width)), 0.0, 1.0)
+
+    tile_mask = classify_tiles_reference(view_z, denoising_range=300.0)
+    return {
+        "tile_mask": tile_mask,
+        "packed_normal_roughness": packed_normal_roughness,
+        "view_z": view_z,
+        "noisy_diff": noisy_diff.astype(np.float32),
+        "noisy_spec": noisy_spec.astype(np.float32),
+        "clean_diff": clean_diff,
+        "clean_spec": clean_spec,
+        "mid": mid,
+    }
+
+
+def run_module_d_tests(seed: int = 43) -> ModuleDTestResults:
+    denoising_range = 300.0
+
+    flat_fixture = _build_module_d_flat_fixture(
+        seed=seed, width=192, height=128)
+    out_diff_flat, out_spec_flat, _ = prepass_shader_equivalent(
+        flat_fixture["tile_mask"],
+        flat_fixture["packed_normal_roughness"],
+        flat_fixture["view_z"],
+        flat_fixture["noisy_diff"],
+        flat_fixture["noisy_spec"],
+        denoising_range,
+        diffuse_radius=2.0,
+        specular_radius=2.0,
+        spec_tracking_radius=2.0,
+    )
+
+    eval_mask = flat_fixture["eval_mask"]
+    before_variance = 0.5 * (
+        float(np.var(flat_fixture["noisy_diff"][..., 0][eval_mask])) +
+        float(np.var(flat_fixture["noisy_spec"][..., 0][eval_mask]))
+    )
+    after_variance = 0.5 * (
+        float(np.var(out_diff_flat[..., 0][eval_mask])) +
+        float(np.var(out_spec_flat[..., 0][eval_mask]))
+    )
+    d1_variance_reduction_ratio = before_variance / max(after_variance, 1e-8)
+    d1_pass = d1_variance_reduction_ratio >= 1.8
+
+    edge_fixture = _build_module_d_edge_fixture(
+        seed=seed + 1, width=256, height=128)
+    out_diff_edge, out_spec_edge, _ = prepass_shader_equivalent(
+        edge_fixture["tile_mask"],
+        edge_fixture["packed_normal_roughness"],
+        edge_fixture["view_z"],
+        edge_fixture["noisy_diff"],
+        edge_fixture["noisy_spec"],
+        denoising_range,
+        diffuse_radius=2.0,
+        specular_radius=2.0,
+        spec_tracking_radius=2.0,
+    )
+
+    mid = edge_fixture["mid"]
+    edge_band_half_width = 3
+    left_strip = slice(mid - edge_band_half_width, mid)
+    right_strip = slice(mid, mid + edge_band_half_width)
+
+    clean_reference_delta = 0.5 * (
+        float(np.mean(edge_fixture["clean_diff"][:, right_strip, 0])) -
+        float(np.mean(edge_fixture["clean_diff"][:, left_strip, 0]))
+    ) + 0.5 * (
+        float(np.mean(edge_fixture["clean_spec"][:, right_strip, 0])) -
+        float(np.mean(edge_fixture["clean_spec"][:, left_strip, 0]))
+    )
+    filtered_delta = 0.5 * (
+        float(np.mean(out_diff_edge[:, right_strip, 0])) -
+        float(np.mean(out_diff_edge[:, left_strip, 0]))
+    ) + 0.5 * (
+        float(np.mean(out_spec_edge[:, right_strip, 0])) -
+        float(np.mean(out_spec_edge[:, left_strip, 0]))
+    )
+    d2_edge_leakage = max(0.0, (clean_reference_delta -
+                          filtered_delta) / max(clean_reference_delta, 1e-6))
+    d2_pass = d2_edge_leakage <= 0.08
+
+    jitter_seed = seed + 2
+    rng = np.random.default_rng(jitter_seed)
+    jitter_height = 96
+    jitter_width = 160
+    jitter_view_z = np.full(
+        (jitter_height, jitter_width), 48.0, dtype=np.float32)
+    jitter_normals = np.zeros(
+        (jitter_height, jitter_width, 3), dtype=np.float32)
+    jitter_normals[..., 2] = 1.0
+    jitter_roughness = np.full(
+        (jitter_height, jitter_width), 0.55, dtype=np.float32)
+    jitter_packed_normal_roughness = pack_normal_roughness(
+        jitter_normals, jitter_roughness)
+    jitter_tile_mask = classify_tiles_reference(jitter_view_z, denoising_range)
+
+    base_diff = np.zeros((jitter_height, jitter_width, 4), dtype=np.float32)
+    base_diff[..., 0] = 0.33
+    base_diff[..., 1] = 0.02
+    base_diff[..., 2] = -0.01
+    base_diff[..., 3] = 0.42
+    base_spec = np.zeros((jitter_height, jitter_width, 4), dtype=np.float32)
+    base_spec[..., 0] = 0.40
+    base_spec[..., 1] = 0.03
+    base_spec[..., 2] = -0.02
+    base_spec[..., 3] = 0.58
+
+    jitter_eval_mask = np.zeros((jitter_height, jitter_width), dtype=bool)
+    jitter_eval_mask[24:72, 40:120] = True
+
+    frame_count = 12
+    baseline_frames = []
+    tracking_frames = []
+    for _ in range(frame_count):
+        frame_diff = base_diff.copy()
+        frame_spec = base_spec.copy()
+        frame_diff[..., :3] += rng.normal(0.0, 0.03, size=(
+            jitter_height, jitter_width, 3)).astype(np.float32)
+        frame_spec[..., :3] += rng.normal(0.0, 0.03, size=(
+            jitter_height, jitter_width, 3)).astype(np.float32)
+        frame_spec[..., 3] = np.clip(frame_spec[..., 3] + rng.normal(0.0, 0.06, size=(jitter_height, jitter_width)),
+                                     0.0, 1.0)
+
+        _, _, spec_tracking = prepass_shader_equivalent(
+            jitter_tile_mask,
+            jitter_packed_normal_roughness,
+            jitter_view_z,
+            frame_diff,
+            frame_spec,
+            denoising_range,
+            diffuse_radius=0.0,
+            specular_radius=0.0,
+            spec_tracking_radius=2.0,
+        )
+
+        baseline_frames.append(frame_spec[..., 3][jitter_eval_mask].copy())
+        tracking_frames.append(spec_tracking[jitter_eval_mask].copy())
+
+    baseline_stack = np.stack(baseline_frames, axis=0)
+    tracking_stack = np.stack(tracking_frames, axis=0)
+    d3_baseline_jitter = float(np.mean(np.std(baseline_stack, axis=0)))
+    d3_tracking_jitter = float(np.mean(np.std(tracking_stack, axis=0)))
+    d3_jitter_reduction_ratio = d3_tracking_jitter / \
+        max(d3_baseline_jitter, 1e-8)
+    d3_pass = d3_jitter_reduction_ratio <= 0.80
+
+    return ModuleDTestResults(
+        d1_pass=d1_pass,
+        d1_variance_reduction_ratio=d1_variance_reduction_ratio,
+        d2_pass=d2_pass,
+        d2_edge_leakage=d2_edge_leakage,
+        d3_pass=d3_pass,
+        d3_jitter_reduction_ratio=d3_jitter_reduction_ratio,
+        d3_baseline_jitter=d3_baseline_jitter,
+        d3_tracking_jitter=d3_tracking_jitter,
+    )
+
+
 def main() -> int:
     module_a_results = run_module_a_tests()
     module_b_results = run_module_b_tests()
     module_c_results = run_module_c_tests()
+    module_d_results = run_module_d_tests()
 
     print(
         "Module A results: "
@@ -526,7 +792,16 @@ def main() -> int:
         f"rmse_5x5_norm={module_c_results.c3_rmse_5x5_norm:.6f})",
         flush=True,
     )
-    return 0 if module_a_results.passed and module_b_results.passed and module_c_results.passed else 1
+    print(
+        "Module D results: "
+        f"D1(pass={module_d_results.d1_pass}, variance_reduction_ratio={module_d_results.d1_variance_reduction_ratio:.6f}); "
+        f"D2(pass={module_d_results.d2_pass}, edge_leakage={module_d_results.d2_edge_leakage:.6f}); "
+        f"D3(pass={module_d_results.d3_pass}, jitter_reduction_ratio={module_d_results.d3_jitter_reduction_ratio:.6f}, "
+        f"baseline_jitter={module_d_results.d3_baseline_jitter:.6f}, "
+        f"tracking_jitter={module_d_results.d3_tracking_jitter:.6f})",
+        flush=True,
+    )
+    return 0 if module_a_results.passed and module_b_results.passed and module_c_results.passed and module_d_results.passed else 1
 
 
 if __name__ == "__main__":
