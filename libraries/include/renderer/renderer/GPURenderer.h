@@ -47,6 +47,13 @@ private:
 
     RHIResourceRef<RHIImage> scene_texture_;
     RHIResourceRef<RHIRenderTarget> scene_rt_;
+
+    RHIResourceRef<RHIImage> reblur_normal_roughness_texture_;
+    RHIResourceRef<RHIImage> reblur_view_z_texture_;
+    RHIResourceRef<RHIImage> reblur_motion_vector_texture_;
+    RHIResourceRef<RHIImage> reblur_diff_radiance_hitdist_texture_;
+    RHIResourceRef<RHIImage> reblur_spec_radiance_hitdist_texture_;
+
     RHIResourceRef<RHIImage> denoiser_output_texture_;
     std::unique_ptr<class ReblurDenoiser> reblur_denoiser_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
@@ -72,6 +79,9 @@ private:
 
     uint32_t last_second_total_spp_ = 0;
     uint32_t dispatched_sample_count_ = 0;
+
+    Mat4 previous_view_projection_ = Mat4::Identity();
+    bool has_previous_view_projection_ = false;
 
     TimerCaller spp_logger_;
 };

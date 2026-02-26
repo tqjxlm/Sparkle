@@ -62,10 +62,14 @@ void ReblurDenoiser::Resize(const Vector2UInt &image_size)
     image_size_ = image_size;
 }
 
-void ReblurDenoiser::Dispatch(const RHIResourceRef<RHIImage> &noisy_input,
-                              const RHIResourceRef<RHIImage> &denoised_output)
+void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef<RHIImage> &denoised_output)
 {
-    ASSERT(noisy_input);
+    ASSERT(inputs.noisy_input);
+    ASSERT(inputs.normal_roughness);
+    ASSERT(inputs.view_z);
+    ASSERT(inputs.motion_vectors);
+    ASSERT(inputs.diff_radiance_hitdist);
+    ASSERT(inputs.spec_radiance_hitdist);
     ASSERT(denoised_output);
     ASSERT(pipeline_state_);
     ASSERT(compute_pass_);
@@ -81,7 +85,7 @@ void ReblurDenoiser::Dispatch(const RHIResourceRef<RHIImage> &noisy_input,
     uniform_buffer_->Upload(rhi_, &ubo);
 
     auto *cs_resources = pipeline_state_->GetShaderResource<ReblurPassthroughShader>();
-    cs_resources->noisy_input().BindResource(noisy_input->GetDefaultView(rhi_));
+    cs_resources->noisy_input().BindResource(inputs.noisy_input->GetDefaultView(rhi_));
     cs_resources->denoised_output().BindResource(denoised_output->GetDefaultView(rhi_));
 
     denoised_output->Transition({.target_layout = RHIImageLayout::StorageWrite,

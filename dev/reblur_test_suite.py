@@ -5,6 +5,11 @@ Phase 0 covers bootstrap checks:
 - S0.1 Entry-point smoke (denoiser-enabled GPU path runs and exits cleanly)
 - S0.2 Pass-through equivalence (denoiser off vs on output difference is near zero)
 - S0.3 Resize/reset smoke (denoiser-enabled path survives alternate render resolution)
+
+Phase 1 adds Module A checks:
+- A1 Roundtrip encoding error for normal/roughness/radiance/hit-distance packing
+- A2 Motion-vector reprojection error on deterministic camera-motion fixtures
+- A3 Guide validity ratio check for finite valid viewZ and normalized hit distance
 """
 
 import argparse
@@ -17,14 +22,19 @@ import tempfile
 import numpy as np
 from PIL import Image
 
+from denoiser_module_tests import run_module_a_tests
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the dedicated ReBLUR test suite.")
-    parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
-    parser.add_argument("--config", default="Release", choices=("Release", "Debug"))
+    parser = argparse.ArgumentParser(
+        description="Run the dedicated ReBLUR test suite.")
+    parser.add_argument("--framework", default="glfw",
+                        choices=("glfw", "macos"))
+    parser.add_argument("--config", default="Release",
+                        choices=("Release", "Debug"))
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--skip_build", action="store_true")
     parser.add_argument("--software", action="store_true",
@@ -67,7 +77,8 @@ def compare_images(off_path, on_path):
     off_img = load_image(off_path)
     on_img = load_image(on_path)
     if off_img.shape != on_img.shape:
-        print(f"Image size mismatch: {off_img.shape} vs {on_img.shape}", flush=True)
+        print(
+            f"Image size mismatch: {off_img.shape} vs {on_img.shape}", flush=True)
         sys.exit(1)
 
     abs_diff = np.abs(off_img - on_img)
@@ -80,7 +91,8 @@ def compare_images(off_path, on_path):
 def main():
     args = parse_args()
     build_py = os.path.join(PROJECT_ROOT, "build.py")
-    functional_test_py = os.path.join(PROJECT_ROOT, "dev", "functional_test.py")
+    functional_test_py = os.path.join(
+        PROJECT_ROOT, "dev", "functional_test.py")
     scene_name = "TestScene"
     pipeline_name = "gpu"
 
@@ -123,6 +135,28 @@ def main():
         functional_cmd.append("--software")
     run_command(functional_cmd, env=env)
 
+    # Module A quantitative checks (Phase 1).
+    module_a_results = run_module_a_tests()
+    print(
+        "A1 metrics: "
+        f"normal_rmse={module_a_results.a1_normal_rmse:.8f}, "
+        f"roughness_rmse={module_a_results.a1_roughness_rmse:.8f}, "
+        f"radiance_rmse={module_a_results.a1_radiance_rmse:.8f}, "
+        f"norm_hit_rmse={module_a_results.a1_norm_hit_rmse:.8f}",
+        flush=True,
+    )
+    print(
+        "A2 metrics: "
+        f"mean_reprojection_error_px={module_a_results.a2_mean_reprojection_error_px:.6f}, "
+        f"max_reprojection_error_px={module_a_results.a2_max_reprojection_error_px:.6f}",
+        flush=True,
+    )
+    print(
+        f"A3 metrics: guide_valid_ratio={module_a_results.a3_guide_valid_ratio:.6%}", flush=True)
+    if not module_a_results.passed:
+        print("Module A quantitative checks FAILED", flush=True)
+        return 1
+
     # S0.1 Entry-point smoke.
     smoke_cmd = base_cmd + [
         "--run",
@@ -152,7 +186,8 @@ def main():
     if args.headless:
         screenshot_off_cmd += ["--headless", "true"]
     run_command(screenshot_off_cmd, env=env)
-    off_path = find_latest_screenshot(args.framework, scene_name, pipeline_name)
+    off_path = find_latest_screenshot(
+        args.framework, scene_name, pipeline_name)
     off_copy = os.path.join(tempfile.gettempdir(), "sparkle_reblur_s0_off.png")
     Image.open(off_path).save(off_copy)
 

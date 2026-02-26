@@ -13,13 +13,23 @@ class RHIContext;
 class ReblurDenoiser
 {
 public:
+    struct FrontEndInputs
+    {
+        RHIResourceRef<RHIImage> noisy_input;
+        RHIResourceRef<RHIImage> normal_roughness;
+        RHIResourceRef<RHIImage> view_z;
+        RHIResourceRef<RHIImage> motion_vectors;
+        RHIResourceRef<RHIImage> diff_radiance_hitdist;
+        RHIResourceRef<RHIImage> spec_radiance_hitdist;
+    };
+
     explicit ReblurDenoiser(RHIContext *rhi_context);
 
     void Initialize(const Vector2UInt &image_size);
 
     void Resize(const Vector2UInt &image_size);
 
-    void Dispatch(const RHIResourceRef<RHIImage> &noisy_input, const RHIResourceRef<RHIImage> &denoised_output);
+    void Dispatch(const FrontEndInputs &inputs, const RHIResourceRef<RHIImage> &denoised_output);
 
 private:
     RHIContext *rhi_ = nullptr;

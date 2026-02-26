@@ -31,6 +31,11 @@ class RayTracingComputeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(skyMap, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(skyMapSampler, RHIShaderResourceReflection::ResourceType::Sampler)
     USE_SHADER_RESOURCE(materialTextureSampler, RHIShaderResourceReflection::ResourceType::Sampler)
+    USE_SHADER_RESOURCE(reblur_normal_roughness_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(reblur_view_z_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(reblur_motion_vector_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(reblur_diff_radiance_hitdist_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(reblur_spec_radiance_hitdist_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
     USE_SHADER_RESOURCE_BINDLESS(textures, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE_BINDLESS(indexBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
@@ -49,6 +54,11 @@ class RayTracingComputeShader : public RHIShaderInfo
         uint32_t total_sample_count;
         uint32_t spp;
         uint32_t enable_nee;
+        alignas(16) Mat4 current_view_projection;
+        alignas(16) Mat4 previous_view_projection;
+        uint32_t write_reblur_inputs;
+        uint32_t has_history;
+        alignas(8) Vector2UInt reblur_padding = Vector2UInt::Zero();
     };
 };
 
@@ -65,6 +75,7 @@ GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
 void GPURenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
+    has_previous_view_projection_ = false;
 
     scene_texture_ = rhi_->CreateImage(
         RHIImage::Attribute{
@@ -83,6 +94,86 @@ void GPURenderer::InitRenderResources()
         "GPUPipelineColorBuffer");
 
     scene_rt_ = rhi_->CreateRenderTarget({}, scene_texture_, nullptr, "GPUPipelineColorRT");
+
+    reblur_normal_roughness_texture_ = rhi_->CreateImage(
+        RHIImage::Attribute{
+            .format = PixelFormat::RGBAFloat16,
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+            .width = image_size_.x(),
+            .height = image_size_.y(),
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+            .memory_properties = RHIMemoryProperty::DeviceLocal,
+            .mip_levels = 1,
+            .msaa_samples = 1,
+        },
+        "ReblurInNormalRoughness");
+
+    reblur_view_z_texture_ = rhi_->CreateImage(
+        RHIImage::Attribute{
+            .format = PixelFormat::R32_FLOAT,
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+            .width = image_size_.x(),
+            .height = image_size_.y(),
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+            .memory_properties = RHIMemoryProperty::DeviceLocal,
+            .mip_levels = 1,
+            .msaa_samples = 1,
+        },
+        "ReblurInViewZ");
+
+    reblur_motion_vector_texture_ = rhi_->CreateImage(
+        RHIImage::Attribute{
+            .format = PixelFormat::RGBAFloat16,
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+            .width = image_size_.x(),
+            .height = image_size_.y(),
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+            .memory_properties = RHIMemoryProperty::DeviceLocal,
+            .mip_levels = 1,
+            .msaa_samples = 1,
+        },
+        "ReblurInMotionVector");
+
+    reblur_diff_radiance_hitdist_texture_ = rhi_->CreateImage(
+        RHIImage::Attribute{
+            .format = PixelFormat::RGBAFloat16,
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+            .width = image_size_.x(),
+            .height = image_size_.y(),
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+            .memory_properties = RHIMemoryProperty::DeviceLocal,
+            .mip_levels = 1,
+            .msaa_samples = 1,
+        },
+        "ReblurInDiffRadianceHitDist");
+
+    reblur_spec_radiance_hitdist_texture_ = rhi_->CreateImage(
+        RHIImage::Attribute{
+            .format = PixelFormat::RGBAFloat16,
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+            .width = image_size_.x(),
+            .height = image_size_.y(),
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+            .memory_properties = RHIMemoryProperty::DeviceLocal,
+            .mip_levels = 1,
+            .msaa_samples = 1,
+        },
+        "ReblurInSpecRadianceHitDist");
 
     if (render_config_.spatial_denoise)
     {
@@ -169,6 +260,22 @@ void GPURenderer::Render()
                                     .after_stage = RHIPipelineStage::Top,
                                     .before_stage = RHIPipelineStage::ComputeShader});
 
+        reblur_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                      .after_stage = RHIPipelineStage::Top,
+                                                      .before_stage = RHIPipelineStage::ComputeShader});
+        reblur_view_z_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                            .after_stage = RHIPipelineStage::Top,
+                                            .before_stage = RHIPipelineStage::ComputeShader});
+        reblur_motion_vector_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                   .after_stage = RHIPipelineStage::Top,
+                                                   .before_stage = RHIPipelineStage::ComputeShader});
+        reblur_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                           .after_stage = RHIPipelineStage::Top,
+                                                           .before_stage = RHIPipelineStage::ComputeShader});
+        reblur_spec_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                           .after_stage = RHIPipelineStage::Top,
+                                                           .before_stage = RHIPipelineStage::ComputeShader});
+
         rhi_->BeginComputePass(compute_pass_);
 
         rhi_->DispatchCompute(pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
@@ -184,7 +291,32 @@ void GPURenderer::Render()
                                         .after_stage = RHIPipelineStage::ComputeShader,
                                         .before_stage = RHIPipelineStage::ComputeShader});
 
-            reblur_denoiser_->Dispatch(scene_texture_, denoiser_output_texture_);
+            reblur_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                          .after_stage = RHIPipelineStage::ComputeShader,
+                                                          .before_stage = RHIPipelineStage::ComputeShader});
+            reblur_view_z_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                .after_stage = RHIPipelineStage::ComputeShader,
+                                                .before_stage = RHIPipelineStage::ComputeShader});
+            reblur_motion_vector_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                       .after_stage = RHIPipelineStage::ComputeShader,
+                                                       .before_stage = RHIPipelineStage::ComputeShader});
+            reblur_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                               .after_stage = RHIPipelineStage::ComputeShader,
+                                                               .before_stage = RHIPipelineStage::ComputeShader});
+            reblur_spec_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                               .after_stage = RHIPipelineStage::ComputeShader,
+                                                               .before_stage = RHIPipelineStage::ComputeShader});
+
+            ReblurDenoiser::FrontEndInputs reblur_front_end_inputs{
+                .noisy_input = scene_texture_,
+                .normal_roughness = reblur_normal_roughness_texture_,
+                .view_z = reblur_view_z_texture_,
+                .motion_vectors = reblur_motion_vector_texture_,
+                .diff_radiance_hitdist = reblur_diff_radiance_hitdist_texture_,
+                .spec_radiance_hitdist = reblur_spec_radiance_hitdist_texture_,
+            };
+
+            reblur_denoiser_->Dispatch(reblur_front_end_inputs, denoiser_output_texture_);
         }
         else
         {
@@ -247,6 +379,12 @@ void GPURenderer::Update()
 {
     PROFILE_SCOPE("GPURenderer::Update");
 
+    auto *camera = scene_render_proxy_->GetCamera();
+    if (camera->NeedClear())
+    {
+        has_previous_view_projection_ = false;
+    }
+
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
     {
         BindBindlessResources();
@@ -262,6 +400,7 @@ void GPURenderer::Update()
         // with a dummy black cubemap don't drag down the running average.
         scene_render_proxy_->GetCamera()->MarkPixelDirty();
         dispatched_sample_count_ = 0;
+        has_previous_view_projection_ = false;
 
         if ((sky_light != nullptr) && sky_light->GetSkyMap())
         {
@@ -337,8 +476,6 @@ void GPURenderer::Update()
         tlas_->Update(primitives_to_update);
     }
 
-    auto *camera = scene_render_proxy_->GetCamera();
-
     // Use a per-frame seed that advances every dispatch so fresh samples are generated
     // even after cumulated_sample_count is capped. Stays identical to GetCumulatedSampleCount()
     // before the cap, preserving determinism for functional tests.
@@ -381,16 +518,25 @@ void GPURenderer::Update()
         spp = render_config_.sample_per_pixel;
     }
 
+    Mat4 current_view_projection = camera->GetViewProjectionMatrix();
+    Mat4 previous_view_projection = has_previous_view_projection_ ? previous_view_projection_ : current_view_projection;
+
     RayTracingComputeShader::UniformBufferData ubo{
         .camera = camera->GetUniformBufferData(render_config_),
         .time_seed = time_seed,
         .total_sample_count = camera->GetCumulatedSampleCount(),
         .spp = spp,
         .enable_nee = render_config_.enable_nee ? 1u : 0,
+        .current_view_projection = current_view_projection,
+        .previous_view_projection = previous_view_projection,
+        .write_reblur_inputs = render_config_.spatial_denoise ? 1u : 0u,
+        .has_history = has_previous_view_projection_ ? 1u : 0u,
     };
 
     dispatched_sample_count_ += spp;
     camera->AccumulateSample(spp);
+    previous_view_projection_ = current_view_projection;
+    has_previous_view_projection_ = true;
 
     if (sky_light)
     {
@@ -454,6 +600,13 @@ void GPURenderer::InitSceneRenderResources()
     cs_resources->ubo().BindResource(uniform_buffer_);
     cs_resources->imageData().BindResource(scene_texture_->GetDefaultView(rhi_));
     cs_resources->tlas().BindResource(tlas_);
+    cs_resources->reblur_normal_roughness_output().BindResource(reblur_normal_roughness_texture_->GetDefaultView(rhi_));
+    cs_resources->reblur_view_z_output().BindResource(reblur_view_z_texture_->GetDefaultView(rhi_));
+    cs_resources->reblur_motion_vector_output().BindResource(reblur_motion_vector_texture_->GetDefaultView(rhi_));
+    cs_resources->reblur_diff_radiance_hitdist_output().BindResource(
+        reblur_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    cs_resources->reblur_spec_radiance_hitdist_output().BindResource(
+        reblur_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
 
     auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::R8G8B8A8_SRGB,

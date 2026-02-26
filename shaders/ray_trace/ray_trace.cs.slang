@@ -2,9 +2,9 @@
 
 #include "debug.h.slang"
 #include "directional_light.h.slang"
+#include "pbr.h.slang"
 #include "random.h.slang"
 #include "sky_light.h.slang"
-#include "pbr.h.slang"
 
 struct Camera
 {
@@ -32,6 +32,11 @@ struct Camera
     uint total_sample_count;
     uint spp;
     uint enable_nee;
+    float4x4 current_view_projection;
+    float4x4 previous_view_projection;
+    uint write_reblur_inputs;
+    uint has_history;
+    uint2 reblur_padding;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
@@ -40,6 +45,11 @@ struct Camera
 [[vk::binding(4, 1)]] TextureCube<float4> skyMap;
 [[vk::binding(5, 1)]] SamplerState skyMapSampler;
 [[vk::binding(6, 1)]] SamplerState materialTextureSampler;
+[[vk::binding(7, 1)]] RWTexture2D<float4> reblur_normal_roughness_output;
+[[vk::binding(8, 1)]] RWTexture2D<float> reblur_view_z_output;
+[[vk::binding(9, 1)]] RWTexture2D<float4> reblur_motion_vector_output;
+[[vk::binding(10, 1)]] RWTexture2D<float4> reblur_diff_radiance_hitdist_output;
+[[vk::binding(11, 1)]] RWTexture2D<float4> reblur_spec_radiance_hitdist_output;
 
 // set 2: bindless resources, shared by the whole scene
 [[vk::binding(0, 2)]] Texture2D textures[];
@@ -75,7 +85,8 @@ float3 SampleEmissive(inout Intersection intersection, MaterialParameters mat_pa
     return emissive_color_sampled * mat_param.emissive_color;
 }
 
-float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i, out float out_pdf)
+float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i,
+                     out float out_pdf)
 {
     if (mat_param.eta > 0)
     {
@@ -161,6 +172,90 @@ float GetMISWeight(float current_pdf, float compensation_pdf)
     return current_pdf_sqr / (compensation_pdf_sqr + current_pdf_sqr + Eps);
 }
 
+static const float4 ReblurHitDistanceParams = float4(3.0f, 0.1f, 20.0f, -25.0f);
+
+struct PathTraceResult
+{
+    float3 color;
+    uint has_primary_hit;
+    float3 primary_world_position;
+    float primary_view_z;
+    float3 primary_normal;
+    float primary_roughness;
+    float primary_metallic;
+    float primary_hit_distance;
+};
+
+float3 ReblurLinearToYCoCg(float3 color)
+{
+    float y = dot(color, float3(0.25f, 0.5f, 0.25f));
+    float co = dot(color, float3(0.5f, 0.0f, -0.5f));
+    float cg = dot(color, float3(-0.25f, 0.5f, -0.25f));
+
+    return float3(y, co, cg);
+}
+
+float GetReblurHitDistanceNormalization(float view_z, float roughness)
+{
+    float roughness_factor = saturate(exp2(ReblurHitDistanceParams.w * roughness * roughness));
+    float mixed_scale = lerp(1.0f, ReblurHitDistanceParams.z, roughness_factor);
+    return (ReblurHitDistanceParams.x + abs(view_z) * ReblurHitDistanceParams.y) * mixed_scale;
+}
+
+float4 ReblurPackNormalAndRoughness(float3 normal, float roughness)
+{
+    float normal_length = length(normal);
+    float3 safe_normal = normal_length > Eps ? normal / normal_length : float3(0.0f, 0.0f, 1.0f);
+    safe_normal /= max(abs(safe_normal.x), max(abs(safe_normal.y), abs(safe_normal.z)));
+    return float4(safe_normal * 0.5f + 0.5f, saturate(roughness));
+}
+
+float ReblurGetNormHitDist(float hit_distance, float view_z, float roughness)
+{
+    if (hit_distance <= 0.0f || abs(view_z) <= Eps)
+    {
+        return 0.0f;
+    }
+
+    float normalization = GetReblurHitDistanceNormalization(view_z, roughness);
+    return saturate(hit_distance / max(normalization, Eps));
+}
+
+float4 ReblurPackRadianceAndNormHitDist(float3 radiance, float norm_hit_distance)
+{
+    float3 sanitized_radiance =
+        any(isnan(radiance)) || any(isinf(radiance)) ? float3(0.0f, 0.0f, 0.0f) : max(radiance, 0.0f);
+    float sanitized_norm_hit_distance =
+        (isnan(norm_hit_distance) || isinf(norm_hit_distance)) ? 0.0f : saturate(norm_hit_distance);
+    return float4(ReblurLinearToYCoCg(sanitized_radiance), sanitized_norm_hit_distance);
+}
+
+float2 ReblurComputeMotionVector(float3 world_position)
+{
+    if (has_history == 0)
+    {
+        return float2(0.0f, 0.0f);
+    }
+
+    float4 current_clip = mul(current_view_projection, float4(world_position, 1.0f));
+    float4 prev_clip = mul(previous_view_projection, float4(world_position, 1.0f));
+    if (abs(current_clip.w) <= Eps || abs(prev_clip.w) <= Eps)
+    {
+        return float2(0.0f, 0.0f);
+    }
+
+    float2 current_ndc = current_clip.xy / current_clip.w;
+    float2 prev_ndc = prev_clip.xy / prev_clip.w;
+
+    float2 current_uv = current_ndc * 0.5f + 0.5f;
+    float2 prev_uv = prev_ndc * 0.5f + 0.5f;
+    current_uv.y = 1.0f - current_uv.y;
+    prev_uv.y = 1.0f - prev_uv.y;
+
+    float2 current_pixel = current_uv * float2(camera.resolution);
+    float2 prev_pixel = prev_uv * float2(camera.resolution);
+    return prev_pixel - current_pixel;
+}
 
 MaterialParameters GetMaterial(inout Intersection intersection)
 {
@@ -249,15 +344,19 @@ void GetIntersection(RayDesc ray_desc, RayQuery<RAY_FLAG_NONE> ray_query, out In
     intersection.primitiveId = instance_id;
 }
 
-float3 SamplePixel(RayDesc ray_desc)
+PathTraceResult SamplePixel(RayDesc ray_desc)
 {
     RayQuery<RAY_FLAG_NONE> ray_query;
     Intersection intersection;
 
+    PathTraceResult result = (PathTraceResult)0;
+    result.primary_normal = float3(0.0f, 0.0f, 1.0f);
+    result.primary_roughness = 1.0f;
+
     float3 pixel_color = float3(0, 0, 0);
     float3 throughput = float3(1, 1, 1);
     int bounce;
-    
+
     // When we introduce NEE, non-NEE paths should be weighted down
     float bsdf_mis_weight = 1.f;
 
@@ -282,6 +381,18 @@ float3 SamplePixel(RayDesc ray_desc)
         // get intersection details
         GetIntersection(ray_desc, ray_query, intersection);
         MaterialParameters mat_param = GetMaterial(intersection);
+
+        if (result.has_primary_hit == 0)
+        {
+            float3 front = normalize(cross(camera.max_v, camera.max_u));
+            result.has_primary_hit = 1;
+            result.primary_world_position = intersection.position;
+            result.primary_view_z = max(dot(intersection.position - camera.position, front), 0.0f);
+            result.primary_normal = normalize(intersection.normal);
+            result.primary_roughness = saturate(mat_param.roughness);
+            result.primary_metallic = saturate(mat_param.metallic);
+            result.primary_hit_distance = max(length(intersection.position - ray_desc.Origin), 0.0f);
+        }
 
         // terminal condition: emissive
         float3 emissive_color = SampleEmissive(intersection, mat_param);
@@ -312,20 +423,27 @@ float3 SamplePixel(RayDesc ray_desc)
         switch (camera.mode)
         {
         case 3:
-            return VisualizeVector(intersection.normal);
+            result.color = VisualizeVector(intersection.normal);
+            return result;
         case 4:
-            return VisualizeVector(next_direction);
+            result.color = VisualizeVector(next_direction);
+            return result;
         case 7:
-            return ((float3)1) * mat_param.metallic;
+            result.color = ((float3)1) * mat_param.metallic;
+            return result;
         case 8:
-            return ((float3)1) * mat_param.roughness;
+            result.color = ((float3)1) * mat_param.roughness;
+            return result;
         case 9:
-            return mat_param.base_color;
+            result.color = mat_param.base_color;
+            return result;
         case 10:
-            return emissive_color;
+            result.color = emissive_color;
+            return result;
         case 11: {
             float3 front = normalize(cross(camera.max_v, camera.max_u));
-            return ((float3)1) * dot(intersection.position - camera.position, front) / ray_desc.TMax;
+            result.color = ((float3)1) * dot(intersection.position - camera.position, front) / ray_desc.TMax;
+            return result;
         }
         default:
             break;
@@ -386,12 +504,11 @@ float3 SamplePixel(RayDesc ray_desc)
         break;
     }
 
-    return pixel_color;
+    result.color = pixel_color;
+    return result;
 }
 
-[shader("compute")]
-[numthreads(16, 16, 1)] void main(uint3 DTid
-                                  : SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = uint2(DTid.xy);
 
     // bound check
@@ -403,6 +520,13 @@ float3 SamplePixel(RayDesc ray_desc)
     float3 all_samples = imageData[pixel].rgb;
 
     float3 this_samples = (float3)0;
+    float3 primary_world_position_sum = (float3)0;
+    float3 primary_normal_sum = (float3)0;
+    float primary_roughness_sum = 0.0f;
+    float primary_metallic_sum = 0.0f;
+    float primary_view_z_sum = 0.0f;
+    float primary_hit_distance_sum = 0.0f;
+    uint primary_hit_count = 0;
 
     InitRandomBase(pixel.x, pixel.y, time_seed);
 
@@ -428,17 +552,68 @@ float3 SamplePixel(RayDesc ray_desc)
         ray_desc.TMin = Tolerance;
         ray_desc.TMax = 1000.0f;
 
-        float3 this_pixel = SamplePixel(ray_desc);
+        PathTraceResult trace_result = SamplePixel(ray_desc);
+        float3 this_pixel = trace_result.color;
 
         // firefly removal
         this_pixel = min(this_pixel, output_limit);
 
         this_samples += this_pixel;
+
+        if (trace_result.has_primary_hit != 0)
+        {
+            primary_hit_count += 1;
+            primary_world_position_sum += trace_result.primary_world_position;
+            primary_normal_sum += trace_result.primary_normal;
+            primary_roughness_sum += trace_result.primary_roughness;
+            primary_metallic_sum += trace_result.primary_metallic;
+            primary_view_z_sum += trace_result.primary_view_z;
+            primary_hit_distance_sum += trace_result.primary_hit_distance;
+        }
     }
 
+    float3 frame_radiance = this_samples / float(spp);
     float moving_average = (float)total_sample_count / (total_sample_count + spp);
-    all_samples = lerp(this_samples / float(spp), all_samples, moving_average);
+    all_samples = lerp(frame_radiance, all_samples, moving_average);
 
     // output
     imageData[pixel] = float4(all_samples, 1.f);
+
+    if (write_reblur_inputs != 0)
+    {
+        float3 primary_world_position = float3(0.0f, 0.0f, 0.0f);
+        float3 primary_normal = float3(0.0f, 0.0f, 1.0f);
+        float primary_roughness = 1.0f;
+        float primary_metallic = 0.0f;
+        float primary_view_z = 0.0f;
+        float primary_hit_distance = 0.0f;
+
+        if (primary_hit_count > 0)
+        {
+            float hit_count = float(primary_hit_count);
+            primary_world_position = primary_world_position_sum / hit_count;
+            float3 averaged_normal = primary_normal_sum / hit_count;
+            float normal_length = length(averaged_normal);
+            primary_normal = normal_length > Eps ? averaged_normal / normal_length : float3(0.0f, 0.0f, 1.0f);
+            primary_roughness = saturate(primary_roughness_sum / hit_count);
+            primary_metallic = saturate(primary_metallic_sum / hit_count);
+            primary_view_z = max(primary_view_z_sum / hit_count, 0.0f);
+            primary_hit_distance = max(primary_hit_distance_sum / hit_count, 0.0f);
+        }
+
+        float norm_hit_distance = ReblurGetNormHitDist(primary_hit_distance, primary_view_z, primary_roughness);
+        float3 diffuse_radiance =
+            primary_hit_count > 0 ? frame_radiance * (1.0f - primary_metallic) : float3(0.0f, 0.0f, 0.0f);
+        float3 specular_radiance = primary_hit_count > 0 ? frame_radiance - diffuse_radiance : float3(0.0f, 0.0f, 0.0f);
+        float2 motion_vector =
+            primary_hit_count > 0 ? ReblurComputeMotionVector(primary_world_position) : float2(0.0f, 0.0f);
+
+        reblur_normal_roughness_output[pixel] = ReblurPackNormalAndRoughness(primary_normal, primary_roughness);
+        reblur_view_z_output[pixel] = primary_view_z;
+        reblur_motion_vector_output[pixel] = float4(motion_vector, 0.0f, 0.0f);
+        reblur_diff_radiance_hitdist_output[pixel] =
+            ReblurPackRadianceAndNormHitDist(diffuse_radiance, norm_hit_distance);
+        reblur_spec_radiance_hitdist_output[pixel] =
+            ReblurPackRadianceAndNormHitDist(specular_radiance, norm_hit_distance);
+    }
 }
