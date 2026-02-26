@@ -24,6 +24,11 @@ Phase 2 Module D adds pre-pass checks:
 - D1 Variance reduction ratio on flat regions
 - D2 Cross-edge leakage guard
 - D3 Spec hit-distance tracking jitter reduction
+
+Phase 2 Module G adds blur checks:
+- G1 High-frequency energy reduction on static noisy patches
+- G2 Edge-preservation MSE guard near depth discontinuities
+- G3 Effective blur-radius decrease as history increases
 """
 
 import argparse
@@ -36,7 +41,13 @@ import tempfile
 import numpy as np
 from PIL import Image
 
-from denoiser_module_tests import run_module_a_tests, run_module_b_tests, run_module_c_tests, run_module_d_tests
+from denoiser_module_tests import (
+    run_module_a_tests,
+    run_module_b_tests,
+    run_module_c_tests,
+    run_module_d_tests,
+    run_module_g_tests,
+)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -232,6 +243,28 @@ def main():
     )
     if not module_d_results.passed:
         print("Module D quantitative checks FAILED", flush=True)
+        return 1
+
+    # Module G quantitative checks (Phase 2).
+    module_g_results = run_module_g_tests()
+    print(
+        "G1 metrics: "
+        f"high_frequency_reduction_ratio={module_g_results.g1_high_frequency_reduction_ratio:.6f}",
+        flush=True,
+    )
+    print(
+        "G2 metrics: "
+        f"edge_mse={module_g_results.g2_edge_mse:.6f}",
+        flush=True,
+    )
+    print(
+        "G3 metrics: "
+        f"low_history_radius={module_g_results.g3_low_history_radius:.6f}, "
+        f"high_history_radius={module_g_results.g3_high_history_radius:.6f}",
+        flush=True,
+    )
+    if not module_g_results.passed:
+        print("Module G quantitative checks FAILED", flush=True)
         return 1
 
     # S0.1 Entry-point smoke.

@@ -212,7 +212,10 @@ void GPURenderer::InitRenderResources()
                  ToReblurHitDistanceReconstructionMode(render_config_.reblur_hit_distance_reconstruction_mode),
              .prepass_diffuse_radius = render_config_.reblur_prepass_diffuse_radius,
              .prepass_specular_radius = render_config_.reblur_prepass_specular_radius,
-             .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius});
+             .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius,
+             .blur_min_radius = render_config_.reblur_blur_min_radius,
+             .blur_max_radius = render_config_.reblur_blur_max_radius,
+             .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num});
         reblur_denoiser_->Initialize(image_size_);
     }
 
@@ -310,7 +313,10 @@ void GPURenderer::Render()
                      ToReblurHitDistanceReconstructionMode(render_config_.reblur_hit_distance_reconstruction_mode),
                  .prepass_diffuse_radius = render_config_.reblur_prepass_diffuse_radius,
                  .prepass_specular_radius = render_config_.reblur_prepass_specular_radius,
-                 .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius});
+                 .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius,
+                 .blur_min_radius = render_config_.reblur_blur_min_radius,
+                 .blur_max_radius = render_config_.reblur_blur_max_radius,
+                 .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num});
 
             scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                         .after_stage = RHIPipelineStage::ComputeShader,

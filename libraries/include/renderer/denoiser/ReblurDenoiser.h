@@ -28,6 +28,9 @@ public:
         float prepass_diffuse_radius = 2.0f;
         float prepass_specular_radius = 2.0f;
         float prepass_spec_tracking_radius = 2.0f;
+        float blur_min_radius = 1.0f;
+        float blur_max_radius = 6.0f;
+        uint32_t blur_history_max_frame_num = 32u;
     };
 
     struct FrontEndInputs
@@ -54,6 +57,7 @@ private:
     void CreateTileMaskTexture();
     void CreateHitDistanceReconstructionTextures();
     void CreatePrePassTextures();
+    void CreateBlurTextures();
 
     RHIContext *rhi_ = nullptr;
     Vector2UInt image_size_{};
@@ -64,18 +68,22 @@ private:
     RHIResourceRef<RHIShader> classify_tiles_shader_;
     RHIResourceRef<RHIShader> hit_distance_reconstruction_shader_;
     RHIResourceRef<RHIShader> prepass_shader_;
+    RHIResourceRef<RHIShader> blur_shader_;
     RHIResourceRef<RHIShader> passthrough_shader_;
     RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_state_;
     RHIResourceRef<RHIPipelineState> hit_distance_reconstruction_pipeline_state_;
     RHIResourceRef<RHIPipelineState> prepass_pipeline_state_;
+    RHIResourceRef<RHIPipelineState> blur_pipeline_state_;
     RHIResourceRef<RHIPipelineState> pipeline_state_;
     RHIResourceRef<RHIComputePass> classify_tiles_compute_pass_;
     RHIResourceRef<RHIComputePass> hit_distance_reconstruction_compute_pass_;
     RHIResourceRef<RHIComputePass> prepass_compute_pass_;
+    RHIResourceRef<RHIComputePass> blur_compute_pass_;
     RHIResourceRef<RHIComputePass> compute_pass_;
     RHIResourceRef<RHIBuffer> classify_tiles_uniform_buffer_;
     RHIResourceRef<RHIBuffer> hit_distance_reconstruction_uniform_buffer_;
     RHIResourceRef<RHIBuffer> prepass_uniform_buffer_;
+    RHIResourceRef<RHIBuffer> blur_uniform_buffer_;
     RHIResourceRef<RHIBuffer> uniform_buffer_;
     RHIResourceRef<RHIImage> tile_mask_texture_;
     RHIResourceRef<RHIImage> reconstructed_diff_radiance_hitdist_texture_;
@@ -83,5 +91,9 @@ private:
     RHIResourceRef<RHIImage> prepass_diff_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> prepass_spec_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> spec_hit_distance_for_tracking_texture_;
+    RHIResourceRef<RHIImage> blur_diff_radiance_hitdist_texture_;
+    RHIResourceRef<RHIImage> blur_spec_radiance_hitdist_texture_;
+    RHIResourceRef<RHIImage> prev_view_z_texture_;
+    uint32_t blur_history_frame_num_ = 0u;
 };
 } // namespace sparkle

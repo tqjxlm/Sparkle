@@ -80,6 +80,9 @@ struct RenderConfig : public ConfigCollection
     float reblur_prepass_diffuse_radius;
     float reblur_prepass_specular_radius;
     float reblur_prepass_spec_tracking_radius;
+    float reblur_blur_min_radius;
+    float reblur_blur_max_radius;
+    uint32_t reblur_blur_history_max_frame_num;
     bool spatial_denoise;
     bool use_ssao;
     bool use_prepass;

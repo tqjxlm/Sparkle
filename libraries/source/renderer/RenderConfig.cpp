@@ -44,6 +44,15 @@ static ConfigValue<float> config_reblur_prepass_specular_radius("reblur_prepass_
 static ConfigValue<float> config_reblur_prepass_spec_tracking_radius(
     "reblur_prepass_spec_tracking_radius", "standalone ReBLUR spec hit-distance tracking radius (0-4)", "renderer",
     2.0f, true);
+static ConfigValue<float> config_reblur_blur_min_radius("reblur_blur_min_radius",
+                                                        "standalone ReBLUR blur minimum radius (0-8)", "renderer", 1.0f,
+                                                        true);
+static ConfigValue<float> config_reblur_blur_max_radius("reblur_blur_max_radius",
+                                                        "standalone ReBLUR blur maximum radius (0-8)", "renderer", 6.0f,
+                                                        true);
+static ConfigValue<uint32_t> config_reblur_blur_history_max_frame_num(
+    "reblur_blur_history_max_frame_num", "standalone ReBLUR blur convergence history cap in frames (1-4096)",
+    "renderer", 32u, true);
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
@@ -72,6 +81,10 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_prepass_specular_radius, reblur_prepass_specular_radius);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_prepass_spec_tracking_radius,
                                            reblur_prepass_spec_tracking_radius);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_min_radius, reblur_blur_min_radius);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_max_radius, reblur_blur_max_radius);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_history_max_frame_num,
+                                           reblur_blur_history_max_frame_num);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
@@ -173,6 +186,53 @@ void RenderConfig::Validate()
             reblur_prepass_spec_tracking_radius, clamped_spec_tracking_radius);
         config_reblur_prepass_spec_tracking_radius.Set(clamped_spec_tracking_radius);
         reblur_prepass_spec_tracking_radius = clamped_spec_tracking_radius;
+    }
+
+    auto sanitize_blur_radius = [](float value, float fallback) {
+        if (!std::isfinite(value))
+        {
+            return fallback;
+        }
+
+        return std::clamp(value, 0.0f, 8.0f);
+    };
+
+    float clamped_blur_min_radius = sanitize_blur_radius(reblur_blur_min_radius, 1.0f);
+    if (std::abs(clamped_blur_min_radius - reblur_blur_min_radius) > 1e-6f)
+    {
+        Log(Warn, "reblur_blur_min_radius={} is invalid. clamped to {}", reblur_blur_min_radius,
+            clamped_blur_min_radius);
+        config_reblur_blur_min_radius.Set(clamped_blur_min_radius);
+        reblur_blur_min_radius = clamped_blur_min_radius;
+    }
+
+    float clamped_blur_max_radius = sanitize_blur_radius(reblur_blur_max_radius, 6.0f);
+    if (std::abs(clamped_blur_max_radius - reblur_blur_max_radius) > 1e-6f)
+    {
+        Log(Warn, "reblur_blur_max_radius={} is invalid. clamped to {}", reblur_blur_max_radius,
+            clamped_blur_max_radius);
+        config_reblur_blur_max_radius.Set(clamped_blur_max_radius);
+        reblur_blur_max_radius = clamped_blur_max_radius;
+    }
+
+    if (reblur_blur_max_radius < reblur_blur_min_radius)
+    {
+        Log(Warn, "reblur_blur_max_radius={} is below reblur_blur_min_radius={}. set max to min",
+            reblur_blur_max_radius, reblur_blur_min_radius);
+        reblur_blur_max_radius = reblur_blur_min_radius;
+        config_reblur_blur_max_radius.Set(reblur_blur_max_radius);
+    }
+
+    constexpr uint32_t MinBlurHistoryFrameNum = 1u;
+    constexpr uint32_t MaxBlurHistoryFrameNum = 4096u;
+    uint32_t clamped_blur_history_max_frame_num =
+        std::clamp(reblur_blur_history_max_frame_num, MinBlurHistoryFrameNum, MaxBlurHistoryFrameNum);
+    if (clamped_blur_history_max_frame_num != reblur_blur_history_max_frame_num)
+    {
+        Log(Warn, "reblur_blur_history_max_frame_num={} is invalid. clamped to {}", reblur_blur_history_max_frame_num,
+            clamped_blur_history_max_frame_num);
+        config_reblur_blur_history_max_frame_num.Set(clamped_blur_history_max_frame_num);
+        reblur_blur_history_max_frame_num = clamped_blur_history_max_frame_num;
     }
 
 #if FRAMEWORK_ANDROID || FRAMEWORK_IOS

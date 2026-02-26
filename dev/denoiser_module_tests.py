@@ -11,6 +11,7 @@ from denoiser_metrics import (
     REBLUR_HIT_DIST_RECONSTRUCTION_AREA_5X5,
     REBLUR_TILE_SIZE,
     binary_precision_recall,
+    blur_shader_equivalent,
     classify_tiles_reference,
     classify_tiles_shader_equivalent,
     compute_motion_vectors_pixels,
@@ -89,6 +90,21 @@ class ModuleDTestResults:
     @property
     def passed(self) -> bool:
         return self.d1_pass and self.d2_pass and self.d3_pass
+
+
+@dataclass
+class ModuleGTestResults:
+    g1_pass: bool
+    g1_high_frequency_reduction_ratio: float
+    g2_pass: bool
+    g2_edge_mse: float
+    g3_pass: bool
+    g3_low_history_radius: float
+    g3_high_history_radius: float
+
+    @property
+    def passed(self) -> bool:
+        return self.g1_pass and self.g2_pass and self.g3_pass
 
 
 def run_module_a_tests(seed: int = 7) -> ModuleATestResults:
@@ -759,11 +775,285 @@ def run_module_d_tests(seed: int = 43) -> ModuleDTestResults:
     )
 
 
+def _compute_laplacian_energy(channel: np.ndarray, mask: np.ndarray) -> float:
+    if channel.ndim != 2:
+        raise ValueError("channel must be 2D")
+    if mask.shape != channel.shape:
+        raise ValueError("mask shape must match channel shape")
+
+    if channel.shape[0] < 3 or channel.shape[1] < 3:
+        return 0.0
+
+    laplacian = np.zeros_like(channel, dtype=np.float32)
+    laplacian[1:-1, 1:-1] = (
+        4.0 * channel[1:-1, 1:-1]
+        - channel[:-2, 1:-1]
+        - channel[2:, 1:-1]
+        - channel[1:-1, :-2]
+        - channel[1:-1, 2:]
+    )
+
+    interior_mask = mask.copy()
+    interior_mask[0, :] = False
+    interior_mask[-1, :] = False
+    interior_mask[:, 0] = False
+    interior_mask[:, -1] = False
+    if not np.any(interior_mask):
+        return 0.0
+    return float(np.mean(np.abs(laplacian[interior_mask])))
+
+
+def _estimate_effective_radius_from_impulse(signal: np.ndarray, center_x: int, center_y: int) -> float:
+    if signal.ndim != 2:
+        raise ValueError("signal must be 2D")
+
+    height, width = signal.shape
+    yy, xx = np.indices((height, width), dtype=np.float32)
+    weights = np.clip(signal.astype(np.float32), 0.0, None)
+    total_weight = float(np.sum(weights))
+    if total_weight <= 1e-8:
+        return 0.0
+
+    distance_squared = (xx - float(center_x)) ** 2 + \
+        (yy - float(center_y)) ** 2
+    return float(np.sqrt(np.sum(weights * distance_squared) / total_weight))
+
+
+def _build_module_g_flat_fixture(seed: int, width: int, height: int) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(seed)
+
+    view_z = np.full((height, width), 36.0, dtype=np.float32)
+    normals = np.zeros((height, width, 3), dtype=np.float32)
+    normals[..., 2] = 1.0
+    roughness = np.full((height, width), 0.45, dtype=np.float32)
+    packed_normal_roughness = pack_normal_roughness(normals, roughness)
+
+    clean_diff = np.zeros((height, width, 4), dtype=np.float32)
+    clean_spec = np.zeros((height, width, 4), dtype=np.float32)
+    clean_diff[..., 0] = 0.30
+    clean_diff[..., 1] = 0.02
+    clean_diff[..., 2] = -0.01
+    clean_diff[..., 3] = 0.48
+    clean_spec[..., 0] = 0.34
+    clean_spec[..., 1] = 0.03
+    clean_spec[..., 2] = -0.02
+    clean_spec[..., 3] = 0.56
+
+    noisy_diff = clean_diff.copy()
+    noisy_spec = clean_spec.copy()
+    noisy_diff[..., :3] += rng.normal(0.0, 0.14,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_spec[..., :3] += rng.normal(0.0, 0.16,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_diff[..., 3] = np.clip(
+        noisy_diff[..., 3] + rng.normal(0.0, 0.08, size=(height, width)), 0.0, 1.0)
+    noisy_spec[..., 3] = np.clip(
+        noisy_spec[..., 3] + rng.normal(0.0, 0.10, size=(height, width)), 0.0, 1.0)
+
+    tile_mask = classify_tiles_reference(view_z, denoising_range=300.0)
+    eval_mask = np.zeros((height, width), dtype=bool)
+    eval_mask[height // 4: (height * 3) // 4, width //
+              4: (width * 3) // 4] = True
+
+    return {
+        "tile_mask": tile_mask,
+        "packed_normal_roughness": packed_normal_roughness,
+        "view_z": view_z,
+        "noisy_diff": noisy_diff.astype(np.float32),
+        "noisy_spec": noisy_spec.astype(np.float32),
+        "clean_diff": clean_diff,
+        "clean_spec": clean_spec,
+        "eval_mask": eval_mask,
+    }
+
+
+def _build_module_g_edge_fixture(seed: int, width: int, height: int) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    mid = width // 2
+
+    view_z = np.full((height, width), 24.0, dtype=np.float32)
+    view_z[:, mid:] = 88.0
+
+    normals = np.zeros((height, width, 3), dtype=np.float32)
+    normals[..., 2] = 1.0
+    right_normal = np.array([0.55, 0.0, 0.84], dtype=np.float32)
+    right_normal /= np.linalg.norm(right_normal)
+    normals[:, mid:, :] = right_normal
+
+    roughness = np.full((height, width), 0.18, dtype=np.float32)
+    roughness[:, mid:] = 0.78
+    packed_normal_roughness = pack_normal_roughness(normals, roughness)
+
+    clean_diff = np.zeros((height, width, 4), dtype=np.float32)
+    clean_spec = np.zeros((height, width, 4), dtype=np.float32)
+    clean_diff[:, :mid, 0] = 0.16
+    clean_diff[:, mid:, 0] = 0.86
+    clean_diff[..., 1] = 0.02
+    clean_diff[..., 2] = -0.01
+    clean_diff[:, :mid, 3] = 0.24
+    clean_diff[:, mid:, 3] = 0.66
+
+    clean_spec[:, :mid, 0] = 0.12
+    clean_spec[:, mid:, 0] = 0.72
+    clean_spec[..., 1] = 0.03
+    clean_spec[..., 2] = -0.02
+    clean_spec[:, :mid, 3] = 0.20
+    clean_spec[:, mid:, 3] = 0.74
+
+    noisy_diff = clean_diff.copy()
+    noisy_spec = clean_spec.copy()
+    noisy_diff[..., :3] += rng.normal(0.0, 0.07,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_spec[..., :3] += rng.normal(0.0, 0.08,
+                                      size=(height, width, 3)).astype(np.float32)
+    noisy_diff[..., 3] = np.clip(
+        noisy_diff[..., 3] + rng.normal(0.0, 0.05, size=(height, width)), 0.0, 1.0)
+    noisy_spec[..., 3] = np.clip(
+        noisy_spec[..., 3] + rng.normal(0.0, 0.05, size=(height, width)), 0.0, 1.0)
+
+    tile_mask = classify_tiles_reference(view_z, denoising_range=300.0)
+    edge_mask = np.zeros((height, width), dtype=bool)
+    edge_mask[:, max(mid - 3, 0): min(mid + 3, width)] = True
+
+    return {
+        "tile_mask": tile_mask,
+        "packed_normal_roughness": packed_normal_roughness,
+        "view_z": view_z,
+        "noisy_diff": noisy_diff.astype(np.float32),
+        "noisy_spec": noisy_spec.astype(np.float32),
+        "clean_diff": clean_diff,
+        "clean_spec": clean_spec,
+        "edge_mask": edge_mask,
+    }
+
+
+def run_module_g_tests(seed: int = 59) -> ModuleGTestResults:
+    denoising_range = 300.0
+
+    flat_fixture = _build_module_g_flat_fixture(
+        seed=seed, width=224, height=144)
+    out_diff_flat, out_spec_flat, _, _, _ = blur_shader_equivalent(
+        flat_fixture["tile_mask"],
+        flat_fixture["packed_normal_roughness"],
+        flat_fixture["view_z"],
+        flat_fixture["noisy_diff"],
+        flat_fixture["noisy_spec"],
+        denoising_range,
+        min_blur_radius=1.0,
+        max_blur_radius=6.0,
+        history_factor=0.0,
+    )
+
+    eval_mask = flat_fixture["eval_mask"]
+    high_frequency_before = 0.5 * (
+        _compute_laplacian_energy(
+            flat_fixture["noisy_diff"][..., 0], eval_mask)
+        + _compute_laplacian_energy(flat_fixture["noisy_spec"][..., 0], eval_mask)
+    )
+    high_frequency_after = 0.5 * (
+        _compute_laplacian_energy(out_diff_flat[..., 0], eval_mask)
+        + _compute_laplacian_energy(out_spec_flat[..., 0], eval_mask)
+    )
+    g1_high_frequency_reduction_ratio = high_frequency_before / \
+        max(high_frequency_after, 1e-8)
+    g1_pass = g1_high_frequency_reduction_ratio >= 1.8
+
+    edge_fixture = _build_module_g_edge_fixture(
+        seed=seed + 1, width=256, height=128)
+    out_diff_edge, out_spec_edge, _, _, _ = blur_shader_equivalent(
+        edge_fixture["tile_mask"],
+        edge_fixture["packed_normal_roughness"],
+        edge_fixture["view_z"],
+        edge_fixture["noisy_diff"],
+        edge_fixture["noisy_spec"],
+        denoising_range,
+        min_blur_radius=1.0,
+        max_blur_radius=5.0,
+        history_factor=0.25,
+    )
+
+    edge_mask = edge_fixture["edge_mask"]
+    g2_edge_mse = 0.5 * (
+        float(np.mean((out_diff_edge[..., 0][edge_mask] -
+              edge_fixture["clean_diff"][..., 0][edge_mask]) ** 2))
+        + float(np.mean((out_spec_edge[..., 0][edge_mask] -
+                edge_fixture["clean_spec"][..., 0][edge_mask]) ** 2))
+    )
+    g2_pass = g2_edge_mse <= 0.020
+
+    impulse_size = 129
+    center = impulse_size // 2
+    impulse_view_z = np.full(
+        (impulse_size, impulse_size), 30.0, dtype=np.float32)
+    impulse_normals = np.zeros(
+        (impulse_size, impulse_size, 3), dtype=np.float32)
+    impulse_normals[..., 2] = 1.0
+    impulse_roughness = np.full(
+        (impulse_size, impulse_size), 0.6, dtype=np.float32)
+    impulse_packed_normal_roughness = pack_normal_roughness(
+        impulse_normals, impulse_roughness)
+    impulse_tile_mask = classify_tiles_reference(
+        impulse_view_z, denoising_range)
+
+    impulse_diff = np.zeros((impulse_size, impulse_size, 4), dtype=np.float32)
+    impulse_spec = np.zeros((impulse_size, impulse_size, 4), dtype=np.float32)
+    impulse_diff[center, center, 0] = 1.0
+    impulse_spec[center, center, 0] = 1.0
+    impulse_diff[..., 3] = 0.65
+    impulse_spec[..., 3] = 0.80
+
+    out_diff_low, out_spec_low, _, _, _ = blur_shader_equivalent(
+        impulse_tile_mask,
+        impulse_packed_normal_roughness,
+        impulse_view_z,
+        impulse_diff,
+        impulse_spec,
+        denoising_range,
+        min_blur_radius=0.0,
+        max_blur_radius=6.0,
+        history_factor=0.0,
+    )
+    out_diff_high, out_spec_high, _, _, _ = blur_shader_equivalent(
+        impulse_tile_mask,
+        impulse_packed_normal_roughness,
+        impulse_view_z,
+        impulse_diff,
+        impulse_spec,
+        denoising_range,
+        min_blur_radius=0.0,
+        max_blur_radius=6.0,
+        history_factor=1.0,
+    )
+
+    g3_low_history_radius = 0.5 * (
+        _estimate_effective_radius_from_impulse(
+            out_diff_low[..., 0], center, center)
+        + _estimate_effective_radius_from_impulse(out_spec_low[..., 0], center, center)
+    )
+    g3_high_history_radius = 0.5 * (
+        _estimate_effective_radius_from_impulse(
+            out_diff_high[..., 0], center, center)
+        + _estimate_effective_radius_from_impulse(out_spec_high[..., 0], center, center)
+    )
+    g3_pass = g3_high_history_radius <= g3_low_history_radius - 0.20
+
+    return ModuleGTestResults(
+        g1_pass=g1_pass,
+        g1_high_frequency_reduction_ratio=g1_high_frequency_reduction_ratio,
+        g2_pass=g2_pass,
+        g2_edge_mse=g2_edge_mse,
+        g3_pass=g3_pass,
+        g3_low_history_radius=g3_low_history_radius,
+        g3_high_history_radius=g3_high_history_radius,
+    )
+
+
 def main() -> int:
     module_a_results = run_module_a_tests()
     module_b_results = run_module_b_tests()
     module_c_results = run_module_c_tests()
     module_d_results = run_module_d_tests()
+    module_g_results = run_module_g_tests()
 
     print(
         "Module A results: "
@@ -801,7 +1091,23 @@ def main() -> int:
         f"tracking_jitter={module_d_results.d3_tracking_jitter:.6f})",
         flush=True,
     )
-    return 0 if module_a_results.passed and module_b_results.passed and module_c_results.passed and module_d_results.passed else 1
+    print(
+        "Module G results: "
+        f"G1(pass={module_g_results.g1_pass}, high_frequency_reduction_ratio={module_g_results.g1_high_frequency_reduction_ratio:.6f}); "
+        f"G2(pass={module_g_results.g2_pass}, edge_mse={module_g_results.g2_edge_mse:.6f}); "
+        f"G3(pass={module_g_results.g3_pass}, low_history_radius={module_g_results.g3_low_history_radius:.6f}, "
+        f"high_history_radius={module_g_results.g3_high_history_radius:.6f})",
+        flush=True,
+    )
+    return (
+        0
+        if module_a_results.passed
+        and module_b_results.passed
+        and module_c_results.passed
+        and module_d_results.passed
+        and module_g_results.passed
+        else 1
+    )
 
 
 if __name__ == "__main__":

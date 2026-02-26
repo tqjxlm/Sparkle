@@ -337,3 +337,49 @@ Date: 2026-02-26
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Phase 2 Module D is complete. Next planned target in this phase is Module G (blur) with G1/G2/G3 quantitative coverage.
+
+Date: 2026-02-26
+- Scope: Phase 2 Module G implementation (blur pass + objective G1/G2/G3 tests).
+- Milestone: Implemented standalone ReBLUR blur pass with bilateral filtering, min/max radius controls, convergence scaling proxy, and `PREV_VIEWZ` writeback; integrated Module G quantitative checks into the dedicated ReBLUR suite.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_blur.cs.slang` and wired it into `ReblurDenoiser::Dispatch` after pre-pass.
+  - `ReblurDenoiser` now allocates blur outputs:
+    - `ReblurBlurDiffRadianceHitDist`
+    - `ReblurBlurSpecRadianceHitDist`
+    - `ReblurPrevViewZ` (`R32_FLOAT`)
+  - Added runtime controls and validation for Module G:
+    - `reblur_blur_min_radius`
+    - `reblur_blur_max_radius`
+    - `reblur_blur_history_max_frame_num`
+  - Module G metrics from the latest suite run:
+    - G1 high-frequency reduction ratio = `8.933731`
+    - G2 edge MSE = `0.000579`
+    - G3 effective radius: `low_history=3.512203`, `high_history=0.000000` (high-history radius decreases as expected)
+  - Existing baseline behavior remains stable:
+    - S0.2 pass-through equivalence remains bit-exact (`max_abs_diff=0`, `mean_abs_diff=0`, `rmse=0`)
+    - GPU functional output with denoiser enabled remains within baseline (`Mean FLIP error: 0.0032`).
+- Trials:
+  - Extended `dev/denoiser_metrics.py` with blur shader-equivalent logic and effective-radius helpers.
+  - Extended `dev/denoiser_module_tests.py` with deterministic G1/G2/G3 fixtures and assertions.
+  - Extended `dev/reblur_test_suite.py` to execute and gate Module G checks.
+  - Design adjustment (recorded): until Module E introduces true `DATA1` history surfaces, Module G convergence scaling uses a controlled per-frame history proxy in `ReblurDenoiser`; impact is limited to current blur radius adaptation and keeps Module G tests deterministic.
+- Pitfalls: None encountered in this module.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_blur.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `libraries/include/renderer/RenderConfig.h`
+  - Updated: `libraries/source/renderer/RenderConfig.cpp`
+  - Updated: `libraries/source/renderer/renderer/GPURenderer.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Updated: `docs/Run.md`
+  - Executed:
+    - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+    - `python dev/denoiser_module_tests.py`
+    - `python build.py --framework glfw --config Release`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 2 Module G is complete. Next planned target is Phase 3 Module E (temporal accumulation) and replacing the Module G history proxy with true `DATA1` inputs.
