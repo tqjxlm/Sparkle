@@ -44,7 +44,7 @@ Date: 2026-02-26
 
 Date: 2026-02-26
 - Scope: Refine rewrite plan to enforce implementation bootstrap order.
-- Milestone: Reordered plan so the first mandatory delivery is a minimal `ReblurStandaloneDenoiser` class plus `GPURenderer` entry point.
+- Milestone: Reordered plan so the first mandatory delivery is a minimal `ReblurDenoiser` class plus `GPURenderer` entry point.
 - Findings: Existing GPU path is single-pass ray tracing -> tone mapping, with no denoiser seam; plan now reflects this gap explicitly.
 - Trials: Updated architecture, phase ordering, bootstrap test gate (S0.1-S0.3), risk section, and exit criteria.
 - Pitfalls: None.
@@ -61,3 +61,124 @@ Date: 2026-02-26
 - Tests Added/Updated: None (documentation-only change).
 - Suite Result (`dev/reblur_test_suite.py`): Not run (suite not implemented yet).
 - Notes/Next: During implementation, continue updating plan + progress log together whenever a design adjustment is made.
+
+Date: 2026-02-26
+- Scope: Phase 0 bootstrap implementation (standalone denoiser seam and entry-point smoke tests).
+- Milestone: Implemented `ReblurDenoiser` (minimal API: `Initialize`, `Resize`, `Dispatch`) and integrated it into the GPU pipeline between ray tracing and tone mapping.
+- Findings:
+  - GPU render flow is now `ray trace -> ReblurDenoiser::Dispatch -> tone mapping` when `spatial_denoise=true`.
+  - Phase 0 pass-through denoiser path is bit-exact against denoiser-off output (max abs diff = 0, mean abs diff = 0, RMSE = 0 on captured TestScene screenshots).
+  - Functional GPU output remains aligned with baseline (`Mean FLIP error: 0.0032`) for both `spatial_denoise=false` and `spatial_denoise=true`.
+- Trials:
+  - Added shader `shaders/utilities/reblur_passthrough.cs.slang` for pass-through copy.
+  - Added dedicated suite bootstrap script `dev/reblur_test_suite.py` with S0.1 smoke coverage (`--pipeline gpu --spatial_denoise true`).
+  - Added denoiser output texture path and `GPURenderer` ownership/call site wiring for `ReblurDenoiser`.
+- Pitfalls: None encountered during Phase 0 integration/testing.
+- Tests Added/Updated:
+  - Added: `dev/reblur_test_suite.py` (Phase 0 S0.1 entry-point smoke).
+  - Executed:
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise false`
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+    - `python build.py --framework glfw --config Release --skip_build --run --test_case screenshot --headless true --pipeline gpu --spatial_denoise false`
+    - `python build.py --framework glfw --config Release --skip_build --run --test_case screenshot --headless true --pipeline gpu --spatial_denoise true`
+    - `python build.py --framework glfw --config Release --skip_build --run --test_case smoke --headless true --pipeline gpu --spatial_denoise true --width 960 --height 540`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Start Phase 1 (Module A): emit ReBLUR front-end guide/signal buffers from GPU ray tracing and extend `dev/reblur_test_suite.py` with A1-A3 quantitative tests.
+
+Date: 2026-02-26
+- Scope: Phase 0 test-suite hardening.
+- Milestone: Extended `dev/reblur_test_suite.py` from S0.1-only smoke to full Phase 0 bootstrap coverage (S0.1, S0.2, S0.3 proxy).
+- Findings:
+  - S0.2 pass-through equivalence check inside suite reports `max_abs_diff=0`, `mean_abs_diff=0`, `rmse=0`.
+  - S0.3 proxy run at alternate resolution (`960x540`) passes without crashes.
+- Trials:
+  - Added screenshot discovery/comparison logic (PIL + NumPy) to suite.
+  - Added suite-driven screenshot runs for denoiser off/on with automatic image differencing.
+  - Added suite-driven alternate-resolution smoke command.
+- Pitfalls: None.
+- Tests Added/Updated:
+  - Updated: `dev/reblur_test_suite.py` now executes:
+    - S0.1: `--test_case smoke --pipeline gpu --spatial_denoise true`
+    - S0.2: `--test_case screenshot` with denoiser off/on + strict image-diff assertion
+    - S0.3 proxy: `--test_case smoke --width 960 --height 540` with denoiser enabled
+  - Executed:
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Begin Phase 1 Module A implementation and register A1/A2/A3 tests into the same suite.
+
+Date: 2026-02-26
+- Scope: Naming cleanup for Phase 0 denoiser symbols and resources.
+- Milestone: Renamed Phase 0 denoiser identifiers from `ReblurStandalone*` to `Reblur*` for concise naming.
+- Findings:
+  - Runtime class is now `ReblurDenoiser`.
+  - Pass-through output resource name is now `ReblurOutput`.
+  - Pass-through shader path is now `shaders/utilities/reblur_passthrough.cs.slang`.
+- Trials:
+  - Renamed files:
+    - `libraries/include/renderer/denoiser/ReblurStandaloneDenoiser.h` -> `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+    - `libraries/source/renderer/denoiser/ReblurStandaloneDenoiser.cpp` -> `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+    - `shaders/utilities/reblur_standalone_passthrough.cs.slang` -> `shaders/utilities/reblur_passthrough.cs.slang`
+  - Updated `GPURenderer` ownership and include paths to the new class/file names.
+- Pitfalls: None.
+- Tests Added/Updated:
+  - Updated docs to match new symbol/file names in `docs/ReBLUR_Standalone_Denoiser_Plan.md` and this progress log.
+  - Re-ran build and ReBLUR suite after rename.
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Continue Phase 1 implementation with `ReblurDenoiser` naming.
+
+Date: 2026-02-26
+- Scope: Plan refinement for visual debugging workflow.
+- Milestone: Added explicit visual debugging methodology and stricter evidence/test requirements to the ReBLUR rewrite plan.
+- Findings:
+  - Plan now explicitly requires debugging via intermediate pass textures instead of end-to-end guessing.
+  - Plan now requires a targeted reproducible test case for each visual issue found.
+- Trials:
+  - Updated `docs/ReBLUR_Standalone_Denoiser_Plan.md`:
+    - Added execution rules enforcing evidence-driven isolation and per-issue test creation.
+    - Added new section `1.2 Visual Debugging Methodology` covering per-pass texture inspection, measurable evidence, and regression-test requirements.
+- Pitfalls: None.
+- Tests Added/Updated: None (documentation/process update only).
+- Suite Result (`dev/reblur_test_suite.py`): Not run (documentation-only change).
+- Notes/Next: Apply this workflow in Phase 1+ debugging: isolate by pass, prove with metrics/screenshots, and add regression tests per issue.
+
+Date: 2026-02-26
+- Scope: Phase 0 regression hardening for baseline GPU output.
+- Milestone: Added an explicit vanilla GPU functional regression gate (R0.1) to the dedicated ReBLUR suite.
+- Findings:
+  - `dev/reblur_test_suite.py` now runs `dev/functional_test.py` first with `--pipeline gpu --spatial_denoise false`.
+  - R0.1 baseline functional check passed (`Mean FLIP error: 0.0032`) in the latest suite run.
+  - The same suite run then failed in S0.1 (`--test_case smoke --spatial_denoise true`) with non-zero exit (`4294967295`), so full Phase 0 suite status is currently failing.
+- Trials:
+  - Added R0.1 section in suite docstring and wired `functional_test_py` command in `main()`.
+  - Propagated suite flags into R0.1 command (`--framework`, `--config`, optional `--headless`, `--skip_build`, `--software`).
+- Pitfalls:
+  - Existing denoiser-enabled smoke path instability remains and currently blocks full suite PASS.
+- Tests Added/Updated:
+  - Updated: `dev/reblur_test_suite.py`
+    - New R0.1 command: `python dev/functional_test.py --framework <framework> --pipeline gpu --spatial_denoise false --config <config> [--headless] [--skip_build] [--software]`
+  - Executed:
+    - `python -m py_compile dev/reblur_test_suite.py`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+- Suite Result (`dev/reblur_test_suite.py`): FAIL (R0.1 PASS, S0.1 FAIL).
+- Notes/Next: Debug S0.1 crash using the visual-debugging workflow (capture intermediate pass outputs, isolate first failing stage, and add a targeted regression case for the failure mode).
+
+Date: 2026-02-26
+- Scope: ReBLUR suite build-flow cleanup.
+- Milestone: Changed suite execution model to build once up front, then force `--skip_build` for every test command.
+- Findings:
+  - `dev/reblur_test_suite.py` now runs an explicit `build.py` step only when `--skip_build` is not set.
+  - R0.1 (`dev/functional_test.py`) now always receives `--skip_build` from the suite.
+  - All suite-internal `build.py --run ...` invocations inherit `--skip_build` via shared `base_cmd`.
+- Trials:
+  - Added one-time build block in `main()` before test execution.
+  - Converted `base_cmd` to always include `--skip_build`.
+  - Removed conditional `--skip_build` append from the functional gate and made it unconditional.
+- Pitfalls: None observed in this run.
+- Tests Added/Updated:
+  - Updated: `dev/reblur_test_suite.py` (build flow only).
+  - Executed:
+    - `python -m py_compile dev/reblur_test_suite.py`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Keep this model for future module tests to avoid repeated configure/build overhead in suite runs.

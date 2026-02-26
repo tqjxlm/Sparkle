@@ -47,6 +47,8 @@ private:
 
     RHIResourceRef<RHIImage> scene_texture_;
     RHIResourceRef<RHIRenderTarget> scene_rt_;
+    RHIResourceRef<RHIImage> denoiser_output_texture_;
+    std::unique_ptr<class ReblurDenoiser> reblur_denoiser_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
 
     RHIResourceRef<RHIImage> tone_mapping_output_;

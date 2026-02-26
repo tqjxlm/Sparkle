@@ -2,6 +2,7 @@
 
 #include "core/Profiler.h"
 #include "renderer/BindlessManager.h"
+#include "renderer/denoiser/ReblurDenoiser.h"
 #include "renderer/pass/ClearTexturePass.h"
 #include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/ToneMappingPass.h"
@@ -83,6 +84,28 @@ void GPURenderer::InitRenderResources()
 
     scene_rt_ = rhi_->CreateRenderTarget({}, scene_texture_, nullptr, "GPUPipelineColorRT");
 
+    if (render_config_.spatial_denoise)
+    {
+        denoiser_output_texture_ = rhi_->CreateImage(
+            RHIImage::Attribute{
+                .format = PixelFormat::RGBAFloat,
+                .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+                .width = image_size_.x(),
+                .height = image_size_.y(),
+                .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+                .memory_properties = RHIMemoryProperty::DeviceLocal,
+                .mip_levels = 1,
+                .msaa_samples = 1,
+            },
+            "ReblurOutput");
+
+        reblur_denoiser_ = std::make_unique<ReblurDenoiser>(rhi_);
+        reblur_denoiser_->Initialize(image_size_);
+    }
+
     tone_mapping_output_ = rhi_->CreateImage(
         RHIImage::Attribute{
             .format = PixelFormat::B8G8R8A8_SRGB,
@@ -102,7 +125,11 @@ void GPURenderer::InitRenderResources()
 
     InitSceneRenderResources();
 
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_texture_, tone_mapping_rt_);
+    const RHIResourceRef<RHIImage> tone_mapping_source =
+        render_config_.spatial_denoise ? denoiser_output_texture_ : scene_texture_;
+
+    tone_mapping_pass_ =
+        PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, tone_mapping_source, tone_mapping_rt_);
 
     clear_pass_ = PipelinePass::Create<ClearTexturePass>(render_config_, rhi_, Vector4::Zero(),
                                                          RHIImageLayout::StorageWrite, scene_rt_);
@@ -148,9 +175,23 @@ void GPURenderer::Render()
 
         rhi_->EndComputePass(compute_pass_);
 
-        scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = RHIPipelineStage::ComputeShader,
-                                    .before_stage = RHIPipelineStage::PixelShader});
+        if (render_config_.spatial_denoise)
+        {
+            ASSERT(reblur_denoiser_);
+            ASSERT(denoiser_output_texture_);
+
+            scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                        .after_stage = RHIPipelineStage::ComputeShader,
+                                        .before_stage = RHIPipelineStage::ComputeShader});
+
+            reblur_denoiser_->Dispatch(scene_texture_, denoiser_output_texture_);
+        }
+        else
+        {
+            scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                        .after_stage = RHIPipelineStage::ComputeShader,
+                                        .before_stage = RHIPipelineStage::PixelShader});
+        }
     }
 
     // screen space passes (post processing)
@@ -185,8 +226,9 @@ void GPURenderer::Render()
             final_after_stage = RHIPipelineStage::Transfer;
         }
 
-        tone_mapping_output_->Transition(
-            {.target_layout = RHIImageLayout::Read, .after_stage = final_after_stage, .before_stage = RHIPipelineStage::PixelShader});
+        tone_mapping_output_->Transition({.target_layout = RHIImageLayout::Read,
+                                          .after_stage = final_after_stage,
+                                          .before_stage = RHIPipelineStage::PixelShader});
     }
 
     // screen pass: render texture on a screen quad
