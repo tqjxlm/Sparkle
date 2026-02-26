@@ -761,8 +761,9 @@ void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const R
                                            .after_stage = RHIPipelineStage::Top,
                                            .before_stage = RHIPipelineStage::ComputeShader});
     // prev_internal_data_ receives antilag-modified accumulation speeds
+    // CopyHistoryData leaves prev_internal_data_ in Read (available to ComputeShader)
     prev_internal_data_->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                     .after_stage = RHIPipelineStage::Transfer,
+                                     .after_stage = RHIPipelineStage::ComputeShader,
                                      .before_stage = RHIPipelineStage::ComputeShader});
 
     rhi_->BeginComputePass(compute_pass_);
@@ -885,6 +886,14 @@ void ReblurDenoiser::CopyPreviousFrameData(const ReblurInputBuffers &inputs)
     prev_normal_roughness_->Transition({.target_layout = RHIImageLayout::Read,
                                         .after_stage = RHIPipelineStage::Transfer,
                                         .before_stage = RHIPipelineStage::ComputeShader});
+
+    // Transition source inputs back to Read (they are borrowed from the caller)
+    inputs.view_z->Transition({.target_layout = RHIImageLayout::Read,
+                               .after_stage = RHIPipelineStage::Transfer,
+                               .before_stage = RHIPipelineStage::ComputeShader});
+    inputs.normal_roughness->Transition({.target_layout = RHIImageLayout::Read,
+                                         .after_stage = RHIPipelineStage::Transfer,
+                                         .before_stage = RHIPipelineStage::ComputeShader});
 }
 
 RHIImage *ReblurDenoiser::GetDenoisedDiffuse() const
