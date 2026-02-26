@@ -1,0 +1,552 @@
+﻿# ReBLUR Standalone Denoiser Rewrite Plan (Sparkle GPU Renderer)
+
+## 1. Goal
+
+Rewrite NRD ReBLUR (starting from `REBLUR_DIFFUSE_SPECULAR`) into Sparkle as a standalone denoiser module used by the GPU path-tracing pipeline.
+
+Primary acceptance signal:
+- End-to-end image quality is validated by `dev/functional_test.py` (GPU pipeline).
+
+Secondary acceptance signals:
+- A minimal `ReblurStandaloneDenoiser` class exists and is called from `GPURenderer` as a real post-ray-trace entry point (pass-through is acceptable at this stage).
+- Dedicated quantitative module tests per pass.
+- Convergence and temporal stability tests using multi-frame screenshots.
+- Continuous implementation progress is documented in `docs/ReBLUR_Standalone_Denoiser_Progress.md`.
+
+## 1.1 Execution Rules
+
+1. Keep recording progress, milestones, findings, trials, and pitfalls in `docs/ReBLUR_Standalone_Denoiser_Progress.md` throughout implementation.
+2. For every module in this plan (A-K), the listed test cases are mandatory implementation work, not optional checks.
+3. All ReBLUR module tests and convergence tests must be added to a dedicated ReBLUR test suite (`dev/reblur_test_suite.py`).
+4. Before any commit related to ReBLUR, the dedicated ReBLUR test suite must pass.
+5. This plan is allowed to change during implementation when design adjustments are required; every adjustment must be recorded immediately in `docs/ReBLUR_Standalone_Denoiser_Progress.md` with rationale and impact on phases/tests.
+
+## 2. NRD ReBLUR Reference Map
+
+Core host-side flow and settings:
+- `thirdparty/NRD/Source/Reblur.cpp`
+  - `Update_Reblur` (pass scheduling and permutation selection)
+  - `AddSharedConstants_Reblur` (shared constants and frame-state logic)
+- `thirdparty/NRD/Include/NRD.h`
+  - `CreateInstance`, `SetCommonSettings`, `SetDenoiserSettings`, `GetComputeDispatches`
+- `thirdparty/NRD/Include/NRDSettings.h`
+  - `CommonSettings`, `ReblurSettings`, `ReblurConvergenceSettings`
+- `thirdparty/NRD/Include/NRDDescs.h`
+  - `ResourceType`, `DispatchDesc`
+
+Reference pass graph (`REBLUR_DIFFUSE_SPECULAR`):
+- `thirdparty/NRD/Source/Denoisers/Reblur_DiffuseSpecular.hpp`
+  - Classify tiles
+  - Hit distance reconstruction
+  - Pre-pass
+  - Temporal accumulation
+  - History fix
+  - Blur
+  - Post-blur
+  - Temporal stabilization
+  - Split screen
+  - Validation (optional)
+
+Signal pack/unpack reference APIs:
+- `thirdparty/NRD/Shaders/NRD.hlsli`
+  - `NRD_FrontEnd_PackNormalAndRoughness`
+  - `REBLUR_FrontEnd_GetNormHitDist`
+  - `REBLUR_FrontEnd_PackRadianceAndNormHitDist`
+  - `REBLUR_BackEnd_UnpackRadianceAndNormHitDist`
+  - `NRD_FrontEnd_SpecHitDistAveraging_Begin/Add/End`
+
+## 3. Sparkle Standalone Denoiser Target Architecture (Bootstrap First)
+
+Mandatory first milestone (before implementing any ReBLUR pass logic):
+- Add a new runtime component:
+  - `libraries/include/renderer/denoiser/ReblurStandaloneDenoiser.h`
+  - `libraries/source/renderer/denoiser/ReblurStandaloneDenoiser.cpp`
+- Wire it into a real GPU pipeline entry point:
+  - `GPURenderer` owns the class (`std::unique_ptr<ReblurStandaloneDenoiser>`).
+  - `GPURenderer::Render()` calls denoiser dispatch between ray tracing and tone mapping.
+  - `ToneMappingPass` reads denoiser output (initially pass-through output is acceptable).
+- Reuse existing `spatial_denoise` cvar as the initial enable/disable switch.
+
+Initial API surface (minimal, add more only when needed):
+- `Initialize(...)`
+- `Resize(...)`
+- `Dispatch(...)`
+
+On-demand API expansion rules:
+- Add `ResetHistory(...)` only when the first persistent history resource is introduced.
+- Add debug-output APIs only when Module J is implemented.
+- Add settings structs/feature toggles only when a module needs them.
+
+Initial data flow target:
+- `ray_trace.cs.slang` outputs noisy data to denoiser input textures.
+- `ReblurStandaloneDenoiser::Dispatch` consumes noisy/guides, produces denoised color.
+- Tone mapping consumes denoised color.
+
+Shader rollout rule (no upfront bulk creation):
+- Only add a shader when the corresponding module is being implemented.
+- For bootstrap milestone, a no-op/pass-through dispatch (or copy path) is acceptable.
+- Do not pre-create all `reblur_*.cs.slang` files before their modules are scheduled.
+
+Future module shader list (created on demand):
+- `shaders/denoiser/reblur/reblur_classify_tiles.cs.slang`
+- `shaders/denoiser/reblur/reblur_hitdist_reconstruction.cs.slang`
+- `shaders/denoiser/reblur/reblur_prepass.cs.slang`
+- `shaders/denoiser/reblur/reblur_temporal_accumulation.cs.slang`
+- `shaders/denoiser/reblur/reblur_history_fix.cs.slang`
+- `shaders/denoiser/reblur/reblur_blur.cs.slang`
+- `shaders/denoiser/reblur/reblur_post_blur.cs.slang`
+- `shaders/denoiser/reblur/reblur_temporal_stabilization.cs.slang`
+- `shaders/denoiser/reblur/reblur_split_screen.cs.slang`
+- `shaders/denoiser/reblur/reblur_validation.cs.slang`
+
+## 4. Module Decomposition
+
+All modules below require implementation of their listed quantitative test cases, and all of those tests must be integrated into the dedicated ReBLUR test suite.
+
+### Module A: Front-End Signal Encoding and Guide Buffer Generation
+
+NRD references:
+- `thirdparty/NRD/Shaders/NRD.hlsli` (front-end pack functions)
+- `thirdparty/NRD/Include/NRDDescs.h` (`ResourceType` input contracts)
+
+Inputs:
+- Path-tracing first-hit / shading data, per-pixel motion, depth, normal, roughness, material metadata.
+
+Outputs:
+- `IN_NORMAL_ROUGHNESS`
+- `IN_VIEWZ`
+- `IN_MV`
+- `IN_DIFF_RADIANCE_HITDIST`, `IN_SPEC_RADIANCE_HITDIST`
+- Optional: confidence, disocclusion-threshold mix, basecolor/metalness.
+
+Scope:
+- Convert Sparkle GPU path tracer outputs into ReBLUR-compatible data contracts.
+
+Expected behavior:
+- Packed noisy inputs decode to physically consistent radiance/hit-distance.
+- Motion vectors and guides are non-jittered and frame-consistent.
+
+Sparkle rewrite steps:
+- Extend `shaders/ray_trace/ray_trace.cs.slang` to write denoiser input textures instead of only `imageData`.
+- Add denoiser input texture allocations in `GPURenderer::InitRenderResources`.
+- Add explicit reset conditions when history must be invalidated.
+
+Quantitative tests:
+- A1 Roundtrip encoding error: pack/unpack RMSE for normal/roughness/radiance/hit distance below epsilon.
+- A2 Motion-vector reprojection error: average pixel reprojection error below 0.25 px for deterministic camera motion fixtures.
+- A3 Guide validity ratio: percentage of pixels with finite valid `viewZ` and normalized hit distance above 99.9%.
+
+### Module B: Tile Classification
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_ClassifyTiles.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_ClassifyTiles.resources.hlsli`
+
+Inputs:
+- `IN_VIEWZ`
+
+Outputs:
+- `TILES` mask (sky / denoisable classification)
+
+Scope:
+- Build 16x16 tile activity mask to skip sky/invalid regions in downstream passes.
+
+Expected behavior:
+- Tile mask is stable and deterministic; no denoising on sky tiles.
+
+Sparkle rewrite steps:
+- Implement classify compute pass in standalone denoiser.
+- Keep tile texture as transient per-frame resource.
+
+Quantitative tests:
+- B1 Tile-mask precision/recall vs CPU reference depth classifier both >= 0.999.
+- B2 Determinism test: hash of tile mask unchanged across repeated runs with same seed.
+
+### Module C: Hit Distance Reconstruction
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_HitDistReconstruction.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_HitDistReconstruction.resources.hlsli`
+- `thirdparty/NRD/Include/NRDSettings.h` (`hitDistanceReconstructionMode`)
+
+Inputs:
+- `TILES`, `IN_NORMAL_ROUGHNESS`, `IN_VIEWZ`, noisy diff/spec input signals.
+
+Outputs:
+- Reconstructed diff/spec noisy signals (when probabilistic sampling leaves gaps).
+
+Scope:
+- Fill invalid hit-distance neighborhoods (3x3 / 5x5 modes) without biasing valid pixels.
+
+Expected behavior:
+- Invalid hit distances are reconstructed; valid samples preserved.
+
+Sparkle rewrite steps:
+- Implement mode permutations (`OFF`, `AREA_3X3`, `AREA_5X5`).
+- Wire toggle from denoiser settings.
+
+Quantitative tests:
+- C1 Reconstruction RMSE on masked invalid pixels <= target threshold (scene-normalized).
+- C2 Preservation error on valid pixels <= 1e-4 absolute luma.
+- C3 3x3 vs 5x5 monotonicity: 5x5 should not increase invalid-pixel RMSE over 3x3 in sparse sampling fixtures.
+
+### Module D: Pre-Pass (Spatial Pre-Accumulation)
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_PrePass.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_PrePass.resources.hlsli`
+
+Inputs:
+- `TILES`, `IN_NORMAL_ROUGHNESS`, `IN_VIEWZ`, diff/spec noisy signals.
+
+Outputs:
+- Pre-blurred diff/spec signals.
+- `SpecHitDistForTracking` auxiliary texture.
+
+Scope:
+- Spatial reuse before temporal accumulation; establish robust spec hit-distance tracking.
+
+Expected behavior:
+- Noise variance reduced while preserving geometric and material edges.
+
+Sparkle rewrite steps:
+- Implement prepass kernels for diffuse/specular with radius controls.
+- Preserve spec hit-distance tracking path even when visual prepass is reduced.
+
+Quantitative tests:
+- D1 Variance reduction ratio on flat regions >= target.
+- D2 Edge leakage metric (cross-edge luma bleed) <= target.
+- D3 Spec-tracking consistency: reduced frame-to-frame hit-distance jitter vs no-prepass baseline.
+
+### Module E: Temporal Accumulation
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_TemporalAccumulation.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_TemporalAccumulation.resources.hlsli`
+- `thirdparty/NRD/Source/Reblur.cpp` (`Update_Reblur` permutation logic)
+
+Inputs:
+- Current guides and noisy signals.
+- Previous frame histories (`PREV_VIEWZ`, `PREV_NORMAL_ROUGHNESS`, internal data, diff/spec histories, fast histories, spec tracking).
+- Optional confidence and disocclusion-threshold mix.
+
+Outputs:
+- `DATA1`, `DATA2`, updated diff/spec accumulated signals, fast histories, updated spec hit-distance tracking.
+
+Scope:
+- Reproject previous histories, reject disocclusions, blend current and history using convergence logic.
+
+Expected behavior:
+- Static regions converge; disocclusions reset quickly; history confidence controls aggression.
+
+Sparkle rewrite steps:
+- Implement reprojection using Sparkle motion/depth/normal data.
+- Add all required permanent/transient history resources with ping-pong.
+- Mirror settings-driven permutations.
+
+Quantitative tests:
+- E1 Static-scene history growth: mean history length should be monotonic up to configured cap.
+- E2 Disocclusion response: >99% of newly uncovered pixels reset history within 1 frame.
+- E3 Reprojection validity: ghosting metric after object motion below threshold.
+
+### Module F: History Fix and Anti-Firefly
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_HistoryFix.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_HistoryFix.resources.hlsli`
+- `thirdparty/NRD/Include/NRDSettings.h` (`historyFix*`, `fastHistoryClampingSigmaScale`, `enableAntiFirefly`)
+
+Inputs:
+- `TILES`, `IN_NORMAL_ROUGHNESS`, `DATA1`, `IN_VIEWZ`, temporal outputs + fast histories + spec tracking.
+
+Outputs:
+- History-fixed diff/spec and updated fast histories.
+
+Scope:
+- Recover from short-history artifacts and clamp outliers by fast-history statistics.
+
+Expected behavior:
+- Early-frame instability decreases; fireflies are suppressed with bounded bias.
+
+Sparkle rewrite steps:
+- Implement 5x5 reconstruction strides and fast-history clamping.
+- Expose anti-firefly and sigma controls.
+
+Quantitative tests:
+- F1 Outlier suppression: p99 luminance reduced by target factor in synthetic firefly fixtures.
+- F2 Bias guard: median luminance drift vs reference <= target percentage.
+- F3 History-reset recovery: SSIM/PSNR recovers to target within N frames after forced reset.
+
+### Module G: Blur
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_Blur.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_Blur.resources.hlsli`
+
+Inputs:
+- `TILES`, `IN_NORMAL_ROUGHNESS`, `IN_VIEWZ`, `DATA1`, history-fixed diff/spec.
+
+Outputs:
+- Spatially blurred diff/spec and updated `PREV_VIEWZ`.
+
+Scope:
+- Main spatial denoising radius controlled by history/convergence and material response.
+
+Expected behavior:
+- Removes residual spatial noise while keeping edges and glossy detail.
+
+Sparkle rewrite steps:
+- Implement bilateral weights (normal/depth/hit-distance/material aware).
+- Ensure radii obey min/max and convergence scaling.
+
+Quantitative tests:
+- G1 High-frequency energy reduction >= target on static noisy patches.
+- G2 Edge preservation: MSE across depth edges <= target.
+- G3 Radius behavior: measured effective blur radius decreases as history length increases.
+
+### Module H: Post-Blur and History Writeback
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_PostBlur.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_PostBlur.resources.hlsli`
+
+Inputs:
+- `TILES`, guides, `DATA1`, blurred diff/spec.
+
+Outputs:
+- `PREV_NORMAL_ROUGHNESS`, `DIFF_HISTORY`, `SPEC_HISTORY`, optional output copy/internal data for non-stabilization path.
+
+Scope:
+- Prepare persistent history resources and optionally produce direct outputs when stabilization is skipped.
+
+Expected behavior:
+- History writeback is format-stable, no ping-pong aliasing, no stale-frame bleed.
+
+Sparkle rewrite steps:
+- Implement explicit history ping-pong ownership and barriers.
+- Match “stabilization enabled/disabled” behavior.
+
+Quantitative tests:
+- H1 Resource integrity: checksum of write/readback history surfaces matches expected ping-pong frame index.
+- H2 No-stabilization equivalence: output from post-blur path matches final output when stabilization is disabled.
+
+### Module I: Temporal Stabilization
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_TemporalStabilization.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_TemporalStabilization.resources.hlsli`
+- `thirdparty/NRD/Include/NRDSettings.h` (`maxStabilizedFrameNum`)
+
+Inputs:
+- `TILES`, guides, `DATA1`, `DATA2`, optional basecolor/metalness, spec tracking, stabilized history ping-pong.
+
+Outputs:
+- Final denoised diff/spec outputs.
+- Stabilized luma histories.
+- Updated internal data and MV patching where needed.
+
+Scope:
+- Temporal luma stabilization to reduce residual flicker and improve temporal coherence.
+
+Expected behavior:
+- Lower frame-to-frame shimmer in static/slow-motion regions with bounded ghosting.
+
+Sparkle rewrite steps:
+- Implement stabilization path and optional MV modification in spec-dominant cases.
+- Make stabilization strength/history caps configurable.
+
+Quantitative tests:
+- I1 Temporal flicker index (per-pixel luma stddev across frames) reduced by target ratio vs stabilization-off.
+- I2 Motion ghosting guard: trailing-error metric remains below target in moving-object fixtures.
+
+### Module J: Split Screen and Validation
+
+NRD references:
+- `thirdparty/NRD/Shaders/REBLUR_SplitScreen.cs.hlsl`
+- `thirdparty/NRD/Shaders/REBLUR_Validation.cs.hlsl`
+- `thirdparty/NRD/Source/Reblur.cpp` (split/validation dispatch gating)
+
+Inputs:
+- Denoised outputs and raw noisy inputs.
+
+Outputs:
+- Split-screen visualization and validation debug texture.
+
+Scope:
+- Debug and QA-only module to inspect quality and state transitions.
+
+Expected behavior:
+- Exact split behavior; validation output highlights instability/disocclusion issues.
+
+Sparkle rewrite steps:
+- Add debug-mode mapping from `RenderConfig::DebugMode` to denoiser debug outputs.
+- Keep validation disabled in release path by default.
+
+Quantitative tests:
+- J1 Split boundary correctness: left/right region difference exactly tracks split ratio.
+- J2 Validation non-regression: known-bad synthetic inputs trigger non-zero validation alerts.
+
+### Module K: Scheduler, Resources, and Constants (Host Orchestration)
+
+NRD references:
+- `thirdparty/NRD/Source/Reblur.cpp` (`Update_Reblur`, `AddSharedConstants_Reblur`)
+- `thirdparty/NRD/Source/Denoisers/Reblur_DiffuseSpecular.hpp` (permanent/transient pools and pass wiring)
+
+Inputs:
+- Frame settings, camera matrices, frame index, reset flags, denoiser settings.
+
+Outputs:
+- Ordered dispatch list, constants blocks, resource transitions, ping-pong selection.
+
+Scope:
+- Standalone host-side pass orchestration replacing NRD runtime scheduler.
+
+Expected behavior:
+- Correct pass order/permutation, correct constants every frame, strict hazard-free resource usage.
+
+Sparkle rewrite steps:
+- Implement deterministic pass graph in C++ (`ReblurStandaloneDenoiser`).
+- Mirror NRD permanent/transient pool strategy:
+  - Permanent: `PREV_VIEWZ`, `PREV_NORMAL_ROUGHNESS`, `PREV_INTERNAL_DATA`, diff/spec history families, spec tracking ping-pong.
+  - Transient: `DATA1`, `DATA2`, `TILES`, fast temps, etc.
+
+Quantitative tests:
+- K1 Dispatch-order assertion test (exact expected pass sequence per settings permutation).
+- K2 Barrier/layout validation in debug RHI runs: zero hazard warnings.
+- K3 History reset correctness: on forced reset, history-dependent outputs match first-frame behavior.
+
+## 5. Step-by-Step Rewrite Plan
+
+Phase 0: Bootstrap class and entry point first (mandatory)
+- Add `ReblurStandaloneDenoiser` class with minimal API (`Initialize`, `Resize`, `Dispatch` only).
+- Add `GPURenderer` ownership and call site so render flow becomes:
+  - ray tracing -> standalone denoiser dispatch -> tone mapping.
+- Keep first dispatch as no-op/pass-through if needed to stabilize integration.
+- Use existing `spatial_denoise` switch for initial enable path.
+- Add a smoke check proving denoiser-enabled path runs and does not crash.
+
+Phase 1: Front-end data contract (Module A)
+- Expand GPU path tracer outputs to produce required noisy signals and guides.
+- Feed those textures into `ReblurStandaloneDenoiser::Dispatch`.
+- Add encode/decode validation tests (Module A).
+- Add `ResetHistory` only if this phase introduces persistent history state.
+
+Phase 2: Stateless spatial modules (Modules B, C, D, G)
+- Implement tile classify, hit-distance reconstruction, pre-pass, blur.
+- Add only the shader files needed for the module currently in progress.
+- Validate each module with image-space metrics before moving on.
+
+Phase 3: Temporal core (Modules E and H)
+- Implement temporal accumulation and post-blur history writeback.
+- Introduce permanent/transient pools and ping-pong resources.
+- Formalize history reset triggers (resize, scene change, camera cut, settings change).
+
+Phase 4: Temporal robustness (Modules F and I)
+- Implement history fix and temporal stabilization.
+- Run dedicated flicker/ghosting/outlier tests.
+
+Phase 5: Debug/validation surface (Module J)
+- Implement split-screen and validation passes.
+- Add denoiser debug output API only in this phase (on demand).
+
+Phase 6: Host orchestration hardening (Module K)
+- Finalize constants, permutations, pass scheduling, and barriers.
+- Stress resize, scene reload, camera reset, and dynamic SPP transitions.
+
+Phase 7: End-to-end quality gate
+- Run `dev/functional_test.py` as the primary pass/fail signal for GPU pipeline.
+- If denoiser intentionally changes final output, regenerate and update GPU ground truth in CI storage.
+
+## 6. Dedicated Quantitative Test Matrix
+
+Proposed implementation files:
+- `dev/denoiser_module_tests.py`
+- `dev/denoiser_metrics.py`
+- `dev/reblur_test_suite.py`
+- Optional C++ test-case helpers under `tests/denoiser/` for deterministic fixture playback.
+
+Bootstrap integration tests (must pass before Module A starts):
+- S0.1 Entry-point smoke: GPU pipeline runs with `--pipeline gpu --spatial_denoise true` and exits cleanly.
+- S0.2 Pass-through equivalence: with bootstrap no-op denoiser, output difference vs denoiser-off baseline is near zero (strict threshold).
+- S0.3 Resize/reset smoke: denoiser-on path survives resize and scene reload without crashes or invalid resource warnings.
+
+Per-module fixtures:
+- Static Cornell-like scene (noise convergence baseline).
+- Glossy + thin geometry scene (spec tracking stress).
+- Animated-object disocclusion scene.
+- High dynamic range sparse highlights (firefly stress).
+
+Core metrics:
+- RMSE/MAE on selected channels.
+- FLIP for perceptual error where suitable.
+- Temporal luma stddev (flicker index).
+- History length statistics.
+- Edge leakage metrics near depth/normal discontinuities.
+
+Pass/fail policy:
+- Each module has hard thresholds in CI.
+- Any threshold breach fails PR before end-to-end run.
+- ReBLUR-related commits are blocked unless `dev/reblur_test_suite.py` passes.
+
+## 7. End-to-End Test Plan (`functional_test` as main result)
+
+Main gate command (GPU):
+- `python3 ./dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless`
+- macOS gate in CI should also run GPU if hardware supports it.
+
+Bootstrap comparison commands (before ReBLUR logic lands):
+- `python3 ./dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --spatial_denoise false`
+- `python3 ./dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --spatial_denoise true`
+
+Policy:
+- This is the primary integration signal.
+- `FLIP_THRESHOLD` in `dev/functional_test.py` remains the default unless a deliberate policy change is reviewed.
+- Ground truth updates are required when denoiser quality targets intentionally change appearance.
+
+## 8. Convergence and Temporal Stability Test Cases
+
+Use built-in multi-frame screenshot test case:
+- `--test_case multi_frame_screenshot`
+
+Proposed convergence suite:
+- CT1 Static camera convergence:
+  - Capture 5+ frames after warm-up; error to long-run reference must be monotonically non-increasing in aggregate.
+- CT2 Slow camera pan stability:
+  - Frame-to-frame temporal flicker index below threshold.
+- CT3 Fast disocclusion recovery:
+  - After controlled camera cut/object reveal, history reset and re-convergence within N frames.
+- CT4 Specular shimmer stress:
+  - Glossy highlights temporal variance must stay below threshold with stabilization enabled.
+- CT5 Reset-path correctness:
+  - On manual history reset (resize/scene reload), output matches expected first-frame distribution and reconverges predictably.
+
+Automation notes:
+- Extend `dev/functional_test.py` or add `dev/convergence_test.py` to ingest multi-frame screenshots (`multi_frame_*.png`) and compute temporal metrics.
+- Store per-scene temporal baselines and fail on regression.
+
+## 9. Risks and Mitigations
+
+Risk: No executable denoiser seam in renderer delays all downstream modules.
+- Mitigation: Enforce Phase 0 bootstrap milestone (class + entry point + pass-through dispatch) before Module A.
+
+Risk: Sparkle GPU path tracer currently does not emit all ReBLUR-required signals.
+- Mitigation: Phase 1 front-end contract and tests are mandatory before temporal modules.
+
+Risk: Temporal artifacts from mismatched motion/depth conventions.
+- Mitigation: Early reprojection validation tests (A2, E2, E3) and strict convention docs.
+
+Risk: Cross-backend divergence (Vulkan vs Metal).
+- Mitigation: Run module and convergence tests on both backends where available.
+
+Risk: Over-designed API surface increases churn before requirements are proven.
+- Mitigation: Keep API minimal; add methods/structs only when a concrete module needs them.
+
+## 10. Exit Criteria
+
+Implementation is considered complete when:
+- Phase 0 bootstrap entry-point tests (S0.1-S0.3) pass and remain green.
+- All module-level quantitative tests pass.
+- Convergence suite passes (CT1-CT5).
+- `dev/functional_test.py` passes for GPU pipeline in CI-supported frameworks.
+- No known denoiser crashes/hazards remain in logs.
+

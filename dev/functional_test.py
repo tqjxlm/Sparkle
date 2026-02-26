@@ -15,7 +15,7 @@ GROUND_TRUTH_URL_BASE = "https://pub-70861c9d28254fff97386336cba96153.r2.dev/spa
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 DEFAULT_SCENE = "TestScene"
 
-FLIP_THRESHOLD = 0.1
+FLIP_THRESHOLD = 0.03
 
 
 def parse_args():
