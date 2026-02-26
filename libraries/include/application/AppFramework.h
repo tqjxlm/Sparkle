@@ -117,7 +117,9 @@ public:
     void CaptureNextFrames(int count);
 
     void RequestTakeScreenshot();
+    void RequestTakeScreenshot(const std::string &name);
     [[nodiscard]] bool IsScreenshotCompleted() const;
+    [[nodiscard]] bool IsReadyForAutoScreenshot() const;
 
 #if ENABLE_TEST_CASES
     [[nodiscard]] int GetExitCode() const

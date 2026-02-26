@@ -16,13 +16,15 @@ See [docs/Build.md](docs/Build.md) for all build commands.
 
 See [docs/Run.md](docs/Run.md) for run arguments, log location, path conventions, etc..
 
+See [docs/Test.md](docs/Test.md) for how to run tests, how to write test, and test tricks.
+
 ## Visual QA
 
-* Use `--test_case screenshot` as run arguments to automatically take a screenshot after the scene is fully loaded and a frame is fully rendered. This is the main method of visual QA.
-* The screenshot is saved to generated/screenshots/ and named with the scene name and pipeline.
-* You can modify configs and the code to get another screenshot to visualize the changes.
-* You can modify the render pipeline to output different images to the screenshot for debugging.
-* You can modify the screenshot mechanism to capture at different timings or capture multiple times in a run.
+* Use `--test_case screenshot` to take a screenshot after the scene is fully loaded and a frame is fully rendered.
+* Use `--test_case multi_frame_screenshot` to take 5 frames of screenshots after the scene is fully loaded and a frame is fully rendered. This is useful for temporal analysis.
+* Screenshots are saved to [external-storage-path]/screenshots/ and named with the scene name and pipeline. For [external-storage-path], refer to [docs/Run.md](docs/Run.md).
+* By outputting different textures to render target (e.g. via "--debug_mode"), you can test any intermediate textures or render targets in the pipeline.
+* When debugging visual results, you should analyze screenshot images both semantically and statistically.
 * Ground truth images can be found in [docs/CI.md](docs/CI.md). But if you are working on a feature that is meant to change the final image output, you should not rely on the ground truth images.
 
 ## Code Style Guidelines

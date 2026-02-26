@@ -1,5 +1,13 @@
 # Test Guide
 
+## Python Test Scripts
+
+* When possible, always use python scripts to perform tests.
+* Make use of any necessary python libraries and add them to dev/requirements.exe
+* General test scripts are stored at dev/.
+* Dedicated test scripts are stored at tests/.
+* If python is not sufficient to test your case, also make use of TestCase system below. They can be combined with python scripts freely. See dev/functional_test.py as an example.
+
 ## TestCase System
 
 * A `TestCase` is a C++ class that runs inside the app after the scene finishes loading.
@@ -90,7 +98,8 @@ error; the first registration wins.
 
 ## Built-in Test Cases
 
-| Name         | File                                                                          | What it does                                                                                                                  |
-| ------------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `smoke`      | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp)                     | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline.                                           |
-| `screenshot` | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots in the screenshots directory, captures one, then passes. Used by functional tests and visual QA. |
+| Name                     | File                                                                                              | What it does                                                                                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `smoke`                  | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp)                                         | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline.                                                                              |
+| `screenshot`             | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp)                     | Waits for renderer ready, clears all existing screenshots optionallly, captures one, then passes. Used by functional tests and visual QA.                        |
+| `multi_frame_screenshot` | [tests/screenshot/MultiFrameScreenshotTest.cpp](../tests/screenshot/MultiFrameScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots optionallly, captures five, then passes. Used by functional tests and visual QA for temporal analysis. |
