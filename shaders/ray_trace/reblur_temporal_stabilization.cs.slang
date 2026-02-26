@@ -190,9 +190,12 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     if (stab_spec_luma < 1e-6)
         clamped_spec_color = current_spec.rgb;
 
-    // Stabilization blend weight: stronger with more history
-    float diff_stab_frames = min(float(max_stabilized_frame_num), diff_accum_speed);
-    float spec_stab_frames = min(float(max_stabilized_frame_num), spec_accum_speed);
+    // Stabilization blend weight: stronger with more history.
+    // Use max(accumSpeed, frame_index) so stabilization grows independently of the
+    // temporal accumulation cap. This lets stabilization reach full strength even when
+    // temporal accumulation is capped at 63 frames.
+    float diff_stab_frames = min(float(max_stabilized_frame_num), max(diff_accum_speed, float(frame_index)));
+    float spec_stab_frames = min(float(max_stabilized_frame_num), max(spec_accum_speed, float(frame_index)));
     float diff_blend = diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
     float spec_blend = spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
 

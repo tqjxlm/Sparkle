@@ -117,11 +117,6 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 acc_diff = lerp(hist_diff, current_diff, diff_weight);
     float4 acc_spec = lerp(hist_spec, current_spec, spec_weight);
 
-    // Note: Firefly suppression in temporal accumulation is intentionally omitted.
-    // The ratio-based approach (clamp against history * max_relative) creates signal
-    // death spirals with noisy 1 spp inputs where history luminance is near zero.
-    // Anti-firefly is handled by the neighborhood sigma-clamp in HistoryFix instead.
-
     // Write outputs
     outDiffuse[pixel] = acc_diff;
     outSpecular[pixel] = acc_spec;

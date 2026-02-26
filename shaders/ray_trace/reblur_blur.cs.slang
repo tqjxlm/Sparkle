@@ -204,6 +204,20 @@ float GetGaussianWeight(float distance_sq)
     float3 center_Xv = GetViewSpacePosition(pixel, center_viewZ);
     float3 center_Nv = WorldToViewNormal(center_normal);
 
+    // Blend Poisson rotation from per-frame (golden angle) to per-pixel (deterministic)
+    // as accumulation progresses. At high accumSpeed, per-pixel rotation eliminates
+    // the frame-to-frame instability caused by rotating the spatial kernel.
+    float min_accum = min(diff_accum_speed, spec_accum_speed);
+    float stability_weight = saturate(min_accum / 16.0); // 0 at accum=0, 1 at accum>=16
+    float pixel_angle = frac(sin(dot(float2(pixel), float2(12.9898, 78.233))) * 43758.5453) * 6.28318;
+    float4 pixel_rotator = float4(cos(pixel_angle), sin(pixel_angle), -sin(pixel_angle), cos(pixel_angle));
+    // Blend rotators via angle interpolation
+    float blended_cos = lerp(rotator.x, pixel_rotator.x, stability_weight);
+    float blended_sin = lerp(rotator.y, pixel_rotator.y, stability_weight);
+    float inv_len = 1.0 / max(sqrt(blended_cos * blended_cos + blended_sin * blended_sin), 1e-6);
+    float4 effective_rotator = float4(blended_cos * inv_len, blended_sin * inv_len,
+                                      -blended_sin * inv_len, blended_cos * inv_len);
+
     // Accumulate weighted samples
     float3 diff_sum = center_diff.rgb;
     float diff_hit_sum = center_diff_hit_norm;
@@ -217,7 +231,7 @@ float GetGaussianWeight(float distance_sq)
 
     for (int i = 0; i < REBLUR_POISSON_SAMPLE_NUM; i++)
     {
-        float2 offset = RotateVector(rotator, g_Special8[i]);
+        float2 offset = RotateVector(effective_rotator, g_Special8[i]);
 
         // Diffuse sample
         {

@@ -445,7 +445,7 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     Blur(inputs, settings, matrices, 2, diff_temp2_.get(), spec_temp2_.get(), denoised_diffuse_.get(),
          denoised_specular_.get(), internal_data_.get(), true);
 
-    // Store temporal accumulation + history-fix output (temp1, before spatial blur) as history.
+    // Store HistoryFix output (temp1, before spatial blur) as history.
     // Using pre-blur data prevents spatial blur from compounding frame over frame.
     // temp1 still holds the HistoryFix output since Blur/PostBlur only read from it.
     CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());

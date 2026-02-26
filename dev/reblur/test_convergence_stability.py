@@ -20,6 +20,7 @@ Root causes of instability:
 4. No firefly suppression in temporal accumulation
 """
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -33,7 +34,7 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).parent.parent.parent
 BUILD_PY = SCRIPT_DIR / "build.py"
-SCREENSHOT_DIR = Path.home() / "Documents" / "sparkle" / "screenshots"
+SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 
 # Maximum acceptable percentage of pixels changing by >1/255 per frame
 MAX_INSTABILITY_PCT = 3.0
@@ -41,11 +42,19 @@ MAX_INSTABILITY_PCT = 3.0
 MAX_INSTABILITY_RATIO = 20.0
 
 
-def run_pipeline(use_reblur, max_spp=2048):
+def get_screenshot_dir(framework):
+    if framework == "glfw":
+        return SCRIPT_DIR / "build_system" / "glfw" / "output" / "build" / "generated" / "screenshots"
+    if framework == "macos":
+        return Path.home() / "Documents" / "sparkle" / "screenshots"
+    raise ValueError(f"Unsupported framework: {framework}")
+
+
+def run_pipeline(framework, use_reblur, max_spp=2048):
     """Run the app and return frame-to-frame instability metrics."""
     cmd = [
         sys.executable, str(BUILD_PY),
-        "--framework", "macos",
+        "--framework", framework,
         "--pipeline", "gpu",
         "--use_reblur", "true" if use_reblur else "false",
         "--max_spp", str(max_spp),
@@ -60,7 +69,8 @@ def run_pipeline(use_reblur, max_spp=2048):
         print(f"  App failed: {result.stderr[-500:]}")
         return None
 
-    files = sorted(SCREENSHOT_DIR.glob("multi_frame_*.png"))
+    screenshot_dir = get_screenshot_dir(framework)
+    files = sorted(screenshot_dir.glob("multi_frame_*.png"))
     if len(files) < 2:
         print(f"  Need at least 2 screenshots, found {len(files)}")
         return None
@@ -88,11 +98,15 @@ def run_pipeline(use_reblur, max_spp=2048):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Test ReBLUR convergence stability")
+    parser.add_argument("--framework", required=True, choices=SUPPORTED_FRAMEWORKS)
+    args = parser.parse_args()
+
     print("=== Test: ReBLUR Convergence Stability ===\n")
 
     # Step 1: Run vanilla baseline
     print("Running vanilla pipeline (2048 spp)...")
-    vanilla = run_pipeline(use_reblur=False)
+    vanilla = run_pipeline(args.framework, use_reblur=False)
     if vanilla is None:
         print("FAIL: Vanilla pipeline failed to run")
         return 1
@@ -101,7 +115,7 @@ def main():
 
     # Step 2: Run ReBLUR
     print("\nRunning ReBLUR pipeline (2048 spp)...")
-    reblur = run_pipeline(use_reblur=True)
+    reblur = run_pipeline(args.framework, use_reblur=True)
     if reblur is None:
         print("FAIL: ReBLUR pipeline failed to run")
         return 1

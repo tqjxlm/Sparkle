@@ -307,3 +307,199 @@ float3 diff_clamped = min(output.diffuse_radiance, output_limit * inv_albedo);
 
 Either approach ensures the energy-preserving property of the clamp is maintained
 regardless of albedo.
+
+---
+
+## Session 2: Convergence Stability Investigation (Windows/GLFW)
+
+### Baseline Measurements (post-clamping-fix, max_accum=63)
+
+**Platform:** Windows 11, GLFW, Vulkan, Debug build
+
+| Metric | Vanilla | ReBLUR | Ratio |
+|--------|---------|--------|-------|
+| Mean frame-to-frame diff | 0.000177 | 0.005325 | **30x worse** |
+| Pixels changed >1/255 per frame | 0.18% | 6.94% | **39x more** |
+| Pixels changed >5/255 per frame | 0.00% | 4.78% | **infinite** |
+| Mean luminance (frame 4) | 0.4570 | 0.4504 | -1.4% |
+
+Quality comparison (vanilla vs reblur frame 4):
+- 62.68% of pixels differ by >1/255
+- 10.52% of pixels differ by >10/255
+- Max diff: 0.9451, Mean diff: 0.014024
+
+### Per-Pixel Instability Analysis
+
+- 7.60% of pixels have std > 0.005 across 5 frames
+- 4.11% of pixels have std > 0.05 → **fireflies**
+- Top unstable pixels swing between near-0 and near-1:
+  - Pixel (999,276): 0.007→0.008→1.000→0.988→0.004
+  - Pixel (588,341): 0.953→0.961→0.949→0.000→0.058
+  - Pixel (585,339): 0.063→0.958→0.078→0.869→0.966
+
+### Root Cause Refinement
+
+**Dominant issue: Fireflies (Root Cause 4)**
+- 4.11% of pixels have extreme instability (std>0.05) caused by bright outlier samples
+- After accumSpeed reaches 3, HistoryFix anti-firefly stops running
+- No firefly suppression in temporal accumulation
+- A single firefly at accumSpeed=63 gets weight 1/64≈1.6%, creating a visible bump
+  that takes ~64 frames to decay
+
+**Secondary issue: Poisson rotation instability (Root Cause 3)**
+- ~3.5% of pixels have moderate instability (0.005<std<0.05) from rotating spatial kernel
+- At accumSpeed=63, blur radius = 3.75px (Blur) / 7.5px (PostBlur) — still large
+- Golden angle rotation changes neighborhood samples each frame
+- Antilag detects these changes as divergence, triggering accumSpeed resets
+
+**Energy conservation is good** (-1.4%) — the clamping fix from commit 5d3d86c is working.
+
+### Disproved Hypothesis: Increasing accumulation cap
+
+- NRD is designed to converge at 64 frames, not 2048
+- The 63-frame cap is correct for NRD's design
+- Increasing to 2048 would cause float16 precision loss at high accumSpeed
+- The real issue is instability (fireflies + rotation), not insufficient accumulation
+
+### Attempted Fix: Firefly Suppression + Rotation Stability
+
+**Changes:**
+
+1. **Temporal accumulation firefly suppression** (`reblur_temporal_accumulation.cs.slang`):
+   - Clamp incoming sample luminance against history * 10 + 0.5 absolute minimum
+   - Gated on accumSpeed >= 8 (history is reliable enough)
+   - Absolute minimum tolerance (0.5) prevents death spirals for dark pixels
+   - Applied separately to diffuse and specular channels
+
+2. **Per-pixel deterministic Poisson rotation** (`reblur_blur.cs.slang`):
+   - At low accumSpeed: per-frame golden angle rotation (noise coverage)
+   - At high accumSpeed (>=16): per-pixel deterministic rotation (stability)
+   - Smooth blend between them: `stability_weight = saturate(min_accum / 16.0)`
+   - Eliminates frame-to-frame variation from spatial kernel at convergence
+
+3. **AccumSpeed packing fix** (`reblur_data.h.slang`):
+   - Removed 6-bit normalization, store raw float in RG16Float
+   - Float16 represents integers exactly up to 2048
+   - No behavioral change at max_accum=63, but removes unnecessary quantization
+
+---
+
+## Session 3: Stabilization Fix + Convergence Achieved
+
+### Starting Point
+
+After Session 2 changes (per-pixel rotation + always-on anti-firefly):
+
+| Metric | Vanilla | ReBLUR | Target |
+|--------|---------|--------|--------|
+| >1/255 per frame | 0.18% | 6.74% | <3% |
+| >5/255 per frame | 0.00% | 4.64% | ~0% |
+| FLIP score | — | 0.0804 | ≤0.1 |
+
+### Per-Stage Diagnostic (post-Session 2)
+
+| Stage | debug_pass | >1/255 | Notes |
+|-------|-----------|--------|-------|
+| Temporal Accum only | 3 | 37.34% | Core noise source |
+| PostBlur (skip stab) | 2 | 12.35% | 78% reduction from pre-rotation 58% |
+| Full pipeline | 99 | 6.74% | Stabilization helps but insufficient |
+
+**Key finding:** Per-pixel rotation fix WAS working (58% → 12.35% PostBlur reduction), but
+remaining instability survives through temporal stabilization.
+
+### Attempted Fix 1: Recurrent Feedback Loop
+
+**Change:** `CopyHistoryData(denoised_diffuse_, denoised_specular_)` instead of `CopyHistoryData(diff_temp1_, spec_temp1_)`
+
+**Result:** 6.45% >1/255 (was 6.74%). Marginal improvement.
+
+**Conclusion:** Recurrent feedback barely helps. The instability is not from lack of spatial blur
+compounding — it's from the temporal accumulation's inherent noise at 63-frame cap.
+
+### Attempted Fix 2: Disable Antilag
+
+**Change:** `antilag_sigma_scale = 100.0` (effectively disabling antilag detection)
+
+**Result:** 6.35% >1/255 (was 6.45%). ~0.1% difference.
+
+**Conclusion:** Antilag is NOT the convergence bottleneck. It triggers infrequently at convergence.
+
+### Root Cause Discovery: Temporal Stabilization Capped by AccumSpeed
+
+**The bug:** Temporal stabilization blend weight uses `min(max_stabilized_frame_num, diff_accum_speed)`.
+Since `diff_accum_speed` caps at 63 (from temporal accumulation), the stabilization blend is limited
+to 63/64 = 0.984, regardless of `max_stabilized_frame_num`.
+
+This means 1.6% of each frame's PostBlur noise leaks through to the final output. For extreme
+PostBlur changes (up to 248/255 for fireflies), 1.6% × 248/255 ≈ 4/255 — exceeding the 1/255 threshold.
+
+**Instability spatial analysis:**
+- Floor/table surface: 15.73% of mid-brightness pixels change (complex indirect illumination)
+- Rows 323-327: up to 40% instability (object contact region with caustics)
+- Object edges: significant instability from cross-boundary blur
+- Background wall: stable (< 3%)
+
+The instability concentrates on surfaces receiving high-variance indirect lighting (caustics from
+metallic/glass spheres). These have the largest per-sample variance, causing the biggest PostBlur
+changes that the limited stabilization can't suppress.
+
+### Successful Fix: Independent Stabilization Counter
+
+**Changes:**
+
+1. **Decoupled stabilization from temporal accumulation speed** (`reblur_temporal_stabilization.cs.slang`):
+   ```c
+   // Before: limited by accumSpeed (caps at 63)
+   float diff_stab_frames = min(float(max_stabilized_frame_num), diff_accum_speed);
+   // After: grows with frame_index, independent of temporal accum cap
+   float diff_stab_frames = min(float(max_stabilized_frame_num), max(diff_accum_speed, float(frame_index)));
+   ```
+   At frame 255+, stabilization blend = 255/256 = 0.996 (was 63/64 = 0.984).
+   Per-frame noise leakage drops from 1.6% to 0.4%.
+
+2. **Increased max_stabilized_frame_num from 63 to 255** (`ReblurDenoiser.h`):
+   Allows stabilization to reach full 255/256 blend strength.
+
+3. **Reverted recurrent feedback** — kept pre-blur history to avoid compounding blur
+   (recurrent feedback + strong stabilization caused FLIP regression to 0.1251).
+
+4. **Fixed test scripts** — `test_convergence_stability.py`, `test_demodulated_clamping.py`,
+   `convergence_diagnostic.py` now accept `--framework` argument (was hardcoded to `macos`).
+
+### Final Results
+
+| Metric | Baseline | Final | Vanilla | Target |
+|--------|----------|-------|---------|--------|
+| >1/255 per frame | 6.94% | **0.88%** | 0.18% | <3% ✓ |
+| >5/255 per frame | 4.78% | **0.29%** | 0.00% | ~0% ✓ |
+| Mean luminance | 0.4504 | 0.4474 | 0.4570 | close ✓ |
+| FLIP score | — | **0.0832** | — | ≤0.1 ✓ |
+| ReBLUR vs Vanilla ratio | 39x | **4.8x** | 1.0x | <20x ✓ |
+
+**87% reduction in frame-to-frame instability** while maintaining FLIP quality.
+
+### Pitfalls Encountered
+
+1. **Recurrent feedback + strong stabilization = FLIP regression.** PostBlur output as history
+   causes compounding spatial blur. Combined with aggressive stabilization (which locks in the
+   blurred image), FLIP jumped from 0.08 to 0.125. Solution: keep pre-blur history.
+
+2. **Antilag is not the bottleneck.** Despite theoretical concerns about antilag resetting
+   accumSpeed, empirical testing showed <0.1% impact. The antilag threshold formula with
+   sigma-based denominator is stable enough.
+
+3. **The stabilization-accumSpeed coupling was the hidden bottleneck.** The stabilization blend
+   weight was tied to `diff_accum_speed`, which is capped at 63. Even with perfect temporal
+   accumulation, the stabilization couldn't suppress PostBlur noise enough. Using the global
+   frame_index as an independent counter breaks this coupling.
+
+### Summary of All Changes (Session 2 + Session 3)
+
+| File | Change | Purpose |
+|------|--------|---------|
+| `reblur_data.h.slang` | Removed 6-bit normalization | Clean packing |
+| `reblur_blur.cs.slang` | Per-pixel deterministic rotation | Eliminate rotation instability |
+| `reblur_history_fix.cs.slang` | Always-on anti-firefly | Suppress outliers at all frames |
+| `reblur_temporal_stabilization.cs.slang` | Independent stabilization counter | Decouple from temporal cap |
+| `ReblurDenoiser.h` | max_stabilized_frame_num = 255 | Allow stronger stabilization |
+| `dev/reblur/*.py` | Added --framework argument | Cross-platform test scripts |

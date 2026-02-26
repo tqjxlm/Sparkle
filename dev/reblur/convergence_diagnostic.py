@@ -13,10 +13,12 @@ Evidence gathered:
 - Per-stage instability numbers → identifies which pass is the weakest link
 """
 
+import argparse
 import subprocess
 import sys
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 try:
@@ -28,14 +30,26 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).parent.parent.parent
 BUILD_PY = SCRIPT_DIR / "build.py"
-SCREENSHOT_DIR = Path.home() / "Documents" / "sparkle" / "screenshots"
-RESULTS_DIR = Path("/tmp/sparkle_convergence_diagnostic")
+SUPPORTED_FRAMEWORKS = ("glfw", "macos")
+RESULTS_DIR = Path(tempfile.gettempdir()) / "sparkle_convergence_diagnostic"
+
+# Set by main() after parsing args
+_framework = None
+_screenshot_dir = None
+
+
+def get_screenshot_dir(framework):
+    if framework == "glfw":
+        return SCRIPT_DIR / "build_system" / "glfw" / "output" / "build" / "generated" / "screenshots"
+    if framework == "macos":
+        return Path.home() / "Documents" / "sparkle" / "screenshots"
+    raise ValueError(f"Unsupported framework: {framework}")
 
 
 def run_app(max_spp, use_reblur, debug_pass=99, test_case="multi_frame_screenshot"):
     cmd = [
         sys.executable, str(BUILD_PY),
-        "--framework", "macos",
+        "--framework", _framework,
         "--pipeline", "gpu",
         "--use_reblur", "true" if use_reblur else "false",
         "--max_spp", str(max_spp),
@@ -58,7 +72,7 @@ def collect_screenshots(label):
     """Copy screenshots from app output to results dir."""
     dest = RESULTS_DIR / label
     dest.mkdir(parents=True, exist_ok=True)
-    files = sorted(SCREENSHOT_DIR.glob("multi_frame_*.png"))
+    files = sorted(_screenshot_dir.glob("multi_frame_*.png"))
     for f in files:
         shutil.copy2(f, dest / f.name)
     return len(files)
@@ -98,6 +112,15 @@ def analyze_stability(dirname, label):
 
 
 def main():
+    global _framework, _screenshot_dir
+
+    parser = argparse.ArgumentParser(description="ReBLUR convergence diagnostic")
+    parser.add_argument("--framework", required=True, choices=SUPPORTED_FRAMEWORKS)
+    args = parser.parse_args()
+
+    _framework = args.framework
+    _screenshot_dir = get_screenshot_dir(args.framework)
+
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     tests = [

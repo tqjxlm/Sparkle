@@ -18,7 +18,7 @@ struct ReblurSettings
     float diffuse_prepass_blur_radius = 30.f;
     float specular_prepass_blur_radius = 50.f;
     uint32_t max_accumulated_frame_num = 63;
-    uint32_t max_stabilized_frame_num = 63;
+    uint32_t max_stabilized_frame_num = 255;
     uint32_t history_fix_frame_num = 3;
     float history_fix_stride = 14.f;
     float disocclusion_threshold = 0.01f;
