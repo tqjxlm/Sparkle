@@ -62,6 +62,19 @@ class RayTracingComputeShader : public RHIShaderInfo
     };
 };
 
+static ReblurDenoiser::HitDistanceReconstructionMode ToReblurHitDistanceReconstructionMode(uint32_t mode)
+{
+    switch (mode)
+    {
+    case 0:
+        return ReblurDenoiser::HitDistanceReconstructionMode::Off;
+    case 2:
+        return ReblurDenoiser::HitDistanceReconstructionMode::Area5x5;
+    default:
+        return ReblurDenoiser::HitDistanceReconstructionMode::Area3x3;
+    }
+}
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy)
     : Renderer(render_config, rhi_context, scene_render_proxy),
@@ -194,6 +207,8 @@ void GPURenderer::InitRenderResources()
             "ReblurOutput");
 
         reblur_denoiser_ = std::make_unique<ReblurDenoiser>(rhi_);
+        reblur_denoiser_->SetSettings({.hit_distance_reconstruction_mode = ToReblurHitDistanceReconstructionMode(
+                                           render_config_.reblur_hit_distance_reconstruction_mode)});
         reblur_denoiser_->Initialize(image_size_);
     }
 
@@ -286,6 +301,8 @@ void GPURenderer::Render()
         {
             ASSERT(reblur_denoiser_);
             ASSERT(denoiser_output_texture_);
+            reblur_denoiser_->SetSettings({.hit_distance_reconstruction_mode = ToReblurHitDistanceReconstructionMode(
+                                               render_config_.reblur_hit_distance_reconstruction_mode)});
 
             scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                         .after_stage = RHIPipelineStage::ComputeShader,

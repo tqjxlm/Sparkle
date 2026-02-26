@@ -30,6 +30,9 @@ static ConfigValue<uint32_t> config_shadow_map_resolution("shadow_map_resolution
                                                           1024);
 static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial denoise in ray tracing procedures",
                                                 "renderer", true, true);
+static ConfigValue<uint32_t> config_reblur_hit_distance_reconstruction_mode(
+    "reblur_hit_distance_reconstruction_mode",
+    "standalone ReBLUR hit-distance reconstruction mode (0=off, 1=3x3, 2=5x5)", "renderer", 1, true);
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
@@ -52,6 +55,8 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_width, image_width);
     ConfigCollectionHelper::RegisterConfig(this, config_height, image_height);
     ConfigCollectionHelper::RegisterConfig(this, config_spatial_denoise, spatial_denoise);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_hit_distance_reconstruction_mode,
+                                           reblur_hit_distance_reconstruction_mode);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
@@ -109,6 +114,14 @@ void RenderConfig::Validate()
             config_prepass.Set(false);
             use_prepass = true;
         }
+    }
+
+    if (reblur_hit_distance_reconstruction_mode > 2)
+    {
+        Log(Warn, "reblur_hit_distance_reconstruction_mode={} is invalid. set to 1 (3x3)",
+            reblur_hit_distance_reconstruction_mode);
+        config_reblur_hit_distance_reconstruction_mode.Set(1u);
+        reblur_hit_distance_reconstruction_mode = 1u;
     }
 
 #if FRAMEWORK_ANDROID || FRAMEWORK_IOS

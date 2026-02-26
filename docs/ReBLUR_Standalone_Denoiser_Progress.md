@@ -247,3 +247,42 @@ Date: 2026-02-26
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Continue Phase 2 with Module C (hit-distance reconstruction) and add C1/C2/C3 tests before moving to Module D/G.
+
+Date: 2026-02-26
+- Scope: Phase 2 Module C implementation (hit-distance reconstruction + objective C1/C2/C3 tests).
+- Milestone: Implemented standalone hit-distance reconstruction pass with OFF / 3x3 / 5x5 modes and integrated Module C quantitative checks into the dedicated ReBLUR suite.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_hitdist_reconstruction.cs.slang` and wired it into `ReblurDenoiser::Dispatch` after tile classification.
+  - `ReblurDenoiser` now allocates reconstructed diff/spec textures and dispatches Module C when reconstruction mode is enabled.
+  - Added runtime config `reblur_hit_distance_reconstruction_mode` (`0=off`, `1=3x3`, `2=5x5`) and wired it from `RenderConfig` -> `GPURenderer` -> `ReblurDenoiser::SetSettings`.
+  - Module C metrics from latest suite run:
+    - C1 invalid-pixel normalized RMSE = `0.011963`
+    - C2 valid-pixel luma abs error = `0.00000000`
+    - C3 monotonicity: `rmse_3x3_norm=0.113479`, `rmse_5x5_norm=0.007668` (5x5 <= 3x3)
+  - A shader validation warning due to integer dot-product SPIR-V capability was detected and fixed by switching neighbor-distance math to float dot; subsequent suite run remained PASS without that warning.
+- Trials:
+  - Extended `dev/denoiser_metrics.py` with hit-distance reconstruction shader-equivalent logic and normalized RMSE helper.
+  - Extended `dev/denoiser_module_tests.py` with deterministic Module C fixtures and C1/C2/C3 assertions.
+  - Updated `dev/reblur_test_suite.py` to execute and gate Module C metrics.
+  - Updated `docs/Run.md` to document new reconstruction-mode cvar.
+- Pitfalls:
+  - Initial build failed on `-Wmissing-prototypes` for a new helper in `GPURenderer.cpp`; fixed by marking the helper `static`.
+  - Initial Module C shader used integer `dot`, triggering Vulkan validation warnings; fixed by float-based dot calculation.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_hitdist_reconstruction.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `libraries/include/renderer/RenderConfig.h`
+  - Updated: `libraries/source/renderer/RenderConfig.cpp`
+  - Updated: `libraries/source/renderer/renderer/GPURenderer.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Updated: `docs/Run.md`
+  - Executed:
+    - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+    - `python dev/denoiser_module_tests.py`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless` (rerun after warning fix)
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 2 Module C is complete. Next step is Module D (pre-pass) with D1/D2/D3 quantitative coverage.

@@ -9,6 +9,9 @@ import numpy as np
 REBLUR_HIT_DISTANCE_PARAMS = np.array(
     [3.0, 0.1, 20.0, -25.0], dtype=np.float32)
 REBLUR_TILE_SIZE = 16
+REBLUR_HIT_DIST_RECONSTRUCTION_OFF = 0
+REBLUR_HIT_DIST_RECONSTRUCTION_AREA_3X3 = 1
+REBLUR_HIT_DIST_RECONSTRUCTION_AREA_5X5 = 2
 
 
 def _safe_normalize(vectors: np.ndarray) -> np.ndarray:
@@ -215,6 +218,169 @@ def binary_precision_recall(reference_positive_mask: np.ndarray, predicted_posit
 
 def hash_tile_mask(tile_mask: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(tile_mask).tobytes()).hexdigest()
+
+
+def _unpack_normal_from_packed_normal_roughness(packed_normal_roughness: np.ndarray) -> np.ndarray:
+    unpacked = packed_normal_roughness[..., :3] * 2.0 - 1.0
+    return _safe_normalize(unpacked)
+
+
+def _compute_hit_dist_neighbor_weight(
+    center_x: int,
+    center_y: int,
+    neighbor_x: int,
+    neighbor_y: int,
+    view_z: np.ndarray,
+    normals: np.ndarray,
+) -> float:
+    center_view_z = float(view_z[center_y, center_x])
+    neighbor_view_z = float(view_z[neighbor_y, neighbor_x])
+    if not np.isfinite(neighbor_view_z) or neighbor_view_z <= 0.0:
+        return 0.0
+
+    center_normal = normals[center_y, center_x]
+    neighbor_normal = normals[neighbor_y, neighbor_x]
+
+    offset_x = float(neighbor_x - center_x)
+    offset_y = float(neighbor_y - center_y)
+    distance_squared = offset_x * offset_x + offset_y * offset_y
+    distance_weight = float(np.exp(-distance_squared / 2.0))
+
+    relative_depth_delta = abs(
+        neighbor_view_z - center_view_z) / max(center_view_z, 1e-6)
+    depth_weight = float(np.exp(-relative_depth_delta * 16.0))
+
+    normal_cos = float(
+        np.clip(np.dot(center_normal, neighbor_normal), 0.0, 1.0))
+    normal_weight = normal_cos ** 8.0
+
+    return distance_weight * depth_weight * normal_weight
+
+
+def reconstruct_hit_distance_shader_equivalent(
+    tile_mask: np.ndarray,
+    packed_normal_roughness: np.ndarray,
+    view_z: np.ndarray,
+    diff_signal: np.ndarray,
+    spec_signal: np.ndarray,
+    denoising_range: float,
+    mode: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if mode == REBLUR_HIT_DIST_RECONSTRUCTION_OFF:
+        return diff_signal.copy(), spec_signal.copy()
+
+    if mode not in (
+        REBLUR_HIT_DIST_RECONSTRUCTION_AREA_3X3,
+        REBLUR_HIT_DIST_RECONSTRUCTION_AREA_5X5,
+    ):
+        raise ValueError(
+            f"Unsupported hit-distance reconstruction mode: {mode}")
+
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+    if tile_mask.ndim != 2:
+        raise ValueError("tile_mask must be a 2D array")
+    if diff_signal.shape != spec_signal.shape or diff_signal.shape[-1] != 4:
+        raise ValueError("diff/spec signals must have matching HxWx4 shapes")
+    if packed_normal_roughness.shape[:2] != view_z.shape:
+        raise ValueError(
+            "packed_normal_roughness shape must match view_z shape")
+    if diff_signal.shape[:2] != view_z.shape:
+        raise ValueError("diff/spec shapes must match view_z shape")
+
+    height, width = view_z.shape
+    radius = 1 if mode == REBLUR_HIT_DIST_RECONSTRUCTION_AREA_3X3 else 2
+
+    out_diff = diff_signal.copy()
+    out_spec = spec_signal.copy()
+    normals = _unpack_normal_from_packed_normal_roughness(
+        packed_normal_roughness)
+
+    for y in range(height):
+        for x in range(width):
+            tile_x = x // REBLUR_TILE_SIZE
+            tile_y = y // REBLUR_TILE_SIZE
+            if tile_mask[tile_y, tile_x] != 0:
+                continue
+
+            center_view_z = view_z[y, x]
+            if not np.isfinite(center_view_z) or center_view_z <= 0.0 or center_view_z > denoising_range:
+                continue
+
+            diff_center = diff_signal[y, x, 3]
+            spec_center = spec_signal[y, x, 3]
+            diff_valid = bool(np.isfinite(diff_center)
+                              and diff_center > 0.0 and diff_center <= 1.0)
+            spec_valid = bool(np.isfinite(spec_center)
+                              and spec_center > 0.0 and spec_center <= 1.0)
+
+            if not diff_valid:
+                weighted_sum = 0.0
+                weight_sum = 0.0
+                for offset_y in range(-radius, radius + 1):
+                    for offset_x in range(-radius, radius + 1):
+                        if offset_x == 0 and offset_y == 0:
+                            continue
+                        nx = x + offset_x
+                        ny = y + offset_y
+                        if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                            continue
+                        neighbor_value = diff_signal[ny, nx, 3]
+                        if not np.isfinite(neighbor_value) or neighbor_value <= 0.0 or neighbor_value > 1.0:
+                            continue
+                        neighbor_view_z = view_z[ny, nx]
+                        if (
+                            not np.isfinite(neighbor_view_z)
+                            or neighbor_view_z <= 0.0
+                            or neighbor_view_z > denoising_range
+                        ):
+                            continue
+                        weight = _compute_hit_dist_neighbor_weight(
+                            x, y, nx, ny, view_z, normals)
+                        if weight <= 0.0:
+                            continue
+                        weighted_sum += float(neighbor_value) * weight
+                        weight_sum += weight
+                out_diff[y, x, 3] = np.float32(
+                    weighted_sum / weight_sum) if weight_sum > 0.0 else np.float32(0.0)
+
+            if not spec_valid:
+                weighted_sum = 0.0
+                weight_sum = 0.0
+                for offset_y in range(-radius, radius + 1):
+                    for offset_x in range(-radius, radius + 1):
+                        if offset_x == 0 and offset_y == 0:
+                            continue
+                        nx = x + offset_x
+                        ny = y + offset_y
+                        if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                            continue
+                        neighbor_value = spec_signal[ny, nx, 3]
+                        if not np.isfinite(neighbor_value) or neighbor_value <= 0.0 or neighbor_value > 1.0:
+                            continue
+                        neighbor_view_z = view_z[ny, nx]
+                        if (
+                            not np.isfinite(neighbor_view_z)
+                            or neighbor_view_z <= 0.0
+                            or neighbor_view_z > denoising_range
+                        ):
+                            continue
+                        weight = _compute_hit_dist_neighbor_weight(
+                            x, y, nx, ny, view_z, normals)
+                        if weight <= 0.0:
+                            continue
+                        weighted_sum += float(neighbor_value) * weight
+                        weight_sum += weight
+                out_spec[y, x, 3] = np.float32(
+                    weighted_sum / weight_sum) if weight_sum > 0.0 else np.float32(0.0)
+
+    return out_diff, out_spec
+
+
+def normalized_rmse(a: np.ndarray, b: np.ndarray, value_range: float) -> float:
+    if value_range <= 0.0:
+        raise ValueError("value_range must be positive")
+    return rmse(a, b) / value_range
 
 
 def rmse(a: np.ndarray, b: np.ndarray) -> float:

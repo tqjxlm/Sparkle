@@ -14,6 +14,11 @@ Phase 1 adds Module A checks:
 Phase 2 starts with Module B checks:
 - B1 Tile-mask precision/recall against CPU reference depth classifier
 - B2 Determinism check via repeated tile-mask hash stability
+
+Phase 2 Module C adds hit-distance reconstruction checks:
+- C1 Reconstruction RMSE on masked invalid pixels
+- C2 Preservation error on valid pixels
+- C3 3x3 vs 5x5 monotonicity on sparse fixtures
 """
 
 import argparse
@@ -26,7 +31,7 @@ import tempfile
 import numpy as np
 from PIL import Image
 
-from denoiser_module_tests import run_module_a_tests, run_module_b_tests
+from denoiser_module_tests import run_module_a_tests, run_module_b_tests, run_module_c_tests
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -177,6 +182,28 @@ def main():
     )
     if not module_b_results.passed:
         print("Module B quantitative checks FAILED", flush=True)
+        return 1
+
+    # Module C quantitative checks (Phase 2).
+    module_c_results = run_module_c_tests()
+    print(
+        "C1 metrics: "
+        f"invalid_rmse_norm={module_c_results.c1_invalid_rmse_norm:.6f}",
+        flush=True,
+    )
+    print(
+        "C2 metrics: "
+        f"valid_luma_abs_error={module_c_results.c2_valid_luma_abs_error:.8f}",
+        flush=True,
+    )
+    print(
+        "C3 metrics: "
+        f"rmse_3x3_norm={module_c_results.c3_rmse_3x3_norm:.6f}, "
+        f"rmse_5x5_norm={module_c_results.c3_rmse_5x5_norm:.6f}",
+        flush=True,
+    )
+    if not module_c_results.passed:
+        print("Module C quantitative checks FAILED", flush=True)
         return 1
 
     # S0.1 Entry-point smoke.
