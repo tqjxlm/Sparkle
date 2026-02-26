@@ -293,16 +293,27 @@ def install_vulkan_sdk(build_cache_dir):
 
     elif platform_name == "windows":
         print("Installing Vulkan SDK core...")
-        install_cmd = [
-            download_path, "install", "com.lunarg.vulkan.core",
+        install_args = [
+            "install", "com.lunarg.vulkan.core",
             "--root", vulkan_sdk_path,
             "--accept-licenses", "--default-answer", "--confirm-command"
         ]
+        install_cmd = [download_path] + install_args
 
         print(f"Running installer command: {' '.join(install_cmd)}")
         result = subprocess.run(install_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError("Vulkan SDK installation failed. Please run as administrator.")
+            print("Installation failed. Retrying with administrator privileges...")
+            args_str = subprocess.list2cmdline(install_args)
+            result = subprocess.run([
+                "powershell", "-Command",
+                f"$p = Start-Process -FilePath '{download_path}' -ArgumentList '{args_str}'"
+                f" -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
+            ], capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "Vulkan SDK installation failed even with administrator privileges."
+                    f" stderr: {result.stderr}")
 
     os.remove(download_path)
 
