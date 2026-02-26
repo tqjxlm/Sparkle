@@ -48,7 +48,6 @@ public:
     virtual bool IsRegularFile(const Path &path) = 0;
     virtual bool Remove(const Path &path) = 0;
 
-    // List all files and directories in the given directory path. it will always return raw file path.
     [[nodiscard]] virtual std::vector<Path> ListDirectory(const Path &dirpath) = 0;
 
 protected:

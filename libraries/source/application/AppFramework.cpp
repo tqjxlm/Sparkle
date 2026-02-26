@@ -32,6 +32,8 @@ constexpr float LogInterval = 1.f;
 
 static void ClearScreenshots()
 {
+    Log(Info, "Clearing screenshots");
+
     auto *fm = FileManager::GetNativeFileManager();
     auto screenshot_dir = Path::External("screenshots");
 
@@ -44,7 +46,7 @@ static void ClearScreenshots()
     {
         if (fm->IsRegularFile(entry))
         {
-            Log(Info, "Clearing screenshot: {}", entry.path.filename().string());
+            Log(Info, "Removing {}", entry.path.filename().string());
             fm->Remove(entry);
         }
     }
@@ -830,9 +832,19 @@ void AppFramework::RequestTakeScreenshot()
     render_framework_->RequestTakeScreenshot();
 }
 
+void AppFramework::RequestTakeScreenshot(const std::string &name)
+{
+    render_framework_->RequestTakeScreenshot(name);
+}
+
 bool AppFramework::IsScreenshotCompleted() const
 {
     return render_framework_->IsScreenshotCompleted();
+}
+
+bool AppFramework::IsReadyForAutoScreenshot() const
+{
+    return render_framework_->IsReadyForAutoScreenshot();
 }
 
 CameraComponent *AppFramework::GetMainCamera() const

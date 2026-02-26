@@ -170,7 +170,7 @@ std::vector<Path> StdFileManager::ListDirectory(const Path &dirpath)
     {
         for (const auto &entry : fs::directory_iterator(absolute_path))
         {
-            entries.emplace_back(entry.path(), dirpath.type);
+            entries.emplace_back(dirpath.path / entry.path().filename(), dirpath.type);
         }
     }
     catch (const fs::filesystem_error &e)
