@@ -445,6 +445,13 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         ray_desc.Direction = next_direction;
     }
 
+    // Firefly clamp on pre-demodulation radiance (energy-preserving)
+    if (result.is_hit)
+    {
+        result.diffuse_radiance = min(result.diffuse_radiance, output_limit);
+        result.specular_radiance = min(result.specular_radiance, output_limit);
+    }
+
     // Demodulate: divide out albedo from diffuse
     if (result.is_hit)
     {
@@ -508,12 +515,9 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         float3 combined_clamped = min(output.total_radiance, output_limit);
         this_combined += combined_clamped;
 
-        // Firefly removal
-        float3 diff_clamped = min(output.diffuse_radiance, output_limit);
-        float3 spec_clamped = min(output.specular_radiance, output_limit);
-
-        diff_accum += float4(diff_clamped, output.diffuse_hit_dist);
-        spec_accum += float4(spec_clamped, output.specular_hit_dist);
+        // Diffuse/specular already clamped pre-demodulation inside SamplePixelSplit
+        diff_accum += float4(output.diffuse_radiance, output.diffuse_hit_dist);
+        spec_accum += float4(output.specular_radiance, output.specular_hit_dist);
 
         last_output = output;
     }
