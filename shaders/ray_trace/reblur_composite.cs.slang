@@ -7,6 +7,9 @@
 [[vk::binding(2, 0)]] Texture2D<float4> denoisedSpecular;
 [[vk::binding(3, 0)]] Texture2D<float4> albedoMetallic;
 [[vk::binding(4, 0)]] RWTexture2D<float4> outputImage;
+[[vk::binding(5, 0)]] Texture2D<float> viewZ;
+
+static const float DenoisingRange = 1000.0;
 
 [shader("compute")]
 [numthreads(16, 16, 1)]
@@ -14,6 +17,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
 {
     uint2 pixel = DTid.xy;
     if (pixel.x >= resolution.x || pixel.y >= resolution.y)
+        return;
+
+    // Sky pixels already have correct color in outputImage from the split path tracer.
+    // Skip them to preserve the vanilla accumulated sky color.
+    float vz = viewZ[pixel];
+    if (vz > DenoisingRange)
         return;
 
     float4 diff = denoisedDiffuse[pixel];

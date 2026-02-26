@@ -349,9 +349,12 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
             float3 emissive_contrib = emissive_color * throughput * bsdf_mis_weight;
             if (bounce == 0)
             {
-                // Emissive primary hit: put in diffuse channel
+                // Emissive primary hit: put in diffuse channel.
+                // Set albedo to 1 so the composite pass-through is identity
+                // (emissive light is independent of surface albedo).
                 result.total_radiance += emissive_contrib;
                 result.diffuse_radiance += emissive_contrib;
+                result.albedo = float3(1, 1, 1);
                 return result;
             }
 

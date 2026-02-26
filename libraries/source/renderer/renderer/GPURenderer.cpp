@@ -109,6 +109,7 @@ class ReblurCompositeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(denoisedSpecular, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(albedoMetallic, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(outputImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(viewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
 
     END_SHADER_RESOURCE_TABLE
 
@@ -690,6 +691,7 @@ void GPURenderer::InitReblurResources()
     auto *comp_resources = composite_pipeline_->GetShaderResource<ReblurCompositeShader>();
     comp_resources->ubo().BindResource(composite_uniform_buffer_);
     comp_resources->outputImage().BindResource(scene_texture_->GetDefaultView(rhi_));
+    comp_resources->viewZ().BindResource(view_z_->GetDefaultView(rhi_));
 
     // Compute pass for REBLUR dispatches (no timestamp to avoid query reuse within frame)
     reblur_compute_pass_ = rhi_->CreateComputePass("ReblurGPUComputePass", false);
