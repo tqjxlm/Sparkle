@@ -136,6 +136,12 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float stab_diff_luma = GetLuminance(stab_diff.rgb);
     float stab_spec_luma = GetLuminance(stab_spec.rgb);
 
+    // Save incoming accumSpeed before antilag modifies it.
+    // Used later for blend weight and sigma_scale: truly disoccluded edge pixels
+    // (incoming accum<=2) get moderate blend and tighter sigma for faster adaptation.
+    float diff_accum_incoming = diff_accum_speed;
+    float spec_accum_incoming = spec_accum_speed;
+
     // Antilag detection: when history diverges from current neighborhood,
     // reduce accumulation speed to forget stale history faster.
     // Gate on accum_speed >= 8: before that, temporal average is too noisy
@@ -164,7 +170,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
         }
     }
 
-    // Adaptive sigma scale: tighter clamping as more history accumulates
+    // Adaptive sigma scale: tighter clamping as more history accumulates.
     float diff_non_linear = GetNonLinearAccumSpeed(diff_accum_speed);
     float spec_non_linear = GetNonLinearAccumSpeed(spec_accum_speed);
     float diff_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * diff_non_linear);
@@ -176,24 +182,42 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float spec_lo = spec_mean - spec_sigma * spec_sigma_scale;
     float spec_hi = spec_mean + spec_sigma * spec_sigma_scale;
 
-    // Clamp history color based on luminance box
-    float clamped_diff_luma = clamp(stab_diff_luma, diff_lo, diff_hi);
-    float clamped_spec_luma = clamp(stab_spec_luma, spec_lo, spec_hi);
+    // For disoccluded edge pixels (incoming accum<=2), SKIP clamping entirely.
+    // At edges, the 5x5 neighborhood shifts dramatically when the center pixel
+    // alternates surfaces due to sub-pixel jitter. The clamping box follows the
+    // current surface, pulling the stabilized output toward it each frame.
+    // This overrides the blend weight (0.9995) and causes the output to oscillate
+    // with the clamping box instead of staying stable.
+    // Without clamping, the per-frame change is only 0.0005 * (PostBlur - history),
+    // giving sub-1/255 stability.
+    float3 clamped_diff_color;
+    float3 clamped_spec_color;
 
-    // Rescale the history color to match clamped luminance
-    float3 clamped_diff_color = stab_diff.rgb * (clamped_diff_luma / max(stab_diff_luma, 1e-6));
-    float3 clamped_spec_color = stab_spec.rgb * (clamped_spec_luma / max(stab_spec_luma, 1e-6));
+    if (diff_accum_incoming <= 2.0)
+    {
+        clamped_diff_color = stab_diff.rgb;
+    }
+    else
+    {
+        float clamped_diff_luma = clamp(stab_diff_luma, diff_lo, diff_hi);
+        clamped_diff_color = stab_diff.rgb * (clamped_diff_luma / max(stab_diff_luma, 1e-6));
+        if (stab_diff_luma < 1e-6)
+            clamped_diff_color = current_diff.rgb;
+    }
 
-    // Guard against zero-luminance history (first frame or sky->geometry)
-    if (stab_diff_luma < 1e-6)
-        clamped_diff_color = current_diff.rgb;
-    if (stab_spec_luma < 1e-6)
-        clamped_spec_color = current_spec.rgb;
+    if (spec_accum_incoming <= 2.0)
+    {
+        clamped_spec_color = stab_spec.rgb;
+    }
+    else
+    {
+        float clamped_spec_luma = clamp(stab_spec_luma, spec_lo, spec_hi);
+        clamped_spec_color = stab_spec.rgb * (clamped_spec_luma / max(stab_spec_luma, 1e-6));
+        if (stab_spec_luma < 1e-6)
+            clamped_spec_color = current_spec.rgb;
+    }
 
-    // Stabilization blend weight: stronger with more history.
-    // Use max(accumSpeed, frame_index) so stabilization grows independently of the
-    // temporal accumulation cap. This lets stabilization reach full strength even when
-    // temporal accumulation is capped at 63 frames.
+    // Stabilization blend weight: full strength from frame_index for all pixels.
     float diff_stab_frames = min(float(max_stabilized_frame_num), max(diff_accum_speed, float(frame_index)));
     float spec_stab_frames = min(float(max_stabilized_frame_num), max(spec_accum_speed, float(frame_index)));
     float diff_blend = diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;

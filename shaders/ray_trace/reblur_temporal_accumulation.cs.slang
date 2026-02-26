@@ -96,8 +96,16 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float diff_accum_speed, spec_accum_speed;
     if (disoccluded)
     {
-        diff_accum_speed = 0.0;
-        spec_accum_speed = 0.0;
+        // Fixed minimum accumSpeed of 1 for disoccluded pixels (weight = 0.5).
+        // This prevents full-range jumps at object edges where sub-pixel jitter
+        // causes the primary ray to alternate between surfaces every frame.
+        // Without this, edge pixels get weight=1.0 every frame (accumSpeed stays 0
+        // because each frame disoccludes from the previous, creating a self-reinforcing
+        // loop: accum=0 -> weight=1.0 -> output=raw_sample -> next frame disoccludes).
+        // With accumSpeed=1, the output is 50% history + 50% current, dampening the
+        // oscillation to ~1/3 of the raw difference in steady state.
+        diff_accum_speed = 1.0;
+        spec_accum_speed = 1.0;
     }
     else
     {
@@ -112,6 +120,74 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // Read history
     float4 hist_diff = prevDiffHistory[prev_pixel];
     float4 hist_spec = prevSpecHistory[prev_pixel];
+
+    // Firefly suppression: clamp incoming sample luminance relative to history.
+    // At high accumSpeed, history represents a stable average. Extreme 1-spp outliers
+    // (specular caustics reaching 40-60x the average) cause large per-frame jumps
+    // that propagate through Blur/PostBlur/Stabilization.
+    //
+    // Evidence (Session 4):
+    //   - 38x threshold has zero measurable effect because PrePass dilutes outliers to ~5-10x
+    //   - Disoccluded pixels (accumSpeed=0) have weight=1.0 and are completely unprotected
+    //   - Nuclear diagnostic confirmed code path IS executing
+    //   - Need much lower threshold AND coverage of disoccluded pixels
+    //
+    // Strategy:
+    //   - accumSpeed >= 4: history is stable, use tight relative clamp (4x history)
+    //   - accumSpeed 1-3: history is noisy, use moderate relative clamp (8x history)
+    //   - accumSpeed 0 (disoccluded): no valid history, use fixed absolute maximum
+    //   - All branches have absolute minimum floor to prevent clamping near-zero to zero
+    if (enable_firefly_suppression != 0)
+    {
+        float hist_diff_luma = GetLuminance(hist_diff.rgb);
+        float curr_diff_luma = GetLuminance(current_diff.rgb);
+        float hist_spec_luma = GetLuminance(hist_spec.rgb);
+        float curr_spec_luma = GetLuminance(current_spec.rgb);
+
+        // Diffuse channel
+        if (diff_accum_speed >= 4.0)
+        {
+            // Stable history: tight clamp at 4x
+            float max_diff_luma = max(hist_diff_luma * 4.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
+            if (curr_diff_luma > max_diff_luma && curr_diff_luma > 0.0)
+                current_diff.rgb *= max_diff_luma / curr_diff_luma;
+        }
+        else if (diff_accum_speed >= 1.0)
+        {
+            // Early accumulation: moderate clamp at 8x
+            float max_diff_luma = max(hist_diff_luma * 8.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
+            if (curr_diff_luma > max_diff_luma && curr_diff_luma > 0.0)
+                current_diff.rgb *= max_diff_luma / curr_diff_luma;
+        }
+        else
+        {
+            // Disoccluded: no valid history, fixed absolute maximum.
+            // At 2048+ spp, well-converged pixel luminance rarely exceeds 2.0 in demodulated space.
+            float max_diff_luma = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE;
+            if (curr_diff_luma > max_diff_luma && curr_diff_luma > 0.0)
+                current_diff.rgb *= max_diff_luma / curr_diff_luma;
+        }
+
+        // Specular channel
+        if (spec_accum_speed >= 4.0)
+        {
+            float max_spec_luma = max(hist_spec_luma * 4.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
+            if (curr_spec_luma > max_spec_luma && curr_spec_luma > 0.0)
+                current_spec.rgb *= max_spec_luma / curr_spec_luma;
+        }
+        else if (spec_accum_speed >= 1.0)
+        {
+            float max_spec_luma = max(hist_spec_luma * 8.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
+            if (curr_spec_luma > max_spec_luma && curr_spec_luma > 0.0)
+                current_spec.rgb *= max_spec_luma / curr_spec_luma;
+        }
+        else
+        {
+            float max_spec_luma = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE;
+            if (curr_spec_luma > max_spec_luma && curr_spec_luma > 0.0)
+                current_spec.rgb *= max_spec_luma / curr_spec_luma;
+        }
+    }
 
     // Linear accumulation: lerp(history, current, weight)
     float4 acc_diff = lerp(hist_diff, current_diff, diff_weight);
