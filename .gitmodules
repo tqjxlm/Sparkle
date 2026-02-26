@@ -58,3 +58,6 @@
 [submodule "thirdparty/IconFontCppHeaders"]
 	path = thirdparty/IconFontCppHeaders
 	url = https://github.com/juliettef/IconFontCppHeaders.git
+[submodule "thirdparty/NRD"]
+	path = thirdparty/NRD
+	url = https://github.com/NVIDIA-RTX/NRD.git
