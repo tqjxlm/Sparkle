@@ -9,6 +9,8 @@ Tests included:
   6. REBLUR pass validation (C++) — native test case + screenshot pixel validation
   7. REBLUR temporal validation — TemporalAccum/HistoryFix produce valid output, convergence
   8. REBLUR temporal convergence (C++) — 30+ frames temporal pipeline + screenshot pixel validation
+  9. REBLUR smoke test (C++) — 30 frames + screenshot
+ 10. Convergence stability — frame-to-frame instability at 2048 spp vs vanilla baseline
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -126,6 +128,8 @@ def main():
     functional_test_py = os.path.join(PROJECT_ROOT, "dev", "functional_test.py")
     pass_validation_py = os.path.join(SCRIPT_DIR, "reblur_pass_validation.py")
     temporal_validation_py = os.path.join(SCRIPT_DIR, "reblur_temporal_validation.py")
+    convergence_stability_py = os.path.join(
+        PROJECT_ROOT, "dev", "reblur", "test_convergence_stability.py")
 
     results = []
 
@@ -230,6 +234,13 @@ def main():
     if ok:
         ok2, dur2, _ = validate_latest_screenshot(fw, "REBLUR smoke test screenshot")
         results.append(("REBLUR smoke test (pixels)", ok2, dur2))
+
+    # --- Test 10: Convergence stability (frame-to-frame instability vs vanilla) ---
+    ok, dur, _ = run_command(
+        [py, convergence_stability_py, "--framework", fw],
+        "10. Convergence stability (2048 spp, frame-to-frame vs vanilla)",
+        show_output=True)
+    results.append(("Convergence stability", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)

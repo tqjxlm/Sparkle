@@ -3,9 +3,10 @@
 Tests:
   1. No NaN or Inf in any output
   2. No output is all black
-  3. Temporal convergence: 64-frame std <= 4-frame std * 1.1
+  3. Temporal convergence: 64-frame mean >= 4-frame mean * 0.9
   4. HistoryFix does not amplify noise: HistoryFix std <= TemporalAccum std * 1.5
   5. Mean luminance conserved within 50% across temporal passes
+  6. Vanilla comparison: reblur 64-frame mean luminance within 5% of vanilla
 
 Usage:
   python tests/reblur/reblur_temporal_validation.py --framework glfw [--skip_build]
@@ -51,7 +52,8 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_capture(framework, debug_pass, max_spp, output_dir, label):
+def run_capture(framework, debug_pass, max_spp, output_dir, label,
+                use_reblur=True):
     """Run app with given params and capture screenshot to output_dir."""
     build_py = os.path.join(PROJECT_ROOT, "build.py")
     cmd = [
@@ -60,7 +62,7 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label):
         "--clear_screenshots", "true",
         "--headless", "true",
         "--pipeline", "gpu",
-        "--use_reblur", "true",
+        "--use_reblur", "true" if use_reblur else "false",
         "--spp", "1",
         "--max_spp", str(max_spp),
         "--reblur_debug_pass", str(debug_pass),
@@ -88,7 +90,8 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label):
         print(f"FAIL: No screenshot found — {label}", flush=True)
         return None
     matches.sort(key=os.path.getmtime, reverse=True)
-    dst = os.path.join(output_dir, f"temporal_{debug_pass}_spp{max_spp}.png")
+    mode = "reblur" if use_reblur else "vanilla"
+    dst = os.path.join(output_dir, f"temporal_{mode}_{debug_pass}_spp{max_spp}.png")
     shutil.copy2(matches[0], dst)
     print(f"  Screenshot: {dst}", flush=True)
     return dst
@@ -177,6 +180,14 @@ def main():
         return 1
     captures["full_64"] = path
 
+    # 5. Vanilla reference at 64 frames (convergence baseline)
+    path = run_capture(args.framework, 99, 64, output_dir,
+                       "Vanilla reference (64 frames)",
+                       use_reblur=False)
+    if not path:
+        return 1
+    captures["vanilla_64"] = path
+
     # --- Load and validate ---
     images = {k: load_screenshot(v) for k, v in captures.items()}
     metrics = {}
@@ -185,6 +196,7 @@ def main():
     metrics["hf_64"] = validate_image("HistoryFix (64 frames)", images["hf_64"])
     metrics["full_4"] = validate_image("FullPipeline (4 frames)", images["full_4"])
     metrics["full_64"] = validate_image("FullPipeline (64 frames)", images["full_64"])
+    metrics["vanilla_64"] = validate_image("Vanilla (64 frames)", images["vanilla_64"])
 
     # --- Assertions ---
     failures = []
@@ -242,6 +254,22 @@ def main():
             f"FullPipeline at 64 frames is too dark (mean_luma={full_mean:.6f} < 0.05)"
         )
 
+    # 6. Vanilla comparison: reblur at 64 frames should match vanilla mean luminance
+    #    within 5%. This catches energy loss from demodulated clamping, spatial blur
+    #    compounding, or other systematic biases.
+    vanilla_mean = metrics["vanilla_64"]["mean_luminance"]
+    reblur_mean = metrics["full_64"]["mean_luminance"]
+    luma_gap_pct = 0.0
+    if vanilla_mean > 1e-4:
+        luma_gap_pct = abs(reblur_mean - vanilla_mean) / vanilla_mean * 100
+        print(f"Vanilla comparison: vanilla={vanilla_mean:.6f}, reblur={reblur_mean:.6f}, "
+              f"gap={luma_gap_pct:.2f}%", flush=True)
+        if luma_gap_pct > 5.0:
+            failures.append(
+                f"Vanilla luminance gap too large: reblur ({reblur_mean:.6f}) vs "
+                f"vanilla ({vanilla_mean:.6f}) = {luma_gap_pct:.1f}% (threshold: 5%)"
+            )
+
     # --- Report ---
     print(f"\n{'='*60}", flush=True)
     if failures:
@@ -255,6 +283,8 @@ def main():
     print(f"  HistoryFix std (64f):    {hf_std:.6f}", flush=True)
     print(f"  Full pipeline std (4f):  {std_4:.6f}", flush=True)
     print(f"  Full pipeline std (64f): {std_64:.6f}", flush=True)
+    print(f"  Vanilla mean (64f):      {vanilla_mean:.6f}", flush=True)
+    print(f"  Vanilla-reblur gap:      {luma_gap_pct:.2f}%", flush=True)
     return 0
 
 

@@ -37,9 +37,15 @@ BUILD_PY = SCRIPT_DIR / "build.py"
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 
 # Maximum acceptable percentage of pixels changing by >1/255 per frame
-MAX_INSTABILITY_PCT = 3.0
+# Vanilla baseline: ~0.18%. Target: within 3x of vanilla.
+MAX_INSTABILITY_PCT_1 = 0.5
+# Maximum acceptable percentage of pixels changing by >5/255 per frame (visible flicker)
+# Vanilla baseline: ~0.00%. Any visible flicker is a regression.
+MAX_INSTABILITY_PCT_5 = 0.1
 # Maximum acceptable ratio of denoiser instability to vanilla instability
-MAX_INSTABILITY_RATIO = 20.0
+MAX_INSTABILITY_RATIO = 3.0
+# Maximum acceptable mean luminance gap vs vanilla (energy conservation)
+MAX_LUMA_GAP_PCT = 3.0
 
 
 def get_screenshot_dir(framework):
@@ -124,17 +130,31 @@ def main():
 
     # Step 3: Evaluate
     ratio = reblur["pct_1"] / max(vanilla["pct_1"], 0.001)
-    print(f"\n  ReBLUR vs Vanilla instability ratio: {ratio:.1f}x")
-    print(f"  ReBLUR absolute instability: {reblur['pct_1']:.2f}% (threshold: {MAX_INSTABILITY_PCT}%)")
+    luma_gap_pct = abs(reblur["luma"] - vanilla["luma"]) / max(vanilla["luma"], 1e-6) * 100
+
+    print(f"\n--- Results ---")
+    print(f"  >1/255 instability: {reblur['pct_1']:.2f}% (threshold: {MAX_INSTABILITY_PCT_1}%)")
+    print(f"  >5/255 instability: {reblur['pct_5']:.2f}% (threshold: {MAX_INSTABILITY_PCT_5}%)")
+    print(f"  Instability ratio vs vanilla: {ratio:.1f}x (threshold: {MAX_INSTABILITY_RATIO}x)")
+    print(f"  Luminance gap vs vanilla: {luma_gap_pct:.2f}% (threshold: {MAX_LUMA_GAP_PCT}%)")
+    print(f"  Mean luminance — vanilla: {vanilla['luma']:.4f}, reblur: {reblur['luma']:.4f}")
 
     passed = True
 
-    if reblur["pct_1"] > MAX_INSTABILITY_PCT:
-        print(f"\n  FAIL: ReBLUR instability ({reblur['pct_1']:.2f}%) exceeds {MAX_INSTABILITY_PCT}%")
+    if reblur["pct_1"] > MAX_INSTABILITY_PCT_1:
+        print(f"\n  FAIL: >1/255 instability ({reblur['pct_1']:.2f}%) exceeds {MAX_INSTABILITY_PCT_1}%")
+        passed = False
+
+    if reblur["pct_5"] > MAX_INSTABILITY_PCT_5:
+        print(f"  FAIL: >5/255 instability ({reblur['pct_5']:.2f}%) exceeds {MAX_INSTABILITY_PCT_5}%")
         passed = False
 
     if ratio > MAX_INSTABILITY_RATIO:
         print(f"  FAIL: ReBLUR is {ratio:.1f}x more unstable than vanilla (threshold: {MAX_INSTABILITY_RATIO}x)")
+        passed = False
+
+    if luma_gap_pct > MAX_LUMA_GAP_PCT:
+        print(f"  FAIL: Luminance gap ({luma_gap_pct:.2f}%) exceeds {MAX_LUMA_GAP_PCT}%")
         passed = False
 
     if passed:
