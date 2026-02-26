@@ -57,12 +57,18 @@ public:
     // called by main thread, run on render thread
     void NotifySceneLoaded();
 
-    // Called from main thread. Requests a screenshot to be taken on the render thread
-    // once the renderer is ready.
+    // Called from main thread. Requests a screenshot to be taken on the render thread.
     void RequestTakeScreenshot();
+
+    // Called from main thread. Requests a screenshot with a custom file name.
+    void RequestTakeScreenshot(const std::string &name);
 
     // Thread-safe. Returns true after the requested screenshot has been saved.
     [[nodiscard]] bool IsScreenshotCompleted() const;
+
+    // Thread-safe (benign race on monotonically-increasing sample count).
+    // Returns true when the renderer has accumulated enough samples for a screenshot.
+    [[nodiscard]] bool IsReadyForAutoScreenshot() const;
 
 private:
     [[nodiscard]] bool IsSceneFullyLoaded() const;
@@ -123,5 +129,6 @@ private:
     std::atomic<bool> screenshot_requested_{false};
     bool screenshot_in_progress_ = false;
     std::atomic<bool> screenshot_completed_{false};
+    std::string screenshot_name_override_;
 };
 } // namespace sparkle
