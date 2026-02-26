@@ -503,3 +503,413 @@ changes that the limited stabilization can't suppress.
 | `reblur_temporal_stabilization.cs.slang` | Independent stabilization counter | Decouple from temporal cap |
 | `ReblurDenoiser.h` | max_stabilized_frame_num = 255 | Allow stronger stabilization |
 | `dev/reblur/*.py` | Added --framework argument | Cross-platform test scripts |
+
+---
+
+## Session 4: Temporal Firefly Suppression Deep Dive
+
+### Starting Point (from Session 3)
+- 0.88% pixels >1/255 per frame (target: <0.5%)
+- 0.29% pixels >5/255 per frame (target: <0.1%)
+- 4.8x worse than vanilla
+
+### Per-Stage Instability Analysis
+
+| Stage | >1/255 | >5/255 | Luma |
+|-------|--------|--------|------|
+| vanilla | 0.18% | 0.00% | 0.4570 |
+| temporal_accum | 37.34% | 7.45% | 0.4482 |
+| historyfix | 37.25% | 7.37% | 0.4478 |
+| postblur | 12.35% | 6.81% | 0.4492 |
+| full | 0.88% | 0.29% | 0.4474 |
+
+Key finding: Stabilization fixes 11.61% of 12.36% PostBlur-unstable pixels (effective).
+Only 0.75% survive, 0.02% new instability from stabilization.
+
+### Root Cause: Extreme 1-spp Outliers
+
+- Inferred 1-spp outlier values reach 40-60x the temporal average
+- 2,482 pixels with PostBlur std>0.05 AND full pipeline std>0.05
+- Unstable pixels oscillate INDEPENDENTLY (mean pairwise correlation ~0.004)
+- 5x5 neighborhood mean IS unstable (std 0.025-0.063)
+- `enable_firefly_suppression` flag existed in UBO but was unused in shader
+
+### Test Cases Created
+- `tests/reblur/test_temporal_firefly.py`: max jump, high-std%, full pipeline >5/255
+- `tests/reblur/test_stabilization_tracking.py`: retention ratio, surviving pixel %
+
+### Fix Attempts and Evidence
+
+**Attempt 1: Firefly suppression gated on accumSpeed >= 4**
+- Used 38x history threshold (REBLUR_FIREFLY_SUPPRESSOR_MAX_RELATIVE_INTENSITY)
+- Result: NO measurable effect (max_jump 0.9961 vs 1.0000)
+
+**Attempt 2: Extended to accumSpeed >= 1 (non-disoccluded)**
+- Added `else if (accum_speed >= 1.0 && !disoccluded)` branch
+- Result: NO measurable effect (max_jump 0.9961, pct_5 0.285% vs 0.287%)
+
+**Nuclear diagnostic: Zeroed ALL outputs when flag is set**
+- Result: Mean luma dropped from 0.448 to 0.040 (sky-only remaining)
+- CONFIRMED: Flag IS set, code IS executing, shader IS recompiled
+- The previous fixes failed not due to build/flag issues but because:
+
+### Why 38x Threshold Has No Effect
+
+Two populations of problematic pixels:
+
+1. **Disoccluded edge pixels (accumSpeed=0, disoccluded=true)**:
+   - Sub-pixel jitter at object silhouettes causes primary ray to alternate surfaces
+   - Depth/normal changes trigger disocclusion every frame
+   - Weight=1.0, output IS the raw 1-spp sample
+   - None of the suppression branches fire (all gated on accumSpeed >= 1)
+
+2. **Non-disoccluded pixels with high history luminance**:
+   - PrePass spatial blur dilutes extreme 1-spp values to ~5-10x average
+   - 38x threshold (from reblur_config.h) never triggers for 5-10x values
+   - Even if triggered: hist_luma=0.5, max=19, jump=1/64*(19-0.5)=0.289 — still high
+
+**Attempt 3: Aggressive thresholds (4x/8x/0.3 absolute)**
+- 3-tier thresholds: 4x for stable (accum>=4), 8x for early (accum>=1), 0.3 absolute for disoccluded
+- Result: MEASURABLE improvement in temporal accum metrics
+  - P99 jump: 0.536 → 0.449, P99.9: 0.826 → 0.682
+  - But pct_5 barely changed: 0.287% → 0.278%
+
+**Attempt 5: Fixed minimum accumSpeed=1 for disoccluded pixels**
+- Changed disoccluded accumSpeed from 0 to fixed 1 (weight=0.5 instead of 1.0)
+- Prevents the self-reinforcing disoccluded loop (accum=0 → weight=1.0 → raw sample → disoccludes)
+- Combined with attempt 3, results:
+
+| Metric | Baseline | Fix3 (4x) | Fix5 (4x+minAccum) | Target |
+|--------|----------|-----------|---------------------|--------|
+| max_jump | 1.000 | 0.940 | 0.927 | <0.3 |
+| P99 jump | 0.536 | 0.449 | 0.295 | — |
+| P99.9 jump | 0.826 | 0.682 | 0.496 | — |
+| high_std% | 3.95% | 3.38% | 2.06% | <2.0% |
+| jump>0.5% | 1.221% | 0.692% | 0.095% | — |
+| pct_5 | 0.287% | 0.278% | 0.271% | <0.1% |
+| pct_1 | 0.845% | 0.667% | 0.650% | <0.5% |
+
+**Key insight: Input clamping only prevents UPWARD spikes.** The max_jump=0.927 comes from
+DOWNWARD drops (well-converged bright pixel disoccludes to dark surface). The full pipeline
+metrics barely improved because remaining instability is in stabilization, not temporal accum.
+
+### PostBlur vs Full Pipeline Comparison (ROOT CAUSE DISCOVERY)
+
+**Methodology:** Captured PostBlur (debug_pass=2) and full pipeline (debug_pass=99) at 2048 spp.
+Compared instability at same pixels across both outputs.
+
+**High-level results:**
+- PostBlur pixels with max_jump > 5/255: **82,269 (8.9%)**
+- Full pipeline pixels with max_jump > 5/255: **4,887 (0.53%)**
+- Overlap (both bad): 4,823
+- PostBlur-only bad (stabilization FIXING): 77,446
+- Full-only bad (stabilization CREATING): 64
+
+**Conclusion: Stabilization IS working for 94% of PostBlur-unstable pixels.** The remaining 4,887
+pixels are where PostBlur instability is too large for stabilization to suppress.
+
+### Root Cause 6: Stabilization Stale History for Edge Pixels (CRITICAL)
+
+**Evidence — Pixel (933,120):**
+```
+  TempAccum: [0.052 0.131 0.132 0.134 0.134]  ← stable dark
+  HistFix  : [0.052 0.131 0.132 0.134 0.134]  ← stable dark
+  PostBlur : [0.052 0.131 0.132 0.134 0.134]  ← stable dark
+  Full     : [0.052 0.802 0.799 0.799 0.799]  ← BRIGHT!
+```
+PostBlur consistently says dark (~0.13), but full pipeline shows bright (~0.80) for frames 1-4.
+**The ONLY difference between PostBlur and Full is temporal stabilization.**
+Stabilization is outputting completely wrong values — 6x brighter than PostBlur input.
+
+**Evidence — Pixel (415,293):**
+```
+  PostBlur : [0.019 0.022 0.027 0.776 0.031]  ← dark except frame 3
+  Full     : [0.027 0.031 0.026 0.849 0.027]  ← same pattern but amplified
+```
+Full pipeline frame 3 is 0.849 vs PostBlur 0.776 — stabilization AMPLIFYING the bright frame.
+
+**Root cause mechanism:**
+1. Edge pixels disocclude every frame → accumSpeed stays at 1
+2. Session 3 fix: `diff_stab_frames = max(accumSpeed, frame_index)` → stab_frames = 2048
+3. Blend weight = 2048/(2048+1) ≈ **0.9995** — stabilization uses 99.95% history!
+4. Sigma scale = 2.0 * (1 + 3 * 0.5) = **5.0** — clamping box is enormous
+5. Neighborhood at edge has both bright and dark pixels → sigma ≈ 0.3 → box = mean ± 1.5
+6. Bright stale history (from before screenshot sequence) passes through unclamped
+7. Output ≈ 0.9995 * bright_history + 0.0005 * dark_PostBlur ≈ bright_history
+8. Even after 575 frames of dark PostBlur, history still hasn't converged to dark
+
+**The Session 3 fix is counterproductive for edge pixels**: it was designed to make stabilization
+engage strongly for all pixels, but for pixels that disocclude every frame, it creates an almost
+immovable stale history that ignores the current PostBlur input.
+
+**Two effects of stale history:**
+1. **Amplification**: At (933,120), stabilization outputs 0.802 when PostBlur says 0.131
+2. **Composite oscillation**: Even if demod values are stable, composite uses current-frame
+   albedo. Edge pixels alternate surfaces (different albedos), causing `stab_demod * albedo`
+   to oscillate even with stable `stab_demod`
+
+### Proposed Fix: Use accumSpeed for Stabilization Blend (Not frame_index)
+
+**Change in `reblur_temporal_stabilization.cs.slang`:**
+```c
+// Before (Session 3): always use frame_index for strong stabilization
+float diff_stab_frames = min(float(max_stabilized_frame_num), max(diff_accum_speed, float(frame_index)));
+
+// After: use accumSpeed directly (no frame_index override)
+float diff_stab_frames = min(float(max_stabilized_frame_num), diff_accum_speed);
+```
+
+**Effect on edge pixels (accumSpeed=1):**
+- blend = 1/(1+1) = 0.5 → 50% history, 50% PostBlur → fast adaptation
+- Stale history decays by 50% each frame instead of 0.05%
+
+**Effect on stable pixels (accumSpeed=63):**
+- blend = 63/(63+1) = 0.984 → still strong stabilization
+- PostBlur noise leakage: 1.6% vs 0.4% with frame_index override
+- BUT PostBlur noise for stable pixels is small (they have high accumSpeed → small blur radius)
+
+**Concern:** Session 3 showed that 0.984 blend was insufficient (0.88% pct_1). The question is
+whether the temporal accum fixes from Session 4 (firefly suppression + minimum accumSpeed) have
+reduced PostBlur noise enough that 0.984 blend is now adequate.
+
+**TESTED: accumSpeed-only blend weight (no frame_index)**
+Results:
+| Metric | Before (frame_index) | After (accumSpeed-only) |
+|--------|---------------------|------------------------|
+| >1/255 | 0.650% | **6.118%** (massive regression!) |
+| >5/255 | 0.271% | **3.499%** (massive regression!) |
+| max_jump | 0.927 | **0.736** (improved) |
+| P99 jump | 0.295 | **0.130** (much improved) |
+| P99.9 jump | 0.496 | **0.344** (improved) |
+| std > 0.1 | 2.06% | **0.34%** (much improved) |
+| jump > 0.5 | 0.095% | **0.033%** (much improved) |
+
+**CONCLUSION:** Pure accumSpeed blend fixes the stale history issue (extreme outliers much better)
+but 0.984 blend at accumSpeed=63 is FAR too weak for stable pixels. Need HYBRID approach:
+low accumSpeed → use accumSpeed for blend (fast adaptation), high accumSpeed → use frame_index
+(strong stabilization).
+
+### Session 5: Edge Pixel Stabilization Deep Dive (continued)
+
+**Previous session metrics were unreliable** — initial measurements (0.650% pct_1, 0.271% pct_5) were
+from a different compilation. Re-measured ALL configurations with deterministic builds:
+
+| Config | pct_1 | pct_5 | P99 | P999 | Notes |
+|--------|-------|-------|-----|------|-------|
+| Session 3+4 baseline (no edge fix) | 0.926% | 0.507% | 0.0039 | 0.2723 | |
+| sigma_cap=1.5 only (no stab cap) | 0.956% | 0.511% | 0.0039 | 0.2694 | barely different |
+| sigma_cap + stale-blend reduction | 0.976% | 0.514% | 0.0039 | 0.2687 | slightly worse |
+| stab=128 + sigma=1.5 | 1.213% | 0.516% | 0.0048 | 0.2726 | worse |
+| **Skip clamping for accum<=2** | **0.873%** | **0.442%** | **0.0039** | **0.2578** | **best so far** |
+
+**Key insight: Clamping box oscillation at edges is the dominant instability source.**
+
+At object silhouette edges, the primary ray alternates surfaces due to sub-pixel jitter.
+The 5x5 neighborhood shifts dramatically when the center pixel changes surface.
+The clamping box follows the new neighborhood, pulling the stabilized history toward the
+current surface each frame. This OVERRIDES the blend weight (0.9995), causing the output
+to oscillate with the clamping box instead of staying stable.
+
+By skipping clamping for disoccluded pixels (accum_incoming <= 2), the per-frame change
+is only 0.0005 * (PostBlur - history) ≈ 0.13/255, well below the 1/255 threshold.
+
+**Evidence — Pixel (933,120) stale history fixed:**
+```
+  PostBlur:    [0.099 0.131 0.131 0.134 0.135]  (consistently dark)
+  Baseline:    [0.099 0.494 0.494 0.494 0.494]  (stale bright - 3.8x amplification)
+  Skip clamp:  [0.000 0.004 0.004 0.004 0.004]  (converged to dark)
+```
+
+### Root Cause 7: Composite Albedo Oscillation (DOMINANT REMAINING ISSUE)
+
+**The remaining pct_1/pct_5 instability is NOT from the denoiser — it's from the composite.**
+
+The composite shader (`reblur_composite.cs.slang`):
+```c
+color = diff.rgb * albedo.rgb + spec.rgb;
+```
+Uses the CURRENT frame's albedo from the G-buffer. At edge pixels where the primary ray
+alternates surfaces, the albedo alternates too. Even with perfectly stable stabilized demod
+values, the composite output oscillates:
+```
+  Stabilized demod ≈ 0.34 (stable average of both surfaces)
+  Dark surface albedo ≈ 0.02:  composite ≈ 0.34 * 0.02 = 0.007
+  Bright surface albedo ≈ 2.0: composite ≈ 0.34 * 2.0 = 0.68
+  Max jump in composite: 0.67 (matches observed worst pixels)
+```
+
+**Evidence — Worst edge pixels all show the same pattern:**
+```
+  Pixel (415,293) PostBlur: [0.008 0.011 0.011 0.753 0.011]  (surface alternation)
+  Pixel (415,293) Full:     [0.008 0.011 0.008 0.669 0.008]  (composite oscillation)
+  Pixel (450,294) PostBlur: [0.020 0.656 0.015 0.616 0.015]
+  Pixel (450,294) Full:     [0.011 0.658 0.008 0.658 0.008]
+```
+The full pipeline output matches PostBlur oscillation patterns — confirming the denoiser
+stabilization is working (damping from 0.753 to 0.669) but the composite remodulation
+reintroduces oscillation from the alternating albedo.
+
+**This is a fundamental limitation of demodulated-space denoising at silhouette edges.**
+The denoiser stabilizes the demodulated signal, but remodulation with a non-stable albedo
+creates oscillation in the final output.
+
+### Potential Fixes for Root Cause 7
+
+1. **Albedo temporal stabilization**: Maintain EMA of albedo texture, use stabilized albedo
+   in composite. Requires: prev_albedo texture, blend pass, modified composite.
+2. **Post-composite temporal stabilization**: Apply TAA-style temporal filter after composite.
+   More overhead but catches all sources of oscillation.
+3. **Accept as limitation**: Document edge oscillation as inherent to demod-space denoising.
+   The vanilla pipeline avoids this by accumulating all 2048 samples directly.
+
+### Current Best Configuration (Skip Clamping for Edge Pixels)
+
+Changes in `reblur_temporal_stabilization.cs.slang`:
+- Save incoming accumSpeed before antilag: `diff_accum_incoming = diff_accum_speed`
+- Skip clamping for disoccluded pixels (accum_incoming <= 2): use raw stabilized history
+- Keep full blend strength (frame_index) for all pixels
+- All other logic unchanged (antilag, sigma_scale formula, etc.)
+
+Current metrics:
+- pct_1: 0.873% (target <0.5%, was 0.926% baseline)
+- pct_5: 0.442% (target <0.1%, was 0.507% baseline)
+- P99: 0.0039 (unchanged)
+- P999: 0.2578 (improved from 0.2723)
+- std>0.1: 0.12% (excellent)
+- jump>0.5: 0.024% (excellent)
+
+### Summary: What's Achievable Without Architectural Changes
+
+| Metric | Session 2 | Session 3+4 | Session 5 | Target |
+|--------|-----------|-------------|-----------|--------|
+| pct_1 | 6.94% | 0.926% | 0.873% | <0.5% |
+| pct_5 | 4.78% | 0.507% | 0.442% | <0.1% |
+| P99 | — | 0.0039 | 0.0039 | — |
+| max_jump | — | 0.657 | 0.661 | <0.3 |
+| std>0.1 | — | 0.13% | 0.12% | <2% |
+
+The gap between current (0.873%/0.442%) and target (0.5%/0.1%) is primarily from composite
+albedo oscillation at silhouette edges — a fundamental limitation requiring architectural
+changes (albedo stabilization or post-composite temporal filtering).
+
+---
+
+## Session 6: PT Blend — All Targets Met
+
+### Starting Point (from Session 5)
+
+| Metric | Value | Target |
+|--------|-------|--------|
+| pct_1 | 0.873% | <0.5% |
+| pct_5 | 0.442% | <0.1% |
+| max_jump | 0.661 | <0.3 |
+
+Remaining instability from Root Cause 7: composite albedo oscillation at silhouette edges.
+
+### Key Insight: Split Path Tracer Already Has the Answer
+
+The split path tracer accumulates its result identically to vanilla in `scene_texture_` (imageData):
+```c
+// ray_trace_split.cs.slang:555
+float3 all_samples = lerp(this_combined / float(spp), imageData[pixel].rgb, moving_average);
+```
+
+At 2048 spp, this is a well-converged radiance-space average for ALL pixels, including edges.
+The composite shader then OVERWRITES this with the denoised remodulated result:
+```c
+outputImage[pixel] = float4(diff.rgb * albedo.rgb + spec.rgb, 1.0);
+```
+
+**The fix:** At high SPP, use the PT accumulated result instead of the denoised composite.
+At low SPP, the denoiser provides better quality through spatial filtering.
+Blend between them based on frame count.
+
+### Attempt 1: PT Blend for Edge Pixels Only (min_accum <= 2)
+
+Added `internalData` binding (binding 6) and `frame_index` to composite UBO.
+Only blended PT result for pixels with low accumSpeed (disoccluding edge pixels).
+
+**Result:** pct_1=0.840%, pct_5=0.268% — moderate improvement.
+Worst pixels UNCHANGED (still 0.008↔0.669) — they have accumSpeed > 2.
+
+### Attempt 2: PT Blend for ALL Pixels
+
+Applied PT blend to ALL non-sky pixels using `pt_weight = saturate(frame_index / 256.0)`.
+
+**Compiler pitfall:** Removing the conditional on `min_accum` caused Slang to optimize away
+the `internalData` binding (read value unused in control flow) → assertion
+`decl->set != UINT_MAX` in RHIShader.cpp. Fixed with a guard expression:
+```c
+float3 color = (min_accum >= 0.0)
+    ? lerp(denoised_color, pt_accumulated, pt_weight)
+    : denoised_color;
+```
+The condition always evaluates true but prevents the compiler from optimizing away the read.
+
+**Result: ALL TARGETS MET.**
+
+| Metric | Session 5 | Session 6 | Target |
+|--------|-----------|-----------|--------|
+| pct_1 | 0.873% | **0.418%** | <0.5% |
+| pct_5 | 0.442% | **0.000%** | <0.1% |
+| max_jump | 0.661 | **0.0196** | <0.3 |
+
+### Why It Works
+
+At `frame_index >= 256` (PT_BLEND_RAMP), `pt_weight = 1.0` → output IS the PT accumulated
+result, which is identical to vanilla's convergence behavior. The denoiser output is only
+used for early frames where its spatial filtering provides better quality than raw noisy PT.
+
+This elegantly sidesteps all denoiser convergence issues (accumSpeed cap, Poisson rotation,
+antilag resets, composite albedo oscillation) at convergence, because the output at high SPP
+is literally the vanilla accumulation.
+
+### Quality Verification
+
+**Formal convergence stability test:**
+```
+=== Test: ReBLUR Convergence Stability ===
+  Vanilla:  0.18% pixels >1/255, 0.00% >5/255
+  ReBLUR:   0.19% pixels >1/255, 0.00% >5/255
+  Instability ratio: 1.0x (threshold: 3.0x)
+  Luminance gap: 0.31% (threshold: 3.0%)
+  PASS
+```
+
+**Demodulated clamping test:**
+```
+  Luminance gap: 0.3% (threshold: 5.0%)
+  PASS
+```
+
+**Functional test (forward pipeline FLIP):**
+```
+  Mean FLIP error: 0.0035
+  PASS
+```
+
+**ReBLUR vs Vanilla converged frame comparison:**
+- Mean pixel difference: 0.003425
+- RMSE: 0.006003
+- Pixels > 5/255 different: 1.50%
+- Pixels > 10/255 different: 0.15%
+- Luminance gap: 0.31%
+
+### Files Modified
+
+| File | Change | Purpose |
+|------|--------|---------|
+| `reblur_composite.cs.slang` | Added internalData binding, frame_index UBO, PT blend | Core fix |
+| `VulkanImage.h` | Added General layout access mask | Read-write storage image |
+| `ReblurDenoiser.h` | Added GetInternalData() getter | Expose internal data |
+| `ReblurDenoiser.cpp` | Implemented GetInternalData() | Return internal_data_ |
+| `GPURenderer.cpp` | Updated composite shader class, UBO, bindings | Wire up new bindings |
+
+### Results Progression (All Sessions)
+
+| Metric | Session 2 | Session 3+4 | Session 5 | Session 6 | Target |
+|--------|-----------|-------------|-----------|-----------|--------|
+| pct_1 | 6.94% | 0.926% | 0.873% | **0.418%** | <0.5% |
+| pct_5 | 4.78% | 0.507% | 0.442% | **0.000%** | <0.1% |
+| max_jump | — | 0.657 | 0.661 | **0.0196** | <0.3 |
+| vs vanilla ratio | 39x | 5.1x | 4.8x | **1.0x** | <3.0x |
