@@ -117,28 +117,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 acc_diff = lerp(hist_diff, current_diff, diff_weight);
     float4 acc_spec = lerp(hist_spec, current_spec, spec_weight);
 
-    // Firefly suppression: clamp outlier luminance against history
-    // Only apply when we have valid history (accumSpeed > 0)
-    if (enable_firefly_suppression != 0 && !disoccluded)
-    {
-        // Diffuse firefly suppression
-        float diff_max_relative = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE +
-            REBLUR_FIREFLY_SUPPRESSOR_MAX_RELATIVE_INTENSITY / (diff_accum_speed + 1.0);
-        float diff_luma = GetLuminance(acc_diff.rgb);
-        float hist_diff_luma = GetLuminance(hist_diff.rgb);
-        float diff_luma_clamped = min(diff_luma, max(hist_diff_luma, 1e-6) * diff_max_relative);
-        if (diff_luma > 1e-6)
-            acc_diff.rgb = ChangeLuma(acc_diff.rgb, diff_luma_clamped);
-
-        // Specular firefly suppression
-        float spec_max_relative = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE +
-            REBLUR_FIREFLY_SUPPRESSOR_MAX_RELATIVE_INTENSITY / (spec_accum_speed + 1.0);
-        float spec_luma = GetLuminance(acc_spec.rgb);
-        float hist_spec_luma = GetLuminance(hist_spec.rgb);
-        float spec_luma_clamped = min(spec_luma, max(hist_spec_luma, 1e-6) * spec_max_relative);
-        if (spec_luma > 1e-6)
-            acc_spec.rgb = ChangeLuma(acc_spec.rgb, spec_luma_clamped);
-    }
+    // Note: Firefly suppression in temporal accumulation is intentionally omitted.
+    // The ratio-based approach (clamp against history * max_relative) creates signal
+    // death spirals with noisy 1 spp inputs where history luminance is near zero.
+    // Anti-firefly is handled by the neighborhood sigma-clamp in HistoryFix instead.
 
     // Write outputs
     outDiffuse[pixel] = acc_diff;

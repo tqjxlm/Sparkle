@@ -5,6 +5,11 @@
 
 [[vk::binding(0, 0)]] cbuffer ubo
 {
+    float4 rotator; // cos, sin, -sin, cos
+    float4 hit_dist_params;
+    float4 view_row0;
+    float4 view_row1;
+    float4 view_row2;
     uint2 resolution;
     float max_blur_radius;
     float min_blur_radius;
@@ -12,21 +17,15 @@
     float plane_dist_sensitivity;
     float min_hit_dist_weight;
     float denoising_range;
-    float4 rotator; // cos, sin, -sin, cos
-    uint frame_index;
-    uint blur_pass_index; // 0=pre, 1=blur, 2=post
     float diffuse_prepass_blur_radius;
     float specular_prepass_blur_radius;
-    uint has_temporal_data;
     float min_rect_dim_mul_unproject;
     float roughness_fraction;
     float unproject_x;
     float unproject_y;
-    // std140: float4 auto-pads to 16-byte alignment here
-    float4 hit_dist_params;
-    float4 view_row0;
-    float4 view_row1;
-    float4 view_row2;
+    uint frame_index;
+    uint blur_pass_index; // 0=pre, 1=blur, 2=post
+    uint has_temporal_data;
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> inDiffuse;

@@ -137,26 +137,31 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float stab_spec_luma = GetLuminance(stab_spec.rgb);
 
     // Antilag detection: when history diverges from current neighborhood,
-    // reduce accumulation speed to forget stale history faster
+    // reduce accumulation speed to forget stale history faster.
+    // Gate on accum_speed >= 8: before that, temporal average is too noisy
+    // for reliable divergence detection (Monte Carlo noise dominates).
+    // Also use sigma-based denominator instead of mean-based to avoid
+    // false triggers in dark regions.
     float diff_antilag = 1.0;
     float spec_antilag = 1.0;
     {
-        // Compute how far history luminance is from current neighborhood
-        float diff_deviation = abs(stab_diff_luma - diff_mean);
-        float diff_threshold = diff_sigma * antilag_sigma_scale;
-        diff_antilag = saturate(1.0 - (diff_deviation - diff_threshold) /
-                                       max(diff_mean * antilag_sensitivity, 1e-6));
+        if (diff_accum_speed >= 8.0)
+        {
+            float diff_deviation = abs(stab_diff_luma - diff_mean);
+            float diff_threshold = diff_sigma * antilag_sigma_scale;
+            diff_antilag = saturate(1.0 - (diff_deviation - diff_threshold) /
+                                           max(diff_threshold * antilag_sensitivity, 1e-6));
+            diff_accum_speed = lerp(0.0, diff_accum_speed, diff_antilag);
+        }
 
-        float spec_deviation = abs(stab_spec_luma - spec_mean);
-        float spec_threshold = spec_sigma * antilag_sigma_scale;
-        spec_antilag = saturate(1.0 - (spec_deviation - spec_threshold) /
-                                       max(spec_mean * antilag_sensitivity, 1e-6));
-
-        // Reduce accumulation speed when antilag detects divergence
-        float diff_min_accum = 0.0;
-        float spec_min_accum = 0.0;
-        diff_accum_speed = lerp(diff_min_accum, diff_accum_speed, diff_antilag);
-        spec_accum_speed = lerp(spec_min_accum, spec_accum_speed, spec_antilag);
+        if (spec_accum_speed >= 8.0)
+        {
+            float spec_deviation = abs(stab_spec_luma - spec_mean);
+            float spec_threshold = spec_sigma * antilag_sigma_scale;
+            spec_antilag = saturate(1.0 - (spec_deviation - spec_threshold) /
+                                           max(spec_threshold * antilag_sensitivity, 1e-6));
+            spec_accum_speed = lerp(0.0, spec_accum_speed, spec_antilag);
+        }
     }
 
     // Adaptive sigma scale: tighter clamping as more history accumulates

@@ -4,6 +4,9 @@
 
 [[vk::binding(0, 0)]] cbuffer ubo
 {
+    float4 view_row0;
+    float4 view_row1;
+    float4 view_row2;
     uint2 resolution;
     float history_fix_frame_num;
     float history_fix_stride;
@@ -12,12 +15,9 @@
     float denoising_range;
     float min_rect_dim_mul_unproject;
     float roughness_fraction;
-    uint enable_anti_firefly;
     float unproject_x;
     float unproject_y;
-    float4 view_row0;
-    float4 view_row1;
-    float4 view_row2;
+    uint enable_anti_firefly;
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> inDiffuse;

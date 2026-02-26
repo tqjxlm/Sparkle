@@ -49,6 +49,11 @@ class ReblurBlurShader : public RHIShaderInfo
 public:
     struct UniformBufferData
     {
+        Vector4 rotator; // cos, sin, -sin, cos
+        Vector4 hit_dist_params;
+        Vector4 view_row0;
+        Vector4 view_row1;
+        Vector4 view_row2;
         Vector2UInt resolution;
         float max_blur_radius;
         float min_blur_radius;
@@ -56,21 +61,15 @@ public:
         float plane_dist_sensitivity;
         float min_hit_dist_weight;
         float denoising_range;
-        alignas(16) Vector4 rotator; // cos, sin, -sin, cos
-        uint32_t frame_index;
-        uint32_t blur_pass_index;
         float diffuse_prepass_blur_radius;
         float specular_prepass_blur_radius;
-        uint32_t has_temporal_data;
         float min_rect_dim_mul_unproject;
         float roughness_fraction;
         float unproject_x;
         float unproject_y;
-        // std140: float4 auto-pads to 16-byte alignment
-        alignas(16) Vector4 hit_dist_params;
-        alignas(16) Vector4 view_row0;
-        alignas(16) Vector4 view_row1;
-        alignas(16) Vector4 view_row2;
+        uint32_t frame_index;
+        uint32_t blur_pass_index;
+        uint32_t has_temporal_data;
     };
 };
 
@@ -131,6 +130,9 @@ class ReblurHistoryFixShader : public RHIShaderInfo
 public:
     struct UniformBufferData
     {
+        Vector4 view_row0;
+        Vector4 view_row1;
+        Vector4 view_row2;
         Vector2UInt resolution;
         float history_fix_frame_num;
         float history_fix_stride;
@@ -139,12 +141,9 @@ public:
         float denoising_range;
         float min_rect_dim_mul_unproject;
         float roughness_fraction;
-        uint32_t enable_anti_firefly;
         float unproject_x;
         float unproject_y;
-        alignas(16) Vector4 view_row0;
-        alignas(16) Vector4 view_row1;
-        alignas(16) Vector4 view_row2;
+        uint32_t enable_anti_firefly;
     };
 };
 
@@ -446,9 +445,10 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     Blur(inputs, settings, matrices, 2, diff_temp2_.get(), spec_temp2_.get(), denoised_diffuse_.get(),
          denoised_specular_.get(), internal_data_.get(), true);
 
-    // Recurrent blur: store POST-blurred output as history for next frame's temporal accumulation.
-    // NRD feeds back the spatially-filtered signal so the temporal EMA blends denoised data.
-    CopyHistoryData(denoised_diffuse_.get(), denoised_specular_.get());
+    // Store temporal accumulation + history-fix output (temp1, before spatial blur) as history.
+    // Using pre-blur data prevents spatial blur from compounding frame over frame.
+    // temp1 still holds the HistoryFix output since Blur/PostBlur only read from it.
+    CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());
 
     // CopyHistoryData leaves internal_data_ in TransferSrc; transition to Read
     internal_data_->Transition({.target_layout = RHIImageLayout::Read,
@@ -536,6 +536,11 @@ void ReblurDenoiser::Blur(const ReblurInputBuffers &inputs, const ReblurSettings
                             settings.hit_dist_params[3]);
 
     ReblurBlurShader::UniformBufferData ubo{
+        .rotator = {cos_a, sin_a, -sin_a, cos_a},
+        .hit_dist_params = hit_dist_params,
+        .view_row0 = view_row0,
+        .view_row1 = view_row1,
+        .view_row2 = view_row2,
         .resolution = {width_, height_},
         .max_blur_radius = settings.max_blur_radius,
         .min_blur_radius = settings.min_blur_radius,
@@ -543,20 +548,15 @@ void ReblurDenoiser::Blur(const ReblurInputBuffers &inputs, const ReblurSettings
         .plane_dist_sensitivity = settings.plane_dist_sensitivity,
         .min_hit_dist_weight = settings.min_hit_dist_weight,
         .denoising_range = 1000.f,
-        .rotator = {cos_a, sin_a, -sin_a, cos_a},
-        .frame_index = internal_frame_index_,
-        .blur_pass_index = pass_index,
         .diffuse_prepass_blur_radius = settings.diffuse_prepass_blur_radius,
         .specular_prepass_blur_radius = settings.specular_prepass_blur_radius,
-        .has_temporal_data = has_temporal_data ? 1u : 0u,
         .min_rect_dim_mul_unproject = min_rect_dim_mul_unproject,
         .roughness_fraction = settings.roughness_fraction,
         .unproject_x = unproject_x,
         .unproject_y = unproject_y,
-        .hit_dist_params = hit_dist_params,
-        .view_row0 = view_row0,
-        .view_row1 = view_row1,
-        .view_row2 = view_row2,
+        .frame_index = internal_frame_index_,
+        .blur_pass_index = pass_index,
+        .has_temporal_data = has_temporal_data ? 1u : 0u,
     };
     ub->Upload(rhi_, &ubo);
 
@@ -667,6 +667,9 @@ void ReblurDenoiser::HistoryFix(const ReblurInputBuffers &inputs, const ReblurSe
     Vector4 view_row2 = matrices.view_to_world.col(2);
 
     ReblurHistoryFixShader::UniformBufferData ubo{
+        .view_row0 = view_row0,
+        .view_row1 = view_row1,
+        .view_row2 = view_row2,
         .resolution = {width_, height_},
         .history_fix_frame_num = static_cast<float>(settings.history_fix_frame_num),
         .history_fix_stride = settings.history_fix_stride,
@@ -675,12 +678,9 @@ void ReblurDenoiser::HistoryFix(const ReblurInputBuffers &inputs, const ReblurSe
         .denoising_range = 1000.f,
         .min_rect_dim_mul_unproject = min_rect_dim_mul_unproject,
         .roughness_fraction = settings.roughness_fraction,
-        .enable_anti_firefly = settings.enable_anti_firefly ? 1u : 0u,
         .unproject_x = unproject_x,
         .unproject_y = unproject_y,
-        .view_row0 = view_row0,
-        .view_row1 = view_row1,
-        .view_row2 = view_row2,
+        .enable_anti_firefly = settings.enable_anti_firefly ? 1u : 0u,
     };
     history_fix_ub_->Upload(rhi_, &ubo);
 

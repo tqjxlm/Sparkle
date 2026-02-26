@@ -5,10 +5,6 @@
 
 // Internal data packing: diffAccumSpeed (6 bits) + specAccumSpeed (6 bits)
 // Stored in RG16Float as normalized [0,1] values
-// NRD tracks accumulation speed independently per channel because:
-// - Specular has virtual motion reprojection that may succeed/fail independently
-// - Roughness affects specular accumulation speed via GetSpecMagicCurve
-// - Blur radius for each channel depends on its own accumulation speed
 #define REBLUR_ACCUMSPEED_BITS    6
 #define REBLUR_MAX_ACCUM_FRAME    ((1 << REBLUR_ACCUMSPEED_BITS) - 1)
 
