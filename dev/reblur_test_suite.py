@@ -10,6 +10,10 @@ Phase 1 adds Module A checks:
 - A1 Roundtrip encoding error for normal/roughness/radiance/hit-distance packing
 - A2 Motion-vector reprojection error on deterministic camera-motion fixtures
 - A3 Guide validity ratio check for finite valid viewZ and normalized hit distance
+
+Phase 2 starts with Module B checks:
+- B1 Tile-mask precision/recall against CPU reference depth classifier
+- B2 Determinism check via repeated tile-mask hash stability
 """
 
 import argparse
@@ -22,7 +26,7 @@ import tempfile
 import numpy as np
 from PIL import Image
 
-from denoiser_module_tests import run_module_a_tests
+from denoiser_module_tests import run_module_a_tests, run_module_b_tests
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -155,6 +159,24 @@ def main():
         f"A3 metrics: guide_valid_ratio={module_a_results.a3_guide_valid_ratio:.6%}", flush=True)
     if not module_a_results.passed:
         print("Module A quantitative checks FAILED", flush=True)
+        return 1
+
+    # Module B quantitative checks (Phase 2).
+    module_b_results = run_module_b_tests()
+    print(
+        "B1 metrics: "
+        f"tile_precision={module_b_results.b1_precision:.6f}, "
+        f"tile_recall={module_b_results.b1_recall:.6f}",
+        flush=True,
+    )
+    print(
+        "B2 metrics: "
+        f"unique_hash_count={module_b_results.b2_unique_hash_count}, "
+        f"hash={module_b_results.b2_reference_hash}",
+        flush=True,
+    )
+    if not module_b_results.passed:
+        print("Module B quantitative checks FAILED", flush=True)
         return 1
 
     # S0.1 Entry-point smoke.

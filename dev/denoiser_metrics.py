@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 
 REBLUR_HIT_DISTANCE_PARAMS = np.array(
     [3.0, 0.1, 20.0, -25.0], dtype=np.float32)
+REBLUR_TILE_SIZE = 16
 
 
 def _safe_normalize(vectors: np.ndarray) -> np.ndarray:
@@ -113,6 +116,105 @@ def compute_motion_vectors_pixels(
     previous_pixels = project_world_to_pixel(
         world_positions, previous_view_projection, width, height)
     return (previous_pixels - current_pixels).astype(np.float32, copy=False)
+
+
+def _is_denoisable_view_z(view_z: np.ndarray, denoising_range: float) -> np.ndarray:
+    finite_mask = np.isfinite(view_z)
+    return finite_mask & (view_z > 0.0) & (view_z <= denoising_range)
+
+
+def classify_tiles_reference(
+    view_z: np.ndarray,
+    denoising_range: float,
+    tile_size: int = REBLUR_TILE_SIZE,
+) -> np.ndarray:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+
+    height, width = view_z.shape
+    tile_width = (width + tile_size - 1) // tile_size
+    tile_height = (height + tile_size - 1) // tile_size
+    tiles = np.zeros((tile_height, tile_width), dtype=np.uint32)
+
+    for tile_y in range(tile_height):
+        y0 = tile_y * tile_size
+        y1 = min(y0 + tile_size, height)
+        for tile_x in range(tile_width):
+            x0 = tile_x * tile_size
+            x1 = min(x0 + tile_size, width)
+            tile_view_z = view_z[y0:y1, x0:x1]
+            denoisable_mask = _is_denoisable_view_z(
+                tile_view_z, denoising_range)
+            is_sky_tile = not np.any(denoisable_mask)
+            tiles[tile_y, tile_x] = 1 if is_sky_tile else 0
+
+    return tiles
+
+
+def classify_tiles_shader_equivalent(
+    view_z: np.ndarray,
+    denoising_range: float,
+) -> np.ndarray:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+
+    height, width = view_z.shape
+    tile_width = (width + REBLUR_TILE_SIZE - 1) // REBLUR_TILE_SIZE
+    tile_height = (height + REBLUR_TILE_SIZE - 1) // REBLUR_TILE_SIZE
+    tiles = np.zeros((tile_height, tile_width), dtype=np.uint32)
+
+    for tile_y in range(tile_height):
+        for tile_x in range(tile_width):
+            tile_origin_x = tile_x * REBLUR_TILE_SIZE
+            tile_origin_y = tile_y * REBLUR_TILE_SIZE
+
+            invalid_count = 0
+            sample_count = 0
+            for thread_y in range(4):
+                for thread_x in range(8):
+                    base_x = tile_origin_x + thread_x * 2
+                    base_y = tile_origin_y + thread_y * 4
+                    for sample_x in range(2):
+                        for sample_y in range(4):
+                            pixel_x = base_x + sample_x
+                            pixel_y = base_y + sample_y
+                            if pixel_x >= width or pixel_y >= height:
+                                continue
+
+                            sample_count += 1
+                            value = view_z[pixel_y, pixel_x]
+                            if not np.isfinite(value) or value <= 0.0 or value > denoising_range:
+                                invalid_count += 1
+
+            tiles[tile_y, tile_x] = 1 if sample_count > 0 and invalid_count == sample_count else 0
+
+    return tiles
+
+
+def binary_precision_recall(reference_positive_mask: np.ndarray, predicted_positive_mask: np.ndarray) -> tuple[float, float]:
+    if reference_positive_mask.shape != predicted_positive_mask.shape:
+        raise ValueError(
+            "reference and prediction masks must have the same shape")
+
+    reference_positive = reference_positive_mask.astype(bool, copy=False)
+    predicted_positive = predicted_positive_mask.astype(bool, copy=False)
+
+    true_positive = np.logical_and(
+        reference_positive, predicted_positive).sum(dtype=np.int64)
+    false_positive = np.logical_and(
+        ~reference_positive, predicted_positive).sum(dtype=np.int64)
+    false_negative = np.logical_and(
+        reference_positive, ~predicted_positive).sum(dtype=np.int64)
+
+    precision = float(true_positive / (true_positive + false_positive)
+                      ) if (true_positive + false_positive) > 0 else 1.0
+    recall = float(true_positive / (true_positive + false_negative)
+                   ) if (true_positive + false_negative) > 0 else 1.0
+    return precision, recall
+
+
+def hash_tile_mask(tile_mask: np.ndarray) -> str:
+    return hashlib.sha256(np.ascontiguousarray(tile_mask).tobytes()).hexdigest()
 
 
 def rmse(a: np.ndarray, b: np.ndarray) -> float:

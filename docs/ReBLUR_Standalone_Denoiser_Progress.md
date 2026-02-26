@@ -216,3 +216,34 @@ Date: 2026-02-26
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Phase 1 baseline is in place. Next step is Phase 2 stateless spatial modules (B/C/D/G), starting with tile classification and objective B1/B2 tests.
+
+Date: 2026-02-26
+- Scope: Phase 2 Module B implementation (tile classification + objective B1/B2 tests).
+- Milestone: Implemented standalone tile classification pass in `ReblurDenoiser` and integrated Module B quantitative checks into the dedicated ReBLUR suite.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_classify_tiles.cs.slang` with NRD-style 16x16 tile classification (8x4 threads, each thread evaluating 2x4 pixels).
+  - `ReblurDenoiser` now allocates a per-frame tile mask texture (`ReblurTiles`, `R32_UINT`) at `ceil(resolution / 16)` and dispatches classify before passthrough copy.
+  - Tile classification in this phase marks a pixel as non-denoisable when `viewZ` is non-finite, `<= 0`, or `> denoising_range`; tile is sky when all covered pixels are non-denoisable.
+  - Existing Phase 0 pass-through equivalence remains bit-exact (`max_abs_diff=0`, `mean_abs_diff=0`, `rmse=0`) with classify enabled.
+  - GPU functional output with denoiser enabled remains within baseline threshold (`Mean FLIP error: 0.0032`).
+- Trials:
+  - Extended `dev/denoiser_metrics.py` with tile-classification reference/shader-equivalent helpers, precision/recall utility, and deterministic hash helper.
+  - Extended `dev/denoiser_module_tests.py` with:
+    - B1 precision/recall vs CPU reference depth classifier.
+    - B2 deterministic repeated-run hash stability check.
+  - Updated `dev/reblur_test_suite.py` to run Module B checks after Module A checks.
+- Pitfalls: None encountered in this module.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_classify_tiles.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Executed:
+    - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+    - `python dev/denoiser_module_tests.py`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless`
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Continue Phase 2 with Module C (hit-distance reconstruction) and add C1/C2/C3 tests before moving to Module D/G.

@@ -7,8 +7,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from denoiser_metrics import (
+    binary_precision_recall,
+    classify_tiles_reference,
+    classify_tiles_shader_equivalent,
     compute_motion_vectors_pixels,
     get_norm_hit_distance,
+    hash_tile_mask,
     pack_normal_roughness,
     pack_radiance_and_norm_hit_dist,
     project_world_to_pixel,
@@ -34,6 +38,20 @@ class ModuleATestResults:
     @property
     def passed(self) -> bool:
         return self.a1_pass and self.a2_pass and self.a3_pass
+
+
+@dataclass
+class ModuleBTestResults:
+    b1_pass: bool
+    b1_precision: float
+    b1_recall: float
+    b2_pass: bool
+    b2_unique_hash_count: int
+    b2_reference_hash: str
+
+    @property
+    def passed(self) -> bool:
+        return self.b1_pass and self.b2_pass
 
 
 def run_module_a_tests(seed: int = 7) -> ModuleATestResults:
@@ -142,20 +160,99 @@ def run_module_a_tests(seed: int = 7) -> ModuleATestResults:
     )
 
 
+def run_module_b_tests(seed: int = 19) -> ModuleBTestResults:
+    rng = np.random.default_rng(seed)
+
+    width = 317
+    height = 239
+    denoising_range = 300.0
+
+    view_z = rng.uniform(0.1, denoising_range * 0.95,
+                         size=(height, width)).astype(np.float32)
+
+    sky_pixel_mask = rng.random((height, width)) < 0.35
+    far_pixel_mask = rng.random((height, width)) < 0.08
+    nan_pixel_mask = rng.random((height, width)) < 0.01
+    view_z[sky_pixel_mask] = 0.0
+    view_z[far_pixel_mask] = denoising_range + \
+        rng.uniform(1.0, 50.0, size=far_pixel_mask.sum())
+    view_z[nan_pixel_mask] = np.nan
+
+    tile_size = 16
+    tile_width = (width + tile_size - 1) // tile_size
+    tile_height = (height + tile_size - 1) // tile_size
+    for tile_y in range(tile_height):
+        y0 = tile_y * tile_size
+        y1 = min(y0 + tile_size, height)
+        for tile_x in range(tile_width):
+            x0 = tile_x * tile_size
+            x1 = min(x0 + tile_size, width)
+            pattern = (tile_x * 13 + tile_y * 7) % 9
+            if pattern == 0:
+                view_z[y0:y1, x0:x1] = 0.0
+            elif pattern == 1:
+                view_z[y0:y1, x0:x1] = denoising_range + 10.0
+            elif pattern == 2:
+                view_z[y0:y1, x0:x1] = np.nan
+            elif pattern == 3:
+                view_z[y0:y1, x0:x1] = 0.0
+                center_x = (x0 + x1 - 1) // 2
+                center_y = (y0 + y1 - 1) // 2
+                view_z[center_y, center_x] = denoising_range * 0.5
+
+    reference_tiles = classify_tiles_reference(view_z, denoising_range)
+    predicted_tiles = classify_tiles_shader_equivalent(view_z, denoising_range)
+
+    reference_denoisable_mask = reference_tiles == 0
+    predicted_denoisable_mask = predicted_tiles == 0
+    b1_precision, b1_recall = binary_precision_recall(
+        reference_denoisable_mask, predicted_denoisable_mask)
+    b1_pass = b1_precision >= 0.999 and b1_recall >= 0.999
+
+    expected_hash = hash_tile_mask(predicted_tiles)
+    hash_values = set()
+    repeat_count = 16
+    for _ in range(repeat_count):
+        rerun_tiles = classify_tiles_shader_equivalent(
+            view_z.copy(), denoising_range)
+        hash_values.add(hash_tile_mask(rerun_tiles))
+    b2_unique_hash_count = len(hash_values)
+    b2_pass = b2_unique_hash_count == 1 and expected_hash in hash_values
+
+    return ModuleBTestResults(
+        b1_pass=b1_pass,
+        b1_precision=b1_precision,
+        b1_recall=b1_recall,
+        b2_pass=b2_pass,
+        b2_unique_hash_count=b2_unique_hash_count,
+        b2_reference_hash=expected_hash,
+    )
+
+
 def main() -> int:
-    results = run_module_a_tests()
+    module_a_results = run_module_a_tests()
+    module_b_results = run_module_b_tests()
+
     print(
         "Module A results: "
-        f"A1(pass={results.a1_pass}, normal_rmse={results.a1_normal_rmse:.8f}, "
-        f"roughness_rmse={results.a1_roughness_rmse:.8f}, "
-        f"radiance_rmse={results.a1_radiance_rmse:.8f}, "
-        f"norm_hit_rmse={results.a1_norm_hit_rmse:.8f}); "
-        f"A2(pass={results.a2_pass}, mean_reprojection_error_px={results.a2_mean_reprojection_error_px:.6f}, "
-        f"max_reprojection_error_px={results.a2_max_reprojection_error_px:.6f}); "
-        f"A3(pass={results.a3_pass}, valid_ratio={results.a3_guide_valid_ratio:.6%})",
+        f"A1(pass={module_a_results.a1_pass}, normal_rmse={module_a_results.a1_normal_rmse:.8f}, "
+        f"roughness_rmse={module_a_results.a1_roughness_rmse:.8f}, "
+        f"radiance_rmse={module_a_results.a1_radiance_rmse:.8f}, "
+        f"norm_hit_rmse={module_a_results.a1_norm_hit_rmse:.8f}); "
+        f"A2(pass={module_a_results.a2_pass}, mean_reprojection_error_px={module_a_results.a2_mean_reprojection_error_px:.6f}, "
+        f"max_reprojection_error_px={module_a_results.a2_max_reprojection_error_px:.6f}); "
+        f"A3(pass={module_a_results.a3_pass}, valid_ratio={module_a_results.a3_guide_valid_ratio:.6%})",
         flush=True,
     )
-    return 0 if results.passed else 1
+    print(
+        "Module B results: "
+        f"B1(pass={module_b_results.b1_pass}, precision={module_b_results.b1_precision:.6f}, "
+        f"recall={module_b_results.b1_recall:.6f}); "
+        f"B2(pass={module_b_results.b2_pass}, unique_hash_count={module_b_results.b2_unique_hash_count}, "
+        f"hash={module_b_results.b2_reference_hash})",
+        flush=True,
+    )
+    return 0 if module_a_results.passed and module_b_results.passed else 1
 
 
 if __name__ == "__main__":
