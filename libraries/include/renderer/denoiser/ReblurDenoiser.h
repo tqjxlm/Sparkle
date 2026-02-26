@@ -66,6 +66,7 @@ public:
 
     [[nodiscard]] RHIImage *GetDenoisedDiffuse() const;
     [[nodiscard]] RHIImage *GetDenoisedSpecular() const;
+    [[nodiscard]] RHIImage *GetInternalData() const;
 
     void Reset();
 

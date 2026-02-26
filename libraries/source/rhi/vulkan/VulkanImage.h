@@ -35,6 +35,11 @@ inline VkAccessFlags GetImageAccessFlags(const RHIImage *image, RHIImageLayout l
         return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
     }
 
+    if (layout == RHIImageLayout::General)
+    {
+        return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    }
+
     if (layout == RHIImageLayout::StorageWrite)
     {
         return VK_ACCESS_SHADER_WRITE_BIT;

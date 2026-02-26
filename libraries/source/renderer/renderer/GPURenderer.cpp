@@ -110,12 +110,14 @@ class ReblurCompositeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(albedoMetallic, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(outputImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(viewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(internalData, RHIShaderResourceReflection::ResourceType::Texture2D)
 
     END_SHADER_RESOURCE_TABLE
 
     struct UniformBufferData
     {
         Vector2UInt resolution;
+        uint32_t frame_index;
     };
 };
 
@@ -483,6 +485,7 @@ void GPURenderer::Update()
 
         ReblurCompositeShader::UniformBufferData comp_ubo{
             .resolution = {image_size_.x(), image_size_.y()},
+            .frame_index = dispatched_sample_count_,
         };
         composite_uniform_buffer_->Upload(rhi_, &comp_ubo);
     }
@@ -768,15 +771,17 @@ void GPURenderer::RenderReblurPath()
     comp_resources->denoisedDiffuse().BindResource(reblur_->GetDenoisedDiffuse()->GetDefaultView(rhi_));
     comp_resources->denoisedSpecular().BindResource(reblur_->GetDenoisedSpecular()->GetDefaultView(rhi_));
     comp_resources->albedoMetallic().BindResource(albedo_metallic_->GetDefaultView(rhi_));
+    comp_resources->internalData().BindResource(reblur_->GetInternalData()->GetDefaultView(rhi_));
 
-    // Transition denoised output to Read and scene_texture to StorageWrite for composite
+    // Transition denoised output to Read and scene_texture to General (read-write) for composite
     reblur_->GetDenoisedDiffuse()->Transition({.target_layout = RHIImageLayout::Read,
                                                .after_stage = RHIPipelineStage::ComputeShader,
                                                .before_stage = RHIPipelineStage::ComputeShader});
     reblur_->GetDenoisedSpecular()->Transition({.target_layout = RHIImageLayout::Read,
                                                 .after_stage = RHIPipelineStage::ComputeShader,
                                                 .before_stage = RHIPipelineStage::ComputeShader});
-    scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+    // General layout: composite reads PT accumulated result and writes denoised composite
+    scene_texture_->Transition({.target_layout = RHIImageLayout::General,
                                 .after_stage = RHIPipelineStage::ComputeShader,
                                 .before_stage = RHIPipelineStage::ComputeShader});
 

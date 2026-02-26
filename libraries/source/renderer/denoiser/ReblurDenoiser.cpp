@@ -408,6 +408,10 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
         CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
+        // CopyHistoryData leaves internal_data_ in TransferSrc; transition to Read for composite
+        internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::Transfer,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
         CopyPreviousFrameData(inputs);
         internal_frame_index_++;
         history_valid_ = true;
@@ -421,6 +425,9 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     {
         CopyToOutput(diff_temp1_.get(), spec_temp1_.get());
         CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());
+        internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::Transfer,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
         CopyPreviousFrameData(inputs);
         internal_frame_index_++;
         history_valid_ = true;
@@ -435,6 +442,9 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
         CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
+        internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::Transfer,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
         CopyPreviousFrameData(inputs);
         internal_frame_index_++;
         history_valid_ = true;
@@ -904,6 +914,11 @@ RHIImage *ReblurDenoiser::GetDenoisedDiffuse() const
 RHIImage *ReblurDenoiser::GetDenoisedSpecular() const
 {
     return denoised_specular_.get();
+}
+
+RHIImage *ReblurDenoiser::GetInternalData() const
+{
+    return internal_data_.get();
 }
 
 void ReblurDenoiser::Reset()
