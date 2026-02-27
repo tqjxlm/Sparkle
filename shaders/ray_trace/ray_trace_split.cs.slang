@@ -258,6 +258,7 @@ struct SplitPathOutput
     float3 albedo;
     float metallic;
     float3 total_radiance;  // combined radiance mirroring vanilla's pixel_color
+    float3 primary_world_pos;
     bool is_hit;
 };
 
@@ -277,6 +278,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     result.albedo = float3(0, 0, 0);
     result.metallic = 0;
     result.total_radiance = float3(0, 0, 0);
+    result.primary_world_pos = float3(0, 0, 0);
     result.is_hit = false;
 
     float3 throughput = float3(1, 1, 1);
@@ -328,6 +330,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         if (bounce == 0)
         {
             result.is_hit = true;
+            result.primary_world_pos = intersection.position;
             result.world_normal = intersection.normal;
             result.roughness = mat_param.roughness;
             result.metallic = mat_param.metallic;
@@ -549,8 +552,36 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         albedoOutput[pixel] = float4(0, 0, 0, 0);
     }
 
-    // Motion vectors: zero for static camera
-    motionVectorOutput[pixel] = float2(0, 0);
+    // Motion vectors: compute from world position projected through current and previous matrices.
+    // Convention: MV = prevUV - currentUV (where did this pixel come from in the previous frame?)
+    if (last_output.is_hit)
+    {
+        float3 worldPos = last_output.primary_world_pos;
+
+        float4 clipCurr = mul(world_to_clip, float4(worldPos, 1.0));
+        float2 uvCurr = clipCurr.xy / clipCurr.w * 0.5 + 0.5;
+
+        float4 clipPrev = mul(world_to_clip_prev, float4(worldPos, 1.0));
+        float2 uvPrev = clipPrev.xy / clipPrev.w * 0.5 + 0.5;
+
+        motionVectorOutput[pixel] = uvPrev - uvCurr;
+    }
+    else
+    {
+        // Sky pixel: project far point along view direction
+        float2 pixel_center = (float2(pixel) + 0.5) / (float2(camera.resolution) - 1);
+        pixel_center.y = 1.0 - pixel_center.y;
+        float3 skyDir = normalize(camera.lowerLeft + pixel_center.x * camera.max_u + pixel_center.y * camera.max_v - camera.position);
+        float3 farPoint = camera.position + skyDir * 10000.0;
+
+        float4 clipCurr = mul(world_to_clip, float4(farPoint, 1.0));
+        float2 uvCurr = clipCurr.xy / clipCurr.w * 0.5 + 0.5;
+
+        float4 clipPrev = mul(world_to_clip_prev, float4(farPoint, 1.0));
+        float2 uvPrev = clipPrev.xy / clipPrev.w * 0.5 + 0.5;
+
+        motionVectorOutput[pixel] = uvPrev - uvCurr;
+    }
 
     // Write combined output to imageData (identical to vanilla accumulation)
     float moving_average = (float)total_sample_count / (total_sample_count + spp);
