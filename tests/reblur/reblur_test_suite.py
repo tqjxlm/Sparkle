@@ -309,7 +309,8 @@ def main():
          "--run", "--test_case", "screenshot", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
          "--spp", "1", "--max_spp", "64",
-         "--camera_animation", "none"],
+         "--camera_animation", "none",
+         "--clear_screenshots", "true"],
         "17. Static camera with CameraAnimator (none)")
     if ok:
         ok, _, _ = validate_latest_screenshot(fw, "CameraAnimator none screenshot")
@@ -321,7 +322,9 @@ def main():
          "--run", "--test_case", "screenshot", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
          "--spp", "1", "--max_spp", "60",
-         "--camera_animation", "orbit_sweep"],
+         "--camera_animation", "orbit_sweep",
+         "--clear_screenshots", "true",
+         "--test_timeout", "120"],
         "18. Camera motion smoke (orbit_sweep)")
     if ok:
         ok, _, _ = validate_latest_screenshot(fw, "orbit_sweep motion screenshot")
