@@ -1,5 +1,13 @@
 # Test Guide
 
+## Visual Test
+
+* Use `--test_case screenshot` to take a screenshot after the scene is fully loaded and a frame is fully rendered.
+* Use `--test_case multi_frame_screenshot` to take 5 frames of screenshots after the scene is fully loaded and a frame is fully rendered. This is useful for temporal analysis.
+* Screenshot test cases work with `--headless true`, so it is suitable for commandline use.
+* Screenshots are saved to [external-storage-path]/screenshots/ and named with the scene name and pipeline. For [external-storage-path], refer to [Run.md](Run.md).
+* Ground truth images can be found in [CI.md](CI.md). But if you are working on a feature that is meant to change the final image output, you should not rely on the ground truth images.
+
 ## Python Test Scripts
 
 * When possible, always use python scripts to perform tests.
