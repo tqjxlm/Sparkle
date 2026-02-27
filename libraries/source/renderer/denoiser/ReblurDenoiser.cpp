@@ -90,6 +90,8 @@ class ReblurTemporalAccumShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(prevViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(prevNormalRoughness, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(prevInternalData, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inMotionVectors, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(linearSampler, RHIShaderResourceReflection::ResourceType::Sampler)
     USE_SHADER_RESOURCE(outDiffuse, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(outSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(outInternalData, RHIShaderResourceReflection::ResourceType::StorageImage2D)
@@ -608,6 +610,10 @@ void ReblurDenoiser::TemporalAccumulate(const ReblurInputBuffers &inputs, const 
     resources->prevViewZ().BindResource(prev_view_z_->GetDefaultView(rhi_));
     resources->prevNormalRoughness().BindResource(prev_normal_roughness_->GetDefaultView(rhi_));
     resources->prevInternalData().BindResource(prev_internal_data_->GetDefaultView(rhi_));
+
+    // Bind motion vectors and sampler for bilinear history sampling
+    resources->inMotionVectors().BindResource(inputs.motion_vectors->GetDefaultView(rhi_));
+    resources->linearSampler().BindResource(diff_history_->GetSampler());
 
     // Bind outputs
     resources->outDiffuse().BindResource(diff_temp2_->GetDefaultView(rhi_));

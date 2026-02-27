@@ -26,6 +26,10 @@
 [[vk::binding(8, 0)]] Texture2D<float4> prevNormalRoughness;
 [[vk::binding(9, 0)]] Texture2D<float2> prevInternalData;
 
+// Motion vectors (from path tracer)
+[[vk::binding(13, 0)]] Texture2D<float2> inMotionVectors;
+[[vk::binding(14, 0)]] SamplerState linearSampler;
+
 // Outputs
 [[vk::binding(10, 0)]] RWTexture2D<float4> outDiffuse;
 [[vk::binding(11, 0)]] RWTexture2D<float4> outSpecular;
