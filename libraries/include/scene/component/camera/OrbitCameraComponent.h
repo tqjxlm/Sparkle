@@ -73,6 +73,26 @@ public:
         UpdateTransform();
     }
 
+    [[nodiscard]] float GetYaw() const
+    {
+        return yaw_;
+    }
+
+    [[nodiscard]] float GetPitch() const
+    {
+        return pitch_;
+    }
+
+    [[nodiscard]] const Vector3 &GetCenter() const
+    {
+        return center_;
+    }
+
+    [[nodiscard]] float GetRadius() const
+    {
+        return radius_;
+    }
+
     void PrintPosture() override;
 
 private:

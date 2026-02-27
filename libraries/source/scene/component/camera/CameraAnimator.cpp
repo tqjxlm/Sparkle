@@ -35,13 +35,13 @@ CameraAnimator::OrbitPose CameraAnimator::GetPose(uint32_t frame_index) const
     switch (path_type_)
     {
     case PathType::kOrbitSweep: {
-        // Full 360° yaw sweep over total_frames
-        pose.yaw = initial_pose_.yaw + t * 360.0f;
+        // Gentle yaw sweep: ~2°/frame, consistent with existing test patterns
+        pose.yaw = initial_pose_.yaw + static_cast<float>(frame_index) * 2.0f;
         break;
     }
     case PathType::kDolly: {
-        // Sinusoidal forward/back along radius (±30% of initial radius)
-        float offset = std::sin(t * 2.0f * Pi) * initial_pose_.radius * 0.3f;
+        // Gentle sinusoidal forward/back along radius (±10% of initial radius)
+        float offset = std::sin(t * 2.0f * Pi) * initial_pose_.radius * 0.1f;
         pose.radius = std::max(initial_pose_.radius - offset, 0.1f);
         break;
     }

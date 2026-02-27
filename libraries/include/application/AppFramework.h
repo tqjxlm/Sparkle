@@ -5,6 +5,7 @@
 #endif
 
 #include "application/AppConfig.h"
+#include "scene/component/camera/CameraAnimator.h"
 #include "core/Timer.h"
 #include "core/math/Types.h"
 #include "core/task/TaskFuture.h"
@@ -196,6 +197,8 @@ private:
     bool initialized_ = false;
     bool show_control_panel_ = false;
     bool renderer_ready_ = false;
+    CameraAnimator camera_animator_;
+    bool camera_animator_initialized_ = false;
     bool scene_file_loaded_ = false;
     bool scene_async_tasks_completed_ = false;
 
