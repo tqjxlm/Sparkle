@@ -19,6 +19,7 @@ Tests included:
  16. Static non-regression — motion infrastructure doesn't regress static camera quality
  17. CameraAnimator none non-regression — static camera with --camera_animation none
  18. Camera motion smoke (orbit_sweep) — orbit_sweep animation runs without crash
+ 19. Camera motion quality validation — temporal stability and reconvergence under motion
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -325,6 +326,15 @@ def main():
     if ok:
         ok, _, _ = validate_latest_screenshot(fw, "orbit_sweep motion screenshot")
     results.append(("Camera motion smoke (orbit_sweep)", ok, dur))
+
+    # --- Test 19: Camera motion quality validation ---
+    ok, dur, _ = run_command(
+        [py, os.path.join(PROJECT_ROOT, "tests", "reblur",
+                          "reblur_motion_validation.py"),
+         "--framework", fw, "--skip_build"],
+        "19. Camera motion quality validation",
+        show_output=True)
+    results.append(("Camera motion quality validation", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)
