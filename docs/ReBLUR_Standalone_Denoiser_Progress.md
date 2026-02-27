@@ -383,3 +383,27 @@ Date: 2026-02-26
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Phase 2 Module G is complete. Next planned target is Phase 3 Module E (temporal accumulation) and replacing the Module G history proxy with true `DATA1` inputs.
+
+Date: 2026-02-26
+- Scope: Phase 2 closeout verification and documentation wrap-up.
+- Milestone: Formally closed Phase 2 after re-running build, dedicated suite, and GPU functional gate on current head.
+- Findings:
+  - Dedicated ReBLUR suite passed end-to-end with Phase 2 module metrics unchanged from expected deterministic fixtures:
+    - B1 precision/recall = `1.000000` / `1.000000`; B2 unique hash count = `1`
+    - C1 invalid RMSE norm = `0.011963`; C2 valid luma abs error = `0.00000000`; C3 `5x5 <= 3x3` holds (`0.007668 <= 0.113479`)
+    - D1 variance reduction ratio = `19.896658`; D2 edge leakage = `0.003988`; D3 jitter reduction ratio = `0.222898`
+    - G1 high-frequency reduction ratio = `8.933731`; G2 edge MSE = `0.000579`; G3 low/high history radius = `3.512203` / `0.000000`
+  - Baseline and integration gates remained stable:
+    - R0.1 functional baseline (`spatial_denoise=false`) passed inside suite.
+    - S0.2 pass-through equivalence remained bit-exact (`max_abs_diff=0`, `mean_abs_diff=0`, `rmse=0`).
+    - Standalone GPU functional test with denoiser enabled passed (`Mean FLIP error: 0.0032`).
+- Trials:
+  - Updated `docs/ReBLUR_Standalone_Denoiser_Plan.md` Phase 2 section with explicit completion status and Phase 3 handoff note.
+- Pitfalls: None observed during this closeout run.
+- Tests Added/Updated: None (verification + documentation-only wrap-up).
+- Executed:
+  - `python build.py --framework glfw --config Release`
+  - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Begin Phase 3 with Module E temporal accumulation and replace Module G history proxy usage with true `DATA1` from temporal accumulation outputs.

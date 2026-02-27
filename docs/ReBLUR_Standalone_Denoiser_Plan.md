@@ -447,6 +447,8 @@ Phase 2: Stateless spatial modules (Modules B, C, D, G)
 - Implement tile classify, hit-distance reconstruction, pre-pass, blur.
 - Add only the shader files needed for the module currently in progress.
 - Validate each module with image-space metrics before moving on.
+- Status (2026-02-26): Complete. Module B/C/D/G implementation and quantitative gating are in `dev/reblur_test_suite.py`.
+- Handoff: Start Phase 3 Module E (temporal accumulation) and replace the temporary Module G history proxy with true `DATA1` inputs.
 
 Phase 3: Temporal core (Modules E and H)
 - Implement temporal accumulation and post-blur history writeback.
