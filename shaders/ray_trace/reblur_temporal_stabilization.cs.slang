@@ -12,6 +12,7 @@
     float denoising_range;
     uint frame_index;
     uint max_stabilized_frame_num;
+    float framerate_scale;
 };
 
 // Current denoised output (from PostBlur)
@@ -30,6 +31,9 @@
 
 // Accumulation speed writeback (antilag may reduce speeds)
 [[vk::binding(9, 0)]] RWTexture2D<float2> outInternalData;
+
+// Motion vectors for reprojection
+[[vk::binding(10, 0)]] Texture2D<float2> inMotionVectors;
 
 // Shared memory for neighborhood luminance computation (5x5 = BORDER=2)
 #define BORDER 2
@@ -129,9 +133,24 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float spec_variance = max(0.0, spec_luma_sq_sum * inv_count - spec_mean * spec_mean);
     float spec_sigma = sqrt(spec_variance);
 
-    // Read stabilized history (for static camera: previous pixel = current pixel)
-    float4 stab_diff = prevStabilizedDiff[pixel];
-    float4 stab_spec = prevStabilizedSpec[pixel];
+    // Reproject stabilized history via motion vectors
+    float2 motionVec = inMotionVectors[pixel];
+    float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
+    float2 prevUV = currentUV + motionVec;
+
+    float4 stab_diff, stab_spec;
+    if (all(prevUV >= 0.0) && all(prevUV <= 1.0))
+    {
+        int2 prevPixel = int2(prevUV * float2(resolution));
+        prevPixel = clamp(prevPixel, int2(0, 0), int2(resolution) - int2(1, 1));
+        stab_diff = prevStabilizedDiff[prevPixel];
+        stab_spec = prevStabilizedSpec[prevPixel];
+    }
+    else
+    {
+        stab_diff = current_diff;
+        stab_spec = current_spec;
+    }
 
     float stab_diff_luma = GetLuminance(stab_diff.rgb);
     float stab_spec_luma = GetLuminance(stab_spec.rgb);
@@ -153,19 +172,21 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     {
         if (diff_accum_speed >= 8.0)
         {
-            float diff_deviation = abs(stab_diff_luma - diff_mean);
-            float diff_threshold = diff_sigma * antilag_sigma_scale;
-            diff_antilag = saturate(1.0 - (diff_deviation - diff_threshold) /
-                                           max(diff_threshold * antilag_sensitivity, 1e-6));
+            float s = diff_sigma * antilag_sigma_scale;
+            float magic = antilag_sensitivity * framerate_scale * framerate_scale;
+            float clamped = clamp(stab_diff_luma, diff_mean - s, diff_mean + s);
+            float d = abs(stab_diff_luma - clamped) / (max(stab_diff_luma, clamped) + 1e-6);
+            diff_antilag = 1.0 / (1.0 + d * diff_accum_speed / max(magic, 1e-6));
             diff_accum_speed = lerp(0.0, diff_accum_speed, diff_antilag);
         }
 
         if (spec_accum_speed >= 8.0)
         {
-            float spec_deviation = abs(stab_spec_luma - spec_mean);
-            float spec_threshold = spec_sigma * antilag_sigma_scale;
-            spec_antilag = saturate(1.0 - (spec_deviation - spec_threshold) /
-                                           max(spec_threshold * antilag_sensitivity, 1e-6));
+            float s = spec_sigma * antilag_sigma_scale;
+            float magic = antilag_sensitivity * framerate_scale * framerate_scale;
+            float clamped = clamp(stab_spec_luma, spec_mean - s, spec_mean + s);
+            float d = abs(stab_spec_luma - clamped) / (max(stab_spec_luma, clamped) + 1e-6);
+            spec_antilag = 1.0 / (1.0 + d * spec_accum_speed / max(magic, 1e-6));
             spec_accum_speed = lerp(0.0, spec_accum_speed, spec_antilag);
         }
     }
@@ -173,8 +194,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     // Adaptive sigma scale: tighter clamping as more history accumulates.
     float diff_non_linear = GetNonLinearAccumSpeed(diff_accum_speed);
     float spec_non_linear = GetNonLinearAccumSpeed(spec_accum_speed);
-    float diff_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * diff_non_linear);
-    float spec_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * spec_non_linear);
+    float diff_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * framerate_scale * diff_non_linear);
+    float spec_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * framerate_scale * spec_non_linear);
 
     // Clamp stabilized history to local color box
     float diff_lo = diff_mean - diff_sigma * diff_sigma_scale;

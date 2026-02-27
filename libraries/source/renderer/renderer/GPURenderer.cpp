@@ -774,6 +774,10 @@ void GPURenderer::RenderReblurPath()
     matrices.world_to_clip_prev = camera_proxy->GetViewProjectionMatrixPrev();
     matrices.world_to_view_prev = camera_proxy->GetViewMatrixPrev();
     matrices.world_prev_to_world = Mat4::Identity();
+    matrices.camera_delta = camera_proxy->GetPositionPrev() - camera_proxy->GetPosture().position;
+    auto frame_stats = rhi_->GetFrameStats(rhi_->GetFrameIndex());
+    float frame_time_ms = frame_stats.elapsed_time_ms;
+    matrices.framerate_scale = std::max(33.333f / std::max(frame_time_ms, 1.0f), 1.0f);
     reblur_->Denoise(inputs, settings, matrices, dispatched_sample_count_, render_config_.reblur_debug_pass);
 
     // Bind denoised output to composite and dispatch

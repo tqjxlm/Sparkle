@@ -51,6 +51,8 @@ struct ReblurMatrices
     Mat4 world_to_clip_prev = Mat4::Identity();
     Mat4 world_to_view_prev = Mat4::Identity();
     Mat4 world_prev_to_world = Mat4::Identity();
+    Vector3 camera_delta = Vector3::Zero();
+    float framerate_scale = 1.0f;
 };
 
 class ReblurDenoiser
@@ -79,7 +81,8 @@ private:
               RHIImage *internal_data, bool has_temporal_data);
     void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
     void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices);
-    void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
+    void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
+                           const ReblurMatrices &matrices);
     void CopyToOutput(RHIImage *diff, RHIImage *spec);
     void CopyPreviousFrameData(const ReblurInputBuffers &inputs);
     void CopyHistoryData(RHIImage *diff, RHIImage *spec);

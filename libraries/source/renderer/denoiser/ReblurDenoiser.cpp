@@ -166,6 +166,7 @@ class ReblurTemporalStabShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(outDiffuse, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(outSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(outInternalData, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(inMotionVectors, RHIShaderResourceReflection::ResourceType::Texture2D)
 
     END_SHADER_RESOURCE_TABLE
 
@@ -180,6 +181,7 @@ public:
         float denoising_range;
         uint32_t frame_index;
         uint32_t max_stabilized_frame_num;
+        float framerate_scale;
     };
 };
 
@@ -472,7 +474,7 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     // Skipped for debug_pass==2 (isolate PostBlur output)
     if (debug_pass != 2 && settings.max_stabilized_frame_num > 0)
     {
-        TemporalStabilize(inputs, settings);
+        TemporalStabilize(inputs, settings, matrices);
 
         // Copy stabilized result into denoised_diffuse_/denoised_specular_ for composite
         uint32_t cur_idx = stab_ping_pong_;
@@ -724,7 +726,8 @@ void ReblurDenoiser::HistoryFix(const ReblurInputBuffers &inputs, const ReblurSe
     rhi_->EndComputePass(compute_pass_);
 }
 
-void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings)
+void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
+                                       const ReblurMatrices &matrices)
 {
     auto *resources = temporal_stab_pipeline_->GetShaderResource<ReblurTemporalStabShader>();
 
@@ -746,6 +749,9 @@ void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const R
     resources->outSpecular().BindResource(spec_stabilized_[cur_idx]->GetDefaultView(rhi_));
     resources->outInternalData().BindResource(prev_internal_data_->GetDefaultView(rhi_));
 
+    // Bind motion vectors for reprojection
+    resources->inMotionVectors().BindResource(inputs.motion_vectors->GetDefaultView(rhi_));
+
     ReblurTemporalStabShader::UniformBufferData ubo{
         .resolution = {width_, height_},
         .stabilization_strength = settings.stabilization_strength,
@@ -755,6 +761,7 @@ void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const R
         .denoising_range = 1000.f,
         .frame_index = internal_frame_index_,
         .max_stabilized_frame_num = settings.max_stabilized_frame_num,
+        .framerate_scale = matrices.framerate_scale,
     };
     temporal_stab_ub_->Upload(rhi_, &ubo);
 
