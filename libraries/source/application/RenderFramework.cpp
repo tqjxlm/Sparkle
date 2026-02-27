@@ -133,6 +133,9 @@ void RenderFramework::RenderLoop()
 
             renderer_->Render();
 
+            ready_for_auto_screenshot_.store(
+                IsSceneFullyLoaded() && renderer_->IsReadyForAutoScreenshot(), std::memory_order_release);
+
             ProcessScreenshotRequest();
 
             EndFrame();
@@ -384,52 +387,43 @@ bool RenderFramework::IsSceneFullyLoaded() const
     return scene_loaded_notified_;
 }
 
-void RenderFramework::RequestTakeScreenshot()
+std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const std::string &name)
 {
-    screenshot_completed_.store(false);
-    screenshot_requested_.store(true);
-}
-
-void RenderFramework::RequestTakeScreenshot(const std::string &name)
-{
-    screenshot_name_override_ = name;
-    screenshot_completed_.store(false);
-    screenshot_requested_.store(true);
-}
-
-bool RenderFramework::IsScreenshotCompleted() const
-{
-    return screenshot_completed_.load();
+    auto request = std::make_shared<ScreenshotRequest>(name);
+    {
+        std::lock_guard<std::mutex> lock(screenshot_queue_mutex_);
+        screenshot_queue_.push(request);
+    }
+    return request;
 }
 
 bool RenderFramework::IsReadyForAutoScreenshot() const
 {
-    return renderer_ && IsSceneFullyLoaded() && renderer_->IsReadyForAutoScreenshot();
+    return ready_for_auto_screenshot_.load(std::memory_order_acquire);
 }
 
 void RenderFramework::ProcessScreenshotRequest()
 {
-    if (!screenshot_requested_.load() || screenshot_in_progress_ || !renderer_)
+    if (active_screenshot_ || !renderer_ || !IsSceneFullyLoaded())
     {
         return;
     }
 
-    if (!IsSceneFullyLoaded())
     {
-        return;
+        std::lock_guard<std::mutex> lock(screenshot_queue_mutex_);
+        if (screenshot_queue_.empty())
+        {
+            return;
+        }
+        active_screenshot_ = std::move(screenshot_queue_.front());
+        screenshot_queue_.pop();
     }
 
-    auto name = screenshot_name_override_.empty() ? BuildScreenshotName(scene_, render_config_.pipeline)
-                                                  : screenshot_name_override_;
-    screenshot_name_override_.clear();
-
-    Log(Info, "Screenshot requested: {}", name);
-    renderer_->RequestSaveScreenshot(name, false, [this]() {
-        screenshot_in_progress_ = false;
-        screenshot_completed_.store(true);
+    Log(Info, "Screenshot requested: {}", active_screenshot_->GetName());
+    renderer_->RequestSaveScreenshot(active_screenshot_->GetName(), false, [this]() {
+        active_screenshot_->MarkCompleted();
+        active_screenshot_.reset();
     });
-    screenshot_requested_.store(false);
-    screenshot_in_progress_ = true;
 }
 
 void RenderFramework::DrawUi()

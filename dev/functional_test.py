@@ -1,7 +1,6 @@
 """Post-build functional test: run app, capture screenshot, compare against ground truth."""
 
 import argparse
-import glob
 import os
 import subprocess
 import sys
@@ -72,18 +71,15 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def find_screenshot(framework, scene, pipeline):
+def find_screenshot(framework):
     screenshot_dir = get_screenshot_dir(framework)
-    pattern = os.path.join(screenshot_dir, f"{scene}_{pipeline}_*.png")
-    matches = glob.glob(pattern)
-    if not matches:
-        print(f"No screenshot found matching: {pattern}", flush=True)
+    path = os.path.join(screenshot_dir, "screenshot.png")
+    if not os.path.isfile(path):
+        print(f"Screenshot not found: {path}", flush=True)
         sys.exit(1)
 
-    matches.sort(key=os.path.getmtime, reverse=True)
-    chosen = matches[0]
-    print(f"Found screenshot: {chosen}", flush=True)
-    return chosen
+    print(f"Found screenshot: {path}", flush=True)
+    return path
 
 
 def download_ground_truth(framework, scene, pipeline):
@@ -148,7 +144,7 @@ def main():
 
     scene = args.scene or DEFAULT_SCENE
 
-    screenshot = find_screenshot(args.framework, scene, args.pipeline)
+    screenshot = find_screenshot(args.framework)
 
     print("Downloading ground truth...", flush=True)
     ground_truth = download_ground_truth(

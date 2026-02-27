@@ -11,11 +11,14 @@
 #include "renderer/RenderConfig.h"
 #include "rhi/RHIConfig.h"
 
+#include <memory>
+
 namespace sparkle
 {
 class NativeView;
 class Scene;
 class RenderFramework;
+class ScreenshotRequest;
 class CameraComponent;
 class RHIContext;
 class UiManager;
@@ -116,9 +119,7 @@ public:
     void KeyboardCallback(int key, KeyAction action, bool shift_on) const;
     void CaptureNextFrames(int count);
 
-    void RequestTakeScreenshot();
-    void RequestTakeScreenshot(const std::string &name);
-    [[nodiscard]] bool IsScreenshotCompleted() const;
+    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
     [[nodiscard]] bool IsReadyForAutoScreenshot() const;
 
 #if ENABLE_TEST_CASES
