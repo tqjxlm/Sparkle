@@ -219,7 +219,11 @@ void GPURenderer::InitRenderResources()
              .history_fix_enable_anti_firefly = render_config_.reblur_history_fix_enable_anti_firefly,
              .blur_min_radius = render_config_.reblur_blur_min_radius,
              .blur_max_radius = render_config_.reblur_blur_max_radius,
-             .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num});
+             .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num,
+             .stabilization_enable = render_config_.reblur_stabilization_enable,
+             .stabilization_strength = render_config_.reblur_stabilization_strength,
+             .stabilization_max_frame_num = render_config_.reblur_stabilization_max_frame_num,
+             .stabilization_enable_mv_patch = render_config_.reblur_stabilization_enable_mv_patch});
         reblur_denoiser_->Initialize(image_size_);
     }
 
@@ -328,7 +332,11 @@ void GPURenderer::Render()
                  .history_fix_enable_anti_firefly = render_config_.reblur_history_fix_enable_anti_firefly,
                  .blur_min_radius = render_config_.reblur_blur_min_radius,
                  .blur_max_radius = render_config_.reblur_blur_max_radius,
-                 .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num});
+                 .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num,
+                 .stabilization_enable = render_config_.reblur_stabilization_enable,
+                 .stabilization_strength = render_config_.reblur_stabilization_strength,
+                 .stabilization_max_frame_num = render_config_.reblur_stabilization_max_frame_num,
+                 .stabilization_enable_mv_patch = render_config_.reblur_stabilization_enable_mv_patch});
 
             scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                         .after_stage = RHIPipelineStage::ComputeShader,

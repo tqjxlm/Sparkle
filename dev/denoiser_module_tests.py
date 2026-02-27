@@ -27,6 +27,7 @@ from denoiser_metrics import (
     project_world_to_pixel,
     reconstruct_hit_distance_shader_equivalent,
     rmse,
+    temporal_stabilization_shader_equivalent,
     temporal_accumulation_shader_equivalent,
     unpack_normal_roughness,
     unpack_radiance_and_norm_hit_dist,
@@ -156,6 +157,18 @@ class ModuleHTestResults:
     @property
     def passed(self) -> bool:
         return self.h1_pass and self.h2_pass
+
+
+@dataclass
+class ModuleITestResults:
+    i1_pass: bool
+    i1_flicker_reduction_ratio: float
+    i2_pass: bool
+    i2_trailing_error: float
+
+    @property
+    def passed(self) -> bool:
+        return self.i1_pass and self.i2_pass
 
 
 def run_module_a_tests(seed: int = 7) -> ModuleATestResults:
@@ -1709,6 +1722,377 @@ def run_module_h_tests(seed: int = 67) -> ModuleHTestResults:
     )
 
 
+def run_module_i_tests(seed: int = 73) -> ModuleITestResults:
+    rng = np.random.default_rng(seed)
+    denoising_range = 300.0
+
+    # I1: temporal flicker reduction on a static fixture.
+    static_height = 72
+    static_width = 112
+    static_frame_count = 14
+    static_max_frames = 32
+
+    static_view_z = np.full(
+        (static_height, static_width), 42.0, dtype=np.float32)
+    static_normals = rng.normal(
+        size=(static_height, static_width, 3)).astype(np.float32)
+    static_normals[..., 2] += 2.0
+    static_normals /= np.linalg.norm(
+        static_normals, axis=2, keepdims=True).astype(np.float32)
+    static_roughness = rng.uniform(
+        0.08, 0.92, size=(static_height, static_width)).astype(np.float32)
+    static_packed_normal_roughness = pack_normal_roughness(
+        static_normals, static_roughness)
+    static_tile_mask = classify_tiles_reference(static_view_z, denoising_range)
+    static_spec_tracking = np.clip(
+        0.35 + 0.55 * static_roughness, 0.0, 1.0).astype(np.float32)
+
+    yy_static, xx_static = np.meshgrid(
+        np.linspace(0.0, 1.0, static_height, dtype=np.float32),
+        np.linspace(0.0, 1.0, static_width, dtype=np.float32),
+        indexing="ij",
+    )
+    static_base_diff = np.stack(
+        (
+            0.16 + 0.24 * xx_static,
+            0.05 + 0.14 * yy_static,
+            0.04 + 0.12 * (1.0 - xx_static),
+        ),
+        axis=-1,
+    ).astype(np.float32)
+    static_base_spec = np.stack(
+        (
+            0.08 + 0.18 * (1.0 - yy_static),
+            0.03 + 0.10 * xx_static,
+            0.02 + 0.10 * yy_static,
+        ),
+        axis=-1,
+    ).astype(np.float32)
+    static_base_diff_hit = np.clip(
+        0.28 + 0.22 * xx_static + 0.08 * yy_static, 0.04, 0.95).astype(np.float32)
+    static_base_spec_hit = np.clip(
+        0.34 + 0.18 * yy_static + 0.12 * (1.0 - xx_static), 0.04, 0.95).astype(np.float32)
+
+    static_prev_diff_luma_ping = [
+        np.zeros((static_height, static_width), dtype=np.float32),
+        np.zeros((static_height, static_width), dtype=np.float32),
+    ]
+    static_prev_spec_luma_ping = [
+        np.zeros((static_height, static_width), dtype=np.float32),
+        np.zeros((static_height, static_width), dtype=np.float32),
+    ]
+    static_internal_ping = [
+        np.zeros((static_height, static_width, 4), dtype=np.float32),
+        np.zeros((static_height, static_width, 4), dtype=np.float32),
+    ]
+    static_history_read_index = 0
+
+    static_flicker_off_frames = []
+    static_flicker_on_frames = []
+
+    for frame_index in range(static_frame_count):
+        static_history_write_index = (static_history_read_index + 1) % 2
+
+        diff_noise = rng.normal(
+            0.0, 0.055, size=(static_height, static_width, 3)).astype(np.float32)
+        spec_noise = rng.normal(
+            0.0, 0.065, size=(static_height, static_width, 3)).astype(np.float32)
+        diff_radiance = np.maximum(static_base_diff + diff_noise, 0.0)
+        spec_radiance = np.maximum(static_base_spec + spec_noise, 0.0)
+        diff_hit = np.clip(
+            static_base_diff_hit +
+            rng.normal(0.0, 0.035, size=(static_height, static_width)),
+            0.0,
+            1.0,
+        ).astype(np.float32)
+        spec_hit = np.clip(
+            static_base_spec_hit +
+            rng.normal(0.0, 0.040, size=(static_height, static_width)),
+            0.0,
+            1.0,
+        ).astype(np.float32)
+        diff_history = pack_radiance_and_norm_hit_dist(diff_radiance, diff_hit)
+        spec_history = pack_radiance_and_norm_hit_dist(spec_radiance, spec_hit)
+
+        data1 = np.zeros((static_height, static_width, 4), dtype=np.float32)
+        history_length = min(frame_index + 1, static_max_frames)
+        data1[..., 0] = np.clip(
+            (history_length - 1) / max(static_max_frames - 1, 1), 0.0, 1.0)
+        data1[..., 1] = 1.0 if frame_index > 0 else 0.0
+        data1[..., 2] = history_length / float(static_max_frames)
+        data1[..., 3] = static_spec_tracking
+
+        data2 = np.zeros((static_height, static_width, 4), dtype=np.float32)
+        xs = (np.arange(static_width, dtype=np.float32) + 0.5) / \
+            float(static_width)
+        ys = (np.arange(static_height, dtype=np.float32) + 0.5) / \
+            float(static_height)
+        data2[..., 0] = xs[None, :]
+        data2[..., 1] = ys[:, None]
+        data2[..., 2] = 0.0
+        data2[..., 3] = 0.0 if frame_index > 0 else 1.0
+
+        static_internal_ping[static_history_write_index][..., 0] = np.float32(
+            history_length)
+        static_internal_ping[static_history_write_index][..., 1] = np.float32(
+            min(history_length, 4))
+        static_internal_ping[static_history_write_index][...,
+                                                         2] = np.float32(0.0)
+        static_internal_ping[static_history_write_index][...,
+                                                         3] = np.float32(0.0)
+
+        (
+            stabilized_diff_luma,
+            stabilized_spec_luma,
+            _,
+            stabilized_output,
+        ) = temporal_stabilization_shader_equivalent(
+            static_tile_mask,
+            static_packed_normal_roughness,
+            static_view_z,
+            data1,
+            data2,
+            diff_history,
+            spec_history,
+            static_spec_tracking,
+            static_prev_diff_luma_ping[static_history_read_index],
+            static_prev_spec_luma_ping[static_history_read_index],
+            static_internal_ping[static_history_write_index],
+            denoising_range,
+            stabilization_strength=0.78,
+            max_stabilized_frame_num=static_max_frames,
+            history_available=frame_index > 0,
+            enable_mv_patch=True,
+        )
+
+        static_diff_linear, _ = unpack_radiance_and_norm_hit_dist(diff_history)
+        static_spec_linear, _ = unpack_radiance_and_norm_hit_dist(spec_history)
+        static_baseline_rgb = np.maximum(
+            static_diff_linear + static_spec_linear, 0.0)
+
+        static_baseline_luma = (
+            0.2126 * static_baseline_rgb[..., 0]
+            + 0.7152 * static_baseline_rgb[..., 1]
+            + 0.0722 * static_baseline_rgb[..., 2]
+        ).astype(np.float32)
+        static_stabilized_luma = (
+            0.2126 * stabilized_output[..., 0]
+            + 0.7152 * stabilized_output[..., 1]
+            + 0.0722 * stabilized_output[..., 2]
+        ).astype(np.float32)
+
+        static_flicker_off_frames.append(static_baseline_luma)
+        static_flicker_on_frames.append(static_stabilized_luma)
+
+        static_prev_diff_luma_ping[static_history_write_index] = stabilized_diff_luma.copy(
+        )
+        static_prev_spec_luma_ping[static_history_write_index] = stabilized_spec_luma.copy(
+        )
+        static_history_read_index = static_history_write_index
+
+    static_off_stack = np.stack(static_flicker_off_frames, axis=0)
+    static_on_stack = np.stack(static_flicker_on_frames, axis=0)
+    static_off_std = np.std(static_off_stack, axis=0)
+    static_on_std = np.std(static_on_stack, axis=0)
+    i1_flicker_reduction_ratio = float(
+        np.mean(static_off_std) / max(float(np.mean(static_on_std)), 1e-8)
+    )
+    i1_pass = i1_flicker_reduction_ratio >= 1.35
+
+    # I2: moving-object ghosting guard in trailing region.
+    moving_height = 80
+    moving_width = 144
+    moving_frame_count = 10
+    moving_velocity = 6
+    moving_max_frames = 32
+
+    moving_view_z = np.full(
+        (moving_height, moving_width), 30.0, dtype=np.float32)
+    moving_normals = np.zeros(
+        (moving_height, moving_width, 3), dtype=np.float32)
+    moving_normals[..., 2] = 1.0
+    moving_roughness = np.full(
+        (moving_height, moving_width), 0.16, dtype=np.float32)
+    moving_packed_normal_roughness = pack_normal_roughness(
+        moving_normals, moving_roughness)
+    moving_tile_mask = classify_tiles_reference(moving_view_z, denoising_range)
+
+    moving_prev_diff_luma_ping = [
+        np.zeros((moving_height, moving_width), dtype=np.float32),
+        np.zeros((moving_height, moving_width), dtype=np.float32),
+    ]
+    moving_prev_spec_luma_ping = [
+        np.zeros((moving_height, moving_width), dtype=np.float32),
+        np.zeros((moving_height, moving_width), dtype=np.float32),
+    ]
+    moving_internal_ping = [
+        np.zeros((moving_height, moving_width, 4), dtype=np.float32),
+        np.zeros((moving_height, moving_width, 4), dtype=np.float32),
+    ]
+    moving_history_read_index = 0
+
+    trailing_errors = []
+    previous_object_mask = np.zeros((moving_height, moving_width), dtype=bool)
+
+    object_half_w = 9
+    object_half_h = 8
+    object_center_y = moving_height // 2
+    object_start_x = 20
+
+    for frame_index in range(moving_frame_count):
+        moving_history_write_index = (moving_history_read_index + 1) % 2
+
+        center_x = object_start_x + frame_index * moving_velocity
+        x0 = max(center_x - object_half_w, 0)
+        x1 = min(center_x + object_half_w, moving_width)
+        y0 = max(object_center_y - object_half_h, 0)
+        y1 = min(object_center_y + object_half_h, moving_height)
+
+        object_mask = np.zeros((moving_height, moving_width), dtype=bool)
+        object_mask[y0:y1, x0:x1] = True
+
+        clean_diff = np.zeros(
+            (moving_height, moving_width, 3), dtype=np.float32)
+        clean_spec = np.zeros(
+            (moving_height, moving_width, 3), dtype=np.float32)
+        clean_diff[..., 0] = 0.06
+        clean_diff[..., 1] = 0.04
+        clean_diff[..., 2] = 0.03
+        clean_spec[..., 0] = 0.02
+        clean_spec[..., 1] = 0.02
+        clean_spec[..., 2] = 0.02
+
+        clean_diff[object_mask, 0] = 0.12
+        clean_diff[object_mask, 1] = 0.08
+        clean_diff[object_mask, 2] = 0.05
+        clean_spec[object_mask, 0] = 2.20
+        clean_spec[object_mask, 1] = 1.65
+        clean_spec[object_mask, 2] = 1.20
+
+        noisy_diff = np.maximum(
+            clean_diff + rng.normal(0.0, 0.03,
+                                    size=clean_diff.shape).astype(np.float32),
+            0.0,
+        )
+        noisy_spec = np.maximum(
+            clean_spec + rng.normal(0.0, 0.06,
+                                    size=clean_spec.shape).astype(np.float32),
+            0.0,
+        )
+        diff_hit = np.full((moving_height, moving_width),
+                           0.22, dtype=np.float32)
+        spec_hit = np.full((moving_height, moving_width),
+                           0.18, dtype=np.float32)
+        diff_hit[object_mask] = 0.50
+        spec_hit[object_mask] = 0.72
+
+        diff_history = pack_radiance_and_norm_hit_dist(noisy_diff, diff_hit)
+        spec_history = pack_radiance_and_norm_hit_dist(noisy_spec, spec_hit)
+        spec_tracking = np.where(object_mask, 0.90, 0.18).astype(np.float32)
+
+        data1 = np.zeros((moving_height, moving_width, 4), dtype=np.float32)
+        history_length = min(frame_index + 1, moving_max_frames)
+        data1[..., 0] = np.clip(
+            (history_length - 1) / max(moving_max_frames - 1, 1), 0.0, 1.0)
+        data1[..., 1] = 1.0 if frame_index > 0 else 0.0
+        data1[..., 2] = history_length / float(moving_max_frames)
+        data1[..., 3] = spec_tracking
+
+        xs = (np.arange(moving_width, dtype=np.float32) + 0.5) / \
+            float(moving_width)
+        ys = (np.arange(moving_height, dtype=np.float32) + 0.5) / \
+            float(moving_height)
+        data2 = np.zeros((moving_height, moving_width, 4), dtype=np.float32)
+        data2[..., 0] = xs[None, :]
+        data2[..., 1] = ys[:, None]
+        data2[..., 2] = 0.01
+        data2[..., 3] = 0.0 if frame_index > 0 else 1.0
+
+        shifted_mask = object_mask | previous_object_mask
+        pixel_shift = float(moving_velocity) / float(moving_width)
+        data2[shifted_mask, 0] = np.clip(
+            data2[shifted_mask, 0] - pixel_shift, 0.0, 1.0)
+        data2[shifted_mask, 2] = np.where(
+            previous_object_mask[shifted_mask], 0.36, 0.18).astype(np.float32)
+
+        moving_internal_ping[moving_history_write_index][..., 0] = np.float32(
+            history_length)
+        moving_internal_ping[moving_history_write_index][..., 1] = np.float32(
+            min(history_length, 4))
+        moving_internal_ping[moving_history_write_index][...,
+                                                         2] = np.float32(0.0)
+        moving_internal_ping[moving_history_write_index][...,
+                                                         3] = np.float32(0.0)
+
+        (
+            moving_stabilized_diff_luma,
+            moving_stabilized_spec_luma,
+            _,
+            stabilized_output,
+        ) = temporal_stabilization_shader_equivalent(
+            moving_tile_mask,
+            moving_packed_normal_roughness,
+            moving_view_z,
+            data1,
+            data2,
+            diff_history,
+            spec_history,
+            spec_tracking,
+            moving_prev_diff_luma_ping[moving_history_read_index],
+            moving_prev_spec_luma_ping[moving_history_read_index],
+            moving_internal_ping[moving_history_write_index],
+            denoising_range,
+            stabilization_strength=0.82,
+            max_stabilized_frame_num=moving_max_frames,
+            history_available=frame_index > 0,
+            enable_mv_patch=True,
+        )
+
+        clean_diff_packed = pack_radiance_and_norm_hit_dist(
+            clean_diff, diff_hit)
+        clean_spec_packed = pack_radiance_and_norm_hit_dist(
+            clean_spec, spec_hit)
+        clean_diff_linear, _ = unpack_radiance_and_norm_hit_dist(
+            clean_diff_packed)
+        clean_spec_linear, _ = unpack_radiance_and_norm_hit_dist(
+            clean_spec_packed)
+        clean_rgb = np.maximum(clean_diff_linear + clean_spec_linear, 0.0)
+        clean_luma = (
+            0.2126 * clean_rgb[..., 0]
+            + 0.7152 * clean_rgb[..., 1]
+            + 0.0722 * clean_rgb[..., 2]
+        ).astype(np.float32)
+        stabilized_luma = (
+            0.2126 * stabilized_output[..., 0]
+            + 0.7152 * stabilized_output[..., 1]
+            + 0.0722 * stabilized_output[..., 2]
+        ).astype(np.float32)
+
+        trailing_mask = previous_object_mask & (~object_mask)
+        if np.any(trailing_mask):
+            trailing_error = float(
+                np.mean(np.abs(stabilized_luma[trailing_mask] - clean_luma[trailing_mask])))
+            trailing_errors.append(trailing_error)
+
+        moving_prev_diff_luma_ping[moving_history_write_index] = moving_stabilized_diff_luma.copy(
+        )
+        moving_prev_spec_luma_ping[moving_history_write_index] = moving_stabilized_spec_luma.copy(
+        )
+        moving_history_read_index = moving_history_write_index
+        previous_object_mask = object_mask
+
+    i2_trailing_error = float(np.mean(trailing_errors)
+                              ) if trailing_errors else 0.0
+    i2_pass = i2_trailing_error <= 0.10
+
+    return ModuleITestResults(
+        i1_pass=i1_pass,
+        i1_flicker_reduction_ratio=i1_flicker_reduction_ratio,
+        i2_pass=i2_pass,
+        i2_trailing_error=i2_trailing_error,
+    )
+
+
 def main() -> int:
     module_a_results = run_module_a_tests()
     module_b_results = run_module_b_tests()
@@ -1718,6 +2102,7 @@ def main() -> int:
     module_f_results = run_module_f_tests()
     module_g_results = run_module_g_tests()
     module_h_results = run_module_h_tests()
+    module_i_results = run_module_i_tests()
 
     print(
         "Module A results: "
@@ -1790,6 +2175,12 @@ def main() -> int:
         f"rmse={module_h_results.h2_rmse:.8f})",
         flush=True,
     )
+    print(
+        "Module I results: "
+        f"I1(pass={module_i_results.i1_pass}, flicker_reduction_ratio={module_i_results.i1_flicker_reduction_ratio:.6f}); "
+        f"I2(pass={module_i_results.i2_pass}, trailing_error={module_i_results.i2_trailing_error:.6f})",
+        flush=True,
+    )
     return (
         0
         if module_a_results.passed
@@ -1800,6 +2191,7 @@ def main() -> int:
         and module_f_results.passed
         and module_g_results.passed
         and module_h_results.passed
+        and module_i_results.passed
         else 1
     )
 

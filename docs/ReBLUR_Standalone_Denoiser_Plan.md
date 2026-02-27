@@ -460,8 +460,8 @@ Phase 3: Temporal core (Modules E and H)
 Phase 4: Temporal robustness (Modules F and I)
 - Implement history fix and temporal stabilization.
 - Run dedicated flicker/ghosting/outlier tests.
-- Status (2026-02-27): Module F complete. History-fix + anti-firefly pass is integrated between temporal accumulation and blur, fast-history clamping controls are exposed, and F1/F2/F3 quantitative gates pass in `dev/reblur_test_suite.py`.
-- Handoff: Implement Module I temporal stabilization while keeping Module H no-stabilization output as the reference branch for stabilization-off behavior.
+- Status (2026-02-27): Complete. Module F history-fix + anti-firefly and Module I temporal stabilization are integrated; stabilization writes final denoised output with stabilized luma-history ping-pong, and I1/I2 quantitative gates pass in `dev/reblur_test_suite.py` (`flicker_reduction_ratio=2.229064`, `trailing_error=0.031525`).
+- Handoff: Start Phase 5 Module J (split-screen and validation) while keeping the Module H no-stabilization path as the baseline branch for stabilization-off equivalence checks.
 
 Phase 5: Debug/validation surface (Module J)
 - Implement split-screen and validation passes.

@@ -60,6 +60,10 @@ The base storage path varies by platform:
 | `reblur_blur_min_radius` | float | 1.0 | gpu | ReBLUR blur minimum radius (`0`-`8`)                                                                             |
 | `reblur_blur_max_radius` | float | 6.0 | gpu | ReBLUR blur maximum radius (`0`-`8`)                                                                             |
 | `reblur_blur_history_max_frame_num` | uint | 32 | gpu | ReBLUR blur convergence history cap in frames (`1`-`4096`)                                                        |
+| `reblur_stabilization_enable` | bool | true | gpu | ReBLUR temporal stabilization enable toggle                                                                        |
+| `reblur_stabilization_strength` | float | 0.7 | gpu | ReBLUR temporal stabilization strength (`0`-`1`)                                                                   |
+| `reblur_stabilization_max_frame_num` | uint | 32 | gpu | ReBLUR temporal stabilization history cap in frames (`1`-`4096`)                                                   |
+| `reblur_stabilization_enable_mv_patch` | bool | true | gpu | ReBLUR spec-dominant motion-vector patching toggle for temporal stabilization                                       |
 | `enable_nee`        | bool   | false      | gpu               | Next event estimation                                                                                        |
 | `debug_mode`        | string | *(empty)*  | all               | Renderer debug output mode                                                                                   |
 | `screen_log`        | bool   | true       | all               | On-screen log overlay                                                                                        |

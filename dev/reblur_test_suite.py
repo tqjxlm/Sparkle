@@ -43,6 +43,10 @@ Phase 2 Module G adds blur checks:
 Phase 3 Module H adds post-blur and history writeback checks:
 - H1 Ping-pong history checksum ownership integrity
 - H2 Post-blur output equivalence when stabilization is disabled
+
+Phase 4 Module I adds temporal stabilization checks:
+- I1 Temporal flicker index reduction ratio vs stabilization-off baseline
+- I2 Moving-object trailing error guard metric
 """
 
 import argparse
@@ -64,6 +68,7 @@ from denoiser_module_tests import (
     run_module_f_tests,
     run_module_g_tests,
     run_module_h_tests,
+    run_module_i_tests,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -347,6 +352,22 @@ def main():
     )
     if not module_h_results.passed:
         print("Module H quantitative checks FAILED", flush=True)
+        return 1
+
+    # Module I quantitative checks (Phase 4).
+    module_i_results = run_module_i_tests()
+    print(
+        "I1 metrics: "
+        f"flicker_reduction_ratio={module_i_results.i1_flicker_reduction_ratio:.6f}",
+        flush=True,
+    )
+    print(
+        "I2 metrics: "
+        f"trailing_error={module_i_results.i2_trailing_error:.6f}",
+        flush=True,
+    )
+    if not module_i_results.passed:
+        print("Module I quantitative checks FAILED", flush=True)
         return 1
 
     # S0.1 Entry-point smoke.

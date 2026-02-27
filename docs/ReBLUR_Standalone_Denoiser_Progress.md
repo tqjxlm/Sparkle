@@ -569,3 +569,52 @@ Date: 2026-02-27
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Module F is complete. Next target is Module I temporal stabilization (Phase 4) and then ground-truth policy update in Phase 7.
+
+Date: 2026-02-27
+- Scope: Phase 4 Module I implementation (temporal stabilization + objective I1/I2 tests).
+- Milestone: Implemented standalone temporal stabilization pass after post-blur with stabilized luma-history ping-pong and spec-dominant motion-vector patching; integrated Module I quantitative gates into the dedicated ReBLUR suite.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_temporal_stabilization.cs.slang` and wired it into `ReblurDenoiser::Dispatch` after Module H.
+  - `ReblurDenoiser` now owns stabilization history resources:
+    - `ReblurDiffStabilizedLuma{0,1}`
+    - `ReblurSpecStabilizedLuma{0,1}`
+  - Added runtime controls and validation for Module I:
+    - `reblur_stabilization_enable`
+    - `reblur_stabilization_strength`
+    - `reblur_stabilization_max_frame_num`
+    - `reblur_stabilization_enable_mv_patch`
+  - Added Python shader-equivalent + deterministic fixtures for I1/I2:
+    - I1 flicker reduction ratio = `2.229064`
+    - I2 trailing error = `0.031525`
+  - Full dedicated suite remained passing with Module I integrated.
+  - Baseline GPU functional gate (`--spatial_denoise false`) remains passing (`Mean FLIP error: 0.0032`).
+  - Denoiser-on GPU functional gate remains expected-fail vs current ground truth (`Mean FLIP error: 0.4236`, threshold `0.03`).
+- Trials:
+  - Extended host orchestration/resources in `ReblurDenoiser` with stabilization shader/pipeline/pass/uniforms and luma-history ping-pong textures.
+  - Updated `RenderConfig` + `GPURenderer` wiring for new Module I settings and clamping.
+  - Extended `dev/denoiser_metrics.py`, `dev/denoiser_module_tests.py`, and `dev/reblur_test_suite.py` to add and gate I1/I2 metrics.
+  - Updated docs for Phase 4 completion and runtime arguments (`docs/ReBLUR_Standalone_Denoiser_Plan.md`, `docs/Run.md`, `docs/ReBLUR_Standalone_Denoiser_Progress.md`).
+- Pitfalls:
+  - Running two `dev/functional_test.py` invocations in parallel caused a transient `git submodule` lock conflict in `build.py`; rerunning sequentially resolved it.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_temporal_stabilization.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `libraries/include/renderer/RenderConfig.h`
+  - Updated: `libraries/source/renderer/RenderConfig.cpp`
+  - Updated: `libraries/source/renderer/renderer/GPURenderer.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Updated: `docs/Run.md`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Plan.md`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Progress.md`
+- Executed:
+  - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+  - `python dev/denoiser_module_tests.py`
+  - `python build.py --framework glfw --config Release`
+  - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise false`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 4 is complete (F+I). Next target is Phase 5 Module J (split-screen + validation), followed by Phase 7 ground-truth policy update for denoiser-on GPU outputs.

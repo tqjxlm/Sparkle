@@ -65,6 +65,17 @@ static ConfigValue<float> config_reblur_blur_max_radius("reblur_blur_max_radius"
 static ConfigValue<uint32_t> config_reblur_blur_history_max_frame_num(
     "reblur_blur_history_max_frame_num", "standalone ReBLUR blur convergence history cap in frames (1-4096)",
     "renderer", 32u, true);
+static ConfigValue<bool> config_reblur_stabilization_enable("reblur_stabilization_enable",
+                                                            "standalone ReBLUR temporal stabilization enable toggle",
+                                                            "renderer", true, true);
+static ConfigValue<float> config_reblur_stabilization_strength(
+    "reblur_stabilization_strength", "standalone ReBLUR temporal stabilization strength (0-1)", "renderer", 0.7f, true);
+static ConfigValue<uint32_t> config_reblur_stabilization_max_frame_num(
+    "reblur_stabilization_max_frame_num", "standalone ReBLUR temporal stabilization history cap in frames (1-4096)",
+    "renderer", 32u, true);
+static ConfigValue<bool> config_reblur_stabilization_enable_mv_patch(
+    "reblur_stabilization_enable_mv_patch", "standalone ReBLUR spec-dominant motion-vector patching toggle", "renderer",
+    true, true);
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
@@ -103,6 +114,12 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_max_radius, reblur_blur_max_radius);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_history_max_frame_num,
                                            reblur_blur_history_max_frame_num);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_stabilization_enable, reblur_stabilization_enable);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_stabilization_strength, reblur_stabilization_strength);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_stabilization_max_frame_num,
+                                           reblur_stabilization_max_frame_num);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_stabilization_enable_mv_patch,
+                                           reblur_stabilization_enable_mv_patch);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
     ConfigCollectionHelper::RegisterConfig(this, config_target_framerate, target_framerate);
@@ -291,6 +308,27 @@ void RenderConfig::Validate()
             clamped_blur_history_max_frame_num);
         config_reblur_blur_history_max_frame_num.Set(clamped_blur_history_max_frame_num);
         reblur_blur_history_max_frame_num = clamped_blur_history_max_frame_num;
+    }
+
+    float clamped_stabilization_strength = sanitize_history_fix_value(reblur_stabilization_strength, 0.7f, 0.0f, 1.0f);
+    if (std::abs(clamped_stabilization_strength - reblur_stabilization_strength) > 1e-6f)
+    {
+        Log(Warn, "reblur_stabilization_strength={} is invalid. clamped to {}", reblur_stabilization_strength,
+            clamped_stabilization_strength);
+        config_reblur_stabilization_strength.Set(clamped_stabilization_strength);
+        reblur_stabilization_strength = clamped_stabilization_strength;
+    }
+
+    constexpr uint32_t MinStabilizationFrameNum = 1u;
+    constexpr uint32_t MaxStabilizationFrameNum = 4096u;
+    uint32_t clamped_stabilization_max_frame_num =
+        std::clamp(reblur_stabilization_max_frame_num, MinStabilizationFrameNum, MaxStabilizationFrameNum);
+    if (clamped_stabilization_max_frame_num != reblur_stabilization_max_frame_num)
+    {
+        Log(Warn, "reblur_stabilization_max_frame_num={} is invalid. clamped to {}", reblur_stabilization_max_frame_num,
+            clamped_stabilization_max_frame_num);
+        config_reblur_stabilization_max_frame_num.Set(clamped_stabilization_max_frame_num);
+        reblur_stabilization_max_frame_num = clamped_stabilization_max_frame_num;
     }
 
 #if FRAMEWORK_ANDROID || FRAMEWORK_IOS

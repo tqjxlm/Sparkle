@@ -1470,6 +1470,200 @@ def post_blur_shader_equivalent(
     return out_prev_normal_roughness, out_diff_history, out_spec_history, out_denoised_output
 
 
+def temporal_stabilization_shader_equivalent(
+    tile_mask: np.ndarray,
+    packed_normal_roughness: np.ndarray,
+    view_z: np.ndarray,
+    data1: np.ndarray,
+    data2: np.ndarray,
+    diff_history_signal: np.ndarray,
+    spec_history_signal: np.ndarray,
+    spec_hit_dist_for_tracking: np.ndarray,
+    prev_diff_stabilized_luma: np.ndarray,
+    prev_spec_stabilized_luma: np.ndarray,
+    internal_data: np.ndarray,
+    denoising_range: float,
+    stabilization_strength: float,
+    max_stabilized_frame_num: int,
+    history_available: bool,
+    enable_mv_patch: bool,
+    mv_patch_spec_threshold: float = 0.55,
+    mv_patch_strength: float = 2.5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+    if tile_mask.ndim != 2:
+        raise ValueError("tile_mask must be a 2D array")
+    if packed_normal_roughness.shape[:2] != view_z.shape or packed_normal_roughness.shape[-1] != 4:
+        raise ValueError(
+            "packed_normal_roughness must be HxWx4 matching view_z")
+    if data1.shape[:2] != view_z.shape or data1.shape[-1] != 4:
+        raise ValueError("data1 must be HxWx4 matching view_z")
+    if data2.shape[:2] != view_z.shape or data2.shape[-1] != 4:
+        raise ValueError("data2 must be HxWx4 matching view_z")
+    if diff_history_signal.shape != spec_history_signal.shape or diff_history_signal.shape[-1] != 4:
+        raise ValueError(
+            "diff/spec history signals must have matching HxWx4 shapes")
+    if diff_history_signal.shape[:2] != view_z.shape:
+        raise ValueError("diff/spec history shapes must match view_z shape")
+    if spec_hit_dist_for_tracking.shape != view_z.shape:
+        raise ValueError("spec_hit_dist_for_tracking must match view_z shape")
+    if prev_diff_stabilized_luma.shape != view_z.shape:
+        raise ValueError("prev_diff_stabilized_luma must match view_z shape")
+    if prev_spec_stabilized_luma.shape != view_z.shape:
+        raise ValueError("prev_spec_stabilized_luma must match view_z shape")
+    if internal_data.shape[:2] != view_z.shape or internal_data.shape[-1] != 4:
+        raise ValueError("internal_data must be HxWx4 matching view_z")
+
+    height, width = view_z.shape
+    luma_weights = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    strength = float(np.clip(stabilization_strength, 0.0, 1.0))
+    max_frames = max(float(max_stabilized_frame_num), 1.0)
+    patch_threshold = float(np.clip(mv_patch_spec_threshold, 0.0, 1.0))
+    patch_strength = max(float(mv_patch_strength), 0.0)
+
+    diff_linear = ycocg_to_linear(diff_history_signal[..., :3])
+    spec_linear = ycocg_to_linear(spec_history_signal[..., :3])
+    diff_luma = np.sum(np.maximum(diff_linear, 0.0) *
+                       luma_weights[None, None, :], axis=-1)
+    spec_luma = np.sum(np.maximum(spec_linear, 0.0) *
+                       luma_weights[None, None, :], axis=-1)
+
+    out_internal_data = internal_data.astype(np.float32, copy=True)
+    out_diff_stabilized_luma = np.zeros((height, width), dtype=np.float32)
+    out_spec_stabilized_luma = np.zeros((height, width), dtype=np.float32)
+    out_denoised_output = np.zeros((height, width, 4), dtype=np.float32)
+
+    for y in range(height):
+        tile_y = y // REBLUR_TILE_SIZE
+        for x in range(width):
+            tile_x = x // REBLUR_TILE_SIZE
+            is_valid_pixel = (
+                tile_mask[tile_y, tile_x] == 0
+                and _is_valid_prepass_view_z(float(view_z[y, x]), denoising_range)
+            )
+
+            current_diff_luma = float(max(diff_luma[y, x], 0.0))
+            current_spec_luma = float(max(spec_luma[y, x], 0.0))
+            if not is_valid_pixel:
+                out_internal_data[y, x, 2] = np.float32(0.0)
+                out_internal_data[y, x, 3] = np.float32(0.0)
+                out_diff_stabilized_luma[y, x] = np.float32(current_diff_luma)
+                out_spec_stabilized_luma[y, x] = np.float32(current_spec_luma)
+                rgb = np.maximum(diff_linear[y, x] + spec_linear[y, x], 0.0)
+                out_denoised_output[y, x, :3] = rgb.astype(np.float32)
+                out_denoised_output[y, x, 3] = np.float32(1.0)
+                continue
+
+            data1_value = data1[y, x]
+            data2_value = data2[y, x]
+            valid_reprojection = (
+                history_available
+                and data1_value[1] > 0.5
+                and data2_value[3] < 0.5
+            )
+
+            depth_delta_norm = float(np.clip(data2_value[2], 0.0, 1.0))
+            current_uv_x = (float(x) + 0.5) / float(width)
+            current_uv_y = (float(y) + 0.5) / float(height)
+            prev_uv_x = float(data2_value[0])
+            prev_uv_y = float(data2_value[1])
+
+            roughness = float(
+                np.clip(packed_normal_roughness[y, x, 3], 0.0, 1.0))
+            tracking = float(
+                np.clip(spec_hit_dist_for_tracking[y, x], 0.0, 1.0))
+            total_luma = max(current_diff_luma + current_spec_luma, 1e-6)
+            spec_dominance = float(np.clip(
+                current_spec_luma / total_luma, 0.0, 1.0))
+
+            mv_patch_scale = 0.0
+            if valid_reprojection and enable_mv_patch:
+                spec_factor = float(
+                    np.clip(
+                        (spec_dominance - patch_threshold) /
+                        max(1.0 - patch_threshold, 1e-6),
+                        0.0,
+                        1.0,
+                    )
+                )
+                glossy_factor = float(np.clip(1.0 - roughness, 0.0, 1.0))
+                tracking_factor = float(np.sqrt(tracking))
+                mv_patch_scale = float(np.clip(
+                    spec_factor
+                    * glossy_factor
+                    * tracking_factor
+                    * np.clip(depth_delta_norm * patch_strength, 0.0, 1.0),
+                    0.0,
+                    1.0,
+                ))
+                prev_uv_x = (1.0 - mv_patch_scale) * prev_uv_x + \
+                    mv_patch_scale * current_uv_x
+                prev_uv_y = (1.0 - mv_patch_scale) * prev_uv_y + \
+                    mv_patch_scale * current_uv_y
+
+            prev_x = int(np.rint(prev_uv_x * float(width) - 0.5))
+            prev_y = int(np.rint(prev_uv_y * float(height) - 0.5))
+            prev_inside = 0 <= prev_x < width and 0 <= prev_y < height
+
+            previous_diff_luma = current_diff_luma
+            previous_spec_luma = current_spec_luma
+            if valid_reprojection and prev_inside:
+                previous_diff_luma = float(
+                    max(prev_diff_stabilized_luma[prev_y, prev_x], 0.0))
+                previous_spec_luma = float(
+                    max(prev_spec_stabilized_luma[prev_y, prev_x], 0.0))
+
+            stabilized_history_length = float(
+                np.clip(data1_value[2], 0.0, 1.0) * (max_frames - 1.0) + 1.0)
+            base_blend = strength * \
+                (1.0 - 1.0 / max(stabilized_history_length, 1.0))
+            motion_guard = 1.0 - \
+                float(np.clip(depth_delta_norm * 6.0, 0.0, 1.0))
+            blend = 0.0
+            if valid_reprojection and prev_inside:
+                blend = float(np.clip(
+                    base_blend * motion_guard * (1.0 - 0.85 * mv_patch_scale),
+                    0.0,
+                    1.0,
+                ))
+
+            stabilized_diff_luma = max(
+                (1.0 - blend) * current_diff_luma + blend * previous_diff_luma,
+                0.0,
+            )
+            stabilized_spec_luma = max(
+                (1.0 - blend) * current_spec_luma + blend * previous_spec_luma,
+                0.0,
+            )
+
+            diff_signal_linear = np.concatenate(
+                (diff_linear[y, x], diff_history_signal[y, x, 3:4]), axis=0)
+            spec_signal_linear = np.concatenate(
+                (spec_linear[y, x], spec_history_signal[y, x, 3:4]), axis=0)
+            stabilized_diff_signal = _change_signal_luma(
+                diff_signal_linear, stabilized_diff_luma)
+            stabilized_spec_signal = _change_signal_luma(
+                spec_signal_linear, stabilized_spec_luma)
+            denoised_rgb = np.maximum(
+                stabilized_diff_signal[:3] + stabilized_spec_signal[:3], 0.0
+            )
+
+            out_internal_data[y, x, 2] = np.float32(blend)
+            out_internal_data[y, x, 3] = np.float32(mv_patch_scale)
+            out_diff_stabilized_luma[y, x] = np.float32(stabilized_diff_luma)
+            out_spec_stabilized_luma[y, x] = np.float32(stabilized_spec_luma)
+            out_denoised_output[y, x, :3] = denoised_rgb.astype(np.float32)
+            out_denoised_output[y, x, 3] = np.float32(1.0)
+
+    return (
+        out_diff_stabilized_luma,
+        out_spec_stabilized_luma,
+        out_internal_data,
+        out_denoised_output,
+    )
+
+
 def normalized_rmse(a: np.ndarray, b: np.ndarray, value_range: float) -> float:
     if value_range <= 0.0:
         raise ValueError("value_range must be positive")

@@ -87,6 +87,10 @@ struct RenderConfig : public ConfigCollection
     float reblur_blur_min_radius;
     float reblur_blur_max_radius;
     uint32_t reblur_blur_history_max_frame_num;
+    bool reblur_stabilization_enable;
+    float reblur_stabilization_strength;
+    uint32_t reblur_stabilization_max_frame_num;
+    bool reblur_stabilization_enable_mv_patch;
     bool spatial_denoise;
     bool use_ssao;
     bool use_prepass;
