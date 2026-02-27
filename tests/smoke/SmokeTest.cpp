@@ -7,17 +7,10 @@ namespace sparkle
 class SmokeTest : public TestCase
 {
 public:
-    Result Tick(AppFramework & /*app*/) override
+    Result OnTick(AppFramework & /*app*/) override
     {
-        if (frame_++ < 2)
-        {
-            return Result::Pending;
-        }
-        return Result::Pass;
+        return frame_ > 2 ? Result::Pass : Result::Pending;
     }
-
-private:
-    uint32_t frame_ = 0;
 };
 
 static TestCaseRegistrar<SmokeTest> smoke_test_registrar("smoke");

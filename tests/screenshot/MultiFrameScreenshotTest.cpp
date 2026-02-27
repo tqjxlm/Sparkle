@@ -15,10 +15,8 @@ namespace sparkle
 class MultiFrameScreenshotTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    Result OnTick(AppFramework &app) override
     {
-        frame_++;
-
         if (captured_count_ >= FramesToCapture)
         {
             return Result::Pass;
@@ -32,7 +30,7 @@ public:
 
         if (!ready_)
         {
-            return CheckTimeout(app);
+            return Result::Pending;
         }
 
         if (waiting_for_completion_)
@@ -43,31 +41,18 @@ public:
                 captured_count_++;
                 Log(Info, "MultiFrameScreenshotTest: captured frame {} of {}", captured_count_, FramesToCapture);
             }
-            return CheckTimeout(app);
+            return captured_count_ >= FramesToCapture ? Result::Pass : Result::Pending;
         }
 
         // Request next screenshot
         auto name = std::format("multi_frame_{}", captured_count_);
         app.RequestTakeScreenshot(name);
         waiting_for_completion_ = true;
-        return CheckTimeout(app);
-    }
-
-private:
-    Result CheckTimeout(AppFramework &app)
-    {
-        uint32_t timeout = app.GetAppConfig().test_timeout;
-        if (timeout > 0 && frame_ > timeout)
-        {
-            Log(Error, "MultiFrameScreenshotTest timed out after {} frames ({}/{} captured)", frame_,
-                captured_count_, FramesToCapture);
-            return Result::Fail;
-        }
         return captured_count_ >= FramesToCapture ? Result::Pass : Result::Pending;
     }
 
+private:
     static constexpr uint32_t FramesToCapture = 5;
-    uint32_t frame_ = 0;
     uint32_t captured_count_ = 0;
     bool ready_ = false;
     bool waiting_for_completion_ = false;
