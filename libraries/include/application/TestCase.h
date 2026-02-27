@@ -23,7 +23,13 @@ public:
 
     virtual ~TestCase() = default;
 
-    virtual Result Tick(AppFramework &app) = 0;
+    /// Calls OnTick(), increments the frame counter, and enforces the timeout.
+    Result Tick(AppFramework &app);
+
+protected:
+    virtual Result OnTick(AppFramework &app) = 0;
+
+    uint32_t frame_ = 0;
 };
 
 class TestCaseRegistry

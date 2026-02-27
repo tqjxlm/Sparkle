@@ -2,12 +2,32 @@
 
 #if ENABLE_TEST_CASES
 
+#include "application/AppConfig.h"
+#include "application/AppFramework.h"
 #include "core/Logger.h"
 
 #include <map>
 
 namespace sparkle
 {
+
+TestCase::Result TestCase::Tick(AppFramework &app)
+{
+    ++frame_;
+    Result result = OnTick(app);
+
+    if (result == Result::Pending)
+    {
+        uint32_t timeout = app.GetAppConfig().test_timeout;
+        if (timeout > 0 && frame_ > timeout)
+        {
+            Log(Error, "Test case timed out after {} frames", timeout);
+            return Result::Fail;
+        }
+    }
+
+    return result;
+}
 namespace
 {
 std::map<std::string, TestCaseRegistry::Factory> &GetRegistry()
