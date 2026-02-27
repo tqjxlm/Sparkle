@@ -763,7 +763,13 @@ void GPURenderer::RenderReblurPath()
         .albedo_metallic = albedo_metallic_.get(),
     };
     ReblurSettings settings;
+    auto *camera_proxy = scene_render_proxy_->GetCamera();
     ReblurMatrices matrices;
+    matrices.view_to_clip = camera_proxy->GetProjectionMatrix();
+    matrices.view_to_world = camera_proxy->GetViewMatrix().inverse();
+    matrices.world_to_clip_prev = camera_proxy->GetViewProjectionMatrixPrev();
+    matrices.world_to_view_prev = camera_proxy->GetViewMatrixPrev();
+    matrices.world_prev_to_world = Mat4::Identity();
     reblur_->Denoise(inputs, settings, matrices, dispatched_sample_count_, render_config_.reblur_debug_pass);
 
     // Bind denoised output to composite and dispatch
