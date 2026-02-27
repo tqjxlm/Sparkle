@@ -1050,6 +1050,59 @@ def blur_shader_equivalent(
     return out_diff, out_spec, out_prev_view_z, diff_effective_radius, spec_effective_radius
 
 
+def post_blur_shader_equivalent(
+    tile_mask: np.ndarray,
+    packed_normal_roughness: np.ndarray,
+    view_z: np.ndarray,
+    data1: np.ndarray,
+    blur_diff_signal: np.ndarray,
+    blur_spec_signal: np.ndarray,
+    denoising_range: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+    if tile_mask.ndim != 2:
+        raise ValueError("tile_mask must be a 2D array")
+    if packed_normal_roughness.shape[:2] != view_z.shape or packed_normal_roughness.shape[-1] != 4:
+        raise ValueError(
+            "packed_normal_roughness must be HxWx4 matching view_z")
+    if data1.shape[:2] != view_z.shape or data1.shape[-1] != 4:
+        raise ValueError("data1 must be HxWx4 matching view_z")
+    if blur_diff_signal.shape != blur_spec_signal.shape or blur_diff_signal.shape[-1] != 4:
+        raise ValueError(
+            "blur diff/spec signals must have matching HxWx4 shapes")
+    if blur_diff_signal.shape[:2] != view_z.shape:
+        raise ValueError("blur diff/spec shapes must match view_z shape")
+
+    height, width = view_z.shape
+    out_prev_normal_roughness = packed_normal_roughness.astype(
+        np.float32, copy=True)
+    out_diff_history = blur_diff_signal.astype(np.float32, copy=True)
+    out_spec_history = blur_spec_signal.astype(np.float32, copy=True)
+    out_denoised_output = np.zeros((height, width, 4), dtype=np.float32)
+
+    for y in range(height):
+        tile_y = y // REBLUR_TILE_SIZE
+        for x in range(width):
+            tile_x = x // REBLUR_TILE_SIZE
+            history_factor = float(np.clip(data1[y, x, 0], 0.0, 1.0))
+            _ = history_factor
+            view_z_value = float(view_z[y, x])
+            is_sky_tile = tile_mask[tile_y, tile_x] != 0
+
+            diff_linear = ycocg_to_linear(
+                blur_diff_signal[y, x, :3][None, ...])[0]
+            spec_linear = ycocg_to_linear(
+                blur_spec_signal[y, x, :3][None, ...])[0]
+            denoised = np.maximum(diff_linear + spec_linear, 0.0)
+            if is_sky_tile or not _is_valid_prepass_view_z(view_z_value, denoising_range):
+                denoised = np.maximum(denoised, 0.0)
+            out_denoised_output[y, x, :3] = denoised.astype(np.float32)
+            out_denoised_output[y, x, 3] = np.float32(1.0)
+
+    return out_prev_normal_roughness, out_diff_history, out_spec_history, out_denoised_output
+
+
 def normalized_rmse(a: np.ndarray, b: np.ndarray, value_range: float) -> float:
     if value_range <= 0.0:
         raise ValueError("value_range must be positive")

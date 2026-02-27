@@ -141,7 +141,6 @@ class ReblurBlurShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(in_spec, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(in_data1, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(out_prev_view_z, RHIShaderResourceReflection::ResourceType::StorageImage2D)
-    USE_SHADER_RESOURCE(out_prev_normal_roughness, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(out_diff, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(out_spec, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
@@ -155,16 +154,23 @@ public:
     };
 };
 
-class ReblurPassthroughShader : public RHIShaderInfo
+class ReblurPostBlurShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(ReblurPassthroughShader, RHIShaderStage::Compute, "shaders/utilities/reblur_passthrough.cs.slang",
+    REGISTGER_SHADER(ReblurPostBlurShader, RHIShaderStage::Compute, "shaders/denoiser/reblur/reblur_post_blur.cs.slang",
                      "main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
     USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
-    USE_SHADER_RESOURCE(noisy_input, RHIShaderResourceReflection::ResourceType::Texture2D)
-    USE_SHADER_RESOURCE(denoised_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(in_tiles, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_normal_roughness, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_view_z, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_diff, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_spec, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(out_prev_normal_roughness, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(out_diff_history, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(out_spec_history, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(out_denoised_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
     END_SHADER_RESOURCE_TABLE
 
@@ -172,6 +178,7 @@ public:
     struct UniformBufferData
     {
         Vector2UInt resolution;
+        Vector2 params;
     };
 };
 
@@ -348,6 +355,8 @@ void ReblurDenoiser::CreateTemporalTextures()
 
     data1_texture_ = rhi_->CreateImage(signal_attribute, "ReblurData1");
     data2_texture_ = rhi_->CreateImage(signal_attribute, "ReblurData2");
+    temporal_diff_radiance_hitdist_texture_ = rhi_->CreateImage(signal_attribute, "ReblurTemporalDiffRadianceHitDist");
+    temporal_spec_radiance_hitdist_texture_ = rhi_->CreateImage(signal_attribute, "ReblurTemporalSpecRadianceHitDist");
     prev_normal_roughness_texture_ = rhi_->CreateImage(signal_attribute, "ReblurPrevNormalRoughness");
 
     for (uint32_t index = 0u; index < TemporalHistoryPingPongCount; index++)
@@ -430,7 +439,7 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     prepass_shader_ = rhi_->CreateShader<ReblurPrePassShader>();
     temporal_accumulation_shader_ = rhi_->CreateShader<ReblurTemporalAccumulationShader>();
     blur_shader_ = rhi_->CreateShader<ReblurBlurShader>();
-    passthrough_shader_ = rhi_->CreateShader<ReblurPassthroughShader>();
+    post_blur_shader_ = rhi_->CreateShader<ReblurPostBlurShader>();
 
     classify_tiles_pipeline_state_ =
         rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurClassifyTilesPipeline");
@@ -457,9 +466,10 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     blur_pipeline_state_->SetShader<RHIShaderStage::Compute>(blur_shader_);
     blur_pipeline_state_->Compile();
 
-    pipeline_state_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurPassthroughPipeline");
-    pipeline_state_->SetShader<RHIShaderStage::Compute>(passthrough_shader_);
-    pipeline_state_->Compile();
+    post_blur_pipeline_state_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurPostBlurPipeline");
+    post_blur_pipeline_state_->SetShader<RHIShaderStage::Compute>(post_blur_shader_);
+    post_blur_pipeline_state_->Compile();
 
     classify_tiles_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurClassifyTilesShader::UniformBufferData),
                                                          .usages = RHIBuffer::BufferUsage::UniformBuffer,
@@ -493,11 +503,11 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
                                                .is_dynamic = true},
                                               "ReblurBlurUniformBuffer");
 
-    uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurPassthroughShader::UniformBufferData),
-                                          .usages = RHIBuffer::BufferUsage::UniformBuffer,
-                                          .mem_properties = RHIMemoryProperty::None,
-                                          .is_dynamic = true},
-                                         "ReblurUniformBuffer");
+    post_blur_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurPostBlurShader::UniformBufferData),
+                                                    .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                    .mem_properties = RHIMemoryProperty::None,
+                                                    .is_dynamic = true},
+                                                   "ReblurPostBlurUniformBuffer");
 
     auto *classify_resources = classify_tiles_pipeline_state_->GetShaderResource<ReblurClassifyTilesShader>();
     classify_resources->ubo().BindResource(classify_tiles_uniform_buffer_);
@@ -516,8 +526,8 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     auto *blur_resources = blur_pipeline_state_->GetShaderResource<ReblurBlurShader>();
     blur_resources->ubo().BindResource(blur_uniform_buffer_);
 
-    auto *cs_resources = pipeline_state_->GetShaderResource<ReblurPassthroughShader>();
-    cs_resources->ubo().BindResource(uniform_buffer_);
+    auto *post_blur_resources = post_blur_pipeline_state_->GetShaderResource<ReblurPostBlurShader>();
+    post_blur_resources->ubo().BindResource(post_blur_uniform_buffer_);
 
     classify_tiles_compute_pass_ = rhi_->CreateComputePass("ReblurClassifyTilesComputePass", false);
     hit_distance_reconstruction_compute_pass_ =
@@ -525,7 +535,7 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     prepass_compute_pass_ = rhi_->CreateComputePass("ReblurPrePassComputePass", false);
     temporal_accumulation_compute_pass_ = rhi_->CreateComputePass("ReblurTemporalAccumulationComputePass", false);
     blur_compute_pass_ = rhi_->CreateComputePass("ReblurBlurComputePass", false);
-    compute_pass_ = rhi_->CreateComputePass("ReblurComputePass", false);
+    post_blur_compute_pass_ = rhi_->CreateComputePass("ReblurPostBlurComputePass", false);
 
     CreateTileMaskTexture();
     CreateHitDistanceReconstructionTextures();
@@ -596,7 +606,6 @@ void ReblurDenoiser::ResetHistory()
 
 void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef<RHIImage> &denoised_output)
 {
-    ASSERT(inputs.noisy_input);
     ASSERT(inputs.normal_roughness);
     ASSERT(inputs.view_z);
     ASSERT(inputs.motion_vectors);
@@ -623,6 +632,8 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     ASSERT(temporal_accumulation_uniform_buffer_);
     ASSERT(data1_texture_);
     ASSERT(data2_texture_);
+    ASSERT(temporal_diff_radiance_hitdist_texture_);
+    ASSERT(temporal_spec_radiance_hitdist_texture_);
     ASSERT(prev_normal_roughness_texture_);
     ASSERT(diff_history_textures_[0]);
     ASSERT(diff_history_textures_[1]);
@@ -642,9 +653,9 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     ASSERT(blur_diff_radiance_hitdist_texture_);
     ASSERT(blur_spec_radiance_hitdist_texture_);
     ASSERT(prev_view_z_texture_);
-    ASSERT(pipeline_state_);
-    ASSERT(compute_pass_);
-    ASSERT(uniform_buffer_);
+    ASSERT(post_blur_pipeline_state_);
+    ASSERT(post_blur_compute_pass_);
+    ASSERT(post_blur_uniform_buffer_);
 
     Vector2UInt output_size(denoised_output->GetWidth(), denoised_output->GetHeight());
     if (output_size.x() != image_size_.x() || output_size.y() != image_size_.y())
@@ -807,9 +818,9 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     temporal_accumulation_resources->out_internal_data().BindResource(
         internal_data_textures_[history_write_index]->GetDefaultView(rhi_));
     temporal_accumulation_resources->out_diff_history().BindResource(
-        diff_history_textures_[history_write_index]->GetDefaultView(rhi_));
+        temporal_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
     temporal_accumulation_resources->out_spec_history().BindResource(
-        spec_history_textures_[history_write_index]->GetDefaultView(rhi_));
+        temporal_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
     temporal_accumulation_resources->out_diff_fast_history().BindResource(
         diff_fast_history_textures_[history_write_index]->GetDefaultView(rhi_));
     temporal_accumulation_resources->out_spec_fast_history().BindResource(
@@ -849,15 +860,15 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     data2_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                 .after_stage = RHIPipelineStage::Top,
                                 .before_stage = RHIPipelineStage::ComputeShader});
+    temporal_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                         .after_stage = RHIPipelineStage::Top,
+                                                         .before_stage = RHIPipelineStage::ComputeShader});
+    temporal_spec_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                         .after_stage = RHIPipelineStage::Top,
+                                                         .before_stage = RHIPipelineStage::ComputeShader});
     internal_data_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                                               .after_stage = RHIPipelineStage::Top,
                                                               .before_stage = RHIPipelineStage::ComputeShader});
-    diff_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                                             .after_stage = RHIPipelineStage::Top,
-                                                             .before_stage = RHIPipelineStage::ComputeShader});
-    spec_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                                             .after_stage = RHIPipelineStage::Top,
-                                                             .before_stage = RHIPipelineStage::ComputeShader});
     diff_fast_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                                                   .after_stage = RHIPipelineStage::Top,
                                                                   .before_stage = RHIPipelineStage::ComputeShader});
@@ -879,15 +890,15 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     data2_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                 .after_stage = RHIPipelineStage::ComputeShader,
                                 .before_stage = RHIPipelineStage::ComputeShader});
+    temporal_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                         .after_stage = RHIPipelineStage::ComputeShader,
+                                                         .before_stage = RHIPipelineStage::ComputeShader});
+    temporal_spec_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                         .after_stage = RHIPipelineStage::ComputeShader,
+                                                         .before_stage = RHIPipelineStage::ComputeShader});
     internal_data_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
                                                               .after_stage = RHIPipelineStage::ComputeShader,
                                                               .before_stage = RHIPipelineStage::ComputeShader});
-    diff_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
-                                                             .after_stage = RHIPipelineStage::ComputeShader,
-                                                             .before_stage = RHIPipelineStage::ComputeShader});
-    spec_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
-                                                             .after_stage = RHIPipelineStage::ComputeShader,
-                                                             .before_stage = RHIPipelineStage::ComputeShader});
     diff_fast_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
                                                                   .after_stage = RHIPipelineStage::ComputeShader,
                                                                   .before_stage = RHIPipelineStage::ComputeShader});
@@ -899,9 +910,6 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
          .after_stage = RHIPipelineStage::ComputeShader,
          .before_stage = RHIPipelineStage::ComputeShader});
 
-    temporal_history_read_index_ = history_write_index;
-    temporal_history_valid_ = true;
-
     ReblurBlurShader::UniformBufferData blur_ubo{
         .resolution = image_size_,
         .params = Vector4(denoising_range_, settings_.blur_min_radius, settings_.blur_max_radius, 0.0f),
@@ -912,20 +920,16 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     blur_resources->in_tiles().BindResource(tile_mask_texture_->GetDefaultView(rhi_));
     blur_resources->in_normal_roughness().BindResource(inputs.normal_roughness->GetDefaultView(rhi_));
     blur_resources->in_view_z().BindResource(inputs.view_z->GetDefaultView(rhi_));
-    blur_resources->in_diff().BindResource(diff_history_textures_[temporal_history_read_index_]->GetDefaultView(rhi_));
-    blur_resources->in_spec().BindResource(spec_history_textures_[temporal_history_read_index_]->GetDefaultView(rhi_));
+    blur_resources->in_diff().BindResource(temporal_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    blur_resources->in_spec().BindResource(temporal_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
     blur_resources->in_data1().BindResource(data1_texture_->GetDefaultView(rhi_));
     blur_resources->out_prev_view_z().BindResource(prev_view_z_texture_->GetDefaultView(rhi_));
-    blur_resources->out_prev_normal_roughness().BindResource(prev_normal_roughness_texture_->GetDefaultView(rhi_));
     blur_resources->out_diff().BindResource(blur_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
     blur_resources->out_spec().BindResource(blur_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
 
     prev_view_z_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                       .after_stage = RHIPipelineStage::Top,
                                       .before_stage = RHIPipelineStage::ComputeShader});
-    prev_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                                .after_stage = RHIPipelineStage::Top,
-                                                .before_stage = RHIPipelineStage::ComputeShader});
     blur_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                                      .after_stage = RHIPipelineStage::Top,
                                                      .before_stage = RHIPipelineStage::ComputeShader});
@@ -940,9 +944,6 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     prev_view_z_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                       .after_stage = RHIPipelineStage::ComputeShader,
                                       .before_stage = RHIPipelineStage::ComputeShader});
-    prev_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                                .after_stage = RHIPipelineStage::ComputeShader,
-                                                .before_stage = RHIPipelineStage::ComputeShader});
     blur_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                                      .after_stage = RHIPipelineStage::ComputeShader,
                                                      .before_stage = RHIPipelineStage::ComputeShader});
@@ -950,23 +951,56 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
                                                      .after_stage = RHIPipelineStage::ComputeShader,
                                                      .before_stage = RHIPipelineStage::ComputeShader});
 
-    ReblurPassthroughShader::UniformBufferData ubo{.resolution = image_size_};
-    uniform_buffer_->Upload(rhi_, &ubo);
+    ReblurPostBlurShader::UniformBufferData post_blur_ubo{
+        .resolution = image_size_,
+        .params = Vector2(denoising_range_, 0.0f),
+    };
+    post_blur_uniform_buffer_->Upload(rhi_, &post_blur_ubo);
 
-    auto *cs_resources = pipeline_state_->GetShaderResource<ReblurPassthroughShader>();
-    cs_resources->noisy_input().BindResource(inputs.noisy_input->GetDefaultView(rhi_));
-    cs_resources->denoised_output().BindResource(denoised_output->GetDefaultView(rhi_));
+    auto *post_blur_resources = post_blur_pipeline_state_->GetShaderResource<ReblurPostBlurShader>();
+    post_blur_resources->in_tiles().BindResource(tile_mask_texture_->GetDefaultView(rhi_));
+    post_blur_resources->in_normal_roughness().BindResource(inputs.normal_roughness->GetDefaultView(rhi_));
+    post_blur_resources->in_view_z().BindResource(inputs.view_z->GetDefaultView(rhi_));
+    post_blur_resources->in_diff().BindResource(blur_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    post_blur_resources->in_spec().BindResource(blur_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    post_blur_resources->out_prev_normal_roughness().BindResource(prev_normal_roughness_texture_->GetDefaultView(rhi_));
+    post_blur_resources->out_diff_history().BindResource(
+        diff_history_textures_[history_write_index]->GetDefaultView(rhi_));
+    post_blur_resources->out_spec_history().BindResource(
+        spec_history_textures_[history_write_index]->GetDefaultView(rhi_));
+    post_blur_resources->out_denoised_output().BindResource(denoised_output->GetDefaultView(rhi_));
 
+    prev_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                .after_stage = RHIPipelineStage::Top,
+                                                .before_stage = RHIPipelineStage::ComputeShader});
+    diff_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                             .after_stage = RHIPipelineStage::Top,
+                                                             .before_stage = RHIPipelineStage::ComputeShader});
+    spec_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                             .after_stage = RHIPipelineStage::Top,
+                                                             .before_stage = RHIPipelineStage::ComputeShader});
     denoised_output->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                  .after_stage = RHIPipelineStage::Top,
                                  .before_stage = RHIPipelineStage::ComputeShader});
 
-    rhi_->BeginComputePass(compute_pass_);
-    rhi_->DispatchCompute(pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
-    rhi_->EndComputePass(compute_pass_);
+    rhi_->BeginComputePass(post_blur_compute_pass_);
+    rhi_->DispatchCompute(post_blur_pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {8u, 8u, 1u});
+    rhi_->EndComputePass(post_blur_compute_pass_);
 
+    prev_normal_roughness_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                .after_stage = RHIPipelineStage::ComputeShader,
+                                                .before_stage = RHIPipelineStage::ComputeShader});
+    diff_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
+                                                             .after_stage = RHIPipelineStage::ComputeShader,
+                                                             .before_stage = RHIPipelineStage::ComputeShader});
+    spec_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
+                                                             .after_stage = RHIPipelineStage::ComputeShader,
+                                                             .before_stage = RHIPipelineStage::ComputeShader});
     denoised_output->Transition({.target_layout = RHIImageLayout::Read,
                                  .after_stage = RHIPipelineStage::ComputeShader,
                                  .before_stage = RHIPipelineStage::PixelShader});
+
+    temporal_history_read_index_ = history_write_index;
+    temporal_history_valid_ = true;
 }
 } // namespace sparkle

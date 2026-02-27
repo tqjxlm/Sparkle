@@ -343,7 +343,6 @@ void GPURenderer::Render()
                                                                .before_stage = RHIPipelineStage::ComputeShader});
 
             ReblurDenoiser::FrontEndInputs reblur_front_end_inputs{
-                .noisy_input = scene_texture_,
                 .normal_roughness = reblur_normal_roughness_texture_,
                 .view_z = reblur_view_z_texture_,
                 .motion_vectors = reblur_motion_vector_texture_,

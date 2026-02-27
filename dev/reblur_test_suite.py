@@ -3,7 +3,7 @@
 Phase 0 covers bootstrap checks:
 - R0.1 Vanilla GPU functional regression (baseline GPU pipeline must pass `dev/functional_test.py`)
 - S0.1 Entry-point smoke (denoiser-enabled GPU path runs and exits cleanly)
-- S0.2 Pass-through equivalence (denoiser off vs on output difference is near zero)
+- S0.2 Denoiser divergence metric (reports denoiser off vs on output delta; Phase 0 target was near zero)
 - S0.3 Resize/reset smoke (denoiser-enabled path survives alternate render resolution)
 
 Phase 1 adds Module A checks:
@@ -34,6 +34,10 @@ Phase 2 Module G adds blur checks:
 - G1 High-frequency energy reduction on static noisy patches
 - G2 Edge-preservation MSE guard near depth discontinuities
 - G3 Effective blur-radius decrease as history increases
+
+Phase 3 Module H adds post-blur and history writeback checks:
+- H1 Ping-pong history checksum ownership integrity
+- H2 Post-blur output equivalence when stabilization is disabled
 """
 
 import argparse
@@ -53,6 +57,7 @@ from denoiser_module_tests import (
     run_module_d_tests,
     run_module_e_tests,
     run_module_g_tests,
+    run_module_h_tests,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -296,6 +301,25 @@ def main():
         print("Module G quantitative checks FAILED", flush=True)
         return 1
 
+    # Module H quantitative checks (Phase 3).
+    module_h_results = run_module_h_tests()
+    print(
+        "H1 metrics: "
+        f"frames_validated={module_h_results.h1_frames_validated}, "
+        f"last_read_index={module_h_results.h1_last_read_index}, "
+        f"last_history_checksum={module_h_results.h1_last_history_checksum}",
+        flush=True,
+    )
+    print(
+        "H2 metrics: "
+        f"max_abs_diff={module_h_results.h2_max_abs_diff:.8f}, "
+        f"rmse={module_h_results.h2_rmse:.8f}",
+        flush=True,
+    )
+    if not module_h_results.passed:
+        print("Module H quantitative checks FAILED", flush=True)
+        return 1
+
     # S0.1 Entry-point smoke.
     smoke_cmd = base_cmd + [
         "--run",
@@ -349,8 +373,8 @@ def main():
 
     print(f"S0.2 metrics: max_abs_diff={max_abs_diff:.6f}, mean_abs_diff={mean_abs_diff:.6f}, rmse={rmse:.6f}",
           flush=True)
-    if max_abs_diff > 0.0:
-        print("S0.2 FAILED: pass-through output is not bit-exact", flush=True)
+    if not np.isfinite(max_abs_diff) or not np.isfinite(mean_abs_diff) or not np.isfinite(rmse):
+        print("S0.2 FAILED: image-diff metrics are not finite", flush=True)
         return 1
 
     # S0.3 Resize/reset smoke (alternate resolution run).

@@ -445,6 +445,7 @@ Date: 2026-02-27
   - Updated: `dev/reblur_test_suite.py`
   - Updated: `docs/ReBLUR_Standalone_Denoiser_Plan.md`
   - Updated: `docs/ReBLUR_Standalone_Denoiser_Progress.md`
+  - Updated: `docs/TODO.md`
   - Executed:
     - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
     - `python dev/denoiser_module_tests.py`
@@ -453,3 +454,48 @@ Date: 2026-02-27
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Module E is complete. Next target is Phase 3 Module H (post-blur history writeback ownership and H1/H2 quantitative coverage).
+
+Date: 2026-02-27
+- Scope: Phase 3 Module H implementation (post-blur history writeback ownership + objective H1/H2 tests).
+- Milestone: Implemented standalone post-blur pass and moved history writeback ownership to Module H for the stabilization-disabled path.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_post_blur.cs.slang` and wired it into `ReblurDenoiser::Dispatch` after blur.
+  - Module H now owns writeback to:
+    - `ReblurPrevNormalRoughness`
+    - `ReblurDiffHistory{0,1}`
+    - `ReblurSpecHistory{0,1}`
+    - final denoiser output (`ReblurOutput`) when stabilization is disabled.
+  - Temporal accumulation now writes diffuse/spec accumulation into temporary textures (`ReblurTemporalDiffRadianceHitDist`, `ReblurTemporalSpecRadianceHitDist`) to avoid post-blur writeback aliasing.
+  - Added Module H quantitative tests:
+    - H1 ping-pong history integrity via deterministic checksums.
+    - H2 no-stabilization equivalence for post-blur output path.
+  - During integration, a denoiser-enabled startup regression was observed and fixed by removing an optimized-out post-blur `in_data1` binding mismatch.
+  - `dev/reblur_test_suite.py` now treats S0.2 as a divergence metric (finite-value gate) instead of strict bit-exact pass-through, because Module H intentionally changes denoiser-on output.
+- Trials:
+  - Reworked host-side pass sequencing/resources in `ReblurDenoiser`:
+    - blur no longer writes `PREV_NORMAL_ROUGHNESS`,
+    - post-blur now performs ownership writeback and final output composition.
+  - Updated shader/resource declarations to match new pass ownership.
+  - Extended Python metric and module-test helpers with post-blur equivalents and Module H fixtures.
+- Pitfalls:
+  - Initial post-blur shader used a no-op `in_data1` usage pattern that could be optimized away, causing a runtime resource binding mismatch and early denoiser-enabled run failures; fixed by removing the unused binding from shader + host reflection table.
+  - Denoiser-enabled functional comparison against pre-Module-H GPU ground truth now fails (`Mean FLIP error: 0.1745`) because output is no longer pass-through; this is expected until denoiser ground truth policy is updated in later phases.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_post_blur.cs.slang`
+  - Updated: `shaders/denoiser/reblur/reblur_blur.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `libraries/source/renderer/renderer/GPURenderer.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Plan.md`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Progress.md`
+  - Executed:
+    - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+    - `python dev/denoiser_module_tests.py`
+    - `python build.py --framework glfw --config Release`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 3 is complete (E+H). Proceed to Phase 4 Module F (history fix / anti-firefly), then Module I temporal stabilization; revisit denoiser-on functional ground truth expectations once stabilization path is in place.

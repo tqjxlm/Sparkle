@@ -454,8 +454,8 @@ Phase 3: Temporal core (Modules E and H)
 - Implement temporal accumulation and post-blur history writeback.
 - Introduce permanent/transient pools and ping-pong resources.
 - Formalize history reset triggers (resize, scene change, camera cut, settings change).
-- Status (2026-02-27): Module E complete. Temporal accumulation, `DATA1`/`DATA2`, history ping-pong resources, and E1/E2/E3 quantitative gates are integrated.
-- Handoff: Continue Phase 3 with Module H (post-blur history writeback ownership and stabilization-disabled equivalence path).
+- Status (2026-02-27): Modules E and H complete. Temporal accumulation plus post-blur history writeback ownership (`DIFF_HISTORY`/`SPEC_HISTORY`/`PREV_NORMAL_ROUGHNESS`) and H1/H2 quantitative gates are integrated.
+- Handoff: Start Phase 4 Module F (history fix / anti-firefly) while keeping Module H no-stabilization output path as the baseline equivalence branch for upcoming Module I.
 
 Phase 4: Temporal robustness (Modules F and I)
 - Implement history fix and temporal stabilization.
@@ -483,7 +483,7 @@ Proposed implementation files:
 
 Bootstrap integration tests (must pass before Module A starts):
 - S0.1 Entry-point smoke: GPU pipeline runs with `--pipeline gpu --spatial_denoise true` and exits cleanly.
-- S0.2 Pass-through equivalence: with bootstrap no-op denoiser, output difference vs denoiser-off baseline is near zero (strict threshold).
+- S0.2 Pass-through equivalence (Phase 0 bootstrap only): with no-op denoiser, output difference vs denoiser-off baseline is near zero (strict threshold). Once Module H enables denoiser-owned final output, keep this as a reported divergence metric (finite-value gate) instead of a strict zero-diff requirement.
 - S0.3 Resize/reset smoke: denoiser-on path survives resize and scene reload without crashes or invalid resource warnings.
 
 Per-module fixtures:
@@ -560,7 +560,7 @@ Risk: Over-designed API surface increases churn before requirements are proven.
 ## 10. Exit Criteria
 
 Implementation is considered complete when:
-- Phase 0 bootstrap entry-point tests (S0.1-S0.3) pass and remain green.
+- Phase 0 bootstrap entry-point tests remain active. S0.1/S0.3 stay hard pass/fail gates; S0.2 is strict only for bootstrap/no-op mode and becomes a tracked divergence metric after Module H.
 - All module-level quantitative tests pass.
 - Convergence suite passes (CT1-CT5).
 - `dev/functional_test.py` passes for GPU pipeline in CI-supported frameworks.

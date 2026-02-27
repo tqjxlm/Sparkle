@@ -37,7 +37,6 @@ public:
 
     struct FrontEndInputs
     {
-        RHIResourceRef<RHIImage> noisy_input;
         RHIResourceRef<RHIImage> normal_roughness;
         RHIResourceRef<RHIImage> view_z;
         RHIResourceRef<RHIImage> motion_vectors;
@@ -75,25 +74,25 @@ private:
     RHIResourceRef<RHIShader> prepass_shader_;
     RHIResourceRef<RHIShader> temporal_accumulation_shader_;
     RHIResourceRef<RHIShader> blur_shader_;
-    RHIResourceRef<RHIShader> passthrough_shader_;
+    RHIResourceRef<RHIShader> post_blur_shader_;
     RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_state_;
     RHIResourceRef<RHIPipelineState> hit_distance_reconstruction_pipeline_state_;
     RHIResourceRef<RHIPipelineState> prepass_pipeline_state_;
     RHIResourceRef<RHIPipelineState> temporal_accumulation_pipeline_state_;
     RHIResourceRef<RHIPipelineState> blur_pipeline_state_;
-    RHIResourceRef<RHIPipelineState> pipeline_state_;
+    RHIResourceRef<RHIPipelineState> post_blur_pipeline_state_;
     RHIResourceRef<RHIComputePass> classify_tiles_compute_pass_;
     RHIResourceRef<RHIComputePass> hit_distance_reconstruction_compute_pass_;
     RHIResourceRef<RHIComputePass> prepass_compute_pass_;
     RHIResourceRef<RHIComputePass> temporal_accumulation_compute_pass_;
     RHIResourceRef<RHIComputePass> blur_compute_pass_;
-    RHIResourceRef<RHIComputePass> compute_pass_;
+    RHIResourceRef<RHIComputePass> post_blur_compute_pass_;
     RHIResourceRef<RHIBuffer> classify_tiles_uniform_buffer_;
     RHIResourceRef<RHIBuffer> hit_distance_reconstruction_uniform_buffer_;
     RHIResourceRef<RHIBuffer> prepass_uniform_buffer_;
     RHIResourceRef<RHIBuffer> temporal_accumulation_uniform_buffer_;
     RHIResourceRef<RHIBuffer> blur_uniform_buffer_;
-    RHIResourceRef<RHIBuffer> uniform_buffer_;
+    RHIResourceRef<RHIBuffer> post_blur_uniform_buffer_;
     RHIResourceRef<RHIImage> tile_mask_texture_;
     RHIResourceRef<RHIImage> reconstructed_diff_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> reconstructed_spec_radiance_hitdist_texture_;
@@ -102,6 +101,8 @@ private:
     RHIResourceRef<RHIImage> spec_hit_distance_for_tracking_texture_;
     RHIResourceRef<RHIImage> data1_texture_;
     RHIResourceRef<RHIImage> data2_texture_;
+    RHIResourceRef<RHIImage> temporal_diff_radiance_hitdist_texture_;
+    RHIResourceRef<RHIImage> temporal_spec_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> prev_normal_roughness_texture_;
     std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> diff_history_textures_;
     std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> spec_history_textures_;

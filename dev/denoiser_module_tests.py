@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,6 +21,7 @@ from denoiser_metrics import (
     normalized_rmse,
     pack_normal_roughness,
     pack_radiance_and_norm_hit_dist,
+    post_blur_shader_equivalent,
     prepass_shader_equivalent,
     project_world_to_pixel,
     reconstruct_hit_distance_shader_equivalent,
@@ -122,6 +124,21 @@ class ModuleGTestResults:
     @property
     def passed(self) -> bool:
         return self.g1_pass and self.g2_pass and self.g3_pass
+
+
+@dataclass
+class ModuleHTestResults:
+    h1_pass: bool
+    h1_frames_validated: int
+    h1_last_read_index: int
+    h1_last_history_checksum: str
+    h2_pass: bool
+    h2_max_abs_diff: float
+    h2_rmse: float
+
+    @property
+    def passed(self) -> bool:
+        return self.h1_pass and self.h2_pass
 
 
 def run_module_a_tests(seed: int = 7) -> ModuleATestResults:
@@ -1299,6 +1316,163 @@ def run_module_g_tests(seed: int = 59) -> ModuleGTestResults:
     )
 
 
+def _history_checksum(diff_history: np.ndarray, spec_history: np.ndarray) -> str:
+    return hashlib.sha256(
+        np.ascontiguousarray(diff_history).tobytes()
+        + np.ascontiguousarray(spec_history).tobytes()
+    ).hexdigest()
+
+
+def run_module_h_tests(seed: int = 67) -> ModuleHTestResults:
+    rng = np.random.default_rng(seed)
+    denoising_range = 300.0
+    height = 90
+    width = 146
+    frame_count = 6
+
+    view_z = np.full((height, width), 38.0, dtype=np.float32)
+    view_z[:8, :] = 0.0
+    view_z[:, :6] = 0.0
+    view_z[height - 7:, width - 9:] = denoising_range + 10.0
+
+    normals = rng.normal(size=(height, width, 3)).astype(np.float32)
+    normals[..., 2] += 1.5
+    normals /= np.linalg.norm(normals, axis=2,
+                              keepdims=True).astype(np.float32)
+    roughness = rng.uniform(0.08, 0.92, size=(
+        height, width)).astype(np.float32)
+    packed_normal_roughness = pack_normal_roughness(normals, roughness)
+    tile_mask = classify_tiles_reference(view_z, denoising_range)
+
+    history_read_index = 0
+    history_checksums = ["", ""]
+    diff_history_ping = [
+        np.zeros((height, width, 4), dtype=np.float32),
+        np.zeros((height, width, 4), dtype=np.float32),
+    ]
+    spec_history_ping = [
+        np.zeros((height, width, 4), dtype=np.float32),
+        np.zeros((height, width, 4), dtype=np.float32),
+    ]
+    h1_pass = True
+
+    h2_max_abs_diff = 0.0
+    h2_rmse_sum = 0.0
+    h2_frame_samples = 0
+
+    for frame_index in range(frame_count):
+        history_write_index = (history_read_index + 1) % 2
+        preserved_index = history_read_index
+        preserved_checksum = history_checksums[preserved_index]
+
+        data1 = np.zeros((height, width, 4), dtype=np.float32)
+        data1[..., 0] = np.clip(
+            0.18 + 0.12 * frame_index +
+            rng.normal(0.0, 0.03, size=(height, width)),
+            0.0,
+            1.0,
+        ).astype(np.float32)
+
+        diff_radiance = np.stack(
+            (
+                0.20 + 0.15 * np.sin((frame_index + 1) * 0.4) +
+                rng.uniform(0.0, 0.45, size=(height, width)),
+                0.08 + rng.uniform(0.0, 0.30, size=(height, width)),
+                0.06 + rng.uniform(0.0, 0.22, size=(height, width)),
+            ),
+            axis=-1,
+        ).astype(np.float32)
+        spec_radiance = np.stack(
+            (
+                0.10 + rng.uniform(0.0, 0.35, size=(height, width)),
+                0.05 + 0.10 * np.cos((frame_index + 1) * 0.7) +
+                rng.uniform(0.0, 0.20, size=(height, width)),
+                0.03 + rng.uniform(0.0, 0.20, size=(height, width)),
+            ),
+            axis=-1,
+        ).astype(np.float32)
+        diff_hit = rng.uniform(0.05, 0.95, size=(
+            height, width)).astype(np.float32)
+        spec_hit = rng.uniform(0.05, 0.95, size=(
+            height, width)).astype(np.float32)
+
+        blur_diff = pack_radiance_and_norm_hit_dist(diff_radiance, diff_hit)
+        blur_spec = pack_radiance_and_norm_hit_dist(spec_radiance, spec_hit)
+
+        (
+            out_prev_normal_roughness,
+            out_diff_history,
+            out_spec_history,
+            out_denoised_output,
+        ) = post_blur_shader_equivalent(
+            tile_mask,
+            packed_normal_roughness,
+            view_z,
+            data1,
+            blur_diff,
+            blur_spec,
+            denoising_range,
+        )
+
+        if not np.array_equal(out_prev_normal_roughness, packed_normal_roughness):
+            h1_pass = False
+
+        written_checksum = _history_checksum(
+            out_diff_history, out_spec_history)
+        readback_checksum = _history_checksum(
+            out_diff_history, out_spec_history)
+        if written_checksum != readback_checksum:
+            h1_pass = False
+
+        diff_history_ping[history_write_index] = out_diff_history.copy()
+        spec_history_ping[history_write_index] = out_spec_history.copy()
+        ping_readback_checksum = _history_checksum(
+            diff_history_ping[history_write_index], spec_history_ping[history_write_index]
+        )
+        if ping_readback_checksum != written_checksum:
+            h1_pass = False
+
+        if frame_index >= 1:
+            if preserved_checksum:
+                preserved_readback_checksum = _history_checksum(
+                    diff_history_ping[preserved_index], spec_history_ping[preserved_index]
+                )
+                if preserved_readback_checksum != preserved_checksum:
+                    h1_pass = False
+
+        history_checksums[history_write_index] = written_checksum
+        history_read_index = history_write_index
+
+        post_diff_radiance, _ = unpack_radiance_and_norm_hit_dist(
+            out_diff_history)
+        post_spec_radiance, _ = unpack_radiance_and_norm_hit_dist(
+            out_spec_history)
+        expected_rgb = np.maximum(post_diff_radiance + post_spec_radiance, 0.0)
+        expected_output = np.concatenate(
+            (expected_rgb, np.ones((height, width, 1), dtype=np.float32)), axis=-1
+        )
+
+        h2_abs_diff = np.abs(expected_output - out_denoised_output)
+        h2_max_abs_diff = max(h2_max_abs_diff, float(np.max(h2_abs_diff)))
+        h2_rmse_sum += float(np.sqrt(np.mean((expected_output -
+                             out_denoised_output) ** 2)))
+        h2_frame_samples += 1
+
+    h1_last_history_checksum = history_checksums[history_read_index]
+    h2_rmse = h2_rmse_sum / max(h2_frame_samples, 1)
+    h2_pass = h2_max_abs_diff <= 1e-6 and h2_rmse <= 1e-7
+
+    return ModuleHTestResults(
+        h1_pass=h1_pass,
+        h1_frames_validated=frame_count,
+        h1_last_read_index=history_read_index,
+        h1_last_history_checksum=h1_last_history_checksum,
+        h2_pass=h2_pass,
+        h2_max_abs_diff=h2_max_abs_diff,
+        h2_rmse=h2_rmse,
+    )
+
+
 def main() -> int:
     module_a_results = run_module_a_tests()
     module_b_results = run_module_b_tests()
@@ -1306,6 +1480,7 @@ def main() -> int:
     module_d_results = run_module_d_tests()
     module_e_results = run_module_e_tests()
     module_g_results = run_module_g_tests()
+    module_h_results = run_module_h_tests()
 
     print(
         "Module A results: "
@@ -1360,6 +1535,15 @@ def main() -> int:
         f"high_history_radius={module_g_results.g3_high_history_radius:.6f})",
         flush=True,
     )
+    print(
+        "Module H results: "
+        f"H1(pass={module_h_results.h1_pass}, frames_validated={module_h_results.h1_frames_validated}, "
+        f"last_read_index={module_h_results.h1_last_read_index}, "
+        f"last_history_checksum={module_h_results.h1_last_history_checksum}); "
+        f"H2(pass={module_h_results.h2_pass}, max_abs_diff={module_h_results.h2_max_abs_diff:.8f}, "
+        f"rmse={module_h_results.h2_rmse:.8f})",
+        flush=True,
+    )
     return (
         0
         if module_a_results.passed
@@ -1368,6 +1552,7 @@ def main() -> int:
         and module_d_results.passed
         and module_e_results.passed
         and module_g_results.passed
+        and module_h_results.passed
         else 1
     )
 
