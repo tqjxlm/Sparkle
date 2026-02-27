@@ -4,18 +4,15 @@
 #include "core/Logger.h"
 #endif
 
-#include <thread>
+#include <atomic>
 
 namespace sparkle
 {
 void RHIResource::UpdateId() const
 {
-    static thread_local size_t hash_seed =
-        static_cast<size_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    static std::atomic<size_t> next_id{1};
 
-    id_ = std::hash<size_t>{}(reinterpret_cast<size_t>(this)) ^ hash_seed;
-    hash_seed += 1;
-
+    id_ = next_id.fetch_add(1, std::memory_order_relaxed);
     id_dirty_ = false;
 }
 

@@ -363,6 +363,13 @@ void RHIContext::FlushDeferredDeletions()
     deferred_deletion_.resize(max_frames_in_flight_);
 
     is_deleting_deferred_resources_ = false;
+
+#ifndef NDEBUG
+    // After flushing all deferred deletions (always preceded by WaitForDeviceIdle),
+    // no valid code should reference old resources. Clear the set to prevent
+    // unbounded growth and false-positive assertions from ID collisions.
+    deleted_resources_.clear();
+#endif
 }
 
 void RHIContext::ReleaseRenderResources()
