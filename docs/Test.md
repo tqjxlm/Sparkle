@@ -5,13 +5,13 @@
 * Use `--test_case screenshot` to take a screenshot after the scene is fully loaded and a frame is fully rendered.
 * Use `--test_case multi_frame_screenshot` to take 5 frames of screenshots after the scene is fully loaded and a frame is fully rendered. This is useful for temporal analysis.
 * Screenshot test cases work with `--headless true`, so it is suitable for commandline use.
-* Screenshots are saved to [external-storage-path]/screenshots/ and named with the scene name and pipeline. For [external-storage-path], refer to [Run.md](Run.md).
+* Screenshots are saved to [external-storage-path]/screenshots/. For `--test_case screenshot`, the file is named `screenshot.png`. For `--test_case multi_frame_screenshot`, files are named `multi_frame_N.png` where `N` is the frame index. The UI "Save Screenshot" button names files with the scene name, pipeline, and timestamp. For [external-storage-path], refer to [Run.md](Run.md).
 * Ground truth images can be found in [CI.md](CI.md). But if you are working on a feature that is meant to change the final image output, you should not rely on the ground truth images.
 
 ## Python Test Scripts
 
 * When possible, always use python scripts to perform tests.
-* Make use of any necessary python libraries and add them to dev/requirements.exe
+* Make use of any necessary python libraries and add them to dev/requirements.txt
 * General test scripts are stored at dev/.
 * Dedicated test scripts are stored at tests/.
 * If python is not sufficient to test your case, also make use of TestCase system below. They can be combined with python scripts freely. See dev/functional_test.py as an example.
@@ -106,8 +106,8 @@ error; the first registration wins.
 
 ## Built-in Test Cases
 
-| Name                     | File                                                                                              | What it does                                                                                                                                                     |
-| ------------------------ | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `smoke`                  | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp)                                         | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline.                                                                              |
-| `screenshot`             | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp)                     | Waits for renderer ready, clears all existing screenshots optionallly, captures one, then passes. Used by functional tests and visual QA.                        |
-| `multi_frame_screenshot` | [tests/screenshot/MultiFrameScreenshotTest.cpp](../tests/screenshot/MultiFrameScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots optionallly, captures five, then passes. Used by functional tests and visual QA for temporal analysis. |
+| Name                     | File                                                                                              | What it does                                                                                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `smoke`                  | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp)                                         | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline.                                                                             |
+| `screenshot`             | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp)                     | Waits for renderer ready, clears all existing screenshots optionally, captures one, then passes. Used by functional tests and visual QA.                        |
+| `multi_frame_screenshot` | [tests/screenshot/MultiFrameScreenshotTest.cpp](../tests/screenshot/MultiFrameScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots optionally, captures five, then passes. Used by functional tests and visual QA for temporal analysis. |
