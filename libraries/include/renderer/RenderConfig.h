@@ -95,6 +95,7 @@ struct RenderConfig : public ConfigCollection
     float target_framerate;
     float gpu_time_budget_ratio;
     std::string camera_animation;
+    uint32_t camera_animation_frames; // 0 = same as max_spp
 
 protected:
     void Validate() override;

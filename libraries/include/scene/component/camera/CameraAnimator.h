@@ -35,6 +35,11 @@ public:
         return path_type_ != PathType::kNone;
     }
 
+    [[nodiscard]] bool IsDone(uint32_t frame_index) const
+    {
+        return frame_index >= total_frames_;
+    }
+
 private:
     PathType path_type_ = PathType::kNone;
     uint32_t total_frames_ = 1;
