@@ -30,6 +30,10 @@ public:
         float prepass_diffuse_radius = 2.0f;
         float prepass_specular_radius = 2.0f;
         float prepass_spec_tracking_radius = 2.0f;
+        uint32_t history_fix_frame_num = 3u;
+        float history_fix_base_pixel_stride = 2.0f;
+        float history_fix_sigma_scale = 2.0f;
+        bool history_fix_enable_anti_firefly = true;
         float blur_min_radius = 1.0f;
         float blur_max_radius = 6.0f;
         uint32_t blur_history_max_frame_num = 32u;
@@ -61,6 +65,7 @@ private:
     void CreateHitDistanceReconstructionTextures();
     void CreatePrePassTextures();
     void CreateTemporalTextures();
+    void CreateHistoryFixTextures();
     void CreateBlurTextures();
 
     RHIContext *rhi_ = nullptr;
@@ -73,24 +78,28 @@ private:
     RHIResourceRef<RHIShader> hit_distance_reconstruction_shader_;
     RHIResourceRef<RHIShader> prepass_shader_;
     RHIResourceRef<RHIShader> temporal_accumulation_shader_;
+    RHIResourceRef<RHIShader> history_fix_shader_;
     RHIResourceRef<RHIShader> blur_shader_;
     RHIResourceRef<RHIShader> post_blur_shader_;
     RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_state_;
     RHIResourceRef<RHIPipelineState> hit_distance_reconstruction_pipeline_state_;
     RHIResourceRef<RHIPipelineState> prepass_pipeline_state_;
     RHIResourceRef<RHIPipelineState> temporal_accumulation_pipeline_state_;
+    RHIResourceRef<RHIPipelineState> history_fix_pipeline_state_;
     RHIResourceRef<RHIPipelineState> blur_pipeline_state_;
     RHIResourceRef<RHIPipelineState> post_blur_pipeline_state_;
     RHIResourceRef<RHIComputePass> classify_tiles_compute_pass_;
     RHIResourceRef<RHIComputePass> hit_distance_reconstruction_compute_pass_;
     RHIResourceRef<RHIComputePass> prepass_compute_pass_;
     RHIResourceRef<RHIComputePass> temporal_accumulation_compute_pass_;
+    RHIResourceRef<RHIComputePass> history_fix_compute_pass_;
     RHIResourceRef<RHIComputePass> blur_compute_pass_;
     RHIResourceRef<RHIComputePass> post_blur_compute_pass_;
     RHIResourceRef<RHIBuffer> classify_tiles_uniform_buffer_;
     RHIResourceRef<RHIBuffer> hit_distance_reconstruction_uniform_buffer_;
     RHIResourceRef<RHIBuffer> prepass_uniform_buffer_;
     RHIResourceRef<RHIBuffer> temporal_accumulation_uniform_buffer_;
+    RHIResourceRef<RHIBuffer> history_fix_uniform_buffer_;
     RHIResourceRef<RHIBuffer> blur_uniform_buffer_;
     RHIResourceRef<RHIBuffer> post_blur_uniform_buffer_;
     RHIResourceRef<RHIImage> tile_mask_texture_;
@@ -110,6 +119,8 @@ private:
     std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> spec_fast_history_textures_;
     std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> spec_hit_distance_tracking_history_textures_;
     std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> internal_data_textures_;
+    RHIResourceRef<RHIImage> history_fix_diff_radiance_hitdist_texture_;
+    RHIResourceRef<RHIImage> history_fix_spec_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> blur_diff_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> blur_spec_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> prev_view_z_texture_;

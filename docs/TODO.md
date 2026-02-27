@@ -54,4 +54,4 @@
 ## Known Issues
 
 * [ ] Intermittent headless GPU screenshot run failure (`sparkle.exe` exits with code `4294967295`) observed during repeated `dev/reblur_test_suite.py` baseline step (`--pipeline gpu --spatial_denoise false`); rerun with identical args can pass. Collect crash dump/log evidence and isolate root cause.
-* [ ] `dev/functional_test.py --pipeline gpu --spatial_denoise true` currently fails against existing GPU ground truth after Module H because denoiser output is no longer pass-through (`Mean FLIP error: 0.1745` on 2026-02-27). Revisit denoiser-on ground truth/update policy in later phases (Module I/Phase 7 quality gate).
+* [ ] `dev/functional_test.py --pipeline gpu --spatial_denoise true` currently fails against existing GPU ground truth after Module H/Module F because denoiser output is no longer pass-through (`Mean FLIP error: 0.4236` on 2026-02-27 after latest Module F update; previously `0.1745` after Module H). Revisit denoiser-on ground truth/update policy in later phases (Module I/Phase 7 quality gate).

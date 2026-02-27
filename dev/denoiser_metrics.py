@@ -819,6 +819,373 @@ def temporal_accumulation_shader_equivalent(
     )
 
 
+def _signal_luma(signal: np.ndarray) -> float:
+    color = np.maximum(signal[:3].astype(np.float32, copy=False), 0.0)
+    return float(np.dot(color, np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)))
+
+
+def _change_signal_luma(signal: np.ndarray, target_luma: float) -> np.ndarray:
+    result = signal.astype(np.float32, copy=True)
+    color = np.maximum(result[:3], 0.0)
+    source_luma = float(np.dot(color, np.array(
+        [0.2126, 0.7152, 0.0722], dtype=np.float32)))
+    if source_luma > 1e-6:
+        color *= np.float32(target_luma / source_luma)
+    else:
+        color[:] = np.float32(target_luma)
+    result[:3] = np.maximum(color, 0.0)
+    result[3] = np.float32(np.clip(result[3], 0.0, 1.0))
+    return result
+
+
+def _compute_history_fix_stride(
+    history_length: float,
+    history_fix_frame_num: float,
+    base_stride: float,
+    roughness: float,
+    normalized_hit_distance: float,
+) -> int:
+    history_fix_frame_num_safe = max(history_fix_frame_num, 1.0)
+    early_history_factor = float(
+        np.clip((history_fix_frame_num_safe - history_length) /
+                history_fix_frame_num_safe, 0.0, 1.0)
+    )
+    roughness_factor = float(
+        np.clip(1.0 - 0.55 * np.clip(roughness, 0.0, 1.0), 0.0, 1.0))
+    hit_distance_factor = 0.35 + 0.65 * \
+        float(np.sqrt(np.clip(normalized_hit_distance, 0.0, 1.0)))
+    stride = 1.0 + max(base_stride, 0.0) * early_history_factor * \
+        roughness_factor * hit_distance_factor
+    return int(np.clip(np.rint(stride), 1, 4))
+
+
+def _compute_history_fix_neighbor_weight(
+    center_x: int,
+    center_y: int,
+    neighbor_x: int,
+    neighbor_y: int,
+    view_z: np.ndarray,
+    normals: np.ndarray,
+    stride: float,
+) -> float:
+    center_view_z = float(view_z[center_y, center_x])
+    neighbor_view_z = float(view_z[neighbor_y, neighbor_x])
+    if not np.isfinite(neighbor_view_z) or neighbor_view_z <= 0.0:
+        return 0.0
+
+    center_normal = normals[center_y, center_x]
+    neighbor_normal = normals[neighbor_y, neighbor_x]
+
+    offset_x = float(neighbor_x - center_x)
+    offset_y = float(neighbor_y - center_y)
+    distance_squared = offset_x * offset_x + offset_y * offset_y
+    sigma = max(stride * 1.25, 1.0)
+    distance_weight = float(np.exp(-distance_squared / (2.0 * sigma * sigma)))
+
+    relative_depth_delta = abs(
+        neighbor_view_z - center_view_z) / max(center_view_z, 1e-6)
+    depth_weight = float(np.exp(-relative_depth_delta * 20.0))
+
+    normal_cos = float(
+        np.clip(np.dot(center_normal, neighbor_normal), 0.0, 1.0))
+    normal_weight = normal_cos ** 8.0
+    return distance_weight * depth_weight * normal_weight
+
+
+def _reconstruct_history_fix_signal(
+    source_signal: np.ndarray,
+    x: int,
+    y: int,
+    tile_mask: np.ndarray,
+    view_z: np.ndarray,
+    normals: np.ndarray,
+    denoising_range: float,
+    stride_i: int,
+) -> np.ndarray:
+    height, width = view_z.shape
+    weighted_sum = source_signal[y, x].astype(np.float64, copy=True)
+    weight_sum = 1.0
+
+    for offset_y in range(-2, 3):
+        for offset_x in range(-2, 3):
+            if offset_x == 0 and offset_y == 0:
+                continue
+            if abs(offset_x) + abs(offset_y) == 4:
+                continue
+
+            nx = x + offset_x * stride_i
+            ny = y + offset_y * stride_i
+            if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                continue
+
+            neighbor_tile_x = nx // REBLUR_TILE_SIZE
+            neighbor_tile_y = ny // REBLUR_TILE_SIZE
+            if tile_mask[neighbor_tile_y, neighbor_tile_x] != 0:
+                continue
+
+            if not _is_valid_prepass_view_z(float(view_z[ny, nx]), denoising_range):
+                continue
+
+            weight = _compute_history_fix_neighbor_weight(
+                x,
+                y,
+                nx,
+                ny,
+                view_z,
+                normals,
+                float(stride_i),
+            )
+            if weight <= 0.0:
+                continue
+
+            weighted_sum += source_signal[ny, nx].astype(np.float64) * weight
+            weight_sum += weight
+
+    reconstructed = (weighted_sum / max(weight_sum, 1e-6)).astype(np.float32)
+    reconstructed[3] = np.float32(np.clip(reconstructed[3], 0.0, 1.0))
+    return reconstructed
+
+
+def _compute_fast_history_stats(
+    fast_signal: np.ndarray,
+    x: int,
+    y: int,
+    tile_mask: np.ndarray,
+    view_z: np.ndarray,
+    denoising_range: float,
+) -> tuple[float, float, float, float]:
+    height, width = view_z.shape
+    center_luma = _signal_luma(fast_signal[y, x])
+
+    m1 = center_luma
+    m2 = center_luma * center_luma
+    count = 1.0
+
+    ring_m1 = 0.0
+    ring_m2 = 0.0
+    ring_count = 0.0
+
+    for offset_y in range(-2, 3):
+        for offset_x in range(-2, 3):
+            if offset_x == 0 and offset_y == 0:
+                continue
+
+            nx = x + offset_x
+            ny = y + offset_y
+            if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                continue
+
+            neighbor_tile_x = nx // REBLUR_TILE_SIZE
+            neighbor_tile_y = ny // REBLUR_TILE_SIZE
+            if tile_mask[neighbor_tile_y, neighbor_tile_x] != 0:
+                continue
+
+            if not _is_valid_prepass_view_z(float(view_z[ny, nx]), denoising_range):
+                continue
+
+            luma = _signal_luma(fast_signal[ny, nx])
+            m1 += luma
+            m2 += luma * luma
+            count += 1.0
+
+            if abs(offset_x) <= 1 and abs(offset_y) <= 1:
+                continue
+
+            ring_m1 += luma
+            ring_m2 += luma * luma
+            ring_count += 1.0
+
+    mean_luma = m1 / max(count, 1.0)
+    sigma_luma = float(
+        np.sqrt(max(m2 / max(count, 1.0) - mean_luma * mean_luma, 0.0)))
+
+    if ring_count > 0.0:
+        ring_mean_luma = ring_m1 / ring_count
+        ring_sigma_luma = float(
+            np.sqrt(max(ring_m2 / ring_count - ring_mean_luma * ring_mean_luma, 0.0)))
+    else:
+        ring_mean_luma = mean_luma
+        ring_sigma_luma = sigma_luma
+
+    return mean_luma, sigma_luma, ring_mean_luma, ring_sigma_luma
+
+
+def history_fix_shader_equivalent(
+    tile_mask: np.ndarray,
+    packed_normal_roughness: np.ndarray,
+    data1: np.ndarray,
+    view_z: np.ndarray,
+    diff_signal: np.ndarray,
+    spec_signal: np.ndarray,
+    prev_diff_fast_history: np.ndarray,
+    prev_spec_fast_history: np.ndarray,
+    spec_hit_dist_for_tracking: np.ndarray,
+    denoising_range: float,
+    history_fix_frame_num: int,
+    history_fix_base_pixel_stride: float,
+    fast_history_clamping_sigma_scale: float,
+    enable_anti_firefly: bool,
+    max_history_frames: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+    if tile_mask.ndim != 2:
+        raise ValueError("tile_mask must be a 2D array")
+    if packed_normal_roughness.shape[:2] != view_z.shape or packed_normal_roughness.shape[-1] != 4:
+        raise ValueError(
+            "packed_normal_roughness must be HxWx4 matching view_z")
+    if data1.shape[:2] != view_z.shape or data1.shape[-1] != 4:
+        raise ValueError("data1 must be HxWx4 matching view_z")
+    if diff_signal.shape != spec_signal.shape or diff_signal.shape[-1] != 4:
+        raise ValueError("diff/spec signals must have matching HxWx4 shapes")
+    if diff_signal.shape[:2] != view_z.shape:
+        raise ValueError("diff/spec shapes must match view_z shape")
+    if prev_diff_fast_history.shape != diff_signal.shape:
+        raise ValueError("prev_diff_fast_history must match diff shape")
+    if prev_spec_fast_history.shape != spec_signal.shape:
+        raise ValueError("prev_spec_fast_history must match spec shape")
+    if spec_hit_dist_for_tracking.shape != view_z.shape:
+        raise ValueError("spec_hit_dist_for_tracking must match view_z shape")
+
+    height, width = view_z.shape
+    normals = _unpack_normal_from_packed_normal_roughness(
+        packed_normal_roughness)
+    roughness = np.clip(packed_normal_roughness[..., 3], 0.0, 1.0)
+
+    history_fix_frame_num_clamped = max(1.0, float(history_fix_frame_num))
+    max_history_frames_clamped = max(1.0, float(max_history_frames))
+    sigma_scale = float(np.clip(fast_history_clamping_sigma_scale, 0.25, 8.0))
+    base_stride = float(np.clip(history_fix_base_pixel_stride, 0.0, 8.0))
+
+    out_diff = diff_signal.astype(np.float32, copy=True)
+    out_spec = spec_signal.astype(np.float32, copy=True)
+    out_diff_fast = prev_diff_fast_history.astype(np.float32, copy=True)
+    out_spec_fast = prev_spec_fast_history.astype(np.float32, copy=True)
+
+    for y in range(height):
+        tile_y = y // REBLUR_TILE_SIZE
+        for x in range(width):
+            tile_x = x // REBLUR_TILE_SIZE
+            center_view_z = float(view_z[y, x])
+            if tile_mask[tile_y, tile_x] != 0 or not _is_valid_prepass_view_z(center_view_z, denoising_range):
+                continue
+
+            history_length = float(
+                np.clip(data1[y, x, 2], 0.0, 1.0) * max_history_frames_clamped)
+            diff_stride = _compute_history_fix_stride(
+                history_length,
+                history_fix_frame_num_clamped,
+                base_stride,
+                0.0,
+                float(np.clip(diff_signal[y, x, 3], 0.0, 1.0)),
+            )
+            spec_stride = _compute_history_fix_stride(
+                history_length,
+                history_fix_frame_num_clamped,
+                base_stride,
+                float(roughness[y, x]),
+                float(np.clip(spec_hit_dist_for_tracking[y, x], 0.0, 1.0)),
+            )
+
+            reconstructed_diff = _reconstruct_history_fix_signal(
+                diff_signal,
+                x,
+                y,
+                tile_mask,
+                view_z,
+                normals,
+                denoising_range,
+                diff_stride,
+            )
+            reconstructed_spec = _reconstruct_history_fix_signal(
+                spec_signal,
+                x,
+                y,
+                tile_mask,
+                view_z,
+                normals,
+                denoising_range,
+                spec_stride,
+            )
+
+            diff_mean, diff_sigma, diff_ring_mean, diff_ring_sigma = _compute_fast_history_stats(
+                prev_diff_fast_history,
+                x,
+                y,
+                tile_mask,
+                view_z,
+                denoising_range,
+            )
+            spec_mean, spec_sigma, spec_ring_mean, spec_ring_sigma = _compute_fast_history_stats(
+                prev_spec_fast_history,
+                x,
+                y,
+                tile_mask,
+                view_z,
+                denoising_range,
+            )
+
+            reconstructed_diff_luma = _signal_luma(reconstructed_diff)
+            reconstructed_spec_luma = _signal_luma(reconstructed_spec)
+            if history_length <= 1.05:
+                diff_mean = reconstructed_diff_luma
+                spec_mean = reconstructed_spec_luma
+
+            if enable_anti_firefly:
+                diff_anti_sigma = max(diff_ring_sigma * 0.85, 0.01)
+                spec_anti_sigma = max(spec_ring_sigma * 0.85, 0.01)
+                reconstructed_diff_luma = float(
+                    np.clip(reconstructed_diff_luma, diff_ring_mean -
+                            diff_anti_sigma, diff_ring_mean + diff_anti_sigma)
+                )
+                reconstructed_spec_luma = float(
+                    np.clip(reconstructed_spec_luma, spec_ring_mean -
+                            spec_anti_sigma, spec_ring_mean + spec_anti_sigma)
+                )
+
+            diff_fast_sigma = max(diff_sigma * sigma_scale, 0.01)
+            spec_fast_sigma = max(spec_sigma * sigma_scale, 0.01)
+            diff_clamped_luma = float(np.clip(
+                reconstructed_diff_luma, diff_mean - diff_fast_sigma, diff_mean + diff_fast_sigma))
+            spec_clamped_luma = float(np.clip(
+                reconstructed_spec_luma, spec_mean - spec_fast_sigma, spec_mean + spec_fast_sigma))
+
+            history_release = history_length / \
+                (history_fix_frame_num_clamped + history_length + 1e-6)
+            final_diff_luma = max(
+                (1.0 - history_release) * diff_clamped_luma +
+                history_release * reconstructed_diff_luma,
+                0.0,
+            )
+            final_spec_luma = max(
+                (1.0 - history_release) * spec_clamped_luma +
+                history_release * reconstructed_spec_luma,
+                0.0,
+            )
+
+            fast_mix = float(
+                np.clip(history_length / history_fix_frame_num_clamped, 0.0, 1.0))
+            prev_diff_fast_luma = _signal_luma(prev_diff_fast_history[y, x])
+            prev_spec_fast_luma = _signal_luma(prev_spec_fast_history[y, x])
+            updated_diff_fast_luma = (
+                1.0 - fast_mix) * final_diff_luma + fast_mix * prev_diff_fast_luma
+            updated_spec_fast_luma = (
+                1.0 - fast_mix) * final_spec_luma + fast_mix * prev_spec_fast_luma
+
+            final_diff = _change_signal_luma(
+                reconstructed_diff, final_diff_luma)
+            final_spec = _change_signal_luma(
+                reconstructed_spec, final_spec_luma)
+            out_diff[y, x] = final_diff
+            out_spec[y, x] = final_spec
+            out_diff_fast[y, x] = _change_signal_luma(
+                final_diff, updated_diff_fast_luma)
+            out_spec_fast[y, x] = _change_signal_luma(
+                final_spec, updated_spec_fast_luma)
+
+    return out_diff, out_spec, out_diff_fast, out_spec_fast
+
+
 def _compute_blur_neighbor_weight(
     center_x: int,
     center_y: int,

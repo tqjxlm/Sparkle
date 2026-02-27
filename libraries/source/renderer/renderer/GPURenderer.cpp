@@ -213,6 +213,10 @@ void GPURenderer::InitRenderResources()
              .prepass_diffuse_radius = render_config_.reblur_prepass_diffuse_radius,
              .prepass_specular_radius = render_config_.reblur_prepass_specular_radius,
              .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius,
+             .history_fix_frame_num = render_config_.reblur_history_fix_frame_num,
+             .history_fix_base_pixel_stride = render_config_.reblur_history_fix_base_pixel_stride,
+             .history_fix_sigma_scale = render_config_.reblur_history_fix_sigma_scale,
+             .history_fix_enable_anti_firefly = render_config_.reblur_history_fix_enable_anti_firefly,
              .blur_min_radius = render_config_.reblur_blur_min_radius,
              .blur_max_radius = render_config_.reblur_blur_max_radius,
              .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num});
@@ -318,6 +322,10 @@ void GPURenderer::Render()
                  .prepass_diffuse_radius = render_config_.reblur_prepass_diffuse_radius,
                  .prepass_specular_radius = render_config_.reblur_prepass_specular_radius,
                  .prepass_spec_tracking_radius = render_config_.reblur_prepass_spec_tracking_radius,
+                 .history_fix_frame_num = render_config_.reblur_history_fix_frame_num,
+                 .history_fix_base_pixel_stride = render_config_.reblur_history_fix_base_pixel_stride,
+                 .history_fix_sigma_scale = render_config_.reblur_history_fix_sigma_scale,
+                 .history_fix_enable_anti_firefly = render_config_.reblur_history_fix_enable_anti_firefly,
                  .blur_min_radius = render_config_.reblur_blur_min_radius,
                  .blur_max_radius = render_config_.reblur_blur_max_radius,
                  .blur_history_max_frame_num = render_config_.reblur_blur_history_max_frame_num});

@@ -53,6 +53,10 @@ The base storage path varies by platform:
 | `reblur_prepass_diffuse_radius` | float | 2.0 | gpu | ReBLUR pre-pass diffuse radius (`0`-`4`)                                                                      |
 | `reblur_prepass_specular_radius` | float | 2.0 | gpu | ReBLUR pre-pass specular radius (`0`-`4`)                                                                     |
 | `reblur_prepass_spec_tracking_radius` | float | 2.0 | gpu | ReBLUR spec hit-distance tracking radius (`0`-`4`)                                                            |
+| `reblur_history_fix_frame_num` | uint | 3 | gpu | ReBLUR history-fix window in frames (`1`-`64`)                                                                |
+| `reblur_history_fix_base_pixel_stride` | float | 2.0 | gpu | ReBLUR history-fix base reconstruction stride (`0`-`8`)                                                       |
+| `reblur_history_fix_sigma_scale` | float | 2.0 | gpu | ReBLUR fast-history clamping sigma scale (`0.25`-`8`)                                                         |
+| `reblur_history_fix_enable_anti_firefly` | bool | true | gpu | ReBLUR anti-firefly luminance clamp toggle                                                                     |
 | `reblur_blur_min_radius` | float | 1.0 | gpu | ReBLUR blur minimum radius (`0`-`8`)                                                                             |
 | `reblur_blur_max_radius` | float | 6.0 | gpu | ReBLUR blur maximum radius (`0`-`8`)                                                                             |
 | `reblur_blur_history_max_frame_num` | uint | 32 | gpu | ReBLUR blur convergence history cap in frames (`1`-`4096`)                                                        |

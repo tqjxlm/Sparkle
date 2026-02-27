@@ -127,6 +127,39 @@ public:
     };
 };
 
+class ReblurHistoryFixShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ReblurHistoryFixShader, RHIShaderStage::Compute,
+                     "shaders/denoiser/reblur/reblur_history_fix.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(in_tiles, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_normal_roughness, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_data1, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_view_z, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_diff, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_spec, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_diff_fast, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_spec_fast, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_spec_hit_dist_for_tracking, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(out_diff, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(out_spec, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(out_diff_fast, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(out_spec_fast, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+public:
+    struct UniformBufferData
+    {
+        Vector2UInt resolution;
+        Vector4 params0;
+        Vector4 params1;
+    };
+};
+
 class ReblurBlurShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(ReblurBlurShader, RHIShaderStage::Compute, "shaders/denoiser/reblur/reblur_blur.cs.slang", "main")
@@ -222,6 +255,45 @@ float SanitizeBlurRadius(float value, float fallback)
     return std::clamp(value, MinRadius, MaxRadius);
 }
 
+uint32_t SanitizeHistoryFixFrameNum(uint32_t value, uint32_t fallback)
+{
+    constexpr uint32_t MinFrameNum = 1u;
+    constexpr uint32_t MaxFrameNum = 64u;
+
+    if (value < MinFrameNum || value > MaxFrameNum)
+    {
+        return fallback;
+    }
+
+    return value;
+}
+
+float SanitizeHistoryFixStride(float value, float fallback)
+{
+    constexpr float MinStride = 0.0f;
+    constexpr float MaxStride = 8.0f;
+
+    if (!std::isfinite(value))
+    {
+        return fallback;
+    }
+
+    return std::clamp(value, MinStride, MaxStride);
+}
+
+float SanitizeHistoryFixSigma(float value, float fallback)
+{
+    constexpr float MinSigma = 0.25f;
+    constexpr float MaxSigma = 8.0f;
+
+    if (!std::isfinite(value))
+    {
+        return fallback;
+    }
+
+    return std::clamp(value, MinSigma, MaxSigma);
+}
+
 uint32_t SanitizeBlurHistoryMaxFrameNum(uint32_t value, uint32_t fallback)
 {
     constexpr uint32_t MinFrameNum = 1u;
@@ -246,6 +318,10 @@ bool ShouldResetHistoryForSettingsChange(const ReblurDenoiser::Settings &before,
            !NearlyEqual(before.prepass_diffuse_radius, after.prepass_diffuse_radius) ||
            !NearlyEqual(before.prepass_specular_radius, after.prepass_specular_radius) ||
            !NearlyEqual(before.prepass_spec_tracking_radius, after.prepass_spec_tracking_radius) ||
+           before.history_fix_frame_num != after.history_fix_frame_num ||
+           !NearlyEqual(before.history_fix_base_pixel_stride, after.history_fix_base_pixel_stride) ||
+           !NearlyEqual(before.history_fix_sigma_scale, after.history_fix_sigma_scale) ||
+           before.history_fix_enable_anti_firefly != after.history_fix_enable_anti_firefly ||
            !NearlyEqual(before.blur_min_radius, after.blur_min_radius) ||
            !NearlyEqual(before.blur_max_radius, after.blur_max_radius) ||
            before.blur_history_max_frame_num != after.blur_history_max_frame_num;
@@ -392,6 +468,28 @@ void ReblurDenoiser::CreateTemporalTextures()
     }
 }
 
+void ReblurDenoiser::CreateHistoryFixTextures()
+{
+    RHIImage::Attribute signal_attribute{
+        .format = PixelFormat::RGBAFloat16,
+        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+        .width = image_size_.x(),
+        .height = image_size_.y(),
+        .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+        .memory_properties = RHIMemoryProperty::DeviceLocal,
+        .mip_levels = 1,
+        .msaa_samples = 1,
+    };
+
+    history_fix_diff_radiance_hitdist_texture_ =
+        rhi_->CreateImage(signal_attribute, "ReblurHistoryFixDiffRadianceHitDist");
+    history_fix_spec_radiance_hitdist_texture_ =
+        rhi_->CreateImage(signal_attribute, "ReblurHistoryFixSpecRadianceHitDist");
+}
+
 void ReblurDenoiser::CreateBlurTextures()
 {
     RHIImage::Attribute signal_attribute{
@@ -438,6 +536,7 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     hit_distance_reconstruction_shader_ = rhi_->CreateShader<ReblurHitDistanceReconstructionShader>();
     prepass_shader_ = rhi_->CreateShader<ReblurPrePassShader>();
     temporal_accumulation_shader_ = rhi_->CreateShader<ReblurTemporalAccumulationShader>();
+    history_fix_shader_ = rhi_->CreateShader<ReblurHistoryFixShader>();
     blur_shader_ = rhi_->CreateShader<ReblurBlurShader>();
     post_blur_shader_ = rhi_->CreateShader<ReblurPostBlurShader>();
 
@@ -461,6 +560,11 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
         rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurTemporalAccumulationPipeline");
     temporal_accumulation_pipeline_state_->SetShader<RHIShaderStage::Compute>(temporal_accumulation_shader_);
     temporal_accumulation_pipeline_state_->Compile();
+
+    history_fix_pipeline_state_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurHistoryFixPipeline");
+    history_fix_pipeline_state_->SetShader<RHIShaderStage::Compute>(history_fix_shader_);
+    history_fix_pipeline_state_->Compile();
 
     blur_pipeline_state_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurBlurPipeline");
     blur_pipeline_state_->SetShader<RHIShaderStage::Compute>(blur_shader_);
@@ -497,6 +601,12 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
                             .is_dynamic = true},
                            "ReblurTemporalAccumulationUniformBuffer");
 
+    history_fix_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurHistoryFixShader::UniformBufferData),
+                                                      .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                      .mem_properties = RHIMemoryProperty::None,
+                                                      .is_dynamic = true},
+                                                     "ReblurHistoryFixUniformBuffer");
+
     blur_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurBlurShader::UniformBufferData),
                                                .usages = RHIBuffer::BufferUsage::UniformBuffer,
                                                .mem_properties = RHIMemoryProperty::None,
@@ -523,6 +633,9 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
         temporal_accumulation_pipeline_state_->GetShaderResource<ReblurTemporalAccumulationShader>();
     temporal_accumulation_resources->ubo().BindResource(temporal_accumulation_uniform_buffer_);
 
+    auto *history_fix_resources = history_fix_pipeline_state_->GetShaderResource<ReblurHistoryFixShader>();
+    history_fix_resources->ubo().BindResource(history_fix_uniform_buffer_);
+
     auto *blur_resources = blur_pipeline_state_->GetShaderResource<ReblurBlurShader>();
     blur_resources->ubo().BindResource(blur_uniform_buffer_);
 
@@ -534,6 +647,7 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
         rhi_->CreateComputePass("ReblurHitDistanceReconstructionComputePass", false);
     prepass_compute_pass_ = rhi_->CreateComputePass("ReblurPrePassComputePass", false);
     temporal_accumulation_compute_pass_ = rhi_->CreateComputePass("ReblurTemporalAccumulationComputePass", false);
+    history_fix_compute_pass_ = rhi_->CreateComputePass("ReblurHistoryFixComputePass", false);
     blur_compute_pass_ = rhi_->CreateComputePass("ReblurBlurComputePass", false);
     post_blur_compute_pass_ = rhi_->CreateComputePass("ReblurPostBlurComputePass", false);
 
@@ -541,6 +655,7 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     CreateHitDistanceReconstructionTextures();
     CreatePrePassTextures();
     CreateTemporalTextures();
+    CreateHistoryFixTextures();
     CreateBlurTextures();
     ResetHistory();
 }
@@ -553,6 +668,7 @@ void ReblurDenoiser::Resize(const Vector2UInt &image_size)
     CreateHitDistanceReconstructionTextures();
     CreatePrePassTextures();
     CreateTemporalTextures();
+    CreateHistoryFixTextures();
     CreateBlurTextures();
     ResetHistory();
 }
@@ -578,6 +694,12 @@ void ReblurDenoiser::SetSettings(const Settings &settings)
         SanitizePrePassRadius(sanitized_settings.prepass_specular_radius, Settings{}.prepass_specular_radius);
     sanitized_settings.prepass_spec_tracking_radius =
         SanitizePrePassRadius(sanitized_settings.prepass_spec_tracking_radius, Settings{}.prepass_spec_tracking_radius);
+    sanitized_settings.history_fix_frame_num =
+        SanitizeHistoryFixFrameNum(sanitized_settings.history_fix_frame_num, Settings{}.history_fix_frame_num);
+    sanitized_settings.history_fix_base_pixel_stride = SanitizeHistoryFixStride(
+        sanitized_settings.history_fix_base_pixel_stride, Settings{}.history_fix_base_pixel_stride);
+    sanitized_settings.history_fix_sigma_scale =
+        SanitizeHistoryFixSigma(sanitized_settings.history_fix_sigma_scale, Settings{}.history_fix_sigma_scale);
     sanitized_settings.blur_min_radius =
         SanitizeBlurRadius(sanitized_settings.blur_min_radius, Settings{}.blur_min_radius);
     sanitized_settings.blur_max_radius =
@@ -647,6 +769,11 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     ASSERT(spec_hit_distance_tracking_history_textures_[1]);
     ASSERT(internal_data_textures_[0]);
     ASSERT(internal_data_textures_[1]);
+    ASSERT(history_fix_pipeline_state_);
+    ASSERT(history_fix_compute_pass_);
+    ASSERT(history_fix_uniform_buffer_);
+    ASSERT(history_fix_diff_radiance_hitdist_texture_);
+    ASSERT(history_fix_spec_radiance_hitdist_texture_);
     ASSERT(blur_pipeline_state_);
     ASSERT(blur_compute_pass_);
     ASSERT(blur_uniform_buffer_);
@@ -910,6 +1037,69 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
          .after_stage = RHIPipelineStage::ComputeShader,
          .before_stage = RHIPipelineStage::ComputeShader});
 
+    ReblurHistoryFixShader::UniformBufferData history_fix_ubo{
+        .resolution = image_size_,
+        .params0 = Vector4(denoising_range_, static_cast<float>(settings_.history_fix_frame_num),
+                           settings_.history_fix_base_pixel_stride, settings_.history_fix_sigma_scale),
+        .params1 = Vector4(settings_.history_fix_enable_anti_firefly ? 1.0f : 0.0f,
+                           static_cast<float>(settings_.blur_history_max_frame_num), 0.0f, 0.0f),
+    };
+    history_fix_uniform_buffer_->Upload(rhi_, &history_fix_ubo);
+
+    auto *history_fix_resources = history_fix_pipeline_state_->GetShaderResource<ReblurHistoryFixShader>();
+    RHIResourceRef<RHIImage> history_fix_diff_fast_input = temporal_history_valid_
+                                                               ? diff_fast_history_textures_[history_read_index]
+                                                               : temporal_diff_radiance_hitdist_texture_;
+    RHIResourceRef<RHIImage> history_fix_spec_fast_input = temporal_history_valid_
+                                                               ? spec_fast_history_textures_[history_read_index]
+                                                               : temporal_spec_radiance_hitdist_texture_;
+    history_fix_resources->in_tiles().BindResource(tile_mask_texture_->GetDefaultView(rhi_));
+    history_fix_resources->in_normal_roughness().BindResource(inputs.normal_roughness->GetDefaultView(rhi_));
+    history_fix_resources->in_data1().BindResource(data1_texture_->GetDefaultView(rhi_));
+    history_fix_resources->in_view_z().BindResource(inputs.view_z->GetDefaultView(rhi_));
+    history_fix_resources->in_diff().BindResource(temporal_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    history_fix_resources->in_spec().BindResource(temporal_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    history_fix_resources->in_diff_fast().BindResource(history_fix_diff_fast_input->GetDefaultView(rhi_));
+    history_fix_resources->in_spec_fast().BindResource(history_fix_spec_fast_input->GetDefaultView(rhi_));
+    history_fix_resources->in_spec_hit_dist_for_tracking().BindResource(
+        spec_hit_distance_tracking_history_textures_[history_write_index]->GetDefaultView(rhi_));
+    history_fix_resources->out_diff().BindResource(history_fix_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    history_fix_resources->out_spec().BindResource(history_fix_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    history_fix_resources->out_diff_fast().BindResource(
+        diff_fast_history_textures_[history_write_index]->GetDefaultView(rhi_));
+    history_fix_resources->out_spec_fast().BindResource(
+        spec_fast_history_textures_[history_write_index]->GetDefaultView(rhi_));
+
+    history_fix_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                            .after_stage = RHIPipelineStage::Top,
+                                                            .before_stage = RHIPipelineStage::ComputeShader});
+    history_fix_spec_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                            .after_stage = RHIPipelineStage::Top,
+                                                            .before_stage = RHIPipelineStage::ComputeShader});
+    diff_fast_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                                  .after_stage = RHIPipelineStage::Top,
+                                                                  .before_stage = RHIPipelineStage::ComputeShader});
+    spec_fast_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                                  .after_stage = RHIPipelineStage::Top,
+                                                                  .before_stage = RHIPipelineStage::ComputeShader});
+
+    rhi_->BeginComputePass(history_fix_compute_pass_);
+    rhi_->DispatchCompute(history_fix_pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {8u, 8u, 1u});
+    rhi_->EndComputePass(history_fix_compute_pass_);
+
+    history_fix_diff_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                            .after_stage = RHIPipelineStage::ComputeShader,
+                                                            .before_stage = RHIPipelineStage::ComputeShader});
+    history_fix_spec_radiance_hitdist_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                                            .after_stage = RHIPipelineStage::ComputeShader,
+                                                            .before_stage = RHIPipelineStage::ComputeShader});
+    diff_fast_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
+                                                                  .after_stage = RHIPipelineStage::ComputeShader,
+                                                                  .before_stage = RHIPipelineStage::ComputeShader});
+    spec_fast_history_textures_[history_write_index]->Transition({.target_layout = RHIImageLayout::Read,
+                                                                  .after_stage = RHIPipelineStage::ComputeShader,
+                                                                  .before_stage = RHIPipelineStage::ComputeShader});
+
     ReblurBlurShader::UniformBufferData blur_ubo{
         .resolution = image_size_,
         .params = Vector4(denoising_range_, settings_.blur_min_radius, settings_.blur_max_radius, 0.0f),
@@ -920,8 +1110,8 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     blur_resources->in_tiles().BindResource(tile_mask_texture_->GetDefaultView(rhi_));
     blur_resources->in_normal_roughness().BindResource(inputs.normal_roughness->GetDefaultView(rhi_));
     blur_resources->in_view_z().BindResource(inputs.view_z->GetDefaultView(rhi_));
-    blur_resources->in_diff().BindResource(temporal_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
-    blur_resources->in_spec().BindResource(temporal_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    blur_resources->in_diff().BindResource(history_fix_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));
+    blur_resources->in_spec().BindResource(history_fix_spec_radiance_hitdist_texture_->GetDefaultView(rhi_));
     blur_resources->in_data1().BindResource(data1_texture_->GetDefaultView(rhi_));
     blur_resources->out_prev_view_z().BindResource(prev_view_z_texture_->GetDefaultView(rhi_));
     blur_resources->out_diff().BindResource(blur_diff_radiance_hitdist_texture_->GetDefaultView(rhi_));

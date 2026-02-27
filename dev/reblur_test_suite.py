@@ -30,6 +30,11 @@ Phase 3 Module E adds temporal accumulation checks:
 - E2 Disocclusion reset ratio within one frame
 - E3 Ghosting guard metric after object motion
 
+Phase 4 Module F adds history-fix and anti-firefly checks:
+- F1 Firefly outlier suppression on p99 luminance
+- F2 Median luminance bias guard vs clean reference
+- F3 Post-reset PSNR/SSIM recovery within target frame budget
+
 Phase 2 Module G adds blur checks:
 - G1 High-frequency energy reduction on static noisy patches
 - G2 Edge-preservation MSE guard near depth discontinuities
@@ -56,6 +61,7 @@ from denoiser_module_tests import (
     run_module_c_tests,
     run_module_d_tests,
     run_module_e_tests,
+    run_module_f_tests,
     run_module_g_tests,
     run_module_h_tests,
 )
@@ -277,6 +283,29 @@ def main():
     )
     if not module_e_results.passed:
         print("Module E quantitative checks FAILED", flush=True)
+        return 1
+
+    # Module F quantitative checks (Phase 4).
+    module_f_results = run_module_f_tests()
+    print(
+        "F1 metrics: "
+        f"p99_suppression_ratio={module_f_results.f1_p99_suppression_ratio:.6f}",
+        flush=True,
+    )
+    print(
+        "F2 metrics: "
+        f"median_drift_ratio={module_f_results.f2_median_drift_ratio:.6%}",
+        flush=True,
+    )
+    print(
+        "F3 metrics: "
+        f"recovery_frame={module_f_results.f3_recovery_frame}, "
+        f"recovery_psnr={module_f_results.f3_recovery_psnr:.6f}, "
+        f"recovery_ssim={module_f_results.f3_recovery_ssim:.6f}",
+        flush=True,
+    )
+    if not module_f_results.passed:
+        print("Module F quantitative checks FAILED", flush=True)
         return 1
 
     # Module G quantitative checks (Phase 2).

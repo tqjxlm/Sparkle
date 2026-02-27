@@ -18,6 +18,7 @@ from denoiser_metrics import (
     compute_motion_vectors_pixels,
     get_norm_hit_distance,
     hash_tile_mask,
+    history_fix_shader_equivalent,
     normalized_rmse,
     pack_normal_roughness,
     pack_radiance_and_norm_hit_dist,
@@ -109,6 +110,22 @@ class ModuleETestResults:
     @property
     def passed(self) -> bool:
         return self.e1_pass and self.e2_pass and self.e3_pass
+
+
+@dataclass
+class ModuleFTestResults:
+    f1_pass: bool
+    f1_p99_suppression_ratio: float
+    f2_pass: bool
+    f2_median_drift_ratio: float
+    f3_pass: bool
+    f3_recovery_frame: int
+    f3_recovery_psnr: float
+    f3_recovery_ssim: float
+
+    @property
+    def passed(self) -> bool:
+        return self.f1_pass and self.f2_pass and self.f3_pass
 
 
 @dataclass
@@ -1043,6 +1060,225 @@ def run_module_e_tests(seed: int = 53) -> ModuleETestResults:
     )
 
 
+def _compute_psnr(reference: np.ndarray, test: np.ndarray, max_value: float = 1.0) -> float:
+    mse = float(np.mean((reference - test) ** 2))
+    if mse <= 1e-12:
+        return 120.0
+    return float(10.0 * np.log10((max_value * max_value) / mse))
+
+
+def _compute_global_ssim(reference: np.ndarray, test: np.ndarray) -> float:
+    ref = reference.astype(np.float32, copy=False)
+    dst = test.astype(np.float32, copy=False)
+    c1 = 0.01 ** 2
+    c2 = 0.03 ** 2
+
+    mu_x = float(np.mean(ref))
+    mu_y = float(np.mean(dst))
+    sigma_x = float(np.var(ref))
+    sigma_y = float(np.var(dst))
+    sigma_xy = float(np.mean((ref - mu_x) * (dst - mu_y)))
+
+    numerator = (2.0 * mu_x * mu_y + c1) * (2.0 * sigma_xy + c2)
+    denominator = (mu_x * mu_x + mu_y * mu_y + c1) * (sigma_x + sigma_y + c2)
+    if denominator <= 1e-12:
+        return 1.0
+    return float(np.clip(numerator / denominator, 0.0, 1.0))
+
+
+def run_module_f_tests(seed: int = 61) -> ModuleFTestResults:
+    rng = np.random.default_rng(seed)
+    denoising_range = 300.0
+    history_fix_frame_num = 3
+    history_fix_base_pixel_stride = 2.0
+    history_fix_sigma_scale = 1.6
+    max_history_frames = 32
+
+    height = 72
+    width = 104
+    view_z = np.full((height, width), 38.0, dtype=np.float32)
+    normals = np.zeros((height, width, 3), dtype=np.float32)
+    normals[..., 2] = 1.0
+    roughness = np.full((height, width), 0.4, dtype=np.float32)
+    packed_normal_roughness = pack_normal_roughness(normals, roughness)
+    tile_mask = classify_tiles_reference(view_z, denoising_range)
+    eval_mask = _tile_mask_to_pixel_mask(tile_mask, width, height)
+
+    base_diff = np.zeros((height, width, 4), dtype=np.float32)
+    base_spec = np.zeros((height, width, 4), dtype=np.float32)
+    base_diff[..., 0] = 0.28
+    base_diff[..., 1] = 0.03
+    base_diff[..., 2] = -0.01
+    base_diff[..., 3] = 0.40
+    base_spec[..., 0] = 0.21
+    base_spec[..., 1] = 0.02
+    base_spec[..., 2] = -0.01
+    base_spec[..., 3] = 0.64
+
+    temporal_diff = base_diff.copy()
+    temporal_spec = base_spec.copy()
+    temporal_diff[..., :3] += rng.normal(0.0, 0.05,
+                                         size=(height, width, 3)).astype(np.float32)
+    temporal_spec[..., :3] += rng.normal(0.0, 0.06,
+                                         size=(height, width, 3)).astype(np.float32)
+    temporal_diff[..., 3] = np.clip(
+        temporal_diff[..., 3] + rng.normal(0.0, 0.04, size=(height, width)), 0.0, 1.0)
+    temporal_spec[..., 3] = np.clip(
+        temporal_spec[..., 3] + rng.normal(0.0, 0.05, size=(height, width)), 0.0, 1.0)
+
+    firefly_mask = rng.random((height, width)) < 0.015
+    temporal_diff[firefly_mask,
+                  :3] += np.array([8.0, 6.0, 4.0], dtype=np.float32)
+    temporal_spec[firefly_mask,
+                  :3] += np.array([10.0, 8.0, 6.0], dtype=np.float32)
+
+    prev_diff_fast = base_diff.copy()
+    prev_spec_fast = base_spec.copy()
+    prev_diff_fast[..., :3] += rng.normal(0.0, 0.02,
+                                          size=(height, width, 3)).astype(np.float32)
+    prev_spec_fast[..., :3] += rng.normal(0.0, 0.025,
+                                          size=(height, width, 3)).astype(np.float32)
+
+    data1 = np.zeros((height, width, 4), dtype=np.float32)
+    data1[..., 0] = 0.15
+    data1[..., 1] = 1.0
+    data1[..., 2] = 2.0 / float(max_history_frames)
+    data1[..., 3] = temporal_spec[..., 3]
+    spec_tracking = np.clip(temporal_spec[..., 3], 0.0, 1.0)
+
+    out_diff, out_spec, _, _ = history_fix_shader_equivalent(
+        tile_mask,
+        packed_normal_roughness,
+        data1,
+        view_z,
+        temporal_diff,
+        temporal_spec,
+        prev_diff_fast,
+        prev_spec_fast,
+        spec_tracking,
+        denoising_range,
+        history_fix_frame_num=history_fix_frame_num,
+        history_fix_base_pixel_stride=history_fix_base_pixel_stride,
+        fast_history_clamping_sigma_scale=history_fix_sigma_scale,
+        enable_anti_firefly=True,
+        max_history_frames=max_history_frames,
+    )
+
+    input_luma = 0.5 * (temporal_diff[..., 0] + temporal_spec[..., 0])
+    output_luma = 0.5 * (out_diff[..., 0] + out_spec[..., 0])
+    p99_input = float(np.percentile(input_luma[eval_mask], 99.0))
+    p99_output = float(np.percentile(output_luma[eval_mask], 99.0))
+    f1_p99_suppression_ratio = p99_input / max(p99_output, 1e-6)
+    f1_pass = f1_p99_suppression_ratio >= 2.0
+
+    reference_luma = 0.5 * (base_diff[..., 0] + base_spec[..., 0])
+    reference_median = float(np.median(reference_luma[eval_mask]))
+    output_median = float(np.median(output_luma[eval_mask]))
+    f2_median_drift_ratio = abs(
+        output_median - reference_median) / max(abs(reference_median), 1e-6)
+    f2_pass = f2_median_drift_ratio <= 0.05
+
+    ref_diff = base_diff.copy()
+    ref_spec = base_spec.copy()
+    reference_rgb = np.clip(ref_diff[..., :3] + ref_spec[..., :3], 0.0, 1.0)
+    reference_frame = (
+        0.2126 * reference_rgb[..., 0] + 0.7152 *
+        reference_rgb[..., 1] + 0.0722 * reference_rgb[..., 2]
+    ).astype(np.float32)
+
+    prev_diff_fast_recovery = np.zeros_like(base_diff)
+    prev_spec_fast_recovery = np.zeros_like(base_spec)
+    psnr_trace: list[float] = []
+    ssim_trace: list[float] = []
+
+    frame_count = 6
+    for frame_index in range(frame_count):
+        frame_diff = base_diff.copy()
+        frame_spec = base_spec.copy()
+        frame_diff[..., :3] += rng.normal(0.0, 0.07,
+                                          size=(height, width, 3)).astype(np.float32)
+        frame_spec[..., :3] += rng.normal(0.0, 0.08,
+                                          size=(height, width, 3)).astype(np.float32)
+        if frame_index == 0:
+            reset_firefly_mask = rng.random((height, width)) < 0.020
+            frame_diff[reset_firefly_mask,
+                       :3] += np.array([7.0, 5.0, 3.0], dtype=np.float32)
+            frame_spec[reset_firefly_mask,
+                       :3] += np.array([8.0, 6.0, 4.0], dtype=np.float32)
+
+        frame_data1 = np.zeros((height, width, 4), dtype=np.float32)
+        history_length = min(frame_index + 1, max_history_frames)
+        frame_data1[..., 0] = np.clip(
+            (history_length - 1) / max(max_history_frames - 1, 1), 0.0, 1.0)
+        frame_data1[..., 1] = 1.0 if frame_index > 0 else 0.0
+        frame_data1[..., 2] = history_length / float(max_history_frames)
+        frame_data1[..., 3] = np.clip(frame_spec[..., 3], 0.0, 1.0)
+        frame_tracking = np.clip(frame_spec[..., 3], 0.0, 1.0)
+
+        frame_out_diff, frame_out_spec, next_diff_fast, next_spec_fast = history_fix_shader_equivalent(
+            tile_mask,
+            packed_normal_roughness,
+            frame_data1,
+            view_z,
+            frame_diff,
+            frame_spec,
+            prev_diff_fast_recovery,
+            prev_spec_fast_recovery,
+            frame_tracking,
+            denoising_range,
+            history_fix_frame_num=history_fix_frame_num,
+            history_fix_base_pixel_stride=history_fix_base_pixel_stride,
+            fast_history_clamping_sigma_scale=history_fix_sigma_scale,
+            enable_anti_firefly=True,
+            max_history_frames=max_history_frames,
+        )
+        prev_diff_fast_recovery = next_diff_fast
+        prev_spec_fast_recovery = next_spec_fast
+
+        out_rgb = np.clip(
+            frame_out_diff[..., :3] + frame_out_spec[..., :3], 0.0, 1.0)
+        out_luma = (
+            0.2126 * out_rgb[..., 0] + 0.7152 *
+            out_rgb[..., 1] + 0.0722 * out_rgb[..., 2]
+        ).astype(np.float32)
+
+        frame_psnr = _compute_psnr(
+            reference_frame[eval_mask], out_luma[eval_mask], max_value=1.0)
+        frame_ssim = _compute_global_ssim(
+            reference_frame[eval_mask], out_luma[eval_mask])
+        psnr_trace.append(frame_psnr)
+        ssim_trace.append(frame_ssim)
+
+    psnr_target = max(psnr_trace[0] + 2.0, psnr_trace[-1] * 0.90)
+    ssim_target = max(ssim_trace[0] + 0.04, ssim_trace[-1] * 0.90)
+
+    recovery_frame = frame_count
+    recovery_psnr = psnr_trace[-1]
+    recovery_ssim = ssim_trace[-1]
+    for frame_index, (frame_psnr, frame_ssim) in enumerate(zip(psnr_trace, ssim_trace)):
+        if frame_psnr >= psnr_target and frame_ssim >= ssim_target:
+            recovery_frame = frame_index
+            recovery_psnr = frame_psnr
+            recovery_ssim = frame_ssim
+            break
+
+    f3_recovery_frame = recovery_frame
+    f3_recovery_psnr = recovery_psnr
+    f3_recovery_ssim = recovery_ssim
+    f3_pass = f3_recovery_frame <= 3
+
+    return ModuleFTestResults(
+        f1_pass=f1_pass,
+        f1_p99_suppression_ratio=f1_p99_suppression_ratio,
+        f2_pass=f2_pass,
+        f2_median_drift_ratio=f2_median_drift_ratio,
+        f3_pass=f3_pass,
+        f3_recovery_frame=f3_recovery_frame,
+        f3_recovery_psnr=f3_recovery_psnr,
+        f3_recovery_ssim=f3_recovery_ssim,
+    )
+
+
 def _compute_laplacian_energy(channel: np.ndarray, mask: np.ndarray) -> float:
     if channel.ndim != 2:
         raise ValueError("channel must be 2D")
@@ -1479,6 +1715,7 @@ def main() -> int:
     module_c_results = run_module_c_tests()
     module_d_results = run_module_d_tests()
     module_e_results = run_module_e_tests()
+    module_f_results = run_module_f_tests()
     module_g_results = run_module_g_tests()
     module_h_results = run_module_h_tests()
 
@@ -1528,6 +1765,15 @@ def main() -> int:
         flush=True,
     )
     print(
+        "Module F results: "
+        f"F1(pass={module_f_results.f1_pass}, p99_suppression_ratio={module_f_results.f1_p99_suppression_ratio:.6f}); "
+        f"F2(pass={module_f_results.f2_pass}, median_drift_ratio={module_f_results.f2_median_drift_ratio:.6%}); "
+        f"F3(pass={module_f_results.f3_pass}, recovery_frame={module_f_results.f3_recovery_frame}, "
+        f"recovery_psnr={module_f_results.f3_recovery_psnr:.6f}, "
+        f"recovery_ssim={module_f_results.f3_recovery_ssim:.6f})",
+        flush=True,
+    )
+    print(
         "Module G results: "
         f"G1(pass={module_g_results.g1_pass}, high_frequency_reduction_ratio={module_g_results.g1_high_frequency_reduction_ratio:.6f}); "
         f"G2(pass={module_g_results.g2_pass}, edge_mse={module_g_results.g2_edge_mse:.6f}); "
@@ -1551,6 +1797,7 @@ def main() -> int:
         and module_c_results.passed
         and module_d_results.passed
         and module_e_results.passed
+        and module_f_results.passed
         and module_g_results.passed
         and module_h_results.passed
         else 1

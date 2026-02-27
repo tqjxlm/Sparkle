@@ -44,6 +44,18 @@ static ConfigValue<float> config_reblur_prepass_specular_radius("reblur_prepass_
 static ConfigValue<float> config_reblur_prepass_spec_tracking_radius(
     "reblur_prepass_spec_tracking_radius", "standalone ReBLUR spec hit-distance tracking radius (0-4)", "renderer",
     2.0f, true);
+static ConfigValue<uint32_t> config_reblur_history_fix_frame_num("reblur_history_fix_frame_num",
+                                                                 "standalone ReBLUR history-fix frame window (1-64)",
+                                                                 "renderer", 3u, true);
+static ConfigValue<float> config_reblur_history_fix_base_pixel_stride(
+    "reblur_history_fix_base_pixel_stride", "standalone ReBLUR history-fix base reconstruction stride (0-8)",
+    "renderer", 2.0f, true);
+static ConfigValue<float> config_reblur_history_fix_sigma_scale(
+    "reblur_history_fix_sigma_scale", "standalone ReBLUR fast-history clamping sigma scale (0.25-8)", "renderer", 2.0f,
+    true);
+static ConfigValue<bool> config_reblur_history_fix_enable_anti_firefly("reblur_history_fix_enable_anti_firefly",
+                                                                       "standalone ReBLUR anti-firefly toggle",
+                                                                       "renderer", true, true);
 static ConfigValue<float> config_reblur_blur_min_radius("reblur_blur_min_radius",
                                                         "standalone ReBLUR blur minimum radius (0-8)", "renderer", 1.0f,
                                                         true);
@@ -81,6 +93,12 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_prepass_specular_radius, reblur_prepass_specular_radius);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_prepass_spec_tracking_radius,
                                            reblur_prepass_spec_tracking_radius);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_history_fix_frame_num, reblur_history_fix_frame_num);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_history_fix_base_pixel_stride,
+                                           reblur_history_fix_base_pixel_stride);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_history_fix_sigma_scale, reblur_history_fix_sigma_scale);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_history_fix_enable_anti_firefly,
+                                           reblur_history_fix_enable_anti_firefly);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_min_radius, reblur_blur_min_radius);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_max_radius, reblur_blur_max_radius);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_blur_history_max_frame_num,
@@ -186,6 +204,46 @@ void RenderConfig::Validate()
             reblur_prepass_spec_tracking_radius, clamped_spec_tracking_radius);
         config_reblur_prepass_spec_tracking_radius.Set(clamped_spec_tracking_radius);
         reblur_prepass_spec_tracking_radius = clamped_spec_tracking_radius;
+    }
+
+    constexpr uint32_t MinHistoryFixFrameNum = 1u;
+    constexpr uint32_t MaxHistoryFixFrameNum = 64u;
+    uint32_t clamped_history_fix_frame_num =
+        std::clamp(reblur_history_fix_frame_num, MinHistoryFixFrameNum, MaxHistoryFixFrameNum);
+    if (clamped_history_fix_frame_num != reblur_history_fix_frame_num)
+    {
+        Log(Warn, "reblur_history_fix_frame_num={} is invalid. clamped to {}", reblur_history_fix_frame_num,
+            clamped_history_fix_frame_num);
+        config_reblur_history_fix_frame_num.Set(clamped_history_fix_frame_num);
+        reblur_history_fix_frame_num = clamped_history_fix_frame_num;
+    }
+
+    auto sanitize_history_fix_value = [](float value, float fallback, float min_value, float max_value) {
+        if (!std::isfinite(value))
+        {
+            return fallback;
+        }
+
+        return std::clamp(value, min_value, max_value);
+    };
+
+    float clamped_history_fix_base_stride =
+        sanitize_history_fix_value(reblur_history_fix_base_pixel_stride, 2.0f, 0.0f, 8.0f);
+    if (std::abs(clamped_history_fix_base_stride - reblur_history_fix_base_pixel_stride) > 1e-6f)
+    {
+        Log(Warn, "reblur_history_fix_base_pixel_stride={} is invalid. clamped to {}",
+            reblur_history_fix_base_pixel_stride, clamped_history_fix_base_stride);
+        config_reblur_history_fix_base_pixel_stride.Set(clamped_history_fix_base_stride);
+        reblur_history_fix_base_pixel_stride = clamped_history_fix_base_stride;
+    }
+
+    float clamped_history_fix_sigma = sanitize_history_fix_value(reblur_history_fix_sigma_scale, 2.0f, 0.25f, 8.0f);
+    if (std::abs(clamped_history_fix_sigma - reblur_history_fix_sigma_scale) > 1e-6f)
+    {
+        Log(Warn, "reblur_history_fix_sigma_scale={} is invalid. clamped to {}", reblur_history_fix_sigma_scale,
+            clamped_history_fix_sigma);
+        config_reblur_history_fix_sigma_scale.Set(clamped_history_fix_sigma);
+        reblur_history_fix_sigma_scale = clamped_history_fix_sigma;
     }
 
     auto sanitize_blur_radius = [](float value, float fallback) {
