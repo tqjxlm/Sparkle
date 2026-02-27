@@ -1,6 +1,7 @@
 #include "reblur_common.h.slang"
 #include "reblur_config.h.slang"
 #include "reblur_data.h.slang"
+#include "reblur_reprojection.h.slang"
 
 [[vk::binding(0, 0)]] cbuffer ubo
 {
@@ -68,46 +69,68 @@ void main(uint3 DTid : SV_DispatchThreadID)
         return;
     }
 
-    // For static camera: previous pixel = current pixel (no motion vector reprojection)
-    // TODO: Add bilinear history sampling with occlusion-aware weights (Issue #5)
-    uint2 prev_pixel = pixel;
+    // Reprojection via motion vectors
+    float2 motionVec = inMotionVectors[pixel];
+    float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
+    float2 prevUV = currentUV + motionVec;
 
-    // Read previous frame data
-    float prev_z = prevViewZ[prev_pixel];
-    float4 prev_nr = prevNormalRoughness[prev_pixel];
-    float3 prev_normal = DecodeNormalOct(prev_nr.xy);
-    float2 prev_packed = prevInternalData[prev_pixel];
+    // Check if reprojected position is in screen
+    bool inScreen = all(prevUV >= 0.0) && all(prevUV <= 1.0);
 
-    float prev_diff_accum_speed, prev_spec_accum_speed;
-    UnpackInternalData(prev_packed, prev_diff_accum_speed, prev_spec_accum_speed);
+    // Read previous frame data with occlusion-aware bilinear sampling
+    float footprintQuality = 0.0;
+    bool historyValid = false;
+    float4 hist_diff = float4(0, 0, 0, 0);
+    float4 hist_spec = float4(0, 0, 0, 0);
+    float prev_diff_accum_speed = 0.0;
+    float prev_spec_accum_speed = 0.0;
 
-    // Disocclusion test
-    bool disoccluded = false;
+    if (inScreen)
+    {
+        // Use center of bilinear footprint for expected previous-frame depth
+        int2 prevPixelCenter = int2(prevUV * float2(resolution));
+        prevPixelCenter = clamp(prevPixelCenter, int2(0, 0), int2(resolution) - int2(1, 1));
+        float expectedPrevZ = prevViewZ[prevPixelCenter];
 
-    // Depth-based disocclusion: relative depth difference
-    float z_diff = abs(center_viewZ - prev_z);
-    float z_threshold = disocclusion_threshold * max(abs(center_viewZ), 1.0);
-    disoccluded = disoccluded || (z_diff > z_threshold);
+        hist_diff = BilinearHistorySample(
+            prevDiffHistory, prevUV, resolution,
+            prevViewZ, prevNormalRoughness, expectedPrevZ,
+            center_normal, disocclusion_threshold, denoising_range,
+            footprintQuality, historyValid);
 
-    // Normal-based disocclusion: cosine similarity
-    float normal_agreement = dot(center_normal, prev_normal);
-    disoccluded = disoccluded || (normal_agreement < 0.5);
+        // Sample specular with same occlusion pattern
+        float specFootprint;
+        bool specValid;
+        hist_spec = BilinearHistorySample(
+            prevSpecHistory, prevUV, resolution,
+            prevViewZ, prevNormalRoughness, expectedPrevZ,
+            center_normal, disocclusion_threshold, denoising_range,
+            specFootprint, specValid);
 
-    // Previous pixel was sky
-    disoccluded = disoccluded || (prev_z > denoising_range);
+        historyValid = historyValid && specValid;
+
+        // Catmull-Rom upgrade when all bilinear samples are valid
+        if (historyValid && footprintQuality > 0.99)
+        {
+            hist_diff = CatmullRomHistorySample(prevDiffHistory, linearSampler, prevUV, resolution);
+            hist_spec = CatmullRomHistorySample(prevSpecHistory, linearSampler, prevUV, resolution);
+        }
+
+        // Read previous accumulation speed from center of footprint
+        float2 prev_packed = prevInternalData[prevPixelCenter];
+        UnpackInternalData(prev_packed, prev_diff_accum_speed, prev_spec_accum_speed);
+    }
+
+    // Disocclusion: either out-of-screen or no valid history samples
+    bool disoccluded = !inScreen || !historyValid;
 
     // Compute new accumulation speeds - separate per channel
     float diff_accum_speed, spec_accum_speed;
     if (disoccluded)
     {
         // Fixed minimum accumSpeed of 1 for disoccluded pixels (weight = 0.5).
-        // This prevents full-range jumps at object edges where sub-pixel jitter
+        // Prevents full-range jumps at object edges where sub-pixel jitter
         // causes the primary ray to alternate between surfaces every frame.
-        // Without this, edge pixels get weight=1.0 every frame (accumSpeed stays 0
-        // because each frame disoccludes from the previous, creating a self-reinforcing
-        // loop: accum=0 -> weight=1.0 -> output=raw_sample -> next frame disoccludes).
-        // With accumSpeed=1, the output is 50% history + 50% current, dampening the
-        // oscillation to ~1/3 of the raw difference in steady state.
         diff_accum_speed = 1.0;
         spec_accum_speed = 1.0;
     }
@@ -115,15 +138,17 @@ void main(uint3 DTid : SV_DispatchThreadID)
     {
         diff_accum_speed = min(prev_diff_accum_speed + 1.0, max_accumulated_frame_num);
         spec_accum_speed = min(prev_spec_accum_speed + 1.0, max_accumulated_frame_num);
+
+        // Modulate by footprint quality: lower quality → slower accumulation
+        diff_accum_speed *= footprintQuality;
+        spec_accum_speed *= footprintQuality;
+        diff_accum_speed = max(diff_accum_speed, 1.0);
+        spec_accum_speed = max(spec_accum_speed, 1.0);
     }
 
     // Separate blend weights per channel
     float diff_weight = 1.0 / (1.0 + diff_accum_speed);
     float spec_weight = 1.0 / (1.0 + spec_accum_speed);
-
-    // Read history
-    float4 hist_diff = prevDiffHistory[prev_pixel];
-    float4 hist_spec = prevSpecHistory[prev_pixel];
 
     // Firefly suppression: clamp incoming sample luminance relative to history.
     // At high accumSpeed, history represents a stable average. Extreme 1-spp outliers
