@@ -9,6 +9,11 @@ namespace sparkle
 {
 void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera, const RenderConfig &config)
 {
+    view_matrix_prev_ = view_matrix_;
+    projection_matrix_prev_ = projection_matrix_;
+    view_projection_matrix_prev_ = view_projection_matrix_;
+    position_prev_ = posture_.position;
+
     RenderProxy::Update(rhi, camera, config);
 
     if (attribute_dirty_)

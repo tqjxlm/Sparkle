@@ -127,6 +127,26 @@ public:
         return view_projection_matrix_;
     }
 
+    [[nodiscard]] TransformMatrix GetViewMatrixPrev() const
+    {
+        return view_matrix_prev_;
+    }
+
+    [[nodiscard]] Mat4 GetProjectionMatrixPrev() const
+    {
+        return projection_matrix_prev_;
+    }
+
+    [[nodiscard]] Mat4 GetViewProjectionMatrixPrev() const
+    {
+        return view_projection_matrix_prev_;
+    }
+
+    [[nodiscard]] Vector3 GetPositionPrev() const
+    {
+        return position_prev_;
+    }
+
     [[nodiscard]] float GetNear() const
     {
         return near_;
@@ -159,6 +179,11 @@ private:
     TransformMatrix view_matrix_;
     Mat4 projection_matrix_;
     Mat4 view_projection_matrix_;
+
+    TransformMatrix view_matrix_prev_;
+    Mat4 projection_matrix_prev_;
+    Mat4 view_projection_matrix_prev_;
+    Vector3 position_prev_ = Vector3::Zero();
 
     float aspect_ratio_;
     float near_ = 0.1f;
