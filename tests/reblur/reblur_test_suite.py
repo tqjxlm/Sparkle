@@ -20,6 +20,7 @@ Tests included:
  17. CameraAnimator none non-regression — static camera with --camera_animation none
  18. Camera motion smoke (orbit_sweep) — orbit_sweep animation runs without crash
  19. Camera motion quality validation — temporal stability and reconvergence under motion
+ 20. Converged history camera delta — small yaw after convergence preserves history
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -338,6 +339,14 @@ def main():
         "19. Camera motion quality validation",
         show_output=True)
     results.append(("Camera motion quality validation", ok, dur))
+
+    # --- Test 20: Converged history + camera delta ---
+    converged_hist_py = os.path.join(SCRIPT_DIR, "test_converged_history.py")
+    ok, dur, _ = run_command(
+        [py, converged_hist_py, "--framework", fw, "--skip_build"],
+        "20. Converged history camera delta (history preservation)",
+        show_output=True)
+    results.append(("Converged history camera delta", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)
