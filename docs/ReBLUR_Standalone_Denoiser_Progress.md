@@ -618,3 +618,27 @@ Date: 2026-02-27
   - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Phase 4 is complete (F+I). Next target is Phase 5 Module J (split-screen + validation), followed by Phase 7 ground-truth policy update for denoiser-on GPU outputs.
+
+Date: 2026-02-27
+- Scope: Phase 4 closeout verification and handoff.
+- Milestone: Formally wrapped Phase 4 by re-running build, dedicated ReBLUR suite, and explicit GPU functional gates on current head.
+- Findings:
+  - `dev/reblur_test_suite.py` passed with Phase 4 quantitative gates intact:
+    - F1/F2/F3: p99 suppression ratio `33.648850`, median drift ratio `3.053874%`, recovery frame `2`.
+    - I1/I2: flicker reduction ratio `2.229064`, trailing error `0.031525`.
+  - Baseline GPU functional gate (`--spatial_denoise false`) passed with `Mean FLIP error: 0.0032`.
+  - Denoiser-on GPU functional gate (`--spatial_denoise true`) remains expected-fail against current GPU ground truth with `Mean FLIP error: 0.4236` (threshold `0.03`), unchanged from the tracked known issue in `docs/TODO.md`.
+  - S0.2 divergence metric in the latest suite run remained finite (`max_abs_diff=200.000000`, `mean_abs_diff=29.330610`, `rmse=36.306324`).
+- Trials:
+  - Re-ran closeout validation commands sequentially to avoid the previously observed transient `git submodule` lock conflict in parallel functional-test runs.
+  - Updated phase status wording in `docs/ReBLUR_Standalone_Denoiser_Plan.md` to mark closeout verification.
+- Pitfalls:
+  - No new crashes, hangs, or regressions were observed during this closeout run.
+- Tests Added/Updated: None (verification + documentation-only wrap-up).
+- Executed:
+  - `python build.py --framework glfw --config Release`
+  - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise false`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 4 is wrapped and handoff is clear for Phase 5 Module J (split-screen + validation). Keep the denoiser-on GPU ground-truth policy update in Phase 7 scope.
