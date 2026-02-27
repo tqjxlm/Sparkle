@@ -150,3 +150,24 @@
 - **Status:** DONE
 - **Files modified:** `reblur_test_suite.py`
 - **Changes:** Added tests 17 (static camera with `--camera_animation none`) and 18 (orbit_sweep motion smoke with `--camera_animation orbit_sweep`). Both use screenshot + pixel validation.
+
+## Task 15: Camera motion quality and stability tests
+- **Status:** DONE
+- **Files created:** `tests/reblur/reblur_motion_validation.py`
+- **Files modified:** `RenderConfig.h`, `RenderConfig.cpp`, `CameraAnimator.h`, `AppFramework.cpp`, `reblur_test_suite.py`
+- **Changes:**
+  - Added `camera_animation_frames` config (default 0 = max_spp/2) to control how many frames the camera animates before stopping.
+  - Added `IsDone()` to CameraAnimator, stop applying pose after animation completes so sample accumulation can reach max_spp for screenshot capture.
+  - Created `reblur_motion_validation.py`: multi-frame capture during orbit_sweep, per-frame NaN/Inf checks, temporal stability (per-pixel std < 0.04), static camera sanity.
+  - Integrated as test 19 in test suite.
+- **Test results:** 10/10 pass. Temporal stability: mean std=0.006, 0.94% unstable pixels.
+- **Key finding:** With camera motion, `pixels_dirty_` resets `cumulated_sample_count_` every frame, preventing `IsReadyForAutoScreenshot()` from triggering. Fixed by making CameraAnimator stop after `camera_animation_frames` (default max_spp/2), leaving remaining frames for accumulation.
+- **Commits:** `1686d5d`, `35ea6ae`
+
+## Task 16: Tune parameters and final integration test
+- **Status:** DONE
+- **Files modified:** `reblur_test_suite.py`
+- **Changes:** Added `--clear_screenshots true` and `--test_timeout 120` to tests 17-18 to fix intermittent failures from stale screenshots.
+- **Test results:** Full suite: 22/23 pass. Only failure is pre-existing Test 7 (vanilla vs reblur luminance gap at 64 SPP = 25%, threshold 5%). This is unrelated to camera motion — the convergence stability test at 2048 SPP passes with only 2.22% gap (threshold 3%).
+- **All camera motion tests pass:** M1 matrix infra, M2 MV smoke, M2 MV statistical, M3 reprojection, M3 reprojection stats, static non-regression, CameraAnimator none, orbit_sweep smoke, motion quality validation.
+- **Commit:** `0c11b5c`

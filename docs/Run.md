@@ -57,6 +57,8 @@ The base storage path varies by platform:
 | `load_last_session` | bool   | false      | all               | Restore last session (camera, config) on startup                                                             |
 | `clear_screenshots` | bool   | false      | all               | Clear old screenshots in the screenshots directory before taking a new screenshot                            |
 | `headless`          | bool   | false      | all               | Run without creating a window and without input (desktop GLFW and macOS frameworks; not supported on mobile) |
+| `camera_animation`  | string | `none`     | gpu               | Camera animation path: `none`, `orbit_sweep` (360° orbit), `dolly` (forward/back)                           |
+| `camera_animation_frames` | uint | 0     | gpu               | Frames of camera animation before stopping (0 = max_spp / 2)                                                |
 
 Search across the project for keyword "ConfigValue" for more available configs.
 
