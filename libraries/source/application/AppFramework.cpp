@@ -827,19 +827,9 @@ void AppFramework::CaptureNextFrames(int count)
     rhi_->CaptureNextFrames(count);
 }
 
-void AppFramework::RequestTakeScreenshot()
+std::shared_ptr<ScreenshotRequest> AppFramework::RequestTakeScreenshot(const std::string &name)
 {
-    render_framework_->RequestTakeScreenshot();
-}
-
-void AppFramework::RequestTakeScreenshot(const std::string &name)
-{
-    render_framework_->RequestTakeScreenshot(name);
-}
-
-bool AppFramework::IsScreenshotCompleted() const
-{
-    return render_framework_->IsScreenshotCompleted();
+    return render_framework_->RequestTakeScreenshot(name);
 }
 
 bool AppFramework::IsReadyForAutoScreenshot() const

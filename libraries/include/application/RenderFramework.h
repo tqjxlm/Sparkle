@@ -5,6 +5,7 @@
 #include "renderer/RenderConfig.h"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -16,6 +17,20 @@ class NativeView;
 class Scene;
 class UiManager;
 struct ThreadTaskQueue;
+
+class ScreenshotRequest
+{
+public:
+    explicit ScreenshotRequest(std::string name) : name_(std::move(name)) {}
+
+    [[nodiscard]] const std::string &GetName() const { return name_; }
+    [[nodiscard]] bool IsCompleted() const { return completed_.load(std::memory_order_acquire); }
+    void MarkCompleted() { completed_.store(true, std::memory_order_release); }
+
+private:
+    std::string name_;
+    std::atomic<bool> completed_{false};
+};
 
 class RenderFramework
 {
@@ -57,17 +72,10 @@ public:
     // called by main thread, run on render thread
     void NotifySceneLoaded();
 
-    // Called from main thread. Requests a screenshot to be taken on the render thread.
-    void RequestTakeScreenshot();
+    // Called from main thread. Returns a request handle the caller can poll for completion.
+    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
 
-    // Called from main thread. Requests a screenshot with a custom file name.
-    void RequestTakeScreenshot(const std::string &name);
-
-    // Thread-safe. Returns true after the requested screenshot has been saved.
-    [[nodiscard]] bool IsScreenshotCompleted() const;
-
-    // Thread-safe (benign race on monotonically-increasing sample count).
-    // Returns true when the renderer has accumulated enough samples for a screenshot.
+    // Thread-safe. Returns true when the renderer has accumulated enough samples for a screenshot.
     [[nodiscard]] bool IsReadyForAutoScreenshot() const;
 
 private:
@@ -126,9 +134,12 @@ private:
     std::string last_saved_screenshot_path_;
 
     bool scene_loaded_notified_ = false;
-    std::atomic<bool> screenshot_requested_{false};
-    bool screenshot_in_progress_ = false;
-    std::atomic<bool> screenshot_completed_{false};
-    std::string screenshot_name_override_;
+    std::atomic<bool> ready_for_auto_screenshot_{false};
+
+    std::mutex screenshot_queue_mutex_;
+    std::queue<std::shared_ptr<ScreenshotRequest>> screenshot_queue_;
+
+    // Owned exclusively by the render thread.
+    std::shared_ptr<ScreenshotRequest> active_screenshot_;
 };
 } // namespace sparkle

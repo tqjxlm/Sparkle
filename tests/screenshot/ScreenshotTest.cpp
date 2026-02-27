@@ -1,6 +1,7 @@
 #include "application/TestCase.h"
 
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 
 namespace sparkle
 {
@@ -9,22 +10,21 @@ class ScreenshotTest : public TestCase
 public:
     Result OnTick(AppFramework &app) override
     {
-        if (app.IsScreenshotCompleted())
+        if (request_ && request_->IsCompleted())
         {
             return Result::Pass;
         }
 
-        if (!requested_ && app.IsReadyForAutoScreenshot())
+        if (!request_ && app.IsReadyForAutoScreenshot())
         {
-            app.RequestTakeScreenshot();
-            requested_ = true;
+            request_ = app.RequestTakeScreenshot("screenshot");
         }
 
         return Result::Pending;
     }
 
 private:
-    bool requested_ = false;
+    std::shared_ptr<ScreenshotRequest> request_;
 };
 
 static TestCaseRegistrar<ScreenshotTest> screenshot_test_registrar("screenshot");

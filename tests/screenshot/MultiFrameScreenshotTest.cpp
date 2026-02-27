@@ -1,6 +1,7 @@
 #include "application/TestCase.h"
 
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 #include "core/Logger.h"
 
 #include <format>
@@ -22,22 +23,22 @@ public:
             return Result::Pass;
         }
 
-        if (!ready_ && app.IsReadyForAutoScreenshot())
+        if (!ready_to_capture_ && app.IsReadyForAutoScreenshot())
         {
-            ready_ = true;
+            ready_to_capture_ = true;
             Log(Info, "MultiFrameScreenshotTest: renderer ready at frame {}", frame_);
         }
 
-        if (!ready_)
+        if (!ready_to_capture_)
         {
             return Result::Pending;
         }
 
-        if (waiting_for_completion_)
+        if (active_request_)
         {
-            if (app.IsScreenshotCompleted())
+            if (active_request_->IsCompleted())
             {
-                waiting_for_completion_ = false;
+                active_request_.reset();
                 captured_count_++;
                 Log(Info, "MultiFrameScreenshotTest: captured frame {} of {}", captured_count_, FramesToCapture);
             }
@@ -46,16 +47,15 @@ public:
 
         // Request next screenshot
         auto name = std::format("multi_frame_{}", captured_count_);
-        app.RequestTakeScreenshot(name);
-        waiting_for_completion_ = true;
-        return captured_count_ >= FramesToCapture ? Result::Pass : Result::Pending;
+        active_request_ = app.RequestTakeScreenshot(name);
+        return Result::Pending;
     }
 
 private:
     static constexpr uint32_t FramesToCapture = 5;
     uint32_t captured_count_ = 0;
-    bool ready_ = false;
-    bool waiting_for_completion_ = false;
+    bool ready_to_capture_ = false;
+    std::shared_ptr<ScreenshotRequest> active_request_;
 };
 
 static TestCaseRegistrar<MultiFrameScreenshotTest> multi_frame_screenshot_registrar("multi_frame_screenshot");
