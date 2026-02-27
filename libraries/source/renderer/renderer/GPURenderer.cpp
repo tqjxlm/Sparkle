@@ -75,6 +75,19 @@ static ReblurDenoiser::HitDistanceReconstructionMode ToReblurHitDistanceReconstr
     }
 }
 
+static ReblurDenoiser::DebugSettings ToReblurDebugSettings(RenderConfig::DebugMode debug_mode)
+{
+    switch (debug_mode)
+    {
+    case RenderConfig::DebugMode::ReblurSplitScreen:
+        return {.mode = ReblurDenoiser::DebugOutputMode::SplitScreen, .split_screen = 0.5f};
+    case RenderConfig::DebugMode::ReblurValidation:
+        return {.mode = ReblurDenoiser::DebugOutputMode::Validation, .split_screen = 0.5f};
+    default:
+        return {.mode = ReblurDenoiser::DebugOutputMode::None, .split_screen = 0.5f};
+    }
+}
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy)
     : Renderer(render_config, rhi_context, scene_render_proxy),
@@ -224,6 +237,7 @@ void GPURenderer::InitRenderResources()
              .stabilization_strength = render_config_.reblur_stabilization_strength,
              .stabilization_max_frame_num = render_config_.reblur_stabilization_max_frame_num,
              .stabilization_enable_mv_patch = render_config_.reblur_stabilization_enable_mv_patch});
+        reblur_denoiser_->SetDebugSettings(ToReblurDebugSettings(render_config_.debug_mode));
         reblur_denoiser_->Initialize(image_size_);
     }
 
@@ -337,6 +351,7 @@ void GPURenderer::Render()
                  .stabilization_strength = render_config_.reblur_stabilization_strength,
                  .stabilization_max_frame_num = render_config_.reblur_stabilization_max_frame_num,
                  .stabilization_enable_mv_patch = render_config_.reblur_stabilization_enable_mv_patch});
+            reblur_denoiser_->SetDebugSettings(ToReblurDebugSettings(render_config_.debug_mode));
 
             scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                         .after_stage = RHIPipelineStage::ComputeShader,

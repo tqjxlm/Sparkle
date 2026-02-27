@@ -41,6 +41,8 @@ struct RenderConfig : public ConfigCollection
         Albedo = 9,
         Emissive = 10,
         Depth = 11,
+        ReblurSplitScreen = 12, // ReBLUR split-screen debug output (left=noisy, right=denoised)
+        ReblurValidation = 13,  // ReBLUR validation debug surface
     };
 
     [[nodiscard]] bool IsCPURenderMode() const

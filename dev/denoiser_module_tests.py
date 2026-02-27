@@ -27,10 +27,12 @@ from denoiser_metrics import (
     project_world_to_pixel,
     reconstruct_hit_distance_shader_equivalent,
     rmse,
+    split_screen_shader_equivalent,
     temporal_stabilization_shader_equivalent,
     temporal_accumulation_shader_equivalent,
     unpack_normal_roughness,
     unpack_radiance_and_norm_hit_dist,
+    validation_shader_equivalent,
 )
 
 
@@ -169,6 +171,19 @@ class ModuleITestResults:
     @property
     def passed(self) -> bool:
         return self.i1_pass and self.i2_pass
+
+
+@dataclass
+class ModuleJTestResults:
+    j1_pass: bool
+    j1_max_abs_diff: float
+    j2_pass: bool
+    j2_detection_ratio: float
+    j2_false_positive_ratio: float
+
+    @property
+    def passed(self) -> bool:
+        return self.j1_pass and self.j2_pass
 
 
 def run_module_a_tests(seed: int = 7) -> ModuleATestResults:
@@ -2093,6 +2108,152 @@ def run_module_i_tests(seed: int = 73) -> ModuleITestResults:
     )
 
 
+def run_module_j_tests(seed: int = 79) -> ModuleJTestResults:
+    rng = np.random.default_rng(seed)
+    denoising_range = 300.0
+    height = 84
+    width = 132
+
+    view_z = np.full((height, width), 36.0, dtype=np.float32)
+    view_z[:4, :] = 0.0
+    view_z[:, :3] = denoising_range + 5.0
+
+    noisy_diff_radiance = np.stack(
+        (
+            0.12 + rng.uniform(0.0, 0.40, size=(height, width)),
+            0.06 + rng.uniform(0.0, 0.25, size=(height, width)),
+            0.04 + rng.uniform(0.0, 0.20, size=(height, width)),
+        ),
+        axis=-1,
+    ).astype(np.float32)
+    noisy_spec_radiance = np.stack(
+        (
+            0.08 + rng.uniform(0.0, 0.35, size=(height, width)),
+            0.04 + rng.uniform(0.0, 0.22, size=(height, width)),
+            0.03 + rng.uniform(0.0, 0.18, size=(height, width)),
+        ),
+        axis=-1,
+    ).astype(np.float32)
+    noisy_diff_hit = rng.uniform(0.05, 0.95, size=(height, width)).astype(np.float32)
+    noisy_spec_hit = rng.uniform(0.05, 0.95, size=(height, width)).astype(np.float32)
+    noisy_diff_signal = pack_radiance_and_norm_hit_dist(noisy_diff_radiance, noisy_diff_hit)
+    noisy_spec_signal = pack_radiance_and_norm_hit_dist(noisy_spec_radiance, noisy_spec_hit)
+
+    base_denoised_output = np.zeros((height, width, 4), dtype=np.float32)
+    base_denoised_output[..., :3] = np.stack(
+        (
+            0.22 + rng.uniform(0.0, 0.50, size=(height, width)),
+            0.14 + rng.uniform(0.0, 0.36, size=(height, width)),
+            0.10 + rng.uniform(0.0, 0.30, size=(height, width)),
+        ),
+        axis=-1,
+    ).astype(np.float32)
+    base_denoised_output[..., 3] = 1.0
+
+    noisy_diff_linear, _ = unpack_radiance_and_norm_hit_dist(noisy_diff_signal)
+    noisy_spec_linear, _ = unpack_radiance_and_norm_hit_dist(noisy_spec_signal)
+    noisy_rgb = np.maximum(noisy_diff_linear + noisy_spec_linear, 0.0).astype(np.float32)
+    valid_view_mask = (
+        np.isfinite(view_z) & (view_z > 0.0) & (view_z <= denoising_range)
+    )
+
+    # J1: split boundary correctness.
+    j1_max_abs_diff = 0.0
+    for split_ratio in (0.20, 0.50, 0.80):
+        split_output = split_screen_shader_equivalent(
+            view_z,
+            noisy_diff_signal,
+            noisy_spec_signal,
+            base_denoised_output,
+            denoising_range,
+            split_ratio,
+        )
+
+        expected = base_denoised_output.copy()
+        x_coords = (np.arange(width, dtype=np.float32) + 0.5) / float(width)
+        split_mask = np.broadcast_to(x_coords[None, :] <= split_ratio, (height, width))
+        split_valid = split_mask & valid_view_mask
+        split_invalid = split_mask & (~valid_view_mask)
+
+        expected[split_valid, :3] = noisy_rgb[split_valid]
+        expected[split_invalid, :3] = 0.0
+        expected[split_mask, 3] = 1.0
+
+        j1_max_abs_diff = max(j1_max_abs_diff, float(np.max(np.abs(split_output - expected))))
+
+    j1_pass = j1_max_abs_diff <= 1e-6
+
+    # J2: validation non-regression for known-bad synthetic states.
+    tile_mask = classify_tiles_reference(view_z, denoising_range)
+
+    data1 = np.zeros((height, width, 4), dtype=np.float32)
+    data2 = np.zeros((height, width, 4), dtype=np.float32)
+    data1[..., 1] = 1.0
+    data1[..., 2] = 0.80
+    data2[..., 2] = 0.04
+
+    diff_history_signal = noisy_diff_signal.copy()
+    spec_history_signal = noisy_spec_signal.copy()
+    bad_mask = np.zeros((height, width), dtype=bool)
+
+    # Disocclusion alerts.
+    data2[14:28, 18:40, 3] = 1.0
+    bad_mask[14:28, 18:40] = True
+
+    # Reprojection-invalid alerts with non-trivial history length.
+    data1[34:50, 54:86, 1] = 0.0
+    data1[34:50, 54:86, 2] = 0.95
+    bad_mask[34:50, 54:86] = True
+
+    # Invalid hit-distance alerts.
+    diff_history_signal[52:70, 92:118, 3] = 1.35
+    spec_history_signal[52:70, 92:118, 3] = -0.20
+    bad_mask[52:70, 92:118] = True
+
+    # Large depth-delta alerts.
+    data2[20:36, 96:124, 2] = 0.72
+    bad_mask[20:36, 96:124] = True
+
+    validation_output = validation_shader_equivalent(
+        tile_mask,
+        view_z,
+        data1,
+        data2,
+        diff_history_signal,
+        spec_history_signal,
+        denoising_range,
+        disocclusion_threshold=0.5,
+        depth_delta_threshold=0.2,
+        history_threshold=0.15,
+    )
+
+    alert_strength = np.max(validation_output[..., :3], axis=-1)
+    alert_mask = alert_strength > 0.05
+
+    tile_pixel_mask = np.repeat(
+        np.repeat(tile_mask, REBLUR_TILE_SIZE, axis=0), REBLUR_TILE_SIZE, axis=1
+    )[:height, :width]
+    eligible_mask = (tile_pixel_mask == 0) & valid_view_mask
+    clean_mask = eligible_mask & (~bad_mask)
+
+    bad_count = int(np.count_nonzero(bad_mask))
+    clean_count = int(np.count_nonzero(clean_mask))
+    detected_bad = int(np.count_nonzero(alert_mask & bad_mask))
+    detected_clean = int(np.count_nonzero(alert_mask & clean_mask))
+
+    j2_detection_ratio = float(detected_bad / max(bad_count, 1))
+    j2_false_positive_ratio = float(detected_clean / max(clean_count, 1))
+    j2_pass = j2_detection_ratio >= 0.99 and j2_false_positive_ratio <= 0.02
+
+    return ModuleJTestResults(
+        j1_pass=j1_pass,
+        j1_max_abs_diff=j1_max_abs_diff,
+        j2_pass=j2_pass,
+        j2_detection_ratio=j2_detection_ratio,
+        j2_false_positive_ratio=j2_false_positive_ratio,
+    )
+
+
 def main() -> int:
     module_a_results = run_module_a_tests()
     module_b_results = run_module_b_tests()
@@ -2103,6 +2264,7 @@ def main() -> int:
     module_g_results = run_module_g_tests()
     module_h_results = run_module_h_tests()
     module_i_results = run_module_i_tests()
+    module_j_results = run_module_j_tests()
 
     print(
         "Module A results: "
@@ -2181,6 +2343,13 @@ def main() -> int:
         f"I2(pass={module_i_results.i2_pass}, trailing_error={module_i_results.i2_trailing_error:.6f})",
         flush=True,
     )
+    print(
+        "Module J results: "
+        f"J1(pass={module_j_results.j1_pass}, max_abs_diff={module_j_results.j1_max_abs_diff:.8f}); "
+        f"J2(pass={module_j_results.j2_pass}, detection_ratio={module_j_results.j2_detection_ratio:.6%}, "
+        f"false_positive_ratio={module_j_results.j2_false_positive_ratio:.6%})",
+        flush=True,
+    )
     return (
         0
         if module_a_results.passed
@@ -2192,6 +2361,7 @@ def main() -> int:
         and module_g_results.passed
         and module_h_results.passed
         and module_i_results.passed
+        and module_j_results.passed
         else 1
     )
 

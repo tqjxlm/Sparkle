@@ -47,6 +47,10 @@ Phase 3 Module H adds post-blur and history writeback checks:
 Phase 4 Module I adds temporal stabilization checks:
 - I1 Temporal flicker index reduction ratio vs stabilization-off baseline
 - I2 Moving-object trailing error guard metric
+
+Phase 5 Module J adds debug and validation checks:
+- J1 Split-screen boundary correctness for configured split ratio
+- J2 Validation alert non-regression on known-bad synthetic fixtures
 """
 
 import argparse
@@ -69,6 +73,7 @@ from denoiser_module_tests import (
     run_module_g_tests,
     run_module_h_tests,
     run_module_i_tests,
+    run_module_j_tests,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -368,6 +373,23 @@ def main():
     )
     if not module_i_results.passed:
         print("Module I quantitative checks FAILED", flush=True)
+        return 1
+
+    # Module J quantitative checks (Phase 5).
+    module_j_results = run_module_j_tests()
+    print(
+        "J1 metrics: "
+        f"max_abs_diff={module_j_results.j1_max_abs_diff:.8f}",
+        flush=True,
+    )
+    print(
+        "J2 metrics: "
+        f"detection_ratio={module_j_results.j2_detection_ratio:.6%}, "
+        f"false_positive_ratio={module_j_results.j2_false_positive_ratio:.6%}",
+        flush=True,
+    )
+    if not module_j_results.passed:
+        print("Module J quantitative checks FAILED", flush=True)
         return 1
 
     # S0.1 Entry-point smoke.

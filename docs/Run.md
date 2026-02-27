@@ -65,7 +65,7 @@ The base storage path varies by platform:
 | `reblur_stabilization_max_frame_num` | uint | 32 | gpu | ReBLUR temporal stabilization history cap in frames (`1`-`4096`)                                                   |
 | `reblur_stabilization_enable_mv_patch` | bool | true | gpu | ReBLUR spec-dominant motion-vector patching toggle for temporal stabilization                                       |
 | `enable_nee`        | bool   | false      | gpu               | Next event estimation                                                                                        |
-| `debug_mode`        | string | *(empty)*  | all               | Renderer debug output mode                                                                                   |
+| `debug_mode`        | string | *(empty)*  | all               | Renderer debug output mode (`ReblurSplitScreen`, `ReblurValidation` are ReBLUR-only and effective with `--pipeline gpu --spatial_denoise true`) |
 | `screen_log`        | bool   | true       | all               | On-screen log overlay                                                                                        |
 | `rebuild_cache`     | bool   | false      | all               | Force rebuild all cook caches                                                                                |
 | `target_framerate`  | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                                   |

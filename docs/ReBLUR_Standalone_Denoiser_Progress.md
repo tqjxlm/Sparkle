@@ -642,3 +642,55 @@ Date: 2026-02-27
   - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Phase 4 is wrapped and handoff is clear for Phase 5 Module J (split-screen + validation). Keep the denoiser-on GPU ground-truth policy update in Phase 7 scope.
+
+Date: 2026-02-27
+- Scope: Phase 5 Module J implementation (split-screen + validation + debug-output API) and closeout verification.
+- Milestone: Implemented standalone split-screen and validation passes, exposed denoiser debug-output API, mapped renderer debug mode to denoiser debug outputs, and integrated J1/J2 quantitative gates into the dedicated ReBLUR suite.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_split_screen.cs.slang` and `shaders/denoiser/reblur/reblur_validation.cs.slang`, both dispatched from `ReblurDenoiser::Dispatch` after post-blur/temporal-stabilization output generation.
+  - Added Module J debug API in `ReblurDenoiser`:
+    - `DebugOutputMode` (`None`, `SplitScreen`, `Validation`)
+    - `DebugSettings` (`mode`, `split_screen`)
+    - `SetDebugSettings(...)`
+  - Added renderer mapping from `RenderConfig::DebugMode` to denoiser debug outputs:
+    - `ReblurSplitScreen`
+    - `ReblurValidation`
+  - Added Module J quantitative checks:
+    - J1 split boundary correctness: `max_abs_diff=0.00000000`
+    - J2 validation alert non-regression: `detection_ratio=100.000000%`, `false_positive_ratio=0.000000%`
+  - Full dedicated suite passed with Module J integrated; baseline GPU functional gate (`--spatial_denoise false`) remained passing (`Mean FLIP error: 0.0032`).
+  - Denoiser-on GPU functional comparison vs existing ground truth remains expected-fail (`Mean FLIP error: 0.4236`, threshold `0.03`) and stays tracked in `docs/TODO.md`.
+- Trials:
+  - Extended host-side denoiser orchestration and resource transitions to run Module J passes conditionally while preserving final output ownership/lifetime for tone mapping.
+  - Extended Python shader-equivalent helpers and module fixtures in `dev/denoiser_metrics.py` and `dev/denoiser_module_tests.py`.
+  - Extended `dev/reblur_test_suite.py` to gate Module J metrics before smoke/screenshot checks.
+  - Added smoke checks for `--debug_mode ReblurSplitScreen` and `--debug_mode ReblurValidation` on GPU denoiser-enabled path.
+  - Updated docs for phase status and runtime debug mode usage (`docs/ReBLUR_Standalone_Denoiser_Plan.md`, `docs/Run.md`, `docs/ReBLUR_Standalone_Denoiser_Progress.md`).
+- Pitfalls:
+  - A first `dev/reblur_test_suite.py` run failed in S0.1 with intermittent denoiser-on smoke exit code `4294967295`; immediate rerun with identical args passed.
+  - Running two `build.py --run ...` invocations in parallel triggered a transient `git submodule` lock conflict; rerunning sequentially resolved it.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_split_screen.cs.slang`
+  - Added: `shaders/denoiser/reblur/reblur_validation.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `libraries/include/renderer/RenderConfig.h`
+  - Updated: `libraries/source/renderer/renderer/GPURenderer.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Updated: `docs/Run.md`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Plan.md`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Progress.md`
+  - Updated: `docs/TODO.md`
+- Executed:
+  - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+  - `python dev/denoiser_module_tests.py`
+  - `python build.py --framework glfw --config Release`
+  - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build` (rerun after intermittent S0.1 failure)
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise false`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+  - `python build.py --framework glfw --config Release --skip_build --run --pipeline gpu --spatial_denoise true --debug_mode ReblurSplitScreen --test_case smoke --headless true`
+  - `python build.py --framework glfw --config Release --skip_build --run --pipeline gpu --spatial_denoise true --debug_mode ReblurValidation --test_case smoke --headless true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 5 is complete and verified. Next target is Phase 6 Module K (host orchestration hardening: pass ordering/permutations/constants/barriers) while using Module J debug outputs for pass-level diagnostics.

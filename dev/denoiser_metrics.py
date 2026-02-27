@@ -1470,6 +1470,119 @@ def post_blur_shader_equivalent(
     return out_prev_normal_roughness, out_diff_history, out_spec_history, out_denoised_output
 
 
+def split_screen_shader_equivalent(
+    view_z: np.ndarray,
+    noisy_diff_signal: np.ndarray,
+    noisy_spec_signal: np.ndarray,
+    denoised_output: np.ndarray,
+    denoising_range: float,
+    split_screen: float,
+) -> np.ndarray:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+    if noisy_diff_signal.shape != noisy_spec_signal.shape or noisy_diff_signal.shape[-1] != 4:
+        raise ValueError("noisy diff/spec signals must have matching HxWx4 shapes")
+    if noisy_diff_signal.shape[:2] != view_z.shape:
+        raise ValueError("noisy diff/spec shapes must match view_z shape")
+    if denoised_output.shape[:2] != view_z.shape or denoised_output.shape[-1] != 4:
+        raise ValueError("denoised_output must be HxWx4 matching view_z")
+
+    height, width = view_z.shape
+    split = float(np.clip(split_screen, 0.0, 1.0))
+
+    output = denoised_output.astype(np.float32, copy=True)
+    noisy_diff_linear = ycocg_to_linear(noisy_diff_signal[..., :3])
+    noisy_spec_linear = ycocg_to_linear(noisy_spec_signal[..., :3])
+    noisy_rgb = np.maximum(noisy_diff_linear + noisy_spec_linear, 0.0)
+
+    x_coords = (np.arange(width, dtype=np.float32) + 0.5) / float(max(width, 1))
+    split_mask = x_coords <= split
+    split_mask = np.broadcast_to(split_mask[None, :], (height, width))
+
+    valid_mask = np.zeros((height, width), dtype=bool)
+    for y in range(height):
+        for x in range(width):
+            valid_mask[y, x] = _is_valid_prepass_view_z(float(view_z[y, x]), denoising_range)
+
+    left_valid = split_mask & valid_mask
+    left_invalid = split_mask & (~valid_mask)
+
+    output[left_valid, :3] = noisy_rgb[left_valid].astype(np.float32)
+    output[left_invalid, :3] = 0.0
+    output[split_mask, 3] = 1.0
+    return output
+
+
+def _is_valid_norm_hit_distance(value: float) -> bool:
+    return np.isfinite(value) and value >= 0.0 and value <= 1.0
+
+
+def validation_shader_equivalent(
+    tile_mask: np.ndarray,
+    view_z: np.ndarray,
+    data1: np.ndarray,
+    data2: np.ndarray,
+    diff_history_signal: np.ndarray,
+    spec_history_signal: np.ndarray,
+    denoising_range: float,
+    disocclusion_threshold: float = 0.5,
+    depth_delta_threshold: float = 0.2,
+    history_threshold: float = 0.15,
+) -> np.ndarray:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+    if tile_mask.ndim != 2:
+        raise ValueError("tile_mask must be a 2D array")
+    if data1.shape[:2] != view_z.shape or data1.shape[-1] != 4:
+        raise ValueError("data1 must be HxWx4 matching view_z")
+    if data2.shape[:2] != view_z.shape or data2.shape[-1] != 4:
+        raise ValueError("data2 must be HxWx4 matching view_z")
+    if diff_history_signal.shape != spec_history_signal.shape or diff_history_signal.shape[-1] != 4:
+        raise ValueError("diff/spec history signals must have matching HxWx4 shapes")
+    if diff_history_signal.shape[:2] != view_z.shape:
+        raise ValueError("diff/spec history shapes must match view_z shape")
+
+    height, width = view_z.shape
+    out_validation = np.zeros((height, width, 4), dtype=np.float32)
+    out_validation[..., 3] = 1.0
+
+    for y in range(height):
+        tile_y = y // REBLUR_TILE_SIZE
+        for x in range(width):
+            tile_x = x // REBLUR_TILE_SIZE
+
+            is_sky_tile = tile_mask[tile_y, tile_x] != 0
+            view_z_value = float(view_z[y, x])
+            if is_sky_tile or not _is_valid_prepass_view_z(view_z_value, denoising_range):
+                continue
+
+            history_length_norm = float(np.clip(data1[y, x, 2], 0.0, 1.0))
+            reprojection_invalid = data1[y, x, 1] < 0.5 and history_length_norm > history_threshold
+            disoccluded = data2[y, x, 3] > disocclusion_threshold
+            depth_delta = float(np.clip(data2[y, x, 2], 0.0, 1.0))
+            large_depth_delta = depth_delta > depth_delta_threshold
+            invalid_hit_distance = (
+                not _is_valid_norm_hit_distance(float(diff_history_signal[y, x, 3]))
+                or not _is_valid_norm_hit_distance(float(spec_history_signal[y, x, 3]))
+            )
+
+            debug_color = np.zeros(3, dtype=np.float32)
+            if disoccluded:
+                debug_color[0] += 1.0
+            if large_depth_delta:
+                debug_color[0] += 0.5 * depth_delta
+            if reprojection_invalid:
+                debug_color[1] += 1.0
+            if invalid_hit_distance:
+                debug_color[2] = 1.0
+            if not disoccluded and not reprojection_invalid and not invalid_hit_distance and not large_depth_delta:
+                debug_color[1] = 0.15 * (1.0 - history_length_norm)
+
+            out_validation[y, x, :3] = np.clip(debug_color, 0.0, 1.0)
+
+    return out_validation
+
+
 def temporal_stabilization_shader_equivalent(
     tile_mask: np.ndarray,
     packed_normal_roughness: np.ndarray,

@@ -466,6 +466,8 @@ Phase 4: Temporal robustness (Modules F and I)
 Phase 5: Debug/validation surface (Module J)
 - Implement split-screen and validation passes.
 - Add denoiser debug output API only in this phase (on demand).
+- Status (2026-02-27): Complete and closeout-verified. Module J split-screen/validation passes are integrated in `ReblurDenoiser`, renderer debug-mode mapping is wired (`RenderConfig::DebugMode::ReblurSplitScreen` / `RenderConfig::DebugMode::ReblurValidation`), and J1/J2 quantitative gates pass in `dev/reblur_test_suite.py` (`max_abs_diff=0.00000000`, `detection_ratio=100.000000%`, `false_positive_ratio=0.000000%`). Baseline GPU functional gate (`--spatial_denoise false`) remains passing (`Mean FLIP error: 0.0032`), and denoiser-on functional comparison vs existing GPU ground truth remains an expected mismatch tracked in `docs/TODO.md` (`Mean FLIP error: 0.4236`, threshold `0.03`).
+- Handoff: Start Phase 6 Module K (host orchestration hardening: scheduling/permutations/constants/barriers) while keeping Module J debug paths available for pass-level diagnostics.
 
 Phase 6: Host orchestration hardening (Module K)
 - Finalize constants, permutations, pass scheduling, and barriers.

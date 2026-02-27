@@ -249,6 +249,55 @@ public:
     };
 };
 
+class ReblurSplitScreenShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ReblurSplitScreenShader, RHIShaderStage::Compute,
+                     "shaders/denoiser/reblur/reblur_split_screen.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(in_view_z, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_diff_noisy, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_spec_noisy, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(out_denoised_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+public:
+    struct UniformBufferData
+    {
+        Vector2UInt resolution;
+        Vector2 params;
+    };
+};
+
+class ReblurValidationShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ReblurValidationShader, RHIShaderStage::Compute,
+                     "shaders/denoiser/reblur/reblur_validation.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(in_tiles, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_view_z, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_data1, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_data2, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_diff, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(in_spec, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(out_denoised_output, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+public:
+    struct UniformBufferData
+    {
+        Vector2UInt resolution;
+        Vector4 params;
+    };
+};
+
 uint32_t GetHitDistanceReconstructionRadius(ReblurDenoiser::HitDistanceReconstructionMode mode)
 {
     switch (mode)
@@ -365,6 +414,29 @@ uint32_t SanitizeStabilizationMaxFrameNum(uint32_t value, uint32_t fallback)
     }
 
     return value;
+}
+
+ReblurDenoiser::DebugOutputMode SanitizeDebugOutputMode(ReblurDenoiser::DebugOutputMode value)
+{
+    switch (value)
+    {
+    case ReblurDenoiser::DebugOutputMode::None:
+    case ReblurDenoiser::DebugOutputMode::SplitScreen:
+    case ReblurDenoiser::DebugOutputMode::Validation:
+        return value;
+    default:
+        return ReblurDenoiser::DebugOutputMode::None;
+    }
+}
+
+float SanitizeSplitScreen(float value, float fallback)
+{
+    if (!std::isfinite(value))
+    {
+        return fallback;
+    }
+
+    return std::clamp(value, 0.0f, 1.0f);
 }
 
 bool NearlyEqual(float lhs, float rhs)
@@ -629,6 +701,8 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     blur_shader_ = rhi_->CreateShader<ReblurBlurShader>();
     post_blur_shader_ = rhi_->CreateShader<ReblurPostBlurShader>();
     temporal_stabilization_shader_ = rhi_->CreateShader<ReblurTemporalStabilizationShader>();
+    split_screen_shader_ = rhi_->CreateShader<ReblurSplitScreenShader>();
+    validation_shader_ = rhi_->CreateShader<ReblurValidationShader>();
 
     classify_tiles_pipeline_state_ =
         rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurClassifyTilesPipeline");
@@ -669,6 +743,16 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
         rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurTemporalStabilizationPipeline");
     temporal_stabilization_pipeline_state_->SetShader<RHIShaderStage::Compute>(temporal_stabilization_shader_);
     temporal_stabilization_pipeline_state_->Compile();
+
+    split_screen_pipeline_state_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurSplitScreenPipeline");
+    split_screen_pipeline_state_->SetShader<RHIShaderStage::Compute>(split_screen_shader_);
+    split_screen_pipeline_state_->Compile();
+
+    validation_pipeline_state_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurValidationPipeline");
+    validation_pipeline_state_->SetShader<RHIShaderStage::Compute>(validation_shader_);
+    validation_pipeline_state_->Compile();
 
     classify_tiles_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurClassifyTilesShader::UniformBufferData),
                                                          .usages = RHIBuffer::BufferUsage::UniformBuffer,
@@ -721,6 +805,18 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
                             .is_dynamic = true},
                            "ReblurTemporalStabilizationUniformBuffer");
 
+    split_screen_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurSplitScreenShader::UniformBufferData),
+                                                       .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                       .mem_properties = RHIMemoryProperty::None,
+                                                       .is_dynamic = true},
+                                                      "ReblurSplitScreenUniformBuffer");
+
+    validation_uniform_buffer_ = rhi_->CreateBuffer({.size = sizeof(ReblurValidationShader::UniformBufferData),
+                                                     .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                     .mem_properties = RHIMemoryProperty::None,
+                                                     .is_dynamic = true},
+                                                    "ReblurValidationUniformBuffer");
+
     auto *classify_resources = classify_tiles_pipeline_state_->GetShaderResource<ReblurClassifyTilesShader>();
     classify_resources->ubo().BindResource(classify_tiles_uniform_buffer_);
 
@@ -748,6 +844,12 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
         temporal_stabilization_pipeline_state_->GetShaderResource<ReblurTemporalStabilizationShader>();
     temporal_stabilization_resources->ubo().BindResource(temporal_stabilization_uniform_buffer_);
 
+    auto *split_screen_resources = split_screen_pipeline_state_->GetShaderResource<ReblurSplitScreenShader>();
+    split_screen_resources->ubo().BindResource(split_screen_uniform_buffer_);
+
+    auto *validation_resources = validation_pipeline_state_->GetShaderResource<ReblurValidationShader>();
+    validation_resources->ubo().BindResource(validation_uniform_buffer_);
+
     classify_tiles_compute_pass_ = rhi_->CreateComputePass("ReblurClassifyTilesComputePass", false);
     hit_distance_reconstruction_compute_pass_ =
         rhi_->CreateComputePass("ReblurHitDistanceReconstructionComputePass", false);
@@ -757,6 +859,8 @@ void ReblurDenoiser::Initialize(const Vector2UInt &image_size)
     blur_compute_pass_ = rhi_->CreateComputePass("ReblurBlurComputePass", false);
     post_blur_compute_pass_ = rhi_->CreateComputePass("ReblurPostBlurComputePass", false);
     temporal_stabilization_compute_pass_ = rhi_->CreateComputePass("ReblurTemporalStabilizationComputePass", false);
+    split_screen_compute_pass_ = rhi_->CreateComputePass("ReblurSplitScreenComputePass", false);
+    validation_compute_pass_ = rhi_->CreateComputePass("ReblurValidationComputePass", false);
 
     CreateTileMaskTexture();
     CreateHitDistanceReconstructionTextures();
@@ -833,6 +937,15 @@ void ReblurDenoiser::SetSettings(const Settings &settings)
     }
 }
 
+void ReblurDenoiser::SetDebugSettings(const DebugSettings &settings)
+{
+    DebugSettings sanitized_settings = settings;
+    sanitized_settings.mode = SanitizeDebugOutputMode(sanitized_settings.mode);
+    sanitized_settings.split_screen =
+        SanitizeSplitScreen(sanitized_settings.split_screen, DebugSettings{}.split_screen);
+    debug_settings_ = sanitized_settings;
+}
+
 void ReblurDenoiser::ResetHistory()
 {
     temporal_history_read_index_ = 0u;
@@ -903,6 +1016,12 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
     ASSERT(diff_stabilized_luma_textures_[1]);
     ASSERT(spec_stabilized_luma_textures_[0]);
     ASSERT(spec_stabilized_luma_textures_[1]);
+    ASSERT(split_screen_pipeline_state_);
+    ASSERT(split_screen_compute_pass_);
+    ASSERT(split_screen_uniform_buffer_);
+    ASSERT(validation_pipeline_state_);
+    ASSERT(validation_compute_pass_);
+    ASSERT(validation_uniform_buffer_);
 
     Vector2UInt output_size(denoised_output->GetWidth(), denoised_output->GetHeight());
     if (output_size.x() != image_size_.x() || output_size.y() != image_size_.y())
@@ -1382,16 +1501,59 @@ void ReblurDenoiser::Dispatch(const FrontEndInputs &inputs, const RHIResourceRef
             {.target_layout = RHIImageLayout::Read,
              .after_stage = RHIPipelineStage::ComputeShader,
              .before_stage = RHIPipelineStage::ComputeShader});
-        denoised_output->Transition({.target_layout = RHIImageLayout::Read,
-                                     .after_stage = RHIPipelineStage::ComputeShader,
-                                     .before_stage = RHIPipelineStage::PixelShader});
     }
-    else
+
+    if (debug_settings_.mode == DebugOutputMode::SplitScreen)
     {
-        denoised_output->Transition({.target_layout = RHIImageLayout::Read,
+        ReblurSplitScreenShader::UniformBufferData split_screen_ubo{
+            .resolution = image_size_,
+            .params = Vector2(denoising_range_, debug_settings_.split_screen),
+        };
+        split_screen_uniform_buffer_->Upload(rhi_, &split_screen_ubo);
+
+        auto *split_screen_resources = split_screen_pipeline_state_->GetShaderResource<ReblurSplitScreenShader>();
+        split_screen_resources->in_view_z().BindResource(inputs.view_z->GetDefaultView(rhi_));
+        split_screen_resources->in_diff_noisy().BindResource(inputs.diff_radiance_hitdist->GetDefaultView(rhi_));
+        split_screen_resources->in_spec_noisy().BindResource(inputs.spec_radiance_hitdist->GetDefaultView(rhi_));
+        split_screen_resources->out_denoised_output().BindResource(denoised_output->GetDefaultView(rhi_));
+
+        denoised_output->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                      .after_stage = RHIPipelineStage::ComputeShader,
-                                     .before_stage = RHIPipelineStage::PixelShader});
+                                     .before_stage = RHIPipelineStage::ComputeShader});
+
+        rhi_->BeginComputePass(split_screen_compute_pass_);
+        rhi_->DispatchCompute(split_screen_pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {8u, 8u, 1u});
+        rhi_->EndComputePass(split_screen_compute_pass_);
     }
+    else if (debug_settings_.mode == DebugOutputMode::Validation)
+    {
+        ReblurValidationShader::UniformBufferData validation_ubo{
+            .resolution = image_size_,
+            .params = Vector4(denoising_range_, 0.5f, 0.2f, 0.15f),
+        };
+        validation_uniform_buffer_->Upload(rhi_, &validation_ubo);
+
+        auto *validation_resources = validation_pipeline_state_->GetShaderResource<ReblurValidationShader>();
+        validation_resources->in_tiles().BindResource(tile_mask_texture_->GetDefaultView(rhi_));
+        validation_resources->in_view_z().BindResource(inputs.view_z->GetDefaultView(rhi_));
+        validation_resources->in_data1().BindResource(data1_texture_->GetDefaultView(rhi_));
+        validation_resources->in_data2().BindResource(data2_texture_->GetDefaultView(rhi_));
+        validation_resources->in_diff().BindResource(diff_history_textures_[history_write_index]->GetDefaultView(rhi_));
+        validation_resources->in_spec().BindResource(spec_history_textures_[history_write_index]->GetDefaultView(rhi_));
+        validation_resources->out_denoised_output().BindResource(denoised_output->GetDefaultView(rhi_));
+
+        denoised_output->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                     .after_stage = RHIPipelineStage::ComputeShader,
+                                     .before_stage = RHIPipelineStage::ComputeShader});
+
+        rhi_->BeginComputePass(validation_compute_pass_);
+        rhi_->DispatchCompute(validation_pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {8u, 8u, 1u});
+        rhi_->EndComputePass(validation_compute_pass_);
+    }
+
+    denoised_output->Transition({.target_layout = RHIImageLayout::Read,
+                                 .after_stage = RHIPipelineStage::ComputeShader,
+                                 .before_stage = RHIPipelineStage::PixelShader});
 
     temporal_history_read_index_ = history_write_index;
     temporal_history_valid_ = true;
