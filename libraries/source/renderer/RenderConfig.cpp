@@ -38,10 +38,13 @@ static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU 
 static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
 static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear all existing screenshots", "renderer",
                                                   false);
-static ConfigValue<uint32_t> config_reblur_debug_pass(
-    "reblur_debug_pass",
-    "REBLUR debug: output after pass N (99=full, 0=PrePass, 1=Blur, 2=PostBlur, 3=TemporalAccum, 4=HistoryFix, 255=passthrough)",
-    "renderer", 99);
+static ConfigValue<uint32_t> config_reblur_debug_pass("reblur_debug_pass",
+                                                      "REBLUR debug: output after pass N (99=full, 0=PrePass, 1=Blur, "
+                                                      "2=PostBlur, 3=TemporalAccum, 4=HistoryFix, 255=passthrough)",
+                                                      "renderer", 99);
+static ConfigValue<std::string> config_camera_animation("camera_animation",
+                                                        "camera animation path (none, orbit_sweep, dolly)", "renderer",
+                                                        "none");
 
 void RenderConfig::Init()
 {
@@ -66,6 +69,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_debug_pass, reblur_debug_pass);
+    ConfigCollectionHelper::RegisterConfig(this, config_camera_animation, camera_animation);
     Validate();
 }
 

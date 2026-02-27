@@ -2,6 +2,8 @@
 
 #include "application/ConfigCollection.h"
 
+#include <string>
+
 namespace sparkle
 {
 class RHIContext;
@@ -91,6 +93,7 @@ struct RenderConfig : public ConfigCollection
                                 // 3=after TemporalAccum, 4=after HistoryFix, 255=passthrough (no denoising)
     float target_framerate;
     float gpu_time_budget_ratio;
+    std::string camera_animation;
 
 protected:
     void Validate() override;
