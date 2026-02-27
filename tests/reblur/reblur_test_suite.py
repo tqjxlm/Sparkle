@@ -11,6 +11,12 @@ Tests included:
   8. REBLUR temporal convergence (C++) — 30+ frames temporal pipeline + screenshot pixel validation
   9. REBLUR smoke test (C++) — 30 frames + screenshot
  10. Convergence stability — frame-to-frame instability at 2048 spp vs vanilla baseline
+ 11. M1 Matrix infrastructure — prev-frame matrices update correctly under camera motion
+ 12. M2 Motion vector test — MV pipeline runs under camera motion without crash
+ 13. M2 MV statistical — pixel-level validation of static/motion MV screenshots
+ 14. M3 Reprojection test — 30-frame motion + bilinear/Catmull-Rom reprojection
+ 15. M3 Reprojection statistical — pixel-level validation of reprojection output
+ 16. Static non-regression — motion infrastructure doesn't regress static camera quality
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -241,6 +247,58 @@ def main():
         "10. Convergence stability (2048 spp, frame-to-frame vs vanilla)",
         show_output=True)
     results.append(("Convergence stability", ok, dur))
+
+    # --- Test 11: M1 Matrix infrastructure (C++) ---
+    ok, dur, _ = run_command(
+        [py, build_py, "--framework", fw, "--skip_build",
+         "--run", "--test_case", "reblur_matrix_infra", "--headless", "true",
+         "--pipeline", "gpu", "--use_reblur", "true",
+         "--spp", "1", "--max_spp", "20", "--test_timeout", "30"],
+        "11. M1 Matrix infrastructure (C++ test)")
+    results.append(("M1 Matrix infrastructure", ok, dur))
+
+    # --- Test 12: M2 Motion vector test (C++) ---
+    ok, dur, _ = run_command(
+        [py, build_py, "--framework", fw, "--skip_build",
+         "--run", "--test_case", "reblur_mv_test", "--headless", "true",
+         "--pipeline", "gpu", "--use_reblur", "true",
+         "--spp", "1", "--max_spp", "10", "--test_timeout", "30"],
+        "12. M2 Motion vector test (C++ test)")
+    results.append(("M2 Motion vector test", ok, dur))
+
+    # --- Test 13: M2 Motion vector statistical (Python) ---
+    mv_test_py = os.path.join(SCRIPT_DIR, "test_motion_vectors.py")
+    ok, dur, _ = run_command(
+        [py, mv_test_py, "--framework", fw, "--skip_build"],
+        "13. M2 Motion vector statistical validation",
+        show_output=True)
+    results.append(("M2 MV statistical", ok, dur))
+
+    # --- Test 14: M3 Reprojection test (C++) ---
+    ok, dur, _ = run_command(
+        [py, build_py, "--framework", fw, "--skip_build",
+         "--run", "--test_case", "reblur_reprojection", "--headless", "true",
+         "--pipeline", "gpu", "--use_reblur", "true",
+         "--spp", "1", "--max_spp", "60", "--test_timeout", "60"],
+        "14. M3 Reprojection test (C++ test)")
+    results.append(("M3 Reprojection test", ok, dur))
+
+    # --- Test 15: M3 Reprojection statistical (Python) ---
+    reproj_test_py = os.path.join(SCRIPT_DIR, "test_reprojection.py")
+    ok, dur, _ = run_command(
+        [py, reproj_test_py, "--framework", fw, "--skip_build"],
+        "15. M3 Reprojection statistical validation",
+        show_output=True)
+    results.append(("M3 Reprojection statistical", ok, dur))
+
+    # --- Test 16: Static non-regression ---
+    ok, dur, _ = run_command(
+        [py, build_py, "--framework", fw, "--skip_build",
+         "--run", "--test_case", "reblur_static_nonregression", "--headless", "true",
+         "--pipeline", "gpu", "--use_reblur", "true",
+         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"],
+        "16. Static camera non-regression")
+    results.append(("Static non-regression", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)

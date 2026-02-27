@@ -24,6 +24,14 @@ Add moving camera support to the REBLUR denoiser. Currently the denoiser operate
 | Framerate scaling | |
 | Programmatic camera paths for testing | |
 
+### Testing Rule
+
+Every implemented milestone MUST have dedicated test cases that verify:
+1. **Semantic correctness** — logic behaves as designed (e.g., matrices update, MVs point in the right direction, reprojection hits the right pixel).
+2. **Statistical properties** — numerical outputs fall within expected ranges (e.g., MV magnitude > 0 during motion, footprint quality in [0,1], no NaN/Inf).
+
+Tests MUST be committed alongside or immediately after the feature implementation. No milestone may be marked complete without its test gate passing. Test cases use the C++ `TestCase` system for in-app validation and Python scripts for screenshot-based pixel analysis.
+
 ---
 
 ## 1. Previous-Frame Matrix Infrastructure
