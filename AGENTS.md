@@ -8,24 +8,23 @@ This file provides guidance to AI coding agents when working with this repositor
 ## Test Driven Development
 
 * Always run build tests and functional tests to ensure quality. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) and [docs/CI.md](docs/CI.md) for details.
-* Always make sure you have the ability to test with confidence before actual implementation. If in doubt, ask the user to clarify.
 * Create new test cases that exactly test against new features or reproduce a bug. Improve existing test cases when necessary.
+* Always make sure you have the ability to test with confidence before actual implementation. If in doubt, ask the user to clarify.
 * Do not ignore any crashes or errors. If it is not related to current task, report it and record it to [docs/TODO.md](docs/TODO.md). Otherwise fix them before continuing.
 
 See [docs/Build.md](docs/Build.md) for all build commands.
 
 See [docs/Run.md](docs/Run.md) for run arguments, log location, path conventions, etc..
 
-See [docs/Test.md](docs/Test.md) for how to run tests, how to write test, and test tricks.
+See [docs/Test.md](docs/Test.md) for how to run tests, how to write test, and how to test visual output.
 
-## Visual QA
+## Visual Debugging Methodology
 
-* Use `--test_case screenshot` to take a screenshot after the scene is fully loaded and a frame is fully rendered.
-* Use `--test_case multi_frame_screenshot` to take 5 frames of screenshots after the scene is fully loaded and a frame is fully rendered. This is useful for temporal analysis.
-* Screenshots are saved to [external-storage-path]/screenshots/ and named with the scene name and pipeline. For [external-storage-path], refer to [docs/Run.md](docs/Run.md).
+* Refer to [docs/Test.md](docs/Test.md) about how to use screenshots to get visual output headlessly.
 * By outputting different textures to render target (e.g. via "--debug_mode"), you can test any intermediate textures or render targets in the pipeline.
 * When debugging visual results, you should analyze screenshot images both semantically and statistically.
-* Ground truth images can be found in [docs/CI.md](docs/CI.md). But if you are working on a feature that is meant to change the final image output, you should not rely on the ground truth images.
+* When tackling a complex behavioural issue, do not just investigate on end-to-end result. Refer to each intermediate passes and output their input/output.
+* To debug a non-texture variable in shader, modify the shader to write it to full screen and check the screenshot for its value. You may need to disable tonemapping to get the raw value.
 
 ## Code Style Guidelines
 
