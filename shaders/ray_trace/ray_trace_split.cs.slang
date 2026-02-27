@@ -35,6 +35,8 @@ struct Camera
     uint enable_nee;
     float4 hit_dist_params;
     float4x4 view_matrix;
+    float4x4 world_to_clip;
+    float4x4 world_to_clip_prev;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;

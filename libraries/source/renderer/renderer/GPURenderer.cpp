@@ -94,6 +94,8 @@ class SplitPathTracerShader : public RHIShaderInfo
         uint32_t enable_nee;
         alignas(16) Vector4 hit_dist_params = {3.f, 0.1f, 20.f, -25.f};
         Mat4 view_matrix = Mat4::Identity();
+        Mat4 world_to_clip = Mat4::Identity();
+        Mat4 world_to_clip_prev = Mat4::Identity();
     };
 };
 
@@ -479,8 +481,10 @@ void GPURenderer::Update()
             .total_sample_count = ubo.total_sample_count,
             .spp = ubo.spp,
             .enable_nee = ubo.enable_nee,
+            .view_matrix = camera->GetViewMatrix(),
+            .world_to_clip = camera->GetViewProjectionMatrix(),
+            .world_to_clip_prev = camera->GetViewProjectionMatrixPrev(),
         };
-        // view_matrix and hit_dist_params use defaults for now
         split_pt_uniform_buffer_->Upload(rhi_, &split_ubo);
 
         ReblurCompositeShader::UniformBufferData comp_ubo{
