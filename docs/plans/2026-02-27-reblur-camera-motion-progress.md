@@ -97,3 +97,56 @@
 
 ---
 **M1-M3 test gates complete.** All milestones now have semantic and statistical test coverage.
+
+---
+
+## Task 7: Add camera delta and framerate scale to ReblurMatrices
+- **Status:** DONE
+- **Files modified:** `ReblurDenoiser.h`, `GPURenderer.cpp`
+- **Changes:** Added `camera_delta` (Vector3) and `framerate_scale` (float) to `ReblurMatrices`. Computed in GPURenderer: camera_delta from previous-current position difference, framerate_scale from frame stats (base 30 FPS = 33.333ms).
+- **Build:** Passed
+
+## Task 8: Add framerate-scaled anti-lag to temporal stabilization
+- **Status:** DONE
+- **Files modified:** `ReblurDenoiser.cpp`, `reblur_temporal_stabilization.cs.slang`
+- **Changes:** Added `framerate_scale` to temporal stabilization UBO (both C++ struct and shader). Updated anti-lag formula to NRD-style: `magic = sensitivity * framerateScale^2`, clamped luminance difference, `d = 1/(1 + d * accumSpeed / magic)`. Updated sigma scale to `fast_history_sigma_scale * (1 + 3 * framerateScale * nonLinear)`. Passed `const ReblurMatrices&` to `TemporalStabilize()`.
+- **Build:** Passed
+- **Smoke test:** Static camera screenshot clean — no regression.
+
+## Task 9: Add reprojection to temporal stabilization
+- **Status:** DONE
+- **Files modified:** `ReblurDenoiser.cpp`, `reblur_temporal_stabilization.cs.slang`
+- **Changes:** Added `inMotionVectors` (Texture2D<float2>) binding at slot 10 to both shader and C++ resource table. Replaced static `prevStabilizedDiff[pixel]`/`prevStabilizedSpec[pixel]` reads with MV-based reprojection: compute prevUV from motion vectors, sample at nearest integer position with bounds check, fall back to current frame when out-of-screen.
+- **Build:** Passed
+- **Smoke test:** Static camera screenshot clean.
+
+---
+**Milestone M5 checkpoint reached.** Anti-lag with framerate scaling and MV reprojection in temporal stabilization are both active. Committed as single commit `2591161`.
+
+---
+
+## Task 10: Add CameraAnimator and --camera_animation config
+- **Status:** DONE
+- **Files created:** `CameraAnimator.h`, `CameraAnimator.cpp`
+- **Files modified:** `RenderConfig.h`, `RenderConfig.cpp`
+- **Changes:** Created `CameraAnimator` class with `PathType` enum (kNone, kOrbitSweep, kDolly), `OrbitPose` struct, `Setup()` and `GetPose()` methods. Added `camera_animation` string config option to `RenderConfig`.
+- **Build:** Passed
+- **Commit:** `9f2ba7d`
+
+## Task 11: Integrate CameraAnimator into render loop
+- **Status:** DONE
+- **Files modified:** `AppFramework.h`, `AppFramework.cpp`
+- **Changes:** Added `CameraAnimator camera_animator_` member. On startup, parses `render_config_.camera_animation` via `FromString()`, sets up orbit path. Each frame applies camera pose when animator is active.
+- **Build:** Passed
+- **Commit:** `84d12cf`
+
+## Task 12: Add motion vector debug visualization
+- **Status:** DONE
+- **Files modified:** `RenderConfig.h`, `GPURenderer.cpp`, `ray_trace_split.cs.slang`
+- **Changes:** Added `MotionVectors = 12` to `DebugMode` enum. Added `debug_mode` uint to split PT shader UBO and C++ struct. When `debug_mode == 12`, outputs MV magnitude as blue-red heatmap (0-20px range) to imageData and returns early.
+- **Build:** Passed
+
+## Task 13-14: Camera motion smoke and non-regression tests
+- **Status:** DONE
+- **Files modified:** `reblur_test_suite.py`
+- **Changes:** Added tests 17 (static camera with `--camera_animation none`) and 18 (orbit_sweep motion smoke with `--camera_animation orbit_sweep`). Both use screenshot + pixel validation.
