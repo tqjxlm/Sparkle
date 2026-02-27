@@ -82,7 +82,7 @@ def run_with_debug_pass(framework, debug_pass, skip_build, output_dir):
 
     # Find the screenshot
     screenshot_dir = get_screenshot_dir(framework)
-    pattern = os.path.join(screenshot_dir, "TestScene_gpu_*.png")
+    pattern = os.path.join(screenshot_dir, "*.png")
     matches = glob.glob(pattern)
     if not matches:
         print(f"FAIL: No screenshot found for debug_pass={debug_pass}", flush=True)

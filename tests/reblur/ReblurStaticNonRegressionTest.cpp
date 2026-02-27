@@ -1,6 +1,7 @@
 #include "application/TestCase.h"
 
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 #include "core/Logger.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "scene/component/camera/CameraComponent.h"
@@ -21,10 +22,8 @@ namespace sparkle
 class ReblurStaticNonRegressionTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    Result OnTick(AppFramework &app) override
     {
-        frame_++;
-
         auto *camera = app.GetMainCamera();
         if (!camera)
         {
@@ -63,38 +62,29 @@ public:
         }
 
         // Wait for convergence
-        if (frame_ < kConvergenceFrames)
+        if (frame_ < ConvergenceFrames)
         {
             return Result::Pending;
         }
 
-        if (app.IsScreenshotCompleted())
+        if (request_ && request_->IsCompleted())
         {
             Log(Info, "ReblurStaticNonRegression: screenshot captured after {} frames — PASS", frame_);
             return Result::Pass;
         }
 
-        if (!screenshot_requested_)
+        if (!request_)
         {
             Log(Info, "ReblurStaticNonRegression: requesting screenshot at frame {}", frame_);
-            app.RequestTakeScreenshot("reblur_static_nonregression");
-            screenshot_requested_ = true;
-        }
-
-        uint32_t timeout = app.GetAppConfig().test_timeout;
-        if (timeout > 0 && frame_ > timeout)
-        {
-            Log(Error, "ReblurStaticNonRegression timed out after {} frames", timeout);
-            return Result::Fail;
+            request_ = app.RequestTakeScreenshot("reblur_static_nonregression");
         }
 
         return Result::Pending;
     }
 
 private:
-    static constexpr uint32_t kConvergenceFrames = 64;
-    uint32_t frame_ = 0;
-    bool screenshot_requested_ = false;
+    static constexpr uint32_t ConvergenceFrames = 64;
+    std::shared_ptr<ScreenshotRequest> request_;
 };
 
 static TestCaseRegistrar<ReblurStaticNonRegressionTest> reblur_static_nonregression_registrar(

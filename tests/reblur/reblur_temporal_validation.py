@@ -84,7 +84,7 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label,
 
     # Find and copy screenshot
     screenshot_dir = get_screenshot_dir(framework)
-    pattern = os.path.join(screenshot_dir, "TestScene_gpu_*.png")
+    pattern = os.path.join(screenshot_dir, "*.png")
     matches = glob.glob(pattern)
     if not matches:
         print(f"FAIL: No screenshot found — {label}", flush=True)

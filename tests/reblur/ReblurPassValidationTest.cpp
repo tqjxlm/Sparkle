@@ -1,6 +1,7 @@
 #include "application/TestCase.h"
 
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 #include "core/Logger.h"
 
 namespace sparkle
@@ -14,34 +15,24 @@ namespace sparkle
 class ReblurPassValidationTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    Result OnTick(AppFramework &app) override
     {
-        frame_++;
-
         // Wait for scene load and several denoiser frames
         if (frame_ < WarmupFrames)
         {
             return Result::Pending;
         }
 
-        if (app.IsScreenshotCompleted())
+        if (request_ && request_->IsCompleted())
         {
             Log(Info, "ReblurPassValidationTest: screenshot captured after {} frames", frame_);
             return Result::Pass;
         }
 
-        if (!screenshot_requested_)
+        if (!request_)
         {
             Log(Info, "ReblurPassValidationTest: requesting screenshot at frame {}", frame_);
-            app.RequestTakeScreenshot();
-            screenshot_requested_ = true;
-        }
-
-        uint32_t timeout = app.GetAppConfig().test_timeout;
-        if (timeout > 0 && frame_ > timeout)
-        {
-            Log(Error, "ReblurPassValidationTest timed out after {} frames", timeout);
-            return Result::Fail;
+            request_ = app.RequestTakeScreenshot("reblur_pass_validation");
         }
 
         return Result::Pending;
@@ -49,8 +40,7 @@ public:
 
 private:
     static constexpr uint32_t WarmupFrames = 10;
-    uint32_t frame_ = 0;
-    bool screenshot_requested_ = false;
+    std::shared_ptr<ScreenshotRequest> request_;
 };
 
 static TestCaseRegistrar<ReblurPassValidationTest> reblur_pass_validation_registrar("reblur_pass_validation");

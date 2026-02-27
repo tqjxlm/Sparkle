@@ -1,6 +1,7 @@
 #include "application/TestCase.h"
 
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 #include "core/Logger.h"
 
 namespace sparkle
@@ -17,10 +18,8 @@ namespace sparkle
 class ReblurTemporalConvergenceTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    Result OnTick(AppFramework &app) override
     {
-        frame_++;
-
         // Log progress at key milestones
         if (frame_ == 1)
         {
@@ -41,24 +40,16 @@ public:
             return Result::Pending;
         }
 
-        if (app.IsScreenshotCompleted())
+        if (request_ && request_->IsCompleted())
         {
             Log(Info, "ReblurTemporalConvergenceTest: screenshot captured after {} frames — PASS", frame_);
             return Result::Pass;
         }
 
-        if (!screenshot_requested_)
+        if (!request_)
         {
             Log(Info, "ReblurTemporalConvergenceTest: requesting screenshot at frame {}", frame_);
-            app.RequestTakeScreenshot();
-            screenshot_requested_ = true;
-        }
-
-        uint32_t timeout = app.GetAppConfig().test_timeout;
-        if (timeout > 0 && frame_ > timeout)
-        {
-            Log(Error, "ReblurTemporalConvergenceTest timed out after {} frames", timeout);
-            return Result::Fail;
+            request_ = app.RequestTakeScreenshot("reblur_temporal_convergence");
         }
 
         return Result::Pending;
@@ -66,8 +57,7 @@ public:
 
 private:
     static constexpr uint32_t ConvergenceFrames = 30;
-    uint32_t frame_ = 0;
-    bool screenshot_requested_ = false;
+    std::shared_ptr<ScreenshotRequest> request_;
 };
 
 static TestCaseRegistrar<ReblurTemporalConvergenceTest> reblur_temporal_convergence_registrar(

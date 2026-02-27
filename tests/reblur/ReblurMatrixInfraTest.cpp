@@ -24,10 +24,8 @@ namespace sparkle
 class ReblurMatrixInfraTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    Result OnTick(AppFramework &app) override
     {
-        frame_++;
-
         auto *camera = app.GetMainCamera();
         if (!camera)
         {
@@ -65,11 +63,11 @@ public:
         }
 
         // Phase 2: Continuous motion (frames 4-12) — change yaw by 5 degrees each frame
-        if (frame_ >= kMotionStart && frame_ <= kMotionEnd)
+        if (frame_ >= MotionStart && frame_ <= MotionEnd)
         {
             if (orbit)
             {
-                float yaw = 30.0f + 5.0f * static_cast<float>(frame_ - kMotionStart + 1);
+                float yaw = 30.0f + 5.0f * static_cast<float>(frame_ - MotionStart + 1);
                 orbit->Setup(Vector3::Zero(), 3.0f, 20.0f, yaw);
             }
 
@@ -99,7 +97,7 @@ public:
         }
 
         // Phase 3: Final validation at frame 15 (after motion stopped)
-        if (frame_ == kCheckFrame)
+        if (frame_ == CheckFrame)
         {
             auto pos = proxy->GetPosture().position;
             auto vp_prev = proxy->GetViewProjectionMatrixPrev();
@@ -140,22 +138,14 @@ public:
             return Result::Pass;
         }
 
-        uint32_t timeout = app.GetAppConfig().test_timeout;
-        if (timeout > 0 && frame_ > timeout)
-        {
-            Log(Error, "ReblurMatrixInfraTest timed out after {} frames", timeout);
-            return Result::Fail;
-        }
-
         return Result::Pending;
     }
 
 private:
-    static constexpr uint32_t kMotionStart = 4;
-    static constexpr uint32_t kMotionEnd = 12;
-    static constexpr uint32_t kCheckFrame = 15;
+    static constexpr uint32_t MotionStart = 4;
+    static constexpr uint32_t MotionEnd = 12;
+    static constexpr uint32_t CheckFrame = 15;
 
-    uint32_t frame_ = 0;
     Vector3 initial_position_ = Vector3::Zero();
     bool observed_motion_ = false;
     bool observed_matrix_change_ = false;

@@ -1,6 +1,7 @@
 #include "application/TestCase.h"
 
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 #include "core/Logger.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "scene/component/camera/CameraComponent.h"
@@ -24,10 +25,8 @@ namespace sparkle
 class ReblurReprojectionTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    Result OnTick(AppFramework &app) override
     {
-        frame_++;
-
         auto *camera = app.GetMainCamera();
         if (!camera)
         {
@@ -37,33 +36,33 @@ public:
         auto *orbit = dynamic_cast<OrbitCameraComponent *>(camera);
 
         // Phase 1 (frames 1-5): Static warmup — let the scene load and accumulate
-        if (frame_ <= kWarmupFrames)
+        if (frame_ <= WarmupFrames)
         {
             if (frame_ == 1)
             {
-                Log(Info, "ReblurReprojectionTest: warmup phase (frames 1-{})", kWarmupFrames);
+                Log(Info, "ReblurReprojectionTest: warmup phase (frames 1-{})", WarmupFrames);
             }
             return Result::Pending;
         }
 
         // Phase 2 (frames 6-25): Incremental orbit motion — small yaw steps each frame
-        if (frame_ <= kWarmupFrames + kMotionFrames)
+        if (frame_ <= WarmupFrames + MotionFrames)
         {
             if (orbit)
             {
                 float yaw_step = 2.0f; // 2 degrees per frame
-                float yaw = 30.0f + yaw_step * static_cast<float>(frame_ - kWarmupFrames);
+                float yaw = 30.0f + yaw_step * static_cast<float>(frame_ - WarmupFrames);
                 orbit->Setup(Vector3::Zero(), 3.0f, 20.0f, yaw);
             }
 
-            if (frame_ == kWarmupFrames + 1)
+            if (frame_ == WarmupFrames + 1)
             {
-                Log(Info, "ReblurReprojectionTest: motion phase started (frames {}-{})", kWarmupFrames + 1,
-                    kWarmupFrames + kMotionFrames);
+                Log(Info, "ReblurReprojectionTest: motion phase started (frames {}-{})", WarmupFrames + 1,
+                    WarmupFrames + MotionFrames);
             }
 
             // Log camera delta at midpoint to confirm motion propagates
-            if (frame_ == kWarmupFrames + kMotionFrames / 2)
+            if (frame_ == WarmupFrames + MotionFrames / 2)
             {
                 auto *proxy = static_cast<CameraRenderProxy *>(camera->GetRenderProxy());
                 float delta = (proxy->GetPosture().position - proxy->GetPositionPrev()).norm();
@@ -74,47 +73,38 @@ public:
         }
 
         // Phase 3 (frames 26-30): Stop motion, let it reconverge
-        if (frame_ <= kWarmupFrames + kMotionFrames + kSettleFrames)
+        if (frame_ <= WarmupFrames + MotionFrames + SettleFrames)
         {
-            if (frame_ == kWarmupFrames + kMotionFrames + 1)
+            if (frame_ == WarmupFrames + MotionFrames + 1)
             {
                 Log(Info, "ReblurReprojectionTest: settle phase (frames {}-{})", frame_,
-                    kWarmupFrames + kMotionFrames + kSettleFrames);
+                    WarmupFrames + MotionFrames + SettleFrames);
             }
             return Result::Pending;
         }
 
         // Phase 4: Take screenshot and pass
-        if (app.IsScreenshotCompleted())
+        if (request_ && request_->IsCompleted())
         {
             Log(Info, "ReblurReprojectionTest: screenshot captured after {} frames — PASS", frame_);
             return Result::Pass;
         }
 
-        if (!screenshot_requested_)
+        if (!request_)
         {
             Log(Info, "ReblurReprojectionTest: requesting screenshot at frame {}", frame_);
-            app.RequestTakeScreenshot("reblur_reprojection");
-            screenshot_requested_ = true;
-        }
-
-        uint32_t timeout = app.GetAppConfig().test_timeout;
-        if (timeout > 0 && frame_ > timeout)
-        {
-            Log(Error, "ReblurReprojectionTest timed out after {} frames", timeout);
-            return Result::Fail;
+            request_ = app.RequestTakeScreenshot("reblur_reprojection");
         }
 
         return Result::Pending;
     }
 
 private:
-    static constexpr uint32_t kWarmupFrames = 5;
-    static constexpr uint32_t kMotionFrames = 20;
-    static constexpr uint32_t kSettleFrames = 5;
+    static constexpr uint32_t WarmupFrames = 5;
+    static constexpr uint32_t MotionFrames = 20;
+    static constexpr uint32_t SettleFrames = 5;
 
-    uint32_t frame_ = 0;
-    bool screenshot_requested_ = false;
+    std::shared_ptr<ScreenshotRequest> request_;
 };
 
 static TestCaseRegistrar<ReblurReprojectionTest> reblur_reprojection_registrar("reblur_reprojection");

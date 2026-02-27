@@ -1,6 +1,7 @@
 #include "application/TestCase.h"
 
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 #include "core/Logger.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "scene/component/camera/CameraComponent.h"
@@ -21,10 +22,8 @@ namespace sparkle
 class ReblurMotionVectorTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    Result OnTick(AppFramework &app) override
     {
-        frame_++;
-
         auto *camera = app.GetMainCamera();
         if (!camera)
         {
@@ -32,17 +31,15 @@ public:
         }
 
         // Phase 1: Take static screenshot at frame 3
-        if (frame_ == 3 && !static_screenshot_done_)
+        if (frame_ == 3 && !static_request_)
         {
             Log(Info, "ReblurMotionVectorTest: requesting static-camera screenshot (frame {})", frame_);
-            app.RequestTakeScreenshot("reblur_mv_static");
-            static_screenshot_requested_ = true;
+            static_request_ = app.RequestTakeScreenshot("reblur_mv_static");
         }
 
-        if (static_screenshot_requested_ && app.IsScreenshotCompleted())
+        if (static_request_ && !static_screenshot_done_ && static_request_->IsCompleted())
         {
             static_screenshot_done_ = true;
-            static_screenshot_requested_ = false;
             Log(Info, "ReblurMotionVectorTest: static screenshot captured");
         }
 
@@ -63,7 +60,7 @@ public:
         }
 
         // Phase 3: Take motion screenshot at frame 8
-        if (frame_ == 8 && static_screenshot_done_ && !motion_screenshot_requested_)
+        if (frame_ == 8 && static_screenshot_done_ && !motion_request_)
         {
             // Verify MV should be non-zero by checking camera delta
             auto *proxy = static_cast<CameraRenderProxy *>(camera->GetRenderProxy());
@@ -71,31 +68,22 @@ public:
             Log(Info, "ReblurMotionVectorTest: camera position delta = {:.6f}", pos_delta);
 
             Log(Info, "ReblurMotionVectorTest: requesting motion-camera screenshot (frame {})", frame_);
-            app.RequestTakeScreenshot("reblur_mv_motion");
-            motion_screenshot_requested_ = true;
+            motion_request_ = app.RequestTakeScreenshot("reblur_mv_motion");
         }
 
-        if (motion_screenshot_requested_ && app.IsScreenshotCompleted())
+        if (motion_request_ && motion_request_->IsCompleted())
         {
             Log(Info, "ReblurMotionVectorTest: motion screenshot captured — PASS (no crash)");
             return Result::Pass;
-        }
-
-        uint32_t timeout = app.GetAppConfig().test_timeout;
-        if (timeout > 0 && frame_ > timeout)
-        {
-            Log(Error, "ReblurMotionVectorTest timed out after {} frames", timeout);
-            return Result::Fail;
         }
 
         return Result::Pending;
     }
 
 private:
-    uint32_t frame_ = 0;
-    bool static_screenshot_requested_ = false;
+    std::shared_ptr<ScreenshotRequest> static_request_;
+    std::shared_ptr<ScreenshotRequest> motion_request_;
     bool static_screenshot_done_ = false;
-    bool motion_screenshot_requested_ = false;
 };
 
 static TestCaseRegistrar<ReblurMotionVectorTest> reblur_mv_test_registrar("reblur_mv_test");

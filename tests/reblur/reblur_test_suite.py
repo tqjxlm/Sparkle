@@ -94,7 +94,7 @@ def validate_latest_screenshot(framework, label):
 
     start = time.time()
     screenshot_dir = get_screenshot_dir(framework)
-    pattern = os.path.join(screenshot_dir, "TestScene_gpu_*.png")
+    pattern = os.path.join(screenshot_dir, "*.png")
     matches = glob.glob(pattern)
     if not matches:
         return False, time.time() - start, f"No screenshot found matching {pattern}"
