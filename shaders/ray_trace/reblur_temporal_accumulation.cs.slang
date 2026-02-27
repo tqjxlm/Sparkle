@@ -87,9 +87,9 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     if (inScreen)
     {
-        // Use center of bilinear footprint for expected previous-frame depth
         int2 prevPixelCenter = int2(prevUV * float2(resolution));
         prevPixelCenter = clamp(prevPixelCenter, int2(0, 0), int2(resolution) - int2(1, 1));
+
         float expectedPrevZ = prevViewZ[prevPixelCenter];
 
         hist_diff = BilinearHistorySample(

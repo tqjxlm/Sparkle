@@ -218,10 +218,13 @@ void GPURenderer::Render()
         clear_pass_->Render();
         camera->ClearPixels();
         dispatched_sample_count_ = 0;
-        if (reblur_)
-        {
-            reblur_->Reset();
-        }
+        // NOTE: Do NOT reset reblur here. The vanilla accumulation buffer (imageData)
+        // must restart from scratch on camera movement, but the reblur denoiser
+        // preserves temporal history across camera changes via motion-vector
+        // reprojection. Calling Reset() would set reset_history=1, causing the
+        // temporal accumulation shader to discard all converged history and output
+        // a raw 1-spp sample — exactly the failure mode tested by
+        // test_converged_history.py.
     }
 
     if (reblur_)

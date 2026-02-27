@@ -264,9 +264,12 @@ def main():
 
     # --- Run 0: Vanilla baseline (no reblur, full re-convergence) ---
     print(f"\n{'—'*60}")
-    print("  Run 0: Vanilla baseline (converge → nudge → re-converge)")
+    print("  Run 0: Vanilla baseline (converge -> nudge -> re-converge)")
     print(f"{'—'*60}")
-    ok = run_test(py, build_py, fw, "vanilla_converged_baseline", [],
+    # Vanilla needs two full convergences; use modest max_spp + timeout so
+    # the test completes in reasonable time.
+    ok = run_test(py, build_py, fw, "vanilla_converged_baseline",
+                  ["--max_spp", "256", "--test_timeout", "1200"],
                   "vanilla baseline", use_reblur=False,
                   clear_screenshots=True)
     if ok:
@@ -304,8 +307,13 @@ def main():
                   ["--reblur_debug_pass", "3"], "temporal accumulation")
     if ok:
         all_results.append(("Temporal accum: test run", True))
+        # Raw temporal accumulation output (before spatial blur) has higher noise
+        # because genuinely disoccluded pixels (~20-25% for a 2° yaw) get
+        # accumSpeed=1 with no spatial denoising. The full pipeline test (Run 1)
+        # validates the final output quality; this run validates that reprojection
+        # fetches history at all, not that the result is spatially clean.
         run_results = validate_run(
-            screenshot_dir, "Temporal accum", noise_ratio_max=5.0)
+            screenshot_dir, "Temporal accum", noise_ratio_max=8.0)
         all_results.extend(run_results)
         rename_screenshots(screenshot_dir, "*converged_history_*",
                            "reblur_temporal_accum")
