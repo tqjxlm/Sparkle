@@ -499,3 +499,26 @@ Date: 2026-02-27
     - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Phase 3 is complete (E+H). Proceed to Phase 4 Module F (history fix / anti-firefly), then Module I temporal stabilization; revisit denoiser-on functional ground truth expectations once stabilization path is in place.
+
+Date: 2026-02-27
+- Scope: Phase 3 closeout verification and handoff.
+- Milestone: Formally wrapped Phase 3 by re-running build, dedicated ReBLUR suite, and GPU functional gates on current head.
+- Findings:
+  - `dev/reblur_test_suite.py` passed with Phase 3 quantitative gates intact:
+    - E1/E2/E3: history monotonic to cap (`8.000000`), disocclusion reset ratio `100.000000%`, ghosting metric `0.000000`.
+    - H1/H2: ping-pong checksum ownership validated (`frames_validated=6`) and no-stabilization equivalence remained exact (`max_abs_diff=0`, `rmse=0`).
+  - Baseline GPU functional gate (`--spatial_denoise false`) passed with `Mean FLIP error: 0.0032`.
+  - Denoiser-on GPU functional gate (`--spatial_denoise true`) still fails against existing GPU ground truth with `Mean FLIP error: 0.1745` (threshold `0.03`), which is expected after Module H output ownership changes and is tracked in `docs/TODO.md`.
+  - S0.2 divergence metric from suite run remained finite (`max_abs_diff=218.000000`, `mean_abs_diff=13.813147`, `rmse=24.991533`) and stayed within current non-finite guard policy.
+- Trials:
+  - Re-ran full verification sequence on the same local environment used for prior Phase 3 module integration.
+- Pitfalls:
+  - No new crashes or regressions were introduced during closeout verification.
+- Tests Added/Updated: None (verification + documentation-only wrap-up).
+- Executed:
+  - `python build.py --framework glfw --config Release`
+  - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise false`
+  - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Phase 3 is wrapped. Start Phase 4 with Module F (history fix / anti-firefly), then Module I (temporal stabilization), and revisit denoiser-on functional ground truth/update policy during Phase 7 quality-gate work.

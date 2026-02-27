@@ -454,7 +454,7 @@ Phase 3: Temporal core (Modules E and H)
 - Implement temporal accumulation and post-blur history writeback.
 - Introduce permanent/transient pools and ping-pong resources.
 - Formalize history reset triggers (resize, scene change, camera cut, settings change).
-- Status (2026-02-27): Modules E and H complete. Temporal accumulation plus post-blur history writeback ownership (`DIFF_HISTORY`/`SPEC_HISTORY`/`PREV_NORMAL_ROUGHNESS`) and H1/H2 quantitative gates are integrated.
+- Status (2026-02-27): Complete and closeout-verified. Modules E and H are integrated with temporal accumulation + post-blur history writeback ownership (`DIFF_HISTORY`/`SPEC_HISTORY`/`PREV_NORMAL_ROUGHNESS`), H1/H2 quantitative gates pass in `dev/reblur_test_suite.py`, and baseline GPU functional gate (`--spatial_denoise false`) remains passing. Denoiser-on functional comparison vs existing GPU ground truth is an expected mismatch after Module H and is tracked in `docs/TODO.md`.
 - Handoff: Start Phase 4 Module F (history fix / anti-firefly) while keeping Module H no-stabilization output path as the baseline equivalence branch for upcoming Module I.
 
 Phase 4: Temporal robustness (Modules F and I)
