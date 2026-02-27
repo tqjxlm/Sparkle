@@ -43,6 +43,7 @@ struct RenderConfig : public ConfigCollection
         Albedo = 9,
         Emissive = 10,
         Depth = 11,
+        MotionVectors = 12,
     };
 
     [[nodiscard]] bool IsCPURenderMode() const

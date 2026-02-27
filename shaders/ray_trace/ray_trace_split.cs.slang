@@ -37,6 +37,7 @@ struct Camera
     float4x4 view_matrix;
     float4x4 world_to_clip;
     float4x4 world_to_clip_prev;
+    uint debug_mode;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
@@ -581,6 +582,17 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         float2 uvPrev = clipPrev.xy / clipPrev.w * 0.5 + 0.5;
 
         motionVectorOutput[pixel] = uvPrev - uvCurr;
+    }
+
+    // Motion vector debug visualization (DebugMode::MotionVectors = 12)
+    if (debug_mode == 12)
+    {
+        float2 mv = motionVectorOutput[pixel];
+        float magnitude = length(mv * float2(camera.resolution));
+        float t = saturate(magnitude / 20.0);
+        float3 color = lerp(float3(0, 0, 1), float3(1, 0, 0), t);
+        imageData[pixel] = float4(color, 1.0);
+        return;
     }
 
     // Write combined output to imageData (identical to vanilla accumulation)

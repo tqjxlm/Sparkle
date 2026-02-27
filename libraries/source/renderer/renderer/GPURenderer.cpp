@@ -96,6 +96,7 @@ class SplitPathTracerShader : public RHIShaderInfo
         Mat4 view_matrix = Mat4::Identity();
         Mat4 world_to_clip = Mat4::Identity();
         Mat4 world_to_clip_prev = Mat4::Identity();
+        uint32_t debug_mode = 0;
     };
 };
 
@@ -484,6 +485,7 @@ void GPURenderer::Update()
             .view_matrix = camera->GetViewMatrix(),
             .world_to_clip = camera->GetViewProjectionMatrix(),
             .world_to_clip_prev = camera->GetViewProjectionMatrixPrev(),
+            .debug_mode = static_cast<uint32_t>(render_config_.debug_mode),
         };
         split_pt_uniform_buffer_->Upload(rhi_, &split_ubo);
 
