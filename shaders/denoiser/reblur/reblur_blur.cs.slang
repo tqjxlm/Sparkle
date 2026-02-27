@@ -9,9 +9,11 @@
 [[vk::binding(3, 0)]] Texture2D<float> in_view_z;
 [[vk::binding(4, 0)]] Texture2D<float4> in_diff;
 [[vk::binding(5, 0)]] Texture2D<float4> in_spec;
-[[vk::binding(6, 0)]] RWTexture2D<float> out_prev_view_z;
-[[vk::binding(7, 0)]] RWTexture2D<float4> out_diff;
-[[vk::binding(8, 0)]] RWTexture2D<float4> out_spec;
+[[vk::binding(6, 0)]] Texture2D<float4> in_data1;
+[[vk::binding(7, 0)]] RWTexture2D<float> out_prev_view_z;
+[[vk::binding(8, 0)]] RWTexture2D<float4> out_prev_normal_roughness;
+[[vk::binding(9, 0)]] RWTexture2D<float4> out_diff;
+[[vk::binding(10, 0)]] RWTexture2D<float4> out_spec;
 
 static const float Epsilon = 1e-6f;
 static const uint MaxBlurRadius = 8u;
@@ -154,6 +156,7 @@ float4 FilterSignal(Texture2D<float4> source_signal, uint2 pixel, float center_v
 
     float center_view_z = in_view_z.Load(int3(pixel, 0));
     out_prev_view_z[pixel] = center_view_z;
+    out_prev_normal_roughness[pixel] = in_normal_roughness.Load(int3(pixel, 0));
 
     float4 diff = in_diff.Load(int3(pixel, 0));
     float4 spec = in_spec.Load(int3(pixel, 0));
@@ -169,7 +172,7 @@ float4 FilterSignal(Texture2D<float4> source_signal, uint2 pixel, float center_v
     float4 center_normal_roughness = in_normal_roughness.Load(int3(pixel, 0));
     float3 center_normal = UnpackNormal(center_normal_roughness);
     float center_roughness = saturate(center_normal_roughness.w);
-    float history_factor = saturate(params.w);
+    float history_factor = saturate(in_data1.Load(int3(pixel, 0)).x);
 
     float diff_radius = ComputeEffectiveRadius(diff, center_roughness, history_factor, false);
     float spec_radius = ComputeEffectiveRadius(spec, center_roughness, history_factor, true);

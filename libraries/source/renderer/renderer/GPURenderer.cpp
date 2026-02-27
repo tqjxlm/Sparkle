@@ -274,6 +274,10 @@ void GPURenderer::Render()
         clear_pass_->Render();
         camera->ClearPixels();
         dispatched_sample_count_ = 0;
+        if (render_config_.spatial_denoise && reblur_denoiser_)
+        {
+            reblur_denoiser_->ResetHistory();
+        }
     }
 
     // base pass: render to texture

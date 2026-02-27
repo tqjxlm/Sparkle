@@ -5,6 +5,7 @@
 #include "rhi/RHIImage.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIShader.h"
+#include <array>
 
 namespace sparkle
 {
@@ -14,6 +15,7 @@ class ReblurDenoiser
 {
 public:
     static constexpr uint32_t ReblurTileSize = 16u;
+    static constexpr uint32_t TemporalHistoryPingPongCount = 2u;
 
     enum class HitDistanceReconstructionMode : uint32_t
     {
@@ -51,12 +53,15 @@ public:
 
     void SetSettings(const Settings &settings);
 
+    void ResetHistory();
+
     void Dispatch(const FrontEndInputs &inputs, const RHIResourceRef<RHIImage> &denoised_output);
 
 private:
     void CreateTileMaskTexture();
     void CreateHitDistanceReconstructionTextures();
     void CreatePrePassTextures();
+    void CreateTemporalTextures();
     void CreateBlurTextures();
 
     RHIContext *rhi_ = nullptr;
@@ -68,21 +73,25 @@ private:
     RHIResourceRef<RHIShader> classify_tiles_shader_;
     RHIResourceRef<RHIShader> hit_distance_reconstruction_shader_;
     RHIResourceRef<RHIShader> prepass_shader_;
+    RHIResourceRef<RHIShader> temporal_accumulation_shader_;
     RHIResourceRef<RHIShader> blur_shader_;
     RHIResourceRef<RHIShader> passthrough_shader_;
     RHIResourceRef<RHIPipelineState> classify_tiles_pipeline_state_;
     RHIResourceRef<RHIPipelineState> hit_distance_reconstruction_pipeline_state_;
     RHIResourceRef<RHIPipelineState> prepass_pipeline_state_;
+    RHIResourceRef<RHIPipelineState> temporal_accumulation_pipeline_state_;
     RHIResourceRef<RHIPipelineState> blur_pipeline_state_;
     RHIResourceRef<RHIPipelineState> pipeline_state_;
     RHIResourceRef<RHIComputePass> classify_tiles_compute_pass_;
     RHIResourceRef<RHIComputePass> hit_distance_reconstruction_compute_pass_;
     RHIResourceRef<RHIComputePass> prepass_compute_pass_;
+    RHIResourceRef<RHIComputePass> temporal_accumulation_compute_pass_;
     RHIResourceRef<RHIComputePass> blur_compute_pass_;
     RHIResourceRef<RHIComputePass> compute_pass_;
     RHIResourceRef<RHIBuffer> classify_tiles_uniform_buffer_;
     RHIResourceRef<RHIBuffer> hit_distance_reconstruction_uniform_buffer_;
     RHIResourceRef<RHIBuffer> prepass_uniform_buffer_;
+    RHIResourceRef<RHIBuffer> temporal_accumulation_uniform_buffer_;
     RHIResourceRef<RHIBuffer> blur_uniform_buffer_;
     RHIResourceRef<RHIBuffer> uniform_buffer_;
     RHIResourceRef<RHIImage> tile_mask_texture_;
@@ -91,9 +100,19 @@ private:
     RHIResourceRef<RHIImage> prepass_diff_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> prepass_spec_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> spec_hit_distance_for_tracking_texture_;
+    RHIResourceRef<RHIImage> data1_texture_;
+    RHIResourceRef<RHIImage> data2_texture_;
+    RHIResourceRef<RHIImage> prev_normal_roughness_texture_;
+    std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> diff_history_textures_;
+    std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> spec_history_textures_;
+    std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> diff_fast_history_textures_;
+    std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> spec_fast_history_textures_;
+    std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> spec_hit_distance_tracking_history_textures_;
+    std::array<RHIResourceRef<RHIImage>, TemporalHistoryPingPongCount> internal_data_textures_;
     RHIResourceRef<RHIImage> blur_diff_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> blur_spec_radiance_hitdist_texture_;
     RHIResourceRef<RHIImage> prev_view_z_texture_;
-    uint32_t blur_history_frame_num_ = 0u;
+    uint32_t temporal_history_read_index_ = 0u;
+    bool temporal_history_valid_ = false;
 };
 } // namespace sparkle

@@ -24,6 +24,7 @@ from denoiser_metrics import (
     project_world_to_pixel,
     reconstruct_hit_distance_shader_equivalent,
     rmse,
+    temporal_accumulation_shader_equivalent,
     unpack_normal_roughness,
     unpack_radiance_and_norm_hit_dist,
 )
@@ -90,6 +91,22 @@ class ModuleDTestResults:
     @property
     def passed(self) -> bool:
         return self.d1_pass and self.d2_pass and self.d3_pass
+
+
+@dataclass
+class ModuleETestResults:
+    e1_pass: bool
+    e1_history_monotonic: bool
+    e1_final_mean_history_length: float
+    e1_history_cap: float
+    e2_pass: bool
+    e2_reset_ratio: float
+    e3_pass: bool
+    e3_ghosting_metric: float
+
+    @property
+    def passed(self) -> bool:
+        return self.e1_pass and self.e2_pass and self.e3_pass
 
 
 @dataclass
@@ -775,6 +792,240 @@ def run_module_d_tests(seed: int = 43) -> ModuleDTestResults:
     )
 
 
+def run_module_e_tests(seed: int = 53) -> ModuleETestResults:
+    rng = np.random.default_rng(seed)
+    denoising_range = 300.0
+    max_history_frames = 8
+
+    height = 96
+    width = 160
+    static_view_z = np.full((height, width), 42.0, dtype=np.float32)
+    static_normals = np.zeros((height, width, 3), dtype=np.float32)
+    static_normals[..., 2] = 1.0
+    static_roughness = np.full((height, width), 0.45, dtype=np.float32)
+    static_packed_normal_roughness = pack_normal_roughness(
+        static_normals, static_roughness)
+    static_tile_mask = classify_tiles_reference(static_view_z, denoising_range)
+    static_motion_vectors = np.zeros((height, width, 4), dtype=np.float32)
+    static_eval_mask = _tile_mask_to_pixel_mask(
+        static_tile_mask, width, height)
+
+    base_diff = np.zeros((height, width, 4), dtype=np.float32)
+    base_spec = np.zeros((height, width, 4), dtype=np.float32)
+    base_diff[..., 0] = 0.26
+    base_diff[..., 1] = 0.03
+    base_diff[..., 2] = -0.01
+    base_diff[..., 3] = 0.40
+    base_spec[..., 0] = 0.31
+    base_spec[..., 1] = 0.02
+    base_spec[..., 2] = -0.02
+    base_spec[..., 3] = 0.62
+
+    prev_view_z = static_view_z.copy()
+    prev_normal_roughness = static_packed_normal_roughness.copy()
+    prev_internal_data = np.zeros((height, width, 4), dtype=np.float32)
+    prev_diff_history = base_diff.copy()
+    prev_spec_history = base_spec.copy()
+    prev_diff_fast_history = base_diff.copy()
+    prev_spec_fast_history = base_spec.copy()
+    prev_spec_hit_tracking = base_spec[..., 3].copy()
+
+    history_mean_trace: list[float] = []
+    frame_count = 12
+    for frame in range(frame_count):
+        frame_diff = base_diff.copy()
+        frame_spec = base_spec.copy()
+        frame_diff[..., :3] += rng.normal(0.0, 0.01,
+                                          size=(height, width, 3)).astype(np.float32)
+        frame_spec[..., :3] += rng.normal(0.0, 0.01,
+                                          size=(height, width, 3)).astype(np.float32)
+        frame_diff[..., 3] = np.clip(frame_diff[..., 3] + rng.normal(0.0, 0.01, size=(height, width)),
+                                     0.0, 1.0)
+        frame_spec[..., 3] = np.clip(frame_spec[..., 3] + rng.normal(0.0, 0.01, size=(height, width)),
+                                     0.0, 1.0)
+        frame_tracking = np.clip(frame_spec[..., 3], 0.0, 1.0)
+
+        (
+            _,
+            _,
+            out_internal_data,
+            out_diff_history,
+            out_spec_history,
+            out_diff_fast_history,
+            out_spec_fast_history,
+            out_spec_hit_tracking,
+        ) = temporal_accumulation_shader_equivalent(
+            static_tile_mask,
+            static_packed_normal_roughness,
+            static_view_z,
+            static_motion_vectors,
+            frame_diff,
+            frame_spec,
+            frame_tracking,
+            prev_view_z,
+            prev_normal_roughness,
+            prev_internal_data,
+            prev_diff_history,
+            prev_spec_history,
+            prev_diff_fast_history,
+            prev_spec_fast_history,
+            prev_spec_hit_tracking,
+            denoising_range,
+            max_history_frames=max_history_frames,
+            history_available=frame > 0,
+        )
+
+        history_mean_trace.append(
+            float(np.mean(out_internal_data[..., 0][static_eval_mask])))
+        prev_internal_data = out_internal_data
+        prev_diff_history = out_diff_history
+        prev_spec_history = out_spec_history
+        prev_diff_fast_history = out_diff_fast_history
+        prev_spec_fast_history = out_spec_fast_history
+        prev_spec_hit_tracking = out_spec_hit_tracking
+
+    history_deltas = np.diff(np.asarray(history_mean_trace, dtype=np.float32))
+    e1_history_monotonic = bool(np.all(history_deltas >= -1e-4))
+    e1_final_mean_history_length = float(history_mean_trace[-1])
+    e1_history_cap = float(max_history_frames)
+    e1_pass = e1_history_monotonic and e1_final_mean_history_length >= e1_history_cap - 0.05
+
+    motion_height = 96
+    motion_width = 192
+    motion_view_z = np.full(
+        (motion_height, motion_width), 42.0, dtype=np.float32)
+    prev_motion_view_z = motion_view_z.copy()
+
+    object_y0 = 24
+    object_y1 = 72
+    prev_object_x0 = 40
+    prev_object_x1 = 96
+    object_shift = 24
+    curr_object_x0 = prev_object_x0 + object_shift
+    curr_object_x1 = prev_object_x1 + object_shift
+
+    prev_object_mask = np.zeros((motion_height, motion_width), dtype=bool)
+    prev_object_mask[object_y0:object_y1, prev_object_x0:prev_object_x1] = True
+    curr_object_mask = np.zeros((motion_height, motion_width), dtype=bool)
+    curr_object_mask[object_y0:object_y1, curr_object_x0:curr_object_x1] = True
+
+    prev_motion_view_z[prev_object_mask] = 10.0
+    motion_view_z[curr_object_mask] = 10.0
+
+    motion_normals = np.zeros(
+        (motion_height, motion_width, 3), dtype=np.float32)
+    motion_normals[..., 2] = 1.0
+    motion_roughness = np.full(
+        (motion_height, motion_width), 0.35, dtype=np.float32)
+    motion_packed_normal_roughness = pack_normal_roughness(
+        motion_normals, motion_roughness)
+    motion_tile_mask = classify_tiles_reference(motion_view_z, denoising_range)
+
+    motion_vectors = np.zeros(
+        (motion_height, motion_width, 4), dtype=np.float32)
+    motion_vectors[curr_object_mask, 0] = -float(object_shift)
+
+    current_diff = np.zeros((motion_height, motion_width, 4), dtype=np.float32)
+    current_spec = np.zeros((motion_height, motion_width, 4), dtype=np.float32)
+    current_diff[..., 0] = 0.10
+    current_spec[..., 0] = 0.08
+    current_diff[..., 1] = 0.01
+    current_spec[..., 1] = 0.01
+    current_diff[..., 2] = -0.01
+    current_spec[..., 2] = -0.01
+    current_diff[..., 3] = 0.30
+    current_spec[..., 3] = 0.35
+
+    current_diff[curr_object_mask, 0] = 0.95
+    current_spec[curr_object_mask, 0] = 0.88
+    current_diff[curr_object_mask, 3] = 0.75
+    current_spec[curr_object_mask, 3] = 0.82
+    current_tracking = current_spec[..., 3].copy()
+
+    prev_diff_history = np.zeros(
+        (motion_height, motion_width, 4), dtype=np.float32)
+    prev_spec_history = np.zeros(
+        (motion_height, motion_width, 4), dtype=np.float32)
+    prev_diff_history[..., 0] = 0.10
+    prev_spec_history[..., 0] = 0.08
+    prev_diff_history[..., 1] = 0.01
+    prev_spec_history[..., 1] = 0.01
+    prev_diff_history[..., 2] = -0.01
+    prev_spec_history[..., 2] = -0.01
+    prev_diff_history[..., 3] = 0.30
+    prev_spec_history[..., 3] = 0.35
+    prev_diff_history[prev_object_mask, 0] = 0.95
+    prev_spec_history[prev_object_mask, 0] = 0.88
+    prev_diff_history[prev_object_mask, 3] = 0.75
+    prev_spec_history[prev_object_mask, 3] = 0.82
+
+    prev_diff_fast_history = prev_diff_history.copy()
+    prev_spec_fast_history = prev_spec_history.copy()
+    prev_spec_tracking = prev_spec_history[..., 3].copy()
+    prev_internal_data = np.zeros(
+        (motion_height, motion_width, 4), dtype=np.float32)
+    prev_internal_data[..., 0] = float(max_history_frames)
+    prev_internal_data[..., 1] = 4.0
+    prev_internal_data[..., 2] = 1.0
+
+    (
+        _,
+        _,
+        out_internal_data,
+        out_diff_history,
+        out_spec_history,
+        _,
+        _,
+        _,
+    ) = temporal_accumulation_shader_equivalent(
+        motion_tile_mask,
+        motion_packed_normal_roughness,
+        motion_view_z,
+        motion_vectors,
+        current_diff,
+        current_spec,
+        current_tracking,
+        prev_motion_view_z,
+        motion_packed_normal_roughness,
+        prev_internal_data,
+        prev_diff_history,
+        prev_spec_history,
+        prev_diff_fast_history,
+        prev_spec_fast_history,
+        prev_spec_tracking,
+        denoising_range,
+        max_history_frames=max_history_frames,
+        history_available=True,
+    )
+
+    motion_denoisable_mask = _tile_mask_to_pixel_mask(
+        motion_tile_mask, motion_width, motion_height)
+    newly_uncovered_mask = prev_object_mask & (
+        ~curr_object_mask) & motion_denoisable_mask
+    reset_pixels = out_internal_data[..., 0][newly_uncovered_mask] <= 1.01
+    e2_reset_ratio = float(np.mean(reset_pixels)
+                           ) if reset_pixels.size > 0 else 1.0
+    e2_pass = e2_reset_ratio >= 0.99
+
+    e3_diff_error = float(np.mean(np.abs(out_diff_history[..., 0][newly_uncovered_mask] -
+                                         current_diff[..., 0][newly_uncovered_mask])))
+    e3_spec_error = float(np.mean(np.abs(out_spec_history[..., 0][newly_uncovered_mask] -
+                                         current_spec[..., 0][newly_uncovered_mask])))
+    e3_ghosting_metric = 0.5 * (e3_diff_error + e3_spec_error)
+    e3_pass = e3_ghosting_metric <= 0.02
+
+    return ModuleETestResults(
+        e1_pass=e1_pass,
+        e1_history_monotonic=e1_history_monotonic,
+        e1_final_mean_history_length=e1_final_mean_history_length,
+        e1_history_cap=e1_history_cap,
+        e2_pass=e2_pass,
+        e2_reset_ratio=e2_reset_ratio,
+        e3_pass=e3_pass,
+        e3_ghosting_metric=e3_ghosting_metric,
+    )
+
+
 def _compute_laplacian_energy(channel: np.ndarray, mask: np.ndarray) -> float:
     if channel.ndim != 2:
         raise ValueError("channel must be 2D")
@@ -1053,6 +1304,7 @@ def main() -> int:
     module_b_results = run_module_b_tests()
     module_c_results = run_module_c_tests()
     module_d_results = run_module_d_tests()
+    module_e_results = run_module_e_tests()
     module_g_results = run_module_g_tests()
 
     print(
@@ -1092,6 +1344,15 @@ def main() -> int:
         flush=True,
     )
     print(
+        "Module E results: "
+        f"E1(pass={module_e_results.e1_pass}, history_monotonic={module_e_results.e1_history_monotonic}, "
+        f"final_mean_history_length={module_e_results.e1_final_mean_history_length:.6f}, "
+        f"history_cap={module_e_results.e1_history_cap:.6f}); "
+        f"E2(pass={module_e_results.e2_pass}, reset_ratio={module_e_results.e2_reset_ratio:.6%}); "
+        f"E3(pass={module_e_results.e3_pass}, ghosting_metric={module_e_results.e3_ghosting_metric:.6f})",
+        flush=True,
+    )
+    print(
         "Module G results: "
         f"G1(pass={module_g_results.g1_pass}, high_frequency_reduction_ratio={module_g_results.g1_high_frequency_reduction_ratio:.6f}); "
         f"G2(pass={module_g_results.g2_pass}, edge_mse={module_g_results.g2_edge_mse:.6f}); "
@@ -1105,6 +1366,7 @@ def main() -> int:
         and module_b_results.passed
         and module_c_results.passed
         and module_d_results.passed
+        and module_e_results.passed
         and module_g_results.passed
         else 1
     )

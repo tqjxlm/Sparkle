@@ -25,6 +25,11 @@ Phase 2 Module D adds pre-pass checks:
 - D2 Cross-edge leakage guard
 - D3 Spec hit-distance tracking jitter reduction
 
+Phase 3 Module E adds temporal accumulation checks:
+- E1 Static-scene mean history growth monotonic to cap
+- E2 Disocclusion reset ratio within one frame
+- E3 Ghosting guard metric after object motion
+
 Phase 2 Module G adds blur checks:
 - G1 High-frequency energy reduction on static noisy patches
 - G2 Edge-preservation MSE guard near depth discontinuities
@@ -46,6 +51,7 @@ from denoiser_module_tests import (
     run_module_b_tests,
     run_module_c_tests,
     run_module_d_tests,
+    run_module_e_tests,
     run_module_g_tests,
 )
 
@@ -243,6 +249,29 @@ def main():
     )
     if not module_d_results.passed:
         print("Module D quantitative checks FAILED", flush=True)
+        return 1
+
+    # Module E quantitative checks (Phase 3).
+    module_e_results = run_module_e_tests()
+    print(
+        "E1 metrics: "
+        f"history_monotonic={module_e_results.e1_history_monotonic}, "
+        f"final_mean_history_length={module_e_results.e1_final_mean_history_length:.6f}, "
+        f"history_cap={module_e_results.e1_history_cap:.6f}",
+        flush=True,
+    )
+    print(
+        "E2 metrics: "
+        f"reset_ratio={module_e_results.e2_reset_ratio:.6%}",
+        flush=True,
+    )
+    print(
+        "E3 metrics: "
+        f"ghosting_metric={module_e_results.e3_ghosting_metric:.6f}",
+        flush=True,
+    )
+    if not module_e_results.passed:
+        print("Module E quantitative checks FAILED", flush=True)
         return 1
 
     # Module G quantitative checks (Phase 2).

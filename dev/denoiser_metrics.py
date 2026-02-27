@@ -14,6 +14,9 @@ REBLUR_HIT_DIST_RECONSTRUCTION_AREA_3X3 = 1
 REBLUR_HIT_DIST_RECONSTRUCTION_AREA_5X5 = 2
 REBLUR_PREPASS_MAX_RADIUS = 4
 REBLUR_BLUR_MAX_RADIUS = 8
+REBLUR_TEMPORAL_DISOCCLUSION_THRESHOLD = 0.10
+REBLUR_TEMPORAL_NORMAL_REJECT_COS = 0.85
+REBLUR_TEMPORAL_FAST_HISTORY_MAX_FRAMES = 4
 
 
 def _safe_normalize(vectors: np.ndarray) -> np.ndarray:
@@ -587,6 +590,233 @@ def prepass_shader_equivalent(
                         np.clip(weighted_sum / weight_sum, 0.0, 1.0))
 
     return out_diff, out_spec, spec_hit_dist_for_tracking
+
+
+def temporal_accumulation_shader_equivalent(
+    tile_mask: np.ndarray,
+    packed_normal_roughness: np.ndarray,
+    view_z: np.ndarray,
+    motion_vectors: np.ndarray,
+    diff_signal: np.ndarray,
+    spec_signal: np.ndarray,
+    spec_hit_dist_for_tracking: np.ndarray,
+    prev_view_z: np.ndarray,
+    prev_normal_roughness: np.ndarray,
+    prev_internal_data: np.ndarray,
+    prev_diff_history: np.ndarray,
+    prev_spec_history: np.ndarray,
+    prev_diff_fast_history: np.ndarray,
+    prev_spec_fast_history: np.ndarray,
+    prev_spec_hit_dist_for_tracking: np.ndarray,
+    denoising_range: float,
+    max_history_frames: int,
+    history_available: bool,
+    disocclusion_threshold: float = REBLUR_TEMPORAL_DISOCCLUSION_THRESHOLD,
+    normal_reject_cos: float = REBLUR_TEMPORAL_NORMAL_REJECT_COS,
+    fast_history_max_frames: int = REBLUR_TEMPORAL_FAST_HISTORY_MAX_FRAMES,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    if view_z.ndim != 2:
+        raise ValueError("view_z must be a 2D array")
+    if tile_mask.ndim != 2:
+        raise ValueError("tile_mask must be a 2D array")
+    if diff_signal.shape != spec_signal.shape or diff_signal.shape[-1] != 4:
+        raise ValueError("diff/spec signals must have matching HxWx4 shapes")
+    if packed_normal_roughness.shape[:2] != view_z.shape:
+        raise ValueError(
+            "packed_normal_roughness shape must match view_z shape")
+    if diff_signal.shape[:2] != view_z.shape:
+        raise ValueError("diff/spec shapes must match view_z shape")
+    if spec_hit_dist_for_tracking.shape != view_z.shape:
+        raise ValueError(
+            "spec_hit_dist_for_tracking shape must match view_z shape")
+    if prev_view_z.shape != view_z.shape:
+        raise ValueError("prev_view_z shape must match view_z shape")
+    if prev_normal_roughness.shape != packed_normal_roughness.shape:
+        raise ValueError(
+            "prev_normal_roughness shape must match packed_normal_roughness")
+    if prev_internal_data.shape != packed_normal_roughness.shape:
+        raise ValueError("prev_internal_data shape must match HxWx4")
+    if prev_diff_history.shape != diff_signal.shape:
+        raise ValueError("prev_diff_history shape must match diff_signal")
+    if prev_spec_history.shape != spec_signal.shape:
+        raise ValueError("prev_spec_history shape must match spec_signal")
+    if prev_diff_fast_history.shape != diff_signal.shape:
+        raise ValueError(
+            "prev_diff_fast_history shape must match diff_signal")
+    if prev_spec_fast_history.shape != spec_signal.shape:
+        raise ValueError(
+            "prev_spec_fast_history shape must match spec_signal")
+    if prev_spec_hit_dist_for_tracking.shape != view_z.shape:
+        raise ValueError(
+            "prev_spec_hit_dist_for_tracking shape must match view_z shape")
+    if motion_vectors.shape[:2] != view_z.shape:
+        raise ValueError("motion_vectors shape must match view_z shape")
+    if motion_vectors.ndim != 3 or motion_vectors.shape[2] < 2:
+        raise ValueError("motion_vectors must be HxWxN with N >= 2")
+
+    height, width = view_z.shape
+    max_history_frames_clamped = max(1.0, float(max_history_frames))
+    max_fast_history_frames_clamped = max(1.0, float(fast_history_max_frames))
+    disocclusion_threshold_clamped = max(0.0, float(disocclusion_threshold))
+    normal_reject_cos_clamped = float(np.clip(normal_reject_cos, 0.0, 1.0))
+
+    current_normals = _unpack_normal_from_packed_normal_roughness(
+        packed_normal_roughness)
+    previous_normals = _unpack_normal_from_packed_normal_roughness(
+        prev_normal_roughness)
+
+    out_data1 = np.zeros((height, width, 4), dtype=np.float32)
+    out_data2 = np.zeros((height, width, 4), dtype=np.float32)
+    out_internal_data = np.zeros((height, width, 4), dtype=np.float32)
+    out_diff_history = diff_signal.astype(np.float32, copy=True)
+    out_spec_history = spec_signal.astype(np.float32, copy=True)
+    out_diff_fast_history = diff_signal.astype(np.float32, copy=True)
+    out_spec_fast_history = spec_signal.astype(np.float32, copy=True)
+    out_spec_hit_dist_for_tracking = np.clip(
+        spec_hit_dist_for_tracking, 0.0, 1.0).astype(np.float32, copy=True)
+
+    for y in range(height):
+        tile_y = y // REBLUR_TILE_SIZE
+        for x in range(width):
+            tile_x = x // REBLUR_TILE_SIZE
+            current_view_z = float(view_z[y, x])
+            current_tracking = float(
+                np.clip(spec_hit_dist_for_tracking[y, x], 0.0, 1.0))
+            if tile_mask[tile_y, tile_x] != 0 or not _is_valid_prepass_view_z(current_view_z, denoising_range):
+                out_data1[y, x, 3] = np.float32(current_tracking)
+                out_data2[y, x, 3] = np.float32(1.0)
+                continue
+
+            valid_reprojection = False
+            depth_delta_norm = 1.0
+            prev_x = x
+            prev_y = y
+            if history_available:
+                motion = motion_vectors[y, x, :2]
+                reproj_x = int(np.rint(float(x) + float(motion[0])))
+                reproj_y = int(np.rint(float(y) + float(motion[1])))
+                if 0 <= reproj_x < width and 0 <= reproj_y < height:
+                    prev_x = reproj_x
+                    prev_y = reproj_y
+                    previous_view_z = float(prev_view_z[prev_y, prev_x])
+                    if _is_valid_prepass_view_z(previous_view_z, denoising_range):
+                        depth_delta_norm = abs(
+                            previous_view_z - current_view_z) / max(current_view_z, 1e-6)
+                        normal_cos = float(np.clip(np.dot(current_normals[y, x], previous_normals[prev_y, prev_x]),
+                                                   0.0, 1.0))
+                        valid_reprojection = (
+                            depth_delta_norm <= disocclusion_threshold_clamped
+                            and normal_cos >= normal_reject_cos_clamped
+                        )
+
+            history_length = 1.0
+            fast_history_length = 1.0
+            prev_diff_value = diff_signal[y, x]
+            prev_spec_value = spec_signal[y, x]
+            prev_diff_fast_value = diff_signal[y, x]
+            prev_spec_fast_value = spec_signal[y, x]
+            previous_tracking = current_tracking
+            if valid_reprojection:
+                prev_internal = prev_internal_data[prev_y, prev_x]
+                history_length = float(np.clip(
+                    float(prev_internal[0]) + 1.0, 1.0, max_history_frames_clamped))
+                fast_history_length = float(np.clip(
+                    float(prev_internal[1]) + 1.0, 1.0, max_fast_history_frames_clamped))
+                prev_diff_value = prev_diff_history[prev_y, prev_x]
+                prev_spec_value = prev_spec_history[prev_y, prev_x]
+                prev_diff_fast_value = prev_diff_fast_history[prev_y, prev_x]
+                prev_spec_fast_value = prev_spec_fast_history[prev_y, prev_x]
+                previous_tracking = float(np.clip(
+                    prev_spec_hit_dist_for_tracking[prev_y, prev_x], 0.0, 1.0))
+
+            history_alpha = 1.0 / \
+                max(history_length, 1.0) if valid_reprojection else 1.0
+            fast_history_alpha = 1.0 / \
+                max(fast_history_length, 1.0) if valid_reprojection else 1.0
+
+            accumulated_diff = prev_diff_value * \
+                (1.0 - history_alpha) + diff_signal[y, x] * history_alpha
+            accumulated_spec = prev_spec_value * \
+                (1.0 - history_alpha) + spec_signal[y, x] * history_alpha
+            accumulated_diff_fast = prev_diff_fast_value * \
+                (1.0 - fast_history_alpha) + \
+                diff_signal[y, x] * fast_history_alpha
+            accumulated_spec_fast = prev_spec_fast_value * \
+                (1.0 - fast_history_alpha) + \
+                spec_signal[y, x] * fast_history_alpha
+            accumulated_tracking = previous_tracking * \
+                (1.0 - fast_history_alpha) + \
+                current_tracking * fast_history_alpha
+
+            accumulated_diff = accumulated_diff.astype(np.float32, copy=False)
+            accumulated_spec = accumulated_spec.astype(np.float32, copy=False)
+            accumulated_diff_fast = accumulated_diff_fast.astype(
+                np.float32, copy=False)
+            accumulated_spec_fast = accumulated_spec_fast.astype(
+                np.float32, copy=False)
+            accumulated_diff[3] = np.float32(
+                np.clip(accumulated_diff[3], 0.0, 1.0))
+            accumulated_spec[3] = np.float32(
+                np.clip(accumulated_spec[3], 0.0, 1.0))
+            accumulated_diff_fast[3] = np.float32(
+                np.clip(accumulated_diff_fast[3], 0.0, 1.0))
+            accumulated_spec_fast[3] = np.float32(
+                np.clip(accumulated_spec_fast[3], 0.0, 1.0))
+            accumulated_tracking = float(
+                np.clip(accumulated_tracking, 0.0, 1.0))
+
+            out_diff_history[y, x] = accumulated_diff
+            out_spec_history[y, x] = accumulated_spec
+            out_diff_fast_history[y, x] = accumulated_diff_fast
+            out_spec_fast_history[y, x] = accumulated_spec_fast
+            out_spec_hit_dist_for_tracking[y, x] = np.float32(
+                accumulated_tracking)
+
+            history_denom = max(max_history_frames_clamped - 1.0, 1.0)
+            history_factor = float(
+                np.clip((history_length - 1.0) / history_denom, 0.0, 1.0))
+            if valid_reprojection:
+                prev_uv_x = (float(prev_x) + 0.5) / float(width)
+                prev_uv_y = (float(prev_y) + 0.5) / float(height)
+            else:
+                prev_uv_x = 0.0
+                prev_uv_y = 0.0
+
+            out_data1[y, x, 0] = np.float32(history_factor)
+            out_data1[y, x, 1] = np.float32(1.0 if valid_reprojection else 0.0)
+            out_data1[y, x, 2] = np.float32(
+                history_length / max_history_frames_clamped)
+            out_data1[y, x, 3] = np.float32(accumulated_tracking)
+            out_data2[y, x, 0] = np.float32(prev_uv_x)
+            out_data2[y, x, 1] = np.float32(prev_uv_y)
+            out_data2[y, x, 2] = np.float32(
+                np.clip(depth_delta_norm, 0.0, 1.0))
+            out_data2[y, x, 3] = np.float32(0.0 if valid_reprojection else 1.0)
+            out_internal_data[y, x, 0] = np.float32(history_length)
+            out_internal_data[y, x, 1] = np.float32(fast_history_length)
+            out_internal_data[y, x, 2] = np.float32(
+                1.0 if valid_reprojection else 0.0)
+            out_internal_data[y, x, 3] = np.float32(0.0)
+
+    return (
+        out_data1,
+        out_data2,
+        out_internal_data,
+        out_diff_history,
+        out_spec_history,
+        out_diff_fast_history,
+        out_spec_fast_history,
+        out_spec_hit_dist_for_tracking,
+    )
 
 
 def _compute_blur_neighbor_weight(

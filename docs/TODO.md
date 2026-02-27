@@ -52,3 +52,5 @@
 * [ ] event based input handling
 
 ## Known Issues
+
+* [ ] Intermittent headless GPU screenshot run failure (`sparkle.exe` exits with code `4294967295`) observed during repeated `dev/reblur_test_suite.py` baseline step (`--pipeline gpu --spatial_denoise false`); rerun with identical args can pass. Collect crash dump/log evidence and isolate root cause.

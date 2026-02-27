@@ -407,3 +407,49 @@ Date: 2026-02-26
   - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
 - Suite Result (`dev/reblur_test_suite.py`): PASS.
 - Notes/Next: Begin Phase 3 with Module E temporal accumulation and replace Module G history proxy usage with true `DATA1` from temporal accumulation outputs.
+
+Date: 2026-02-27
+- Scope: Phase 3 Module E implementation (temporal accumulation + objective E1/E2/E3 tests) and Module G history-source handoff.
+- Milestone: Implemented standalone temporal accumulation pass with persistent ping-pong histories (`DIFF/SPEC`, fast histories, internal data, spec-hit tracking), `DATA1`/`DATA2` outputs, and resettable temporal state; replaced Module G frame-counter proxy with true per-pixel `DATA1` history input.
+- Findings:
+  - Added `shaders/denoiser/reblur/reblur_temporal_accumulation.cs.slang` and wired it into `ReblurDenoiser::Dispatch` between pre-pass and blur.
+  - `ReblurDenoiser` now owns Module E resources:
+    - `ReblurData1`, `ReblurData2`
+    - ping-pong: `ReblurDiffHistory*`, `ReblurSpecHistory*`, `ReblurDiffFastHistory*`, `ReblurSpecFastHistory*`, `ReblurInternalData*`, `ReblurSpecHitDistTrackingHistory*`
+    - `ReblurPrevNormalRoughness` (updated alongside `ReblurPrevViewZ` in blur pass writeback).
+  - Added `ReblurDenoiser::ResetHistory()` now that persistent histories exist; resets are triggered on resize, settings change, and renderer camera-clear path.
+  - Module G now consumes `DATA1.x` for convergence history factor (replacing the previous global `blur_history_frame_num_` proxy).
+  - Module E metrics from the latest suite run:
+    - E1 history growth: monotonic = `True`, final mean history length = `8.000000` (cap = `8.000000`)
+    - E2 disocclusion reset ratio = `100.000000%`
+    - E3 ghosting metric = `0.000000`
+  - Baseline/integration gates remained stable:
+    - S0.2 pass-through equivalence stayed bit-exact (`max_abs_diff=0`, `mean_abs_diff=0`, `rmse=0`)
+    - GPU functional output with denoiser enabled remained within baseline (`Mean FLIP error: 0.0032`).
+- Trials:
+  - Extended `dev/denoiser_metrics.py` with temporal accumulation shader-equivalent logic.
+  - Extended `dev/denoiser_module_tests.py` with deterministic Module E fixtures/assertions (E1/E2/E3).
+  - Extended `dev/reblur_test_suite.py` to execute and gate Module E metrics.
+  - Updated planning docs for Phase 3 status/handoff.
+- Pitfalls:
+  - Initial Module E test fixture used tile-space mask directly as pixel-space mask and failed with shape mismatch; fixed by expanding tile masks to pixel masks via `_tile_mask_to_pixel_mask`.
+  - During repeated validation loops, an intermittent headless baseline run failure (`exit=4294967295`) was observed in `--spatial_denoise false` screenshot path; rerun with identical arguments passed. Recorded as follow-up in `docs/TODO.md` under Known Issues.
+- Tests Added/Updated:
+  - Added: `shaders/denoiser/reblur/reblur_temporal_accumulation.cs.slang`
+  - Updated: `shaders/denoiser/reblur/reblur_blur.cs.slang`
+  - Updated: `libraries/include/renderer/denoiser/ReblurDenoiser.h`
+  - Updated: `libraries/source/renderer/denoiser/ReblurDenoiser.cpp`
+  - Updated: `libraries/source/renderer/renderer/GPURenderer.cpp`
+  - Updated: `dev/denoiser_metrics.py`
+  - Updated: `dev/denoiser_module_tests.py`
+  - Updated: `dev/reblur_test_suite.py`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Plan.md`
+  - Updated: `docs/ReBLUR_Standalone_Denoiser_Progress.md`
+  - Executed:
+    - `python -m py_compile dev/denoiser_metrics.py dev/denoiser_module_tests.py dev/reblur_test_suite.py`
+    - `python dev/denoiser_module_tests.py`
+    - `python build.py --framework glfw --config Release`
+    - `python dev/reblur_test_suite.py --framework glfw --config Release --headless --skip_build`
+    - `python dev/functional_test.py --framework glfw --config Release --pipeline gpu --headless --skip_build --spatial_denoise true`
+- Suite Result (`dev/reblur_test_suite.py`): PASS.
+- Notes/Next: Module E is complete. Next target is Phase 3 Module H (post-blur history writeback ownership and H1/H2 quantitative coverage).

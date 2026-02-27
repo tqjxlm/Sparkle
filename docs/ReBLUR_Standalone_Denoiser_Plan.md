@@ -454,6 +454,8 @@ Phase 3: Temporal core (Modules E and H)
 - Implement temporal accumulation and post-blur history writeback.
 - Introduce permanent/transient pools and ping-pong resources.
 - Formalize history reset triggers (resize, scene change, camera cut, settings change).
+- Status (2026-02-27): Module E complete. Temporal accumulation, `DATA1`/`DATA2`, history ping-pong resources, and E1/E2/E3 quantitative gates are integrated.
+- Handoff: Continue Phase 3 with Module H (post-blur history writeback ownership and stabilization-disabled equivalence path).
 
 Phase 4: Temporal robustness (Modules F and I)
 - Implement history fix and temporal stabilization.
