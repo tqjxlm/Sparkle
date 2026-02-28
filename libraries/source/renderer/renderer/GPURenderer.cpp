@@ -492,9 +492,16 @@ void GPURenderer::Update()
         };
         split_pt_uniform_buffer_->Upload(rhi_, &split_ubo);
 
+        // Always show denoiser output when ReBLUR is active (pt_weight = 0).
+        // The PT blend ramp (frame_index / 256) was designed for vanilla pipeline.
+        // With a denoiser: at low SPP the denoiser is better, after camera motion
+        // the PT buffer is cleared while the denoiser preserves history via MV
+        // reprojection, and at convergence the denoiser output should match PT
+        // once the output_limit clamping issue is resolved.
+        uint32_t comp_frame_index = 0;
         ReblurCompositeShader::UniformBufferData comp_ubo{
             .resolution = {image_size_.x(), image_size_.y()},
-            .frame_index = dispatched_sample_count_,
+            .frame_index = comp_frame_index,
         };
         composite_uniform_buffer_->Upload(rhi_, &comp_ubo);
     }

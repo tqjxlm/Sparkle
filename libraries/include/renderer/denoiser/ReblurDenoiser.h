@@ -79,7 +79,8 @@ private:
     void Blur(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices,
               uint32_t pass_index, RHIImage *in_diff, RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec,
               RHIImage *internal_data, bool has_temporal_data);
-    void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
+    void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
+                            uint32_t debug_output = 0);
     void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices);
     void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
                            const ReblurMatrices &matrices);

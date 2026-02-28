@@ -108,6 +108,7 @@ public:
         uint32_t frame_index;
         uint32_t reset_history;
         uint32_t enable_firefly_suppression;
+        uint32_t debug_output;
     };
 };
 
@@ -406,7 +407,22 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     }
 
     // Temporal Accumulation: temp1 + history → temp2, writes internal_data
-    TemporalAccumulate(inputs, settings);
+    // debug_pass 10/11/12 = temporal accum diagnostics (disocclusion/MV/depth)
+    uint32_t ta_debug = (debug_pass >= 10 && debug_pass <= 12) ? (debug_pass - 9) : 0;
+    TemporalAccumulate(inputs, settings, ta_debug);
+
+    if (debug_pass >= 10 && debug_pass <= 12)
+    {
+        CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
+        CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
+        internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::Transfer,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
+        CopyPreviousFrameData(inputs);
+        internal_frame_index_++;
+        history_valid_ = true;
+        return;
+    }
 
     if (debug_pass == 3)
     {
@@ -596,7 +612,8 @@ void ReblurDenoiser::Blur(const ReblurInputBuffers &inputs, const ReblurSettings
     rhi_->EndComputePass(compute_pass_);
 }
 
-void ReblurDenoiser::TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings)
+void ReblurDenoiser::TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
+                                        uint32_t debug_output)
 {
     auto *resources = temporal_accum_pipeline_->GetShaderResource<ReblurTemporalAccumShader>();
 
@@ -630,6 +647,7 @@ void ReblurDenoiser::TemporalAccumulate(const ReblurInputBuffers &inputs, const 
         .frame_index = internal_frame_index_,
         .reset_history = history_valid_ ? 0u : 1u,
         .enable_firefly_suppression = settings.enable_anti_firefly ? 1u : 0u,
+        .debug_output = debug_output,
     };
     temporal_accum_ub_->Upload(rhi_, &ubo);
 

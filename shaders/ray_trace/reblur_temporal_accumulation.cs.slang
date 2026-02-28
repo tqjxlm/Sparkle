@@ -12,6 +12,7 @@
     uint frame_index;
     uint reset_history;
     uint enable_firefly_suppression;
+    uint debug_output;
 };
 
 // Current frame inputs (from PrePass)
@@ -146,6 +147,29 @@ void main(uint3 DTid : SV_DispatchThreadID)
         spec_accum_speed = max(spec_accum_speed, 1.0);
     }
 
+    // Specular parallax: view-dependent highlights move differently than surfaces.
+    // Surface motion vectors don't capture the "virtual motion" of specular reflections.
+    // For smooth surfaces with camera motion, reduce specular history trust.
+    if (!disoccluded)
+    {
+        float roughness = nr.z;
+        float2 mv_pixels = motionVec * float2(resolution);
+        float mv_mag = length(mv_pixels);
+
+        // Threshold > 1px to ignore sub-pixel jitter (TAA jitter causes ~0.7px MVs)
+        if (mv_mag > 1.5)
+        {
+            // Sensitivity: 1.0 for mirrors (roughness=0), 0 at roughness >= 0.5
+            // At roughness >= 0.5 specular lobe is broad enough for surface MVs
+            float sensitivity = saturate(1.0 - roughness * 2.0);
+
+            // Reduce accumulation speed toward 1.0 (fast re-convergence)
+            float parallax_reduction = saturate(mv_mag * sensitivity / 5.0);
+            spec_accum_speed = lerp(spec_accum_speed, 1.0, parallax_reduction);
+            spec_accum_speed = max(spec_accum_speed, 1.0);
+        }
+    }
+
     // Separate blend weights per channel
     float diff_weight = 1.0 / (1.0 + diff_accum_speed);
     float spec_weight = 1.0 / (1.0 + spec_accum_speed);
@@ -221,6 +245,55 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // Linear accumulation: lerp(history, current, weight)
     float4 acc_diff = lerp(hist_diff, current_diff, diff_weight);
     float4 acc_spec = lerp(hist_spec, current_spec, spec_weight);
+
+    // Diagnostic output modes (triggered by debug_output UBO flag)
+    if (debug_output == 1)
+    {
+        // Disocclusion map:
+        //   R = disoccluded (1=yes), G = footprintQuality, B = inScreen
+        outDiffuse[pixel] = float4(disoccluded ? 1.0 : 0.0, footprintQuality, inScreen ? 1.0 : 0.0, 1.0);
+        outSpecular[pixel] = float4(0, 0, 0, 0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 2)
+    {
+        // Motion vector visualization:
+        //   RG = motionVec * resolution (pixel displacement), B = magnitude
+        float2 mv_pixels = motionVec * float2(resolution);
+        outDiffuse[pixel] = float4(mv_pixels.x * 0.01 + 0.5, mv_pixels.y * 0.01 + 0.5,
+                                   length(mv_pixels) * 0.01, 1.0);
+        outSpecular[pixel] = float4(0, 0, 0, 0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 3)
+    {
+        // Depth test diagnostic:
+        //   R = depth ratio (expected vs actual at prevPixelCenter), G = normal dot, B = prev accum speed / 63
+        float depth_ratio = 0.0;
+        float normal_agreement = 0.0;
+        if (inScreen)
+        {
+            int2 prevPC = int2(prevUV * float2(resolution));
+            prevPC = clamp(prevPC, int2(0, 0), int2(resolution) - int2(1, 1));
+            float epz = prevViewZ[prevPC];
+            // Also sample one of the bilinear corners
+            float2 prevPixelF = prevUV * float2(resolution) - 0.5;
+            int2 tl = int2(floor(prevPixelF));
+            tl = clamp(tl, int2(0, 0), int2(resolution) - int2(1, 1));
+            float cornerZ = prevViewZ[tl];
+            if (abs(epz) > 1e-6)
+                depth_ratio = abs(cornerZ - epz) / (disocclusion_threshold * max(abs(epz), 1.0));
+            float4 pnr = prevNormalRoughness[prevPC];
+            float3 pn = DecodeNormalOct(pnr.xy);
+            normal_agreement = dot(pn, center_normal) * 0.5 + 0.5;
+        }
+        outDiffuse[pixel] = float4(saturate(depth_ratio), normal_agreement, prev_diff_accum_speed / 63.0, 1.0);
+        outSpecular[pixel] = float4(0, 0, 0, 0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
 
     // Write outputs
     outDiffuse[pixel] = acc_diff;

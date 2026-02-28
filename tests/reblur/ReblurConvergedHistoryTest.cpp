@@ -131,7 +131,7 @@ public:
 
 private:
     static constexpr float YawDelta = 2.0f; // degrees
-    static constexpr uint32_t SettleFrames = 2;
+    static constexpr uint32_t SettleFrames = 5;
 
     bool converged_ = false;
     std::shared_ptr<ScreenshotRequest> before_request_;
