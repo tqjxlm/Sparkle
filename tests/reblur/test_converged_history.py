@@ -269,7 +269,7 @@ def main():
     # Vanilla needs two full convergences; use modest max_spp + timeout so
     # the test completes in reasonable time.
     ok = run_test(py, build_py, fw, "vanilla_converged_baseline",
-                  ["--max_spp", "256", "--test_timeout", "1200"],
+                  [],
                   "vanilla baseline", use_reblur=False,
                   clear_screenshots=True)
     if ok:
