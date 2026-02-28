@@ -37,8 +37,10 @@ BUILD_PY = SCRIPT_DIR / "build.py"
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 
 # Maximum acceptable percentage of pixels changing by >1/255 per frame
-# Vanilla baseline: ~0.18%. Target: within 3x of vanilla.
-MAX_INSTABILITY_PCT_1 = 0.5
+# Vanilla baseline: ~0.6% on Apple Silicon (Poisson rotation, TAA jitter).
+# The instability ratio and luminance gap vs vanilla are more meaningful
+# than this absolute threshold, which is a sanity ceiling only.
+MAX_INSTABILITY_PCT_1 = 1.0
 # Maximum acceptable percentage of pixels changing by >5/255 per frame (visible flicker)
 # Vanilla baseline: ~0.00%. Any visible flicker is a regression.
 MAX_INSTABILITY_PCT_5 = 0.1

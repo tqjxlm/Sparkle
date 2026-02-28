@@ -54,6 +54,7 @@ struct Camera
 [[vk::binding(10, 1)]] RWTexture2D<float> viewZOutput;
 [[vk::binding(11, 1)]] RWTexture2D<float2> motionVectorOutput;
 [[vk::binding(12, 1)]] RWTexture2D<float4> albedoOutput;
+[[vk::binding(13, 1)]] RWTexture2D<float4> ptAccumulation;
 
 // set 2: bindless resources, shared by the whole scene
 [[vk::binding(0, 2)]] Texture2D textures[];
@@ -595,8 +596,12 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         return;
     }
 
-    // Write combined output to imageData (identical to vanilla accumulation)
+    // Write combined output to separate PT accumulation buffer.
+    // The running average reads from ptAccumulation (not imageData) to avoid
+    // contamination from the composite pass which overwrites imageData every frame.
     float moving_average = (float)total_sample_count / (total_sample_count + spp);
-    float3 all_samples = lerp(this_combined / float(spp), imageData[pixel].rgb, moving_average);
+    float3 all_samples = lerp(this_combined / float(spp), ptAccumulation[pixel].rgb, moving_average);
+    ptAccumulation[pixel] = float4(all_samples, 1.f);
+    // Copy to imageData for passthrough/debug modes and tone mapping fallback
     imageData[pixel] = float4(all_samples, 1.f);
 }

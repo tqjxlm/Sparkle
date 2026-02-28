@@ -10,6 +10,7 @@
 [[vk::binding(4, 0)]] RWTexture2D<float4> outputImage;
 [[vk::binding(5, 0)]] Texture2D<float> viewZ;
 [[vk::binding(6, 0)]] Texture2D<float2> internalData;
+[[vk::binding(7, 0)]] Texture2D<float4> ptAccumulated;
 
 static const float DenoisingRange = 1000.0;
 
@@ -33,9 +34,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
     if (vz > DenoisingRange)
         return;
 
-    // Read the path tracer's accumulated result BEFORE overwriting.
-    // At high SPP, this is a well-converged average of all samples in radiance space.
-    float3 pt_accumulated = outputImage[pixel].rgb;
+    // Read the path tracer's accumulated result from a separate buffer.
+    // This avoids contamination: the split PT maintains its own running average
+    // in ptAccumulated, independent of the composite's output to outputImage.
+    float3 pt_result = ptAccumulated[pixel].rgb;
 
     float4 diff = denoisedDiffuse[pixel];
     float4 spec = denoisedSpecular[pixel];
@@ -59,7 +61,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     // Guard ensures internalData binding is not optimized away
     float3 color = (min_accum >= 0.0)
-        ? lerp(denoised_color, pt_accumulated, pt_weight)
+        ? lerp(denoised_color, pt_result, pt_weight)
         : denoised_color;
 
     outputImage[pixel] = float4(color, 1.0);

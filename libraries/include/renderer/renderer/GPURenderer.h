@@ -72,6 +72,11 @@ private:
     // REBLUR denoiser (null when disabled)
     std::unique_ptr<ReblurDenoiser> reblur_;
 
+    // Separate PT accumulation buffer (not shared with composite output)
+    RHIResourceRef<RHIImage> pt_accumulation_;
+    RHIResourceRef<RHIRenderTarget> pt_accumulation_rt_;
+    std::unique_ptr<class ClearTexturePass> pt_clear_pass_;
+
     // Auxiliary buffers for split path tracer
     RHIResourceRef<RHIImage> diffuse_signal_;
     RHIResourceRef<RHIImage> specular_signal_;

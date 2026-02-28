@@ -74,6 +74,7 @@ class SplitPathTracerShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(viewZOutput, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(motionVectorOutput, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(albedoOutput, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(ptAccumulation, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
     USE_SHADER_RESOURCE_BINDLESS(textures, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE_BINDLESS(indexBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
@@ -114,6 +115,7 @@ class ReblurCompositeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(outputImage, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(viewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(internalData, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(ptAccumulated, RHIShaderResourceReflection::ResourceType::Texture2D)
 
     END_SHADER_RESOURCE_TABLE
 
@@ -216,6 +218,10 @@ void GPURenderer::Render()
     if (camera->NeedClear())
     {
         clear_pass_->Render();
+        if (pt_clear_pass_)
+        {
+            pt_clear_pass_->Render();
+        }
         camera->ClearPixels();
         dispatched_sample_count_ = 0;
         // NOTE: Do NOT reset reblur here. The vanilla accumulation buffer (imageData)
@@ -488,13 +494,12 @@ void GPURenderer::Update()
         };
         split_pt_uniform_buffer_->Upload(rhi_, &split_ubo);
 
-        // Always show denoiser output when ReBLUR is active (pt_weight = 0).
-        // The PT blend ramp (frame_index / 256) was designed for vanilla pipeline.
-        // With a denoiser: at low SPP the denoiser is better, after camera motion
-        // the PT buffer is cleared while the denoiser preserves history via MV
-        // reprojection, and at convergence the denoiser output should match PT
-        // once the output_limit clamping issue is resolved.
-        uint32_t comp_frame_index = 0;
+        // PT blend ramp: at low SPP the denoiser provides better spatial
+        // filtering, at high SPP (>256) the PT accumulated result provides
+        // correct radiance-space convergence without demod/remod artifacts.
+        // After camera motion cumulated_sample_count resets to 0, so the
+        // denoiser properly takes over during re-convergence.
+        uint32_t comp_frame_index = camera->GetCumulatedSampleCount();
         ReblurCompositeShader::UniformBufferData comp_ubo{
             .resolution = {image_size_.x(), image_size_.y()},
             .frame_index = comp_frame_index,
@@ -634,6 +639,27 @@ void GPURenderer::InitReblurResources()
             name);
     };
 
+    // Separate PT accumulation buffer (same format as scene_texture_) for clean
+    // running average that the composite pass does not overwrite.
+    pt_accumulation_ = rhi_->CreateImage(
+        RHIImage::Attribute{
+            .format = PixelFormat::RGBAFloat,
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+            .width = width,
+            .height = height,
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
+            .memory_properties = RHIMemoryProperty::DeviceLocal,
+        },
+        "ReblurPTAccumulation");
+
+    pt_accumulation_rt_ = rhi_->CreateRenderTarget({}, pt_accumulation_, nullptr, "ReblurPTAccumulationRT");
+
+    pt_clear_pass_ = PipelinePass::Create<ClearTexturePass>(render_config_, rhi_, Vector4::Zero(),
+                                                            RHIImageLayout::StorageWrite, pt_accumulation_rt_);
+
     diffuse_signal_ = make_aux_image(PixelFormat::RGBAFloat16, "ReblurDiffuseSignal");
     specular_signal_ = make_aux_image(PixelFormat::RGBAFloat16, "ReblurSpecularSignal");
     normal_roughness_ = make_aux_image(PixelFormat::RGBAFloat16, "ReblurNormalRoughness");
@@ -664,6 +690,7 @@ void GPURenderer::InitReblurResources()
     split_resources->viewZOutput().BindResource(view_z_->GetDefaultView(rhi_));
     split_resources->motionVectorOutput().BindResource(motion_vectors_->GetDefaultView(rhi_));
     split_resources->albedoOutput().BindResource(albedo_metallic_->GetDefaultView(rhi_));
+    split_resources->ptAccumulation().BindResource(pt_accumulation_->GetDefaultView(rhi_));
 
     auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::R8G8B8A8_SRGB,
@@ -707,6 +734,7 @@ void GPURenderer::InitReblurResources()
     comp_resources->ubo().BindResource(composite_uniform_buffer_);
     comp_resources->outputImage().BindResource(scene_texture_->GetDefaultView(rhi_));
     comp_resources->viewZ().BindResource(view_z_->GetDefaultView(rhi_));
+    comp_resources->ptAccumulated().BindResource(pt_accumulation_->GetDefaultView(rhi_));
 
     // Compute pass for REBLUR dispatches (no timestamp to avoid query reuse within frame)
     reblur_compute_pass_ = rhi_->CreateComputePass("ReblurGPUComputePass", false);
@@ -735,6 +763,7 @@ void GPURenderer::RenderReblurPath()
     transition_aux_to_write(view_z_.get());
     transition_aux_to_write(motion_vectors_.get());
     transition_aux_to_write(albedo_metallic_.get());
+    transition_aux_to_write(pt_accumulation_.get());
 
     // Dispatch split path tracer
     rhi_->BeginComputePass(reblur_compute_pass_);
@@ -801,8 +830,12 @@ void GPURenderer::RenderReblurPath()
     reblur_->GetDenoisedSpecular()->Transition({.target_layout = RHIImageLayout::Read,
                                                 .after_stage = RHIPipelineStage::ComputeShader,
                                                 .before_stage = RHIPipelineStage::ComputeShader});
-    // General layout: composite reads PT accumulated result and writes denoised composite
-    scene_texture_->Transition({.target_layout = RHIImageLayout::General,
+    // PT accumulation buffer to Read for composite to sample
+    pt_accumulation_->Transition({.target_layout = RHIImageLayout::Read,
+                                  .after_stage = RHIPipelineStage::ComputeShader,
+                                  .before_stage = RHIPipelineStage::ComputeShader});
+    // scene_texture_ to StorageWrite: composite writes final blended result
+    scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                 .after_stage = RHIPipelineStage::ComputeShader,
                                 .before_stage = RHIPipelineStage::ComputeShader});
 
