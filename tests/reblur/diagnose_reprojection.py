@@ -52,7 +52,7 @@ def run_test(py, build_py, framework, debug_pass, label, clear=False):
     cmd = [py, build_py, "--framework", framework, "--skip_build",
            "--run", "--test_case", "reblur_converged_history", "--headless", "true",
            "--pipeline", "gpu", "--spp", "1", "--use_reblur", "true",
-           "--reblur_debug_pass", str(debug_pass)]
+           "--reblur_debug_pass", debug_pass]
     if clear:
         cmd += ["--clear_screenshots", "true"]
     print(f"  cmd: {' '.join(cmd)}")
@@ -188,7 +188,7 @@ def main():
     print(f"\n{'—'*60}")
     print("  Diagnostic 1: Disocclusion map (debug_pass 10)")
     print(f"{'—'*60}")
-    if run_test(py, build_py, fw, 10, "disocclusion", clear=True):
+    if run_test(py, build_py, fw, "TADisocclusion", "disocclusion", clear=True):
         analyze_disocclusion_map(screenshot_dir)
         # Rename to avoid overwrite
         for p in glob.glob(os.path.join(screenshot_dir, "*converged_history_*")):
@@ -199,7 +199,7 @@ def main():
     print(f"\n{'—'*60}")
     print("  Diagnostic 2: Motion vectors (debug_pass 11)")
     print(f"{'—'*60}")
-    if run_test(py, build_py, fw, 11, "motion_vectors"):
+    if run_test(py, build_py, fw, "TAMotionVector", "motion_vectors"):
         analyze_motion_vectors(screenshot_dir)
         for p in glob.glob(os.path.join(screenshot_dir, "*converged_history_*")):
             new = p.replace("converged_history", "diag_motion_vec")
@@ -209,7 +209,7 @@ def main():
     print(f"\n{'—'*60}")
     print("  Diagnostic 3: Depth/normal test (debug_pass 12)")
     print(f"{'—'*60}")
-    if run_test(py, build_py, fw, 12, "depth_normal"):
+    if run_test(py, build_py, fw, "TADepth", "depth_normal"):
         analyze_depth_diagnostic(screenshot_dir)
         for p in glob.glob(os.path.join(screenshot_dir, "*converged_history_*")):
             new = p.replace("converged_history", "diag_depth_normal")

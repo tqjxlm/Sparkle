@@ -46,7 +46,7 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_app(max_spp, use_reblur, debug_pass=99, test_case="multi_frame_screenshot"):
+def run_app(max_spp, use_reblur, debug_pass="Full", test_case="multi_frame_screenshot"):
     cmd = [
         sys.executable, str(BUILD_PY),
         "--framework", _framework,
@@ -58,8 +58,8 @@ def run_app(max_spp, use_reblur, debug_pass=99, test_case="multi_frame_screensho
         "--clear_screenshots", "true",
         "--skip_build",
     ]
-    if use_reblur and debug_pass != 99:
-        cmd += ["--reblur_debug_pass", str(debug_pass)]
+    if use_reblur and debug_pass != "Full":
+        cmd += ["--reblur_debug_pass", debug_pass]
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
@@ -125,15 +125,15 @@ def main():
 
     tests = [
         # Test 1: Does temporal quality improve after 64 frames? (accumSpeed cap test)
-        ("reblur_temporal_64spp", 64, True, 3),
-        ("reblur_temporal_2048spp", 2048, True, 3),
+        ("reblur_temporal_64spp", 64, True, "TemporalAccum"),
+        ("reblur_temporal_2048spp", 2048, True, "TemporalAccum"),
         # Test 2: Per-stage instability at 2048 spp
-        ("reblur_prepass_2048spp", 2048, True, 0),
-        ("reblur_histfix_2048spp", 2048, True, 4),
-        ("reblur_postblur_2048spp", 2048, True, 2),
-        ("reblur_full_2048spp", 2048, True, 99),
+        ("reblur_prepass_2048spp", 2048, True, "PrePass"),
+        ("reblur_histfix_2048spp", 2048, True, "HistoryFix"),
+        ("reblur_postblur_2048spp", 2048, True, "PostBlur"),
+        ("reblur_full_2048spp", 2048, True, "Full"),
         # Test 3: Vanilla reference
-        ("vanilla_2048spp", 2048, False, 99),
+        ("vanilla_2048spp", 2048, False, "Full"),
     ]
 
     results = []

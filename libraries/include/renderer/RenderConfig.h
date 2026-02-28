@@ -46,6 +46,20 @@ struct RenderConfig : public ConfigCollection
         MotionVectors = 12,
     };
 
+    enum class ReblurDebugPass : uint8_t
+    {
+        Full,           // run full denoiser pipeline (default)
+        PrePass,        // output after PrePass only
+        Blur,           // output after Blur
+        PostBlur,       // output after PostBlur (skip TemporalStabilization)
+        TemporalAccum,  // output after TemporalAccumulation
+        HistoryFix,     // output after HistoryFix
+        TADisocclusion, // temporal accum diagnostic: disocclusion
+        TAMotionVector, // temporal accum diagnostic: motion vector
+        TADepth,        // temporal accum diagnostic: depth
+        Passthrough,    // no denoising, use raw split PT output
+    };
+
     [[nodiscard]] bool IsCPURenderMode() const
     {
         return pipeline == Pipeline::cpu;
@@ -90,8 +104,7 @@ struct RenderConfig : public ConfigCollection
     bool use_dynamic_spp;
     bool enable_nee;
     bool clear_screenshots;
-    uint32_t reblur_debug_pass; // 99=full pipeline (default), 0=after PrePass, 1=after Blur, 2=after PostBlur,
-                                // 3=after TemporalAccum, 4=after HistoryFix, 255=passthrough (no denoising)
+    ReblurDebugPass reblur_debug_pass;
     float target_framerate;
     float gpu_time_budget_ratio;
     std::string camera_animation;

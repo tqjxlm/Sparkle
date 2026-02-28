@@ -128,7 +128,7 @@ def main():
     print("  Test B: Temporal accum only (debug_pass 3)")
     print(f"{'—'*60}")
     run(py, build_py, fw, "reblur_converged_history",
-        ["--use_reblur", "true", "--reblur_debug_pass", "3"])
+        ["--use_reblur", "true", "--reblur_debug_pass", "TemporalAccum"])
     before_path = find_screenshot(screenshot_dir, "*converged_history_before*")
     after_path = find_screenshot(screenshot_dir, "*converged_history_after*")
     if before_path and after_path:

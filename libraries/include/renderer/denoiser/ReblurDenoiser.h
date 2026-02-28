@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/math/Types.h"
+#include "renderer/RenderConfig.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHIPIpelineState.h"
@@ -61,10 +62,9 @@ public:
     ReblurDenoiser(RHIContext *rhi, uint32_t width, uint32_t height);
     ~ReblurDenoiser();
 
-    static constexpr uint32_t DebugPassDisabled = 99;
-
     void Denoise(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices,
-                 uint32_t frame_index, uint32_t debug_pass = DebugPassDisabled);
+                 uint32_t frame_index,
+                 RenderConfig::ReblurDebugPass debug_pass = RenderConfig::ReblurDebugPass::Full);
 
     [[nodiscard]] RHIImage *GetDenoisedDiffuse() const;
     [[nodiscard]] RHIImage *GetDenoisedSpecular() const;

@@ -304,7 +304,7 @@ def main():
     print("  Run 2: Reblur temporal accumulation (reblur_debug_pass 3)")
     print(f"{'—'*60}")
     ok = run_test(py, build_py, fw, "reblur_converged_history",
-                  ["--reblur_debug_pass", "3"], "temporal accumulation")
+                  ["--reblur_debug_pass", "TemporalAccum"], "temporal accumulation")
     if ok:
         all_results.append(("Temporal accum: test run", True))
         # Raw temporal accumulation output (before spatial blur) has higher noise

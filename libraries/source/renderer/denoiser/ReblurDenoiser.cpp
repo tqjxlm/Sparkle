@@ -390,7 +390,8 @@ void ReblurDenoiser::CopyToOutput(RHIImage *diff, RHIImage *spec)
 }
 
 void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
-                             const ReblurMatrices &matrices, uint32_t /*frame_index*/, uint32_t debug_pass)
+                             const ReblurMatrices &matrices, uint32_t /*frame_index*/,
+                             RenderConfig::ReblurDebugPass debug_pass)
 {
     ClassifyTiles(inputs, settings);
 
@@ -399,7 +400,9 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     Blur(inputs, settings, matrices, 0, inputs.diffuse_radiance_hit_dist, inputs.specular_radiance_hit_dist,
          diff_temp1_.get(), spec_temp1_.get(), prev_internal_data_.get(), history_valid_);
 
-    if (debug_pass == 0)
+    using DP = RenderConfig::ReblurDebugPass;
+
+    if (debug_pass == DP::PrePass)
     {
         CopyToOutput(diff_temp1_.get(), spec_temp1_.get());
         internal_frame_index_++;
@@ -407,11 +410,13 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     }
 
     // Temporal Accumulation: temp1 + history → temp2, writes internal_data
-    // debug_pass 10/11/12 = temporal accum diagnostics (disocclusion/MV/depth)
-    uint32_t ta_debug = (debug_pass >= 10 && debug_pass <= 12) ? (debug_pass - 9) : 0;
+    bool is_ta_diagnostic =
+        debug_pass == DP::TADisocclusion || debug_pass == DP::TAMotionVector || debug_pass == DP::TADepth;
+    uint32_t ta_debug =
+        is_ta_diagnostic ? (static_cast<uint32_t>(debug_pass) - static_cast<uint32_t>(DP::TADisocclusion) + 1) : 0;
     TemporalAccumulate(inputs, settings, ta_debug);
 
-    if (debug_pass >= 10 && debug_pass <= 12)
+    if (is_ta_diagnostic)
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
         CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
@@ -424,7 +429,7 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
         return;
     }
 
-    if (debug_pass == 3)
+    if (debug_pass == DP::TemporalAccum)
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
         CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
@@ -441,7 +446,7 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     // History Fix: temp2 → temp1 (wide-stride bilateral for disoccluded regions)
     HistoryFix(inputs, settings, matrices);
 
-    if (debug_pass == 4)
+    if (debug_pass == DP::HistoryFix)
     {
         CopyToOutput(diff_temp1_.get(), spec_temp1_.get());
         CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());
@@ -458,7 +463,7 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     Blur(inputs, settings, matrices, 1, diff_temp1_.get(), spec_temp1_.get(), diff_temp2_.get(), spec_temp2_.get(),
          internal_data_.get(), true);
 
-    if (debug_pass == 1)
+    if (debug_pass == DP::Blur)
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
         CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
@@ -487,8 +492,8 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
 
     // TemporalStabilization: denoised output → stabilized output (variance clamping)
     // Also writes antilag-modified accumulation speeds to prev_internal_data_
-    // Skipped for debug_pass==2 (isolate PostBlur output)
-    if (debug_pass != 2 && settings.max_stabilized_frame_num > 0)
+    // Skipped for PostBlur debug (isolate PostBlur output)
+    if (debug_pass != DP::PostBlur && settings.max_stabilized_frame_num > 0)
     {
         TemporalStabilize(inputs, settings, matrices);
 

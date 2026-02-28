@@ -30,9 +30,9 @@ sys.path.insert(0, PROJECT_ROOT)
 from dev.utils import extract_log_path
 
 PASS_NAMES = {
-    3: "TemporalAccum",
-    4: "HistoryFix",
-    99: "FullPipeline",
+    "TemporalAccum": "TemporalAccum",
+    "HistoryFix": "HistoryFix",
+    "Full": "FullPipeline",
 }
 
 
@@ -65,7 +65,7 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label,
         "--use_reblur", "true" if use_reblur else "false",
         "--spp", "1",
         "--max_spp", str(max_spp),
-        "--reblur_debug_pass", str(debug_pass),
+        "--reblur_debug_pass", debug_pass,
         "--test_timeout", "120",
     ]
 
@@ -152,36 +152,36 @@ def main():
     # --- Capture screenshots ---
     captures = {}
 
-    # 1. TemporalAccum at 64 frames (debug_pass=3)
-    path = run_capture(args.framework, 3, 64, output_dir,
+    # 1. TemporalAccum at 64 frames
+    path = run_capture(args.framework, "TemporalAccum", 64, output_dir,
                        "TemporalAccum output (64 frames)")
     if not path:
         return 1
     captures["ta_64"] = path
 
-    # 2. HistoryFix at 64 frames (debug_pass=4)
-    path = run_capture(args.framework, 4, 64, output_dir,
+    # 2. HistoryFix at 64 frames
+    path = run_capture(args.framework, "HistoryFix", 64, output_dir,
                        "HistoryFix output (64 frames)")
     if not path:
         return 1
     captures["hf_64"] = path
 
     # 3. Full pipeline at 4 frames (low convergence baseline)
-    path = run_capture(args.framework, 99, 4, output_dir,
+    path = run_capture(args.framework, "Full", 4, output_dir,
                        "Full pipeline (4 frames, low convergence)")
     if not path:
         return 1
     captures["full_4"] = path
 
     # 4. Full pipeline at 64 frames (converged)
-    path = run_capture(args.framework, 99, 64, output_dir,
+    path = run_capture(args.framework, "Full", 64, output_dir,
                        "Full pipeline (64 frames, converged)")
     if not path:
         return 1
     captures["full_64"] = path
 
     # 5. Vanilla reference at 64 frames (convergence baseline)
-    path = run_capture(args.framework, 99, 64, output_dir,
+    path = run_capture(args.framework, "Full", 64, output_dir,
                        "Vanilla reference (64 frames)",
                        use_reblur=False)
     if not path:

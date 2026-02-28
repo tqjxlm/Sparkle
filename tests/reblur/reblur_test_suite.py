@@ -176,7 +176,7 @@ def main():
     ok, dur, _ = run_command(
         [py, functional_test_py,
          "--framework", fw, "--pipeline", "gpu", "--headless", "--skip_build",
-         "--", "--use_reblur", "true", "--reblur_debug_pass", "255",
+         "--", "--use_reblur", "true", "--reblur_debug_pass", "Passthrough",
          "--spp", "1", "--max_spp", "2048"],
         "3. Split-merge equivalence (debug_pass 255, FLIP vs ground truth)")
     results.append(("Split-merge equivalence", ok, dur))

@@ -15,6 +15,9 @@ static ConfigValue<std::string> config_output_image("output_image", "output imag
                                                     Enum2Str<RenderConfig::OutputImage::SceneColor>(), true);
 static ConfigValue<std::string> config_debug_mode("debug_mode", "debug mode", "renderer",
                                                   Enum2Str<RenderConfig::DebugMode::Color>(), true);
+static ConfigValue<std::string> config_reblur_debug_pass("reblur_debug_pass", "REBLUR debug pass output stage",
+                                                         "renderer", Enum2Str<RenderConfig::ReblurDebugPass::Full>(),
+                                                         true);
 static ConfigValue<uint32_t> config_spp("spp", "num rays per sample per frame", "renderer", 1);
 static ConfigValue<bool> config_dynamic_spp("dynamic_spp", "use dynamic spp depending on framerate", "renderer", false,
                                             true);
@@ -44,10 +47,6 @@ static ConfigValue<std::string> config_camera_animation("camera_animation",
 static ConfigValue<uint32_t> config_camera_animation_frames("camera_animation_frames",
                                                             "num frames of camera animation (0 = max_spp / 2)",
                                                             "renderer", 0);
-static ConfigValue<uint32_t> config_reblur_debug_pass("reblur_debug_pass",
-                                                      "REBLUR debug: output after pass N (99=full, 0=PrePass, 1=Blur, "
-                                                      "2=PostBlur, 3=TemporalAccum, 4=HistoryFix, 255=passthrough)",
-                                                      "renderer", 99);
 
 void RenderConfig::Init()
 {

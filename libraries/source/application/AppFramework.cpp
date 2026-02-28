@@ -312,7 +312,7 @@ void AppFramework::DrawUi()
             const ImGuiViewport *main_viewport = ImGui::GetMainViewport();
             ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 20, main_viewport->WorkPos.y + 20),
                                     ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(font_size * 30, font_size * 30), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(font_size * 40, font_size * 30), ImGuiCond_Always);
 
             ImGuiWindowFlags window_flags = 0;
             window_flags |= ImGuiWindowFlags_NoDecoration;
@@ -435,8 +435,8 @@ bool AppFramework::MainLoop()
                     anim_frames = render_config_.max_sample_per_pixel / 2;
                 }
                 camera_animator_.Setup(path_type, anim_frames, initial);
-                Log(Info, "CameraAnimator active: {} for {} frames (max_spp={})",
-                    render_config_.camera_animation, anim_frames, render_config_.max_sample_per_pixel);
+                Log(Info, "CameraAnimator active: {} for {} frames (max_spp={})", render_config_.camera_animation,
+                    anim_frames, render_config_.max_sample_per_pixel);
             }
         }
         camera_animator_initialized_ = true;

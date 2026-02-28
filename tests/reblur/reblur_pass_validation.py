@@ -27,7 +27,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from dev.utils import extract_log_path
 
-PASS_NAMES = {0: "PrePass", 1: "Blur", 2: "PostBlur"}
+PASS_NAMES = {"PrePass": "PrePass", "Blur": "Blur", "PostBlur": "PostBlur"}
 MAX_SPP = 4  # low SPP to see denoiser effect clearly
 WARMUP_FRAMES = 5  # frames before screenshot
 
@@ -65,7 +65,7 @@ def run_with_debug_pass(framework, debug_pass, skip_build, output_dir):
         "--use_reblur", "true",
         "--spp", "1",
         "--max_spp", str(MAX_SPP),
-        "--reblur_debug_pass", str(debug_pass),
+        "--reblur_debug_pass", debug_pass,
         "--test_timeout", "60",
     ]
     name = PASS_NAMES.get(debug_pass, f"full (debug_pass={debug_pass})")
@@ -167,7 +167,7 @@ def main():
     output_dir = tempfile.mkdtemp(prefix="reblur_validation_")
     print(f"Output directory: {output_dir}", flush=True)
     screenshots = {}
-    for debug_pass in [0, 1, 2, 99]:
+    for debug_pass in ["PrePass", "Blur", "PostBlur", "Full"]:
         path = run_with_debug_pass(args.framework, debug_pass, skip_build=True,
                                    output_dir=output_dir)
         if path is None:
@@ -204,7 +204,7 @@ def main():
 
     # 3. Variance should decrease across spatial passes (PrePass -> Blur -> PostBlur)
     # Note: after tone mapping, the variance comparison is approximate
-    stds = [metrics[0]["std_luminance"], metrics[1]["std_luminance"], metrics[2]["std_luminance"]]
+    stds = [metrics["PrePass"]["std_luminance"], metrics["Blur"]["std_luminance"], metrics["PostBlur"]["std_luminance"]]
     print(f"\nVariance progression: PrePass={stds[0]:.6f} -> Blur={stds[1]:.6f} -> PostBlur={stds[2]:.6f}",
           flush=True)
 
@@ -222,7 +222,7 @@ def main():
     #    FullPipeline includes temporal accumulation that converges toward the reference
     #    over many frames. At low frame counts (MAX_SPP=4), the temporal average may
     #    still be dark compared to the spatially pre-blurred raw input.
-    full_luma = metrics[99]["mean_luminance"]
+    full_luma = metrics["Full"]["mean_luminance"]
     if full_luma < 1e-4:
         failures.append(
             f"FullPipeline output is all black (mean_luma={full_luma:.6f})"
