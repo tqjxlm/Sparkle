@@ -21,6 +21,7 @@ Tests included:
  18. Camera motion smoke (orbit_sweep) — orbit_sweep animation runs without crash
  19. Camera motion quality validation — temporal stability and reconvergence under motion
  20. Converged history camera delta — small yaw after convergence preserves history
+ 21. End-to-end FLIP — full REBLUR pipeline screenshot vs ground truth (FLIP <= 0.1)
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -347,6 +348,14 @@ def main():
         "20. Converged history camera delta (history preservation)",
         show_output=True)
     results.append(("Converged history camera delta", ok, dur))
+
+    # --- Test 21: End-to-end FLIP (full REBLUR pipeline vs ground truth) ---
+    ok, dur, _ = run_command(
+        [py, functional_test_py,
+         "--framework", fw, "--pipeline", "gpu", "--headless", "--skip_build",
+         "--", "--use_reblur", "true"],
+        "21. End-to-end FLIP (full REBLUR pipeline vs ground truth)")
+    results.append(("End-to-end FLIP", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)
