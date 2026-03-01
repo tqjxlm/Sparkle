@@ -159,11 +159,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
         result_spec = float4(spec_sum * inv_spec_w, spec_hit_sum * inv_spec_w);
     }
 
-    // Anti-firefly clamping: ALWAYS runs (not just for first N frames).
-    // Computes neighborhood luma statistics and clamps outliers.
-    // This is critical for convergence — without it, bright outlier samples
-    // cause sustained luminance bumps that take ~64 frames to decay.
-    if (enable_anti_firefly != 0)
+    // Anti-firefly clamping: spatial neighborhood mean ± 2σ clamp.
+    // Only apply once accumulation is stable (accum >= 16).
+    // At low accum speeds (after disocclusion/camera motion), spatial statistics
+    // are noisy and the right-skewed PT distribution causes asymmetric energy loss
+    // — bright outliers get clamped but dark pixels don't gain energy.
+    if (enable_anti_firefly != 0 && min_accum >= 16.0)
     {
         float diff_M1 = 0, diff_M2 = 0;
         float spec_M1 = 0, spec_M2 = 0;

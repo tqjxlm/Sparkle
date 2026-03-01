@@ -63,13 +63,17 @@ void RenderableComponent::OnTransformChange()
 {
     Component::OnTransformChange();
 
-    TaskManager::RunInRenderThread([this]() {
+    // Capture the transform by value NOW (on the main thread) rather than reading
+    // it at lambda execution time, to avoid racing with scene node updates.
+    auto transform = GetTransform();
+
+    TaskManager::RunInRenderThread([this, transform]() {
         if (!render_proxy_)
         {
             return;
         }
 
-        render_proxy_->UpdateTransform(GetTransform());
+        render_proxy_->UpdateTransform(transform);
     });
 }
 } // namespace sparkle

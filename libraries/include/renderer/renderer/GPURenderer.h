@@ -107,6 +107,8 @@ private:
     uint32_t last_second_total_spp_ = 0;
     uint32_t dispatched_sample_count_ = 0;
 
+    bool reblur_scene_load_reset_done_ = false;
+
     TimerCaller spp_logger_;
 };
 } // namespace sparkle

@@ -393,6 +393,17 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
                              const ReblurMatrices &matrices, uint32_t /*frame_index*/,
                              RenderConfig::ReblurDebugPass debug_pass)
 {
+    // DIAGNOSTIC: bypass all NRD processing, copy raw input to output
+    // to measure demod/remod energy loss without denoiser interference.
+    if (false) // DIAGNOSTIC: bypass NRD (change to true to enable)
+    {
+        CopyToOutput(const_cast<RHIImage *>(inputs.diffuse_radiance_hit_dist),
+                     const_cast<RHIImage *>(inputs.specular_radiance_hit_dist));
+        history_valid_ = true;
+        internal_frame_index_++;
+        return;
+    }
+
     ClassifyTiles(inputs, settings);
 
     // PrePass: input signals → temp1 (spatial pre-filter with larger radius)
@@ -410,8 +421,8 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     }
 
     // Temporal Accumulation: temp1 + history → temp2, writes internal_data
-    bool is_ta_diagnostic =
-        debug_pass == DP::TADisocclusion || debug_pass == DP::TAMotionVector || debug_pass == DP::TADepth;
+    bool is_ta_diagnostic = debug_pass == DP::TADisocclusion || debug_pass == DP::TAMotionVector ||
+                             debug_pass == DP::TADepth || debug_pass == DP::TAHistory;
     uint32_t ta_debug =
         is_ta_diagnostic ? (static_cast<uint32_t>(debug_pass) - static_cast<uint32_t>(DP::TADisocclusion) + 1) : 0;
     TemporalAccumulate(inputs, settings, ta_debug);

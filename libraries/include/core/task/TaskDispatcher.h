@@ -59,6 +59,35 @@ public:
         return *worker_thread_pool_;
     }
 
+    // Flush all pending tasks destined for the given thread directly to its
+    // queue.  Call from the producer thread right before consuming the queue
+    // to eliminate the one-frame latency introduced by the monitor thread.
+    void FlushPendingTasks(ThreadName target_thread)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto queue = task_queues_[target_thread].lock();
+        if (!queue)
+        {
+            return;
+        }
+
+        std::queue<PendingTask> remaining;
+        while (!pending_tasks_.empty())
+        {
+            auto pending = std::move(pending_tasks_.front());
+            pending_tasks_.pop();
+            if (pending.thread == target_thread)
+            {
+                queue->AddTask(std::move(pending.task));
+            }
+            else
+            {
+                remaining.push(std::move(pending));
+            }
+        }
+        pending_tasks_ = std::move(remaining);
+    }
+
 private:
     void DispatchPendingTasks();
 

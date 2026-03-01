@@ -181,6 +181,12 @@ void RenderFramework::PushRenderTasks()
 {
     ASSERT(ThreadManager::IsInMainThread());
 
+    // Flush any pending render-thread tasks that the monitor thread hasn't
+    // dispatched yet.  Without this, camera transform updates enqueued during
+    // the current frame can miss the current batch, producing one-frame-late
+    // (or never-arriving) transforms and zero motion vectors.
+    TaskDispatcher::Instance().FlushPendingTasks(ThreadName::Render);
+
     std::unique_lock<std::mutex> lock(task_queue_mutex_);
 
     {

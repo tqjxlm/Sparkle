@@ -435,19 +435,24 @@ bool AppFramework::MainLoop()
                     anim_frames = render_config_.max_sample_per_pixel / 2;
                 }
                 camera_animator_.Setup(path_type, anim_frames, initial);
-                Log(Info, "CameraAnimator active: {} for {} frames (max_spp={})", render_config_.camera_animation,
-                    anim_frames, render_config_.max_sample_per_pixel);
+                camera_animator_start_frame_ = frame_number_;
+                Log(Info, "CameraAnimator active: {} for {} frames starting at frame {} (max_spp={})",
+                    render_config_.camera_animation, anim_frames, frame_number_,
+                    render_config_.max_sample_per_pixel);
             }
         }
         camera_animator_initialized_ = true;
     }
 
-    if (camera_animator_.IsActive() && !camera_animator_.IsDone(static_cast<uint32_t>(frame_number_)))
     {
-        auto pose = camera_animator_.GetPose(static_cast<uint32_t>(frame_number_));
-        if (auto *camera = dynamic_cast<OrbitCameraComponent *>(GetMainCamera()))
+        auto anim_frame = static_cast<uint32_t>(frame_number_ - camera_animator_start_frame_);
+        if (camera_animator_.IsActive() && !camera_animator_.IsDone(anim_frame))
         {
-            camera->Setup(pose.center, pose.radius, pose.pitch, pose.yaw);
+            auto pose = camera_animator_.GetPose(anim_frame);
+            if (auto *camera = dynamic_cast<OrbitCameraComponent *>(GetMainCamera()))
+            {
+                camera->Setup(pose.center, pose.radius, pose.pitch, pose.yaw);
+            }
         }
     }
 

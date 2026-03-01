@@ -175,68 +175,30 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float spec_weight = 1.0 / (1.0 + spec_accum_speed);
 
     // Firefly suppression: clamp incoming sample luminance relative to history.
-    // At high accumSpeed, history represents a stable average. Extreme 1-spp outliers
-    // (specular caustics reaching 40-60x the average) cause large per-frame jumps
-    // that propagate through Blur/PostBlur/Stabilization.
+    // Only apply when history is reliable enough to serve as a reference.
+    // At low accum speeds (after disocclusion or camera motion), the history is
+    // too noisy to distinguish fireflies from legitimate high-variance samples.
+    // Asymmetric clamping at low accum speeds causes systematic energy loss
+    // (measured: 28% luminance drop with threshold at accum >= 4).
     //
-    // Evidence (Session 4):
-    //   - 38x threshold has zero measurable effect because PrePass dilutes outliers to ~5-10x
-    //   - Disoccluded pixels (accumSpeed=0) have weight=1.0 and are completely unprotected
-    //   - Nuclear diagnostic confirmed code path IS executing
-    //   - Need much lower threshold AND coverage of disoccluded pixels
-    //
-    // Strategy:
-    //   - accumSpeed >= 4: history is stable, use tight relative clamp (4x history)
-    //   - accumSpeed 1-3: history is noisy, use moderate relative clamp (8x history)
-    //   - accumSpeed 0 (disoccluded): no valid history, use fixed absolute maximum
-    //   - All branches have absolute minimum floor to prevent clamping near-zero to zero
+    // accum >= 16: blend weight is ~6%, history is a stable reference, use 4x clamp.
+    // accum < 16: skip clamping — transient fireflies are diluted by low blend weight.
     if (enable_firefly_suppression != 0)
     {
-        float hist_diff_luma = GetLuminance(hist_diff.rgb);
-        float curr_diff_luma = GetLuminance(current_diff.rgb);
-        float hist_spec_luma = GetLuminance(hist_spec.rgb);
-        float curr_spec_luma = GetLuminance(current_spec.rgb);
-
-        // Diffuse channel
-        if (diff_accum_speed >= 4.0)
+        if (diff_accum_speed >= 16.0)
         {
-            // Stable history: tight clamp at 4x
+            float hist_diff_luma = GetLuminance(hist_diff.rgb);
+            float curr_diff_luma = GetLuminance(current_diff.rgb);
             float max_diff_luma = max(hist_diff_luma * 4.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
             if (curr_diff_luma > max_diff_luma && curr_diff_luma > 0.0)
                 current_diff.rgb *= max_diff_luma / curr_diff_luma;
         }
-        else if (diff_accum_speed >= 1.0)
-        {
-            // Early accumulation: moderate clamp at 8x
-            float max_diff_luma = max(hist_diff_luma * 8.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
-            if (curr_diff_luma > max_diff_luma && curr_diff_luma > 0.0)
-                current_diff.rgb *= max_diff_luma / curr_diff_luma;
-        }
-        else
-        {
-            // Disoccluded: no valid history, fixed absolute maximum.
-            // At 2048+ spp, well-converged pixel luminance rarely exceeds 2.0 in demodulated space.
-            float max_diff_luma = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE;
-            if (curr_diff_luma > max_diff_luma && curr_diff_luma > 0.0)
-                current_diff.rgb *= max_diff_luma / curr_diff_luma;
-        }
 
-        // Specular channel
-        if (spec_accum_speed >= 4.0)
+        if (spec_accum_speed >= 16.0)
         {
+            float hist_spec_luma = GetLuminance(hist_spec.rgb);
+            float curr_spec_luma = GetLuminance(current_spec.rgb);
             float max_spec_luma = max(hist_spec_luma * 4.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
-            if (curr_spec_luma > max_spec_luma && curr_spec_luma > 0.0)
-                current_spec.rgb *= max_spec_luma / curr_spec_luma;
-        }
-        else if (spec_accum_speed >= 1.0)
-        {
-            float max_spec_luma = max(hist_spec_luma * 8.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
-            if (curr_spec_luma > max_spec_luma && curr_spec_luma > 0.0)
-                current_spec.rgb *= max_spec_luma / curr_spec_luma;
-        }
-        else
-        {
-            float max_spec_luma = REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE;
             if (curr_spec_luma > max_spec_luma && curr_spec_luma > 0.0)
                 current_spec.rgb *= max_spec_luma / curr_spec_luma;
         }
@@ -294,7 +256,17 @@ void main(uint3 DTid : SV_DispatchThreadID)
         outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
     }
-
+    if (debug_output == 4)
+    {
+        // Raw history diagnostic: output reprojected history and accum speeds.
+        // Composite with diagnostic passthrough will show diff*albedo+spec.
+        // If luminance matches converged before-screenshot, history is intact.
+        // R,G,B = raw reprojected history (hist_diff), not blended.
+        outDiffuse[pixel] = hist_diff;
+        outSpecular[pixel] = hist_spec;
+        outInternalData[pixel] = PackInternalData(prev_diff_accum_speed, prev_spec_accum_speed);
+        return;
+    }
     // Write outputs
     outDiffuse[pixel] = acc_diff;
     outSpecular[pixel] = acc_spec;

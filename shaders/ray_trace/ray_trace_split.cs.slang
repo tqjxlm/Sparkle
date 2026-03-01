@@ -452,12 +452,12 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         ray_desc.Direction = next_direction;
     }
 
-    // Firefly clamp on pre-demodulation radiance (energy-preserving)
-    if (result.is_hit)
-    {
-        result.diffuse_radiance = min(result.diffuse_radiance, output_limit);
-        result.specular_radiance = min(result.specular_radiance, output_limit);
-    }
+    // No pre-demodulation clamp on the denoiser channels.
+    // The output_limit clamp was causing systematic energy loss: clamping diffuse
+    // at 6 before dividing by albedo biases the demodulated signal low, and
+    // remodulation in the composite (diff * albedo) cannot recover the lost energy.
+    // The denoiser's own firefly suppression (at accum >= 16) handles outliers.
+    // The combined PT accumulation path (below) still applies output_limit.
 
     // Demodulate: divide out albedo from diffuse
     if (result.is_hit)

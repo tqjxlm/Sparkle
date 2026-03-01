@@ -2,25 +2,29 @@
 
 Tests that a small camera yaw delta after full convergence preserves temporal
 history — the resulting frame should be nearly as clean as the converged
-frame, NOT a noisy 1spp restart.
+frame, NOT a noisy 1spp restart.  Specifically detects ghosting artifacts
+by cross-comparing against a fully re-converged vanilla reference.
 
-Orchestrates three runs:
+Orchestrates four runs:
   0. Vanilla baseline — vanilla GPU pipeline (no reblur): fully converge,
-     nudge, fully re-converge.  Establishes the best-case difference between
-     two noise-free views 2 degrees apart.
-  1. Full pipeline (end-to-end) — before/after screenshot noise comparison
-  2. reblur_debug_pass 3 (temporal accumulation output) — validates history
-     was fetched by the reprojection, before any spatial blur
+     nudge, fully re-converge.  Provides ground-truth for the nudged view.
+  1. Full pipeline (end-to-end) — before/after screenshot.  FLIP is computed
+     against the vanilla "after" to detect ghosting.
+  2. Temporal accumulation only (reblur_debug_pass TemporalAccum) — validates
+     that reprojection fetches history before any spatial blur.
+  3. Disocclusion map (reblur_debug_pass TADisocclusion) — counts what fraction
+     of pixels got valid reprojection after the camera nudge.
 
 Metrics:
-  - FLIP error: perceptual difference between before/after (nvidia FLIP)
-  - Laplacian variance: high-frequency noise measure (3x3 Laplacian kernel)
+  - FLIP error: perceptual difference (nvidia FLIP)
+  - Ghosting FLIP: reblur-after vs vanilla-after (measures reprojection artifacts)
+  - Reprojection validity: fraction of geometry pixels with valid history
+  - Footprint quality: mean quality of valid reprojection footprints
+  - Laplacian variance: high-frequency noise measure
   - Noise ratio: laplacian_var_after / laplacian_var_before
-  - Mean luminance: not-black validation
-  - NaN/Inf checks
 
 Usage:
-  python tests/reblur/test_converged_history.py --framework glfw [--skip_build]
+  python tests/reblur/test_converged_history.py --framework macos [--skip_build]
 """
 
 import argparse
@@ -37,11 +41,23 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, PROJECT_ROOT)
 
+# --- Thresholds ---
+# Full pipeline: REBLUR-after vs vanilla-after (ghosting detection)
+GHOSTING_FLIP_MAX = 0.15
+# Full pipeline: noise ratio after/before
+NOISE_RATIO_MAX_FULL = 3.0
+# Temporal accum: noise ratio (raw, before spatial blur)
+NOISE_RATIO_MAX_TEMPORAL = 60.0
+# Disocclusion map: minimum fraction of geometry pixels with valid history
+MIN_VALID_REPROJECTION_PCT = 60.0
+# Disocclusion map: minimum mean footprint quality for valid pixels
+MIN_FOOTPRINT_QUALITY = 0.5
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Converged history camera delta test")
-    parser.add_argument("--framework", default="glfw",
+    parser.add_argument("--framework", default="macos",
                         choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
     return parser.parse_args()
@@ -64,20 +80,20 @@ def find_screenshot(screenshot_dir, pattern):
     return matches[0]
 
 
+def load_image(path):
+    """Load image as float32 [0,1] RGB array."""
+    return np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+
+
 def load_luminance(path):
     """Load image and compute luminance channel as float32 [0,1]."""
-    img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
-        0.7152 + img[:, :, 2] * 0.0722
+    img = load_image(path)
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
     return img, luma
 
 
 def compute_laplacian_variance(luma):
-    """Compute variance of the Laplacian as a noise metric.
-
-    Higher values mean more high-frequency content (noise or edges).
-    """
-    # 3x3 Laplacian kernel
+    """Compute variance of the Laplacian as a noise metric."""
     kernel = np.array([[0, 1, 0],
                        [1, -4, 1],
                        [0, 1, 0]], dtype=np.float32)
@@ -85,23 +101,20 @@ def compute_laplacian_variance(luma):
     return float(np.var(laplacian))
 
 
-def compute_flip(before_path, after_path):
+def compute_flip(path_a, path_b):
     """Compute mean FLIP error between two images. Returns mean_flip or None."""
     try:
         from flip_evaluator import nbflip
     except ImportError:
         print("  WARN: flip_evaluator not installed, skipping FLIP metric")
         return None
-    before_img = np.array(
-        Image.open(before_path).convert("RGB"), dtype=np.float32) / 255.0
-    after_img = np.array(
-        Image.open(after_path).convert("RGB"), dtype=np.float32) / 255.0
-    if before_img.shape != after_img.shape:
+    img_a = load_image(path_a)
+    img_b = load_image(path_b)
+    if img_a.shape != img_b.shape:
         print(f"  WARN: image shape mismatch for FLIP: "
-              f"{before_img.shape} vs {after_img.shape}")
+              f"{img_a.shape} vs {img_b.shape}")
         return None
-    _, mean_flip, _ = nbflip.evaluate(
-        before_img, after_img, False, True, False, True, {})
+    _, mean_flip, _ = nbflip.evaluate(img_a, img_b, False, True, False, True, {})
     return float(mean_flip)
 
 
@@ -130,6 +143,57 @@ def check_image(path, label):
     }
 
 
+def analyze_disocclusion_map(path):
+    """Analyze a TADisocclusion screenshot to count reprojection validity.
+
+    TADisocclusion output format (diagnostic passthrough, no albedo modulation):
+      R = disoccluded (1.0 = yes, 0.0 = no / valid history)
+      G = footprintQuality [0,1]
+      B = inScreen (1.0 = in screen bounds, 0.0 = out of bounds)
+
+    Returns dict with validity metrics.
+    """
+    img = load_image(path)
+    r_chan = img[:, :, 0]  # disoccluded flag
+    g_chan = img[:, :, 1]  # footprint quality
+    b_chan = img[:, :, 2]  # in-screen flag
+
+    total_pixels = r_chan.size
+
+    # Geometry pixels: those that are in-screen (B > 0.5)
+    # Sky pixels have all channels at 0 (passed through early in TA)
+    in_screen = b_chan > 0.5
+    geometry_pixels = int(np.sum(in_screen))
+
+    # Valid history: not disoccluded AND in-screen
+    valid_history = (r_chan < 0.5) & in_screen
+    valid_count = int(np.sum(valid_history))
+
+    # Disoccluded: R > 0.5 AND in-screen
+    disoccluded = (r_chan > 0.5) & in_screen
+    disoccluded_count = int(np.sum(disoccluded))
+
+    # Footprint quality for valid pixels
+    if valid_count > 0:
+        mean_quality = float(np.mean(g_chan[valid_history]))
+    else:
+        mean_quality = 0.0
+
+    # Percentage calculations
+    valid_pct = (valid_count / geometry_pixels * 100) if geometry_pixels > 0 else 0.0
+    disoccluded_pct = (disoccluded_count / geometry_pixels * 100) if geometry_pixels > 0 else 0.0
+
+    return {
+        "total_pixels": total_pixels,
+        "geometry_pixels": geometry_pixels,
+        "valid_count": valid_count,
+        "valid_pct": valid_pct,
+        "disoccluded_count": disoccluded_count,
+        "disoccluded_pct": disoccluded_pct,
+        "mean_footprint_quality": mean_quality,
+    }
+
+
 def run_test(py, build_py, framework, test_case, extra_args, label,
              use_reblur=True, clear_screenshots=False):
     """Run a C++ test case with given extra args. Returns success bool."""
@@ -154,7 +218,7 @@ def run_test(py, build_py, framework, test_case, extra_args, label,
 
 
 def rename_screenshots(screenshot_dir, old_pattern, new_prefix):
-    """Rename screenshots matching old_pattern by replacing the base name with new_prefix."""
+    """Rename screenshots matching old_pattern by replacing the base name."""
     for path in glob.glob(os.path.join(screenshot_dir, old_pattern)):
         dirname = os.path.dirname(path)
         basename = os.path.basename(path)
@@ -170,7 +234,7 @@ def validate_run(screenshot_dir, label, noise_ratio_max,
                  before_pattern="*converged_history_before*",
                  after_pattern="*converged_history_after*",
                  flip_max=None):
-    """Find before/after screenshots, compute noise and FLIP metrics, return results_list."""
+    """Find before/after screenshots, compute noise and FLIP metrics."""
     results = []
 
     before_path = find_screenshot(screenshot_dir, before_pattern)
@@ -179,13 +243,13 @@ def validate_run(screenshot_dir, label, noise_ratio_max,
     if not before_path:
         print(f"  FAIL: 'before' screenshot not found")
         results.append((f"{label}: before screenshot found", False))
-        return results
+        return results, None, None
     results.append((f"{label}: before screenshot found", True))
 
     if not after_path:
         print(f"  FAIL: 'after' screenshot not found")
         results.append((f"{label}: after screenshot found", False))
-        return results
+        return results, None, None
     results.append((f"{label}: after screenshot found", True))
 
     print(f"  Before: {before_path}")
@@ -225,10 +289,10 @@ def validate_run(screenshot_dir, label, noise_ratio_max,
         print(f"  WARN: before laplacian_var too small to compute ratio")
         results.append((f"{label}: noise ratio computable", True))
 
-    # FLIP perceptual error
+    # FLIP perceptual error (before vs after)
     mean_flip = compute_flip(before_path, after_path)
     if mean_flip is not None:
-        print(f"  FLIP error: {mean_flip:.4f}")
+        print(f"  FLIP error (before vs after): {mean_flip:.4f}")
         if flip_max is not None:
             if mean_flip <= flip_max:
                 print(f"  PASS: FLIP {mean_flip:.4f} <= {flip_max}")
@@ -237,7 +301,7 @@ def validate_run(screenshot_dir, label, noise_ratio_max,
                 print(f"  FAIL: FLIP {mean_flip:.4f} > {flip_max}")
                 results.append((f"{label}: FLIP <= {flip_max}", False))
 
-    return results
+    return results, before_path, after_path
 
 
 def main():
@@ -258,23 +322,26 @@ def main():
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
+            if result.stderr:
+                for line in result.stderr.strip().splitlines()[-10:]:
+                    print(f"  {line}")
             return 1
 
     all_results = []
+    vanilla_after_path = None
+    reblur_after_path = None
 
     # --- Run 0: Vanilla baseline (no reblur, full re-convergence) ---
     print(f"\n{'—'*60}")
     print("  Run 0: Vanilla baseline (converge -> nudge -> re-converge)")
     print(f"{'—'*60}")
-    # Vanilla needs two full convergences; use modest max_spp + timeout so
-    # the test completes in reasonable time.
     ok = run_test(py, build_py, fw, "vanilla_converged_baseline",
                   [],
                   "vanilla baseline", use_reblur=False,
                   clear_screenshots=True)
     if ok:
         all_results.append(("Vanilla baseline: test run", True))
-        run_results = validate_run(
+        run_results, _, vanilla_after_path = validate_run(
             screenshot_dir, "Vanilla baseline", noise_ratio_max=float("inf"),
             before_pattern="*vanilla_baseline_before*",
             after_pattern="*vanilla_baseline_after*")
@@ -290,39 +357,121 @@ def main():
                   "full pipeline")
     if ok:
         all_results.append(("Full pipeline: test run", True))
-        run_results = validate_run(
-            screenshot_dir, "Full pipeline", noise_ratio_max=5.0)
+        run_results, _, reblur_after_path = validate_run(
+            screenshot_dir, "Full pipeline",
+            noise_ratio_max=NOISE_RATIO_MAX_FULL)
         all_results.extend(run_results)
-        # Rename so Run 2 doesn't overwrite
+
+        # Ghosting detection: compare REBLUR-after vs vanilla-after
+        # The vanilla "after" is ground truth for the nudged viewpoint.
+        # Any large difference in the REBLUR "after" is ghosting or noise.
+        if vanilla_after_path and reblur_after_path:
+            ghosting_flip = compute_flip(vanilla_after_path, reblur_after_path)
+            if ghosting_flip is not None:
+                print(f"  Ghosting FLIP (reblur-after vs vanilla-after): "
+                      f"{ghosting_flip:.4f}")
+                if ghosting_flip <= GHOSTING_FLIP_MAX:
+                    print(f"  PASS: ghosting FLIP {ghosting_flip:.4f} "
+                          f"<= {GHOSTING_FLIP_MAX}")
+                    all_results.append(
+                        (f"Full pipeline: ghosting FLIP <= {GHOSTING_FLIP_MAX}",
+                         True))
+                else:
+                    print(f"  FAIL: ghosting FLIP {ghosting_flip:.4f} "
+                          f"> {GHOSTING_FLIP_MAX} (ghosting detected)")
+                    all_results.append(
+                        (f"Full pipeline: ghosting FLIP <= {GHOSTING_FLIP_MAX}",
+                         False))
+
+        # Rename so subsequent runs don't overwrite
         rename_screenshots(screenshot_dir, "*converged_history_*",
                            "reblur_e2e")
     else:
         all_results.append(("Full pipeline: test run", False))
 
-    # --- Run 2: Temporal accumulation (reblur_debug_pass 3) ---
+    # --- Run 2: Temporal accumulation (reblur_debug_pass TemporalAccum) ---
     print(f"\n{'—'*60}")
-    print("  Run 2: Reblur temporal accumulation (reblur_debug_pass 3)")
+    print("  Run 2: Reblur temporal accumulation (reblur_debug_pass TemporalAccum)")
     print(f"{'—'*60}")
     ok = run_test(py, build_py, fw, "reblur_converged_history",
-                  ["--reblur_debug_pass", "TemporalAccum"], "temporal accumulation")
+                  ["--reblur_debug_pass", "TemporalAccum"],
+                  "temporal accumulation")
     if ok:
         all_results.append(("Temporal accum: test run", True))
-        # Raw temporal accumulation output (before spatial blur) has much higher
-        # noise after a camera nudge because:
-        #  - Disoccluded pixels (~20-25% for a 2° yaw) get accumSpeed=1
-        #  - The "before" screenshot at convergence is dominated by the PT
-        #    accumulated result (pt_weight=1.0), which is very clean
-        #  - After the nudge, cumulated_sample_count resets to 0, so the
-        #    composite shows ~100% denoiser output (noisy for TemporalAccum)
-        # The full pipeline (Run 1) validates end-to-end quality after spatial
-        # blur; this run only validates that reprojection fetches history.
-        run_results = validate_run(
-            screenshot_dir, "Temporal accum", noise_ratio_max=60.0)
+        run_results, _, _ = validate_run(
+            screenshot_dir, "Temporal accum",
+            noise_ratio_max=NOISE_RATIO_MAX_TEMPORAL)
         all_results.extend(run_results)
         rename_screenshots(screenshot_dir, "*converged_history_*",
                            "reblur_temporal_accum")
     else:
         all_results.append(("Temporal accum: test run", False))
+
+    # --- Run 3: Disocclusion map (reblur_debug_pass TADisocclusion) ---
+    print(f"\n{'—'*60}")
+    print("  Run 3: Disocclusion map (reblur_debug_pass TADisocclusion)")
+    print(f"{'—'*60}")
+    ok = run_test(py, build_py, fw, "reblur_converged_history",
+                  ["--reblur_debug_pass", "TADisocclusion"],
+                  "disocclusion map")
+    if ok:
+        all_results.append(("Disocclusion map: test run", True))
+
+        # Find the "after" screenshot — this is the disocclusion map after nudge
+        after_path = find_screenshot(screenshot_dir,
+                                     "*converged_history_after*")
+        if after_path:
+            all_results.append(("Disocclusion map: after screenshot found",
+                                True))
+            print(f"  Disocclusion map: {after_path}")
+
+            stats = analyze_disocclusion_map(after_path)
+            print(f"  Total pixels:          {stats['total_pixels']}")
+            print(f"  Geometry pixels:       {stats['geometry_pixels']}")
+            print(f"  Valid history:         {stats['valid_count']} "
+                  f"({stats['valid_pct']:.1f}%)")
+            print(f"  Disoccluded:           {stats['disoccluded_count']} "
+                  f"({stats['disoccluded_pct']:.1f}%)")
+            print(f"  Mean footprint quality: {stats['mean_footprint_quality']:.3f}")
+
+            # Check reprojection validity
+            if stats['valid_pct'] >= MIN_VALID_REPROJECTION_PCT:
+                print(f"  PASS: valid reprojection {stats['valid_pct']:.1f}% "
+                      f">= {MIN_VALID_REPROJECTION_PCT}%")
+                all_results.append(
+                    (f"Disocclusion map: valid reproj >= "
+                     f"{MIN_VALID_REPROJECTION_PCT}%", True))
+            else:
+                print(f"  FAIL: valid reprojection {stats['valid_pct']:.1f}% "
+                      f"< {MIN_VALID_REPROJECTION_PCT}% "
+                      f"(reprojection broken)")
+                all_results.append(
+                    (f"Disocclusion map: valid reproj >= "
+                     f"{MIN_VALID_REPROJECTION_PCT}%", False))
+
+            # Check footprint quality
+            if stats['mean_footprint_quality'] >= MIN_FOOTPRINT_QUALITY:
+                print(f"  PASS: footprint quality "
+                      f"{stats['mean_footprint_quality']:.3f} "
+                      f">= {MIN_FOOTPRINT_QUALITY}")
+                all_results.append(
+                    (f"Disocclusion map: footprint quality >= "
+                     f"{MIN_FOOTPRINT_QUALITY}", True))
+            else:
+                print(f"  FAIL: footprint quality "
+                      f"{stats['mean_footprint_quality']:.3f} "
+                      f"< {MIN_FOOTPRINT_QUALITY}")
+                all_results.append(
+                    (f"Disocclusion map: footprint quality >= "
+                     f"{MIN_FOOTPRINT_QUALITY}", False))
+        else:
+            all_results.append(("Disocclusion map: after screenshot found",
+                                False))
+
+        rename_screenshots(screenshot_dir, "*converged_history_*",
+                           "reblur_disocclusion")
+    else:
+        all_results.append(("Disocclusion map: test run", False))
 
     # --- Summary ---
     _print_summary(all_results)

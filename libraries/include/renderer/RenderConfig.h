@@ -57,6 +57,7 @@ struct RenderConfig : public ConfigCollection
         TADisocclusion, // temporal accum diagnostic: disocclusion
         TAMotionVector, // temporal accum diagnostic: motion vector
         TADepth,        // temporal accum diagnostic: depth
+        TAHistory,      // temporal accum diagnostic: raw reprojected history
         Passthrough,    // no denoising, use raw split PT output
     };
 

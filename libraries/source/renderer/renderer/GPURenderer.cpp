@@ -123,6 +123,7 @@ class ReblurCompositeShader : public RHIShaderInfo
     {
         Vector2UInt resolution;
         uint32_t frame_index;
+        uint32_t composite_mode; // 0 = normal, 1 = diagnostic passthrough
     };
 };
 
@@ -224,13 +225,22 @@ void GPURenderer::Render()
         }
         camera->ClearPixels();
         dispatched_sample_count_ = 0;
-        // NOTE: Do NOT reset reblur here. The vanilla accumulation buffer (imageData)
+        // NOTE: Do NOT reset reblur on camera motion. The vanilla accumulation buffer
         // must restart from scratch on camera movement, but the reblur denoiser
         // preserves temporal history across camera changes via motion-vector
         // reprojection. Calling Reset() would set reset_history=1, causing the
         // temporal accumulation shader to discard all converged history and output
         // a raw 1-spp sample — exactly the failure mode tested by
         // test_converged_history.py.
+    }
+
+    // Reset denoiser history once when the scene loads. Pre-scene-load frames
+    // render an empty/partial scene, accumulating dark history that causes dim
+    // output on the first real frames.
+    if (reblur_ && scene_loaded_ && !reblur_scene_load_reset_done_)
+    {
+        reblur_->Reset();
+        reblur_scene_load_reset_done_ = true;
     }
 
     if (reblur_)
@@ -500,9 +510,15 @@ void GPURenderer::Update()
         // After camera motion cumulated_sample_count resets to 0, so the
         // denoiser properly takes over during re-convergence.
         uint32_t comp_frame_index = camera->GetCumulatedSampleCount();
+        using DP = RenderConfig::ReblurDebugPass;
+        bool is_ta_diagnostic = render_config_.reblur_debug_pass == DP::TADisocclusion ||
+                                render_config_.reblur_debug_pass == DP::TAMotionVector ||
+                                render_config_.reblur_debug_pass == DP::TADepth ||
+                                render_config_.reblur_debug_pass == DP::TAHistory;
         ReblurCompositeShader::UniformBufferData comp_ubo{
             .resolution = {image_size_.x(), image_size_.y()},
             .frame_index = comp_frame_index,
+            .composite_mode = is_ta_diagnostic ? 1u : 0u,
         };
         composite_uniform_buffer_->Upload(rhi_, &comp_ubo);
     }
@@ -517,6 +533,7 @@ void GPURenderer::Update()
     tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 
     last_second_total_spp_ += spp;
+
 
     spp_logger_.Tick();
 }

@@ -238,9 +238,15 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
             clamped_spec_color = current_spec.rgb;
     }
 
-    // Stabilization blend weight: full strength from frame_index for all pixels.
-    float diff_stab_frames = min(float(max_stabilized_frame_num), max(diff_accum_speed, float(frame_index)));
-    float spec_stab_frames = min(float(max_stabilized_frame_num), max(spec_accum_speed, float(frame_index)));
+    // Stabilization blend weight: scale with actual accumulation, not frame_index.
+    // Using frame_index causes the blend to ramp to 0.996 within a few frames
+    // (because internal_frame_index increments ~6x per app frame and never resets
+    // on camera motion). This makes freshly disoccluded pixels blend 99.6% with
+    // stale stabilized history, causing severe energy loss during motion.
+    // Using accum_speed alone: disoccluded pixels (accum=0) get 100% PostBlur
+    // output (correct energy), converged pixels (accum=63) get 98.4% stabilization.
+    float diff_stab_frames = min(float(max_stabilized_frame_num), diff_accum_speed);
+    float spec_stab_frames = min(float(max_stabilized_frame_num), spec_accum_speed);
     float diff_blend = diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
     float spec_blend = spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
 

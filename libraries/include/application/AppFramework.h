@@ -199,6 +199,7 @@ private:
     bool renderer_ready_ = false;
     CameraAnimator camera_animator_;
     bool camera_animator_initialized_ = false;
+    uint64_t camera_animator_start_frame_ = 0;
     bool scene_file_loaded_ = false;
     bool scene_async_tasks_completed_ = false;
 

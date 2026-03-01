@@ -2,6 +2,7 @@
 {
     uint2 resolution;
     uint frame_index;
+    uint composite_mode; // 0 = normal, 1 = diagnostic passthrough (skip albedo modulation)
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> denoisedDiffuse;
@@ -27,6 +28,15 @@ void main(uint3 DTid : SV_DispatchThreadID)
     uint2 pixel = DTid.xy;
     if (pixel.x >= resolution.x || pixel.y >= resolution.y)
         return;
+
+    // Diagnostic passthrough: output denoisedDiffuse directly without albedo
+    // modulation. Used for TA diagnostic modes (disocclusion map, motion vectors,
+    // depth test) where the denoised output contains diagnostic data, not radiance.
+    if (composite_mode == 1)
+    {
+        outputImage[pixel] = denoisedDiffuse[pixel];
+        return;
+    }
 
     // Sky pixels already have correct color in outputImage from the split path tracer.
     // Skip them to preserve the vanilla accumulated sky color.
