@@ -509,7 +509,8 @@ void GPURenderer::Update()
         // correct radiance-space convergence without demod/remod artifacts.
         // After camera motion cumulated_sample_count resets to 0, so the
         // denoiser properly takes over during re-convergence.
-        uint32_t comp_frame_index = camera->GetCumulatedSampleCount();
+        uint32_t comp_frame_index =
+            render_config_.reblur_no_pt_blend ? 0u : camera->GetCumulatedSampleCount();
         using DP = RenderConfig::ReblurDebugPass;
         bool is_ta_diagnostic = render_config_.reblur_debug_pass == DP::TADisocclusion ||
                                 render_config_.reblur_debug_pass == DP::TAMotionVector ||

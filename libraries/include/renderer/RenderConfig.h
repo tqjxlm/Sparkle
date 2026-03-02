@@ -110,6 +110,7 @@ struct RenderConfig : public ConfigCollection
     float gpu_time_budget_ratio;
     std::string camera_animation;
     uint32_t camera_animation_frames; // 0 = same as max_spp
+    bool reblur_no_pt_blend;          // force composite to use pure denoised output
 
 protected:
     void Validate() override;

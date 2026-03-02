@@ -22,6 +22,8 @@ Tests included:
  19. Camera motion quality validation — temporal stability and reconvergence under motion
  20. Converged history camera delta — small yaw after convergence preserves history
  21. End-to-end FLIP — full REBLUR pipeline screenshot vs ground truth (FLIP <= 0.1)
+ 22. Denoiser history preservation — pure denoiser quality after camera nudge (no PT blend)
+ 23. Denoised motion luminance — luminance stability during continuous camera motion
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -356,6 +358,22 @@ def main():
          "--", "--use_reblur", "true"],
         "21. End-to-end FLIP (full REBLUR pipeline vs ground truth)")
     results.append(("End-to-end FLIP", ok, dur))
+
+    # --- Test 22: Denoiser history preservation (pure denoiser, no PT blend) ---
+    denoiser_hist_py = os.path.join(SCRIPT_DIR, "test_denoiser_history.py")
+    ok, dur, _ = run_command(
+        [py, denoiser_hist_py, "--framework", fw, "--skip_build"],
+        "22. Denoiser history preservation (pure denoiser quality after nudge)",
+        show_output=True)
+    results.append(("Denoiser history preservation", ok, dur))
+
+    # --- Test 23: Denoised motion luminance stability ---
+    denoised_motion_py = os.path.join(SCRIPT_DIR, "test_denoised_motion_luma.py")
+    ok, dur, _ = run_command(
+        [py, denoised_motion_py, "--framework", fw, "--skip_build"],
+        "23. Denoised motion luminance stability (continuous orbit sweep)",
+        show_output=True)
+    results.append(("Denoised motion luminance stability", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)

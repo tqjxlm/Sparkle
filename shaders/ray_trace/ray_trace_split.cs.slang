@@ -452,12 +452,23 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         ray_desc.Direction = next_direction;
     }
 
-    // No pre-demodulation clamp on the denoiser channels.
-    // The output_limit clamp was causing systematic energy loss: clamping diffuse
-    // at 6 before dividing by albedo biases the demodulated signal low, and
-    // remodulation in the composite (diff * albedo) cannot recover the lost energy.
-    // The denoiser's own firefly suppression (at accum >= 16) handles outliers.
-    // The combined PT accumulation path (below) still applies output_limit.
+    // Clamp diffuse+specular to output_limit before demodulation.
+    // This matches the vanilla PT's energy budget (which clamps total_radiance
+    // to output_limit) while preventing Float16 overflow after demodulation.
+    // Without this clamp, bright radiance on dark surfaces produces demodulated
+    // values exceeding Float16 max (65504), causing systematic energy loss
+    // when the denoiser textures (RGBAFloat16) clip the values.
+    if (result.is_hit)
+    {
+        float3 sum = result.diffuse_radiance + result.specular_radiance;
+        float max_component = max(sum.r, max(sum.g, sum.b));
+        if (max_component > output_limit)
+        {
+            float scale = output_limit / max_component;
+            result.diffuse_radiance *= scale;
+            result.specular_radiance *= scale;
+        }
+    }
 
     // Demodulate: divide out albedo from diffuse
     if (result.is_hit)
@@ -522,7 +533,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         float3 combined_clamped = min(output.total_radiance, output_limit);
         this_combined += combined_clamped;
 
-        // Diffuse/specular already clamped pre-demodulation inside SamplePixelSplit
+        // Diffuse/specular clamped to output_limit pre-demodulation (matching vanilla PT)
         diff_accum += float4(output.diffuse_radiance, output.diffuse_hit_dist);
         spec_accum += float4(output.specular_radiance, output.specular_hit_dist);
 

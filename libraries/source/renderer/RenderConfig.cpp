@@ -47,6 +47,9 @@ static ConfigValue<std::string> config_camera_animation("camera_animation",
 static ConfigValue<uint32_t> config_camera_animation_frames("camera_animation_frames",
                                                             "num frames of camera animation (0 = max_spp / 2)",
                                                             "renderer", 0);
+static ConfigValue<bool> config_reblur_no_pt_blend("reblur_no_pt_blend",
+                                                   "force composite to use pure denoised output (skip PT blend ramp)",
+                                                   "renderer", false);
 
 void RenderConfig::Init()
 {
@@ -73,6 +76,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_debug_pass, reblur_debug_pass);
     ConfigCollectionHelper::RegisterConfig(this, config_camera_animation, camera_animation);
     ConfigCollectionHelper::RegisterConfig(this, config_camera_animation_frames, camera_animation_frames);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_no_pt_blend, reblur_no_pt_blend);
     Validate();
 }
 
