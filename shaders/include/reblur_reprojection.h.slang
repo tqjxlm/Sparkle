@@ -5,6 +5,8 @@
 
 // Bilinear history sampling with per-sample occlusion validation.
 // Returns: sampled history value, sets footprintQuality to [0,1].
+// currentMaterialIdNorm: normalized material ID of the current pixel (from normalRoughness.a).
+// Material ID mismatch → disocclusion (prevents cross-object ghosting).
 float4 BilinearHistorySample(
     Texture2D<float4> prevTexture,
     float2 prevUV,
@@ -13,6 +15,7 @@ float4 BilinearHistorySample(
     Texture2D<float4> prevNormalRough,
     float expectedPrevZ,
     float3 currentNormal,
+    float currentMaterialIdNorm,
     float disoccThreshold,
     float denoisingRange,
     out float footprintQuality,
@@ -61,6 +64,12 @@ float4 BilinearHistorySample(
         float4 pnr = prevNormalRough[p];
         float3 pn = DecodeNormalOct(pnr.xy);
         if (dot(pn, currentNormal) < 0.5)
+            continue;
+
+        // Material ID test: reject history from different surfaces.
+        // Threshold accounts for RGBA16Unorm quantization (~1/65535).
+        // Consecutive material IDs differ by 1/1023 ≈ 0.000978.
+        if (abs(pnr.a - currentMaterialIdNorm) > 0.0005)
             continue;
 
         // This sample is valid

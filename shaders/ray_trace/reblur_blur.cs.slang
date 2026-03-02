@@ -122,6 +122,7 @@ float GetGaussianWeight(float distance_sq)
     float4 nr = inNormalRoughness[pixel];
     float3 center_normal = DecodeNormalOct(nr.xy);
     float center_roughness = nr.z;
+    uint center_instance_id = uint(round(nr.a * 1023.0));
 
     // Hit distance is in alpha channel (normalized)
     float center_diff_hit_norm = center_diff.a;
@@ -245,27 +246,32 @@ float GetGaussianWeight(float distance_sq)
                 float4 sample_nr = inNormalRoughness[sample_pixel];
                 float3 sample_normal = DecodeNormalOct(sample_nr.xy);
 
-                float4 sample_diff = inDiffuse[sample_pixel];
+                // Instance ID edge-stopping: prevent cross-object blur
+                uint sample_instance_id = uint(round(sample_nr.a * 1023.0));
+                if (sample_instance_id == center_instance_id)
+                {
+                    float4 sample_diff = inDiffuse[sample_pixel];
 
-                // Plane-distance geometry weight
-                float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
-                float w_geom = GetPlaneDistanceWeight(center_Nv, center_Xv, sample_Xv,
-                                                       plane_dist_sensitivity, frustum_size);
+                    // Plane-distance geometry weight
+                    float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
+                    float w_geom = GetPlaneDistanceWeight(center_Nv, center_Xv, sample_Xv,
+                                                           plane_dist_sensitivity, frustum_size);
 
-                // Normal weight
-                float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
+                    // Normal weight
+                    float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
 
-                // Hit distance weight
-                float w_hit = GetHitDistWeight(center_diff_hit_norm, sample_diff.a, min_hit_dist_weight);
+                    // Hit distance weight
+                    float w_hit = GetHitDistWeight(center_diff_hit_norm, sample_diff.a, min_hit_dist_weight);
 
-                // Gaussian spatial weight
-                float w_gauss = GetGaussianWeight(dot(offset, offset));
+                    // Gaussian spatial weight
+                    float w_gauss = GetGaussianWeight(dot(offset, offset));
 
-                float w = w_normal * w_geom * w_hit * w_gauss;
+                    float w = w_normal * w_geom * w_hit * w_gauss;
 
-                diff_sum += sample_diff.rgb * w;
-                diff_hit_sum += sample_diff.a * w;
-                diff_weight_sum += w;
+                    diff_sum += sample_diff.rgb * w;
+                    diff_hit_sum += sample_diff.a * w;
+                    diff_weight_sum += w;
+                }
             }
         }
 
@@ -282,32 +288,37 @@ float GetGaussianWeight(float distance_sq)
                 float3 sample_normal = DecodeNormalOct(sample_nr.xy);
                 float sample_roughness = sample_nr.z;
 
-                float4 sample_spec = inSpecular[sample_pixel];
+                // Instance ID edge-stopping: prevent cross-object blur
+                uint sample_instance_id_spec = uint(round(sample_nr.a * 1023.0));
+                if (sample_instance_id_spec == center_instance_id)
+                {
+                    float4 sample_spec = inSpecular[sample_pixel];
 
-                // Plane-distance geometry weight
-                float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
-                float w_geom = GetPlaneDistanceWeight(center_Nv, center_Xv, sample_Xv,
-                                                       plane_dist_sensitivity, frustum_size);
+                    // Plane-distance geometry weight
+                    float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
+                    float w_geom = GetPlaneDistanceWeight(center_Nv, center_Xv, sample_Xv,
+                                                           plane_dist_sensitivity, frustum_size);
 
-                // Specular normal weight using lobe half-angle
-                float w_normal = GetSpecNormalWeight(center_normal, sample_normal, center_roughness,
-                                                      adjusted_lobe_fraction, spec_non_linear);
+                    // Specular normal weight using lobe half-angle
+                    float w_normal = GetSpecNormalWeight(center_normal, sample_normal, center_roughness,
+                                                          adjusted_lobe_fraction, spec_non_linear);
 
-                // Hit distance weight modulated by specular magic curve
-                float spec_min_hit_weight = min_hit_dist_weight * fraction_scale * smc;
-                float w_hit = GetHitDistWeight(center_spec_hit_norm, sample_spec.a, spec_min_hit_weight);
+                    // Hit distance weight modulated by specular magic curve
+                    float spec_min_hit_weight = min_hit_dist_weight * fraction_scale * smc;
+                    float w_hit = GetHitDistWeight(center_spec_hit_norm, sample_spec.a, spec_min_hit_weight);
 
-                // Roughness weight for specular: prevents blur leaking across roughness boundaries
-                float w_roughness = GetRoughnessWeight(center_roughness, sample_roughness, roughness_fraction);
+                    // Roughness weight for specular: prevents blur leaking across roughness boundaries
+                    float w_roughness = GetRoughnessWeight(center_roughness, sample_roughness, roughness_fraction);
 
-                // Gaussian spatial weight
-                float w_gauss = GetGaussianWeight(dot(offset, offset));
+                    // Gaussian spatial weight
+                    float w_gauss = GetGaussianWeight(dot(offset, offset));
 
-                float w = w_normal * w_geom * w_hit * w_roughness * w_gauss;
+                    float w = w_normal * w_geom * w_hit * w_roughness * w_gauss;
 
-                spec_sum += sample_spec.rgb * w;
-                spec_hit_sum += sample_spec.a * w;
-                spec_weight_sum += w;
+                    spec_sum += sample_spec.rgb * w;
+                    spec_hit_sum += sample_spec.a * w;
+                    spec_weight_sum += w;
+                }
             }
         }
     }

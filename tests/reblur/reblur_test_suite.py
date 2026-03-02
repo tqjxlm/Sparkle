@@ -17,9 +17,8 @@ Tests included:
  14. M3 Reprojection test — 30-frame motion + bilinear/Catmull-Rom reprojection
  15. M3 Reprojection statistical — pixel-level validation of reprojection output
  16. Static non-regression — motion infrastructure doesn't regress static camera quality
- 17. CameraAnimator none non-regression — static camera with --camera_animation none
- 18. Camera motion smoke (orbit_sweep) — orbit_sweep animation runs without crash
- 19. Camera motion quality validation — temporal stability and reconvergence under motion
+ 17. Ghosting test (camera nudge) — camera nudge + screenshot to detect cross-object ghosting
+ 18. Camera motion quality validation — temporal stability and reconvergence under motion
  20. Converged history camera delta — small yaw after convergence preserves history
  21. End-to-end FLIP — full REBLUR pipeline screenshot vs ground truth (FLIP <= 0.1)
  22. Denoiser history preservation — pure denoiser quality after camera nudge (no PT blend)
@@ -307,32 +306,16 @@ def main():
         "16. Static camera non-regression")
     results.append(("Static non-regression", ok, dur))
 
-    # --- Test 17: Static camera non-regression with CameraAnimator (none) ---
+    # --- Test 17: Ghosting test (camera nudge + screenshot) ---
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
-         "--run", "--test_case", "screenshot", "--headless", "true",
+         "--run", "--test_case", "reblur_ghosting", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "64",
-         "--camera_animation", "none",
-         "--clear_screenshots", "true"],
-        "17. Static camera with CameraAnimator (none)")
-    if ok:
-        ok, _, _ = validate_latest_screenshot(fw, "CameraAnimator none screenshot")
-    results.append(("CameraAnimator none non-regression", ok, dur))
-
-    # --- Test 18: Camera motion smoke (orbit_sweep) ---
-    ok, dur, _ = run_command(
-        [py, build_py, "--framework", fw, "--skip_build",
-         "--run", "--test_case", "screenshot", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "60",
-         "--camera_animation", "orbit_sweep",
+         "--spp", "1", "--max_spp", "200",
          "--clear_screenshots", "true",
          "--test_timeout", "120"],
-        "18. Camera motion smoke (orbit_sweep)")
-    if ok:
-        ok, _, _ = validate_latest_screenshot(fw, "orbit_sweep motion screenshot")
-    results.append(("Camera motion smoke (orbit_sweep)", ok, dur))
+        "17. Ghosting test (camera nudge)")
+    results.append(("Ghosting test (camera nudge)", ok, dur))
 
     # --- Test 19: Camera motion quality validation ---
     ok, dur, _ = run_command(

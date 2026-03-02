@@ -41,12 +41,6 @@ static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU 
 static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
 static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear all existing screenshots", "renderer",
                                                   false);
-static ConfigValue<std::string> config_camera_animation("camera_animation",
-                                                        "camera animation path (none, orbit_sweep, dolly)", "renderer",
-                                                        "none");
-static ConfigValue<uint32_t> config_camera_animation_frames("camera_animation_frames",
-                                                            "num frames of camera animation (0 = max_spp / 2)",
-                                                            "renderer", 0);
 static ConfigValue<bool> config_reblur_no_pt_blend("reblur_no_pt_blend",
                                                    "force composite to use pure denoised output (skip PT blend ramp)",
                                                    "renderer", false);
@@ -74,8 +68,6 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_debug_pass, reblur_debug_pass);
-    ConfigCollectionHelper::RegisterConfig(this, config_camera_animation, camera_animation);
-    ConfigCollectionHelper::RegisterConfig(this, config_camera_animation_frames, camera_animation_frames);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_no_pt_blend, reblur_no_pt_blend);
     Validate();
 }

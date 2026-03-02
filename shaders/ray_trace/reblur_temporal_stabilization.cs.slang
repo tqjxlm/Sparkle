@@ -203,18 +203,23 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float spec_lo = spec_mean - spec_sigma * spec_sigma_scale;
     float spec_hi = spec_mean + spec_sigma * spec_sigma_scale;
 
-    // For disoccluded edge pixels (incoming accum<=2), SKIP clamping entirely.
-    // At edges, the 5x5 neighborhood shifts dramatically when the center pixel
-    // alternates surfaces due to sub-pixel jitter. The clamping box follows the
-    // current surface, pulling the stabilized output toward it each frame.
-    // This overrides the blend weight (0.9995) and causes the output to oscillate
-    // with the clamping box instead of staying stable.
-    // Without clamping, the per-frame change is only 0.0005 * (PostBlur - history),
-    // giving sub-1/255 stability.
+    // For freshly disoccluded pixels (incoming accum<=1), the stabilized history
+    // at the reprojected position belongs to a different surface (the object that
+    // was there before). Blending it in causes ghosting.
+    // Skip stabilization entirely: output 100% PostBlur.
+    // For edge pixels (accum<=2), skip clamping but still blend weakly.
     float3 clamped_diff_color;
     float3 clamped_spec_color;
 
-    if (diff_accum_incoming <= 2.0)
+    bool diff_disoccluded = diff_accum_incoming <= 1.0;
+    bool spec_disoccluded = spec_accum_incoming <= 1.0;
+
+    if (diff_disoccluded)
+    {
+        // Freshly disoccluded: stabilized history is from wrong surface
+        clamped_diff_color = current_diff.rgb;
+    }
+    else if (diff_accum_incoming <= 2.0)
     {
         clamped_diff_color = stab_diff.rgb;
     }
@@ -226,7 +231,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
             clamped_diff_color = current_diff.rgb;
     }
 
-    if (spec_accum_incoming <= 2.0)
+    if (spec_disoccluded)
+    {
+        clamped_spec_color = current_spec.rgb;
+    }
+    else if (spec_accum_incoming <= 2.0)
     {
         clamped_spec_color = stab_spec.rgb;
     }
@@ -247,8 +256,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     // output (correct energy), converged pixels (accum=63) get 98.4% stabilization.
     float diff_stab_frames = min(float(max_stabilized_frame_num), diff_accum_speed);
     float spec_stab_frames = min(float(max_stabilized_frame_num), spec_accum_speed);
-    float diff_blend = diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
-    float spec_blend = spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
+    float diff_blend = diff_disoccluded ? 0.0 : diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
+    float spec_blend = spec_disoccluded ? 0.0 : spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
 
     // Blend current with clamped history
     float3 final_diff = lerp(current_diff.rgb, clamped_diff_color, diff_blend);

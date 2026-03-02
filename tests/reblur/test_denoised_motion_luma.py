@@ -105,7 +105,7 @@ def main():
     cmd = [py, build_py, "--framework", fw, "--skip_build",
            "--run", "--test_case", "motion_luminance_track",
            "--headless", "true", "--pipeline", "gpu", "--spp", "1",
-           "--max_spp", "60", "--camera_animation", "orbit_sweep",
+           "--max_spp", "60",
            "--clear_screenshots", "true", "--test_timeout", "120",
            "--use_reblur", "true", "--reblur_no_pt_blend", "true"]
     print(f"  cmd: {' '.join(cmd)}")

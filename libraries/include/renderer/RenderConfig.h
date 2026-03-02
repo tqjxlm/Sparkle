@@ -58,6 +58,7 @@ struct RenderConfig : public ConfigCollection
         TAMotionVector, // temporal accum diagnostic: motion vector
         TADepth,        // temporal accum diagnostic: depth
         TAHistory,      // temporal accum diagnostic: raw reprojected history
+        TAMaterialId,   // temporal accum diagnostic: material ID mismatch
         Passthrough,    // no denoising, use raw split PT output
     };
 
@@ -108,8 +109,6 @@ struct RenderConfig : public ConfigCollection
     ReblurDebugPass reblur_debug_pass;
     float target_framerate;
     float gpu_time_budget_ratio;
-    std::string camera_animation;
-    uint32_t camera_animation_frames; // 0 = same as max_spp
     bool reblur_no_pt_blend;          // force composite to use pure denoised output
 
 protected:

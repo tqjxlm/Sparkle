@@ -92,11 +92,13 @@ void main(uint3 DTid : SV_DispatchThreadID)
         prevPixelCenter = clamp(prevPixelCenter, int2(0, 0), int2(resolution) - int2(1, 1));
 
         float expectedPrevZ = prevViewZ[prevPixelCenter];
+        float currentMaterialIdNorm = nr.a;
 
         hist_diff = BilinearHistorySample(
             prevDiffHistory, prevUV, resolution,
             prevViewZ, prevNormalRoughness, expectedPrevZ,
-            center_normal, disocclusion_threshold, denoising_range,
+            center_normal, currentMaterialIdNorm,
+            disocclusion_threshold, denoising_range,
             footprintQuality, historyValid);
 
         // Sample specular with same occlusion pattern
@@ -105,16 +107,35 @@ void main(uint3 DTid : SV_DispatchThreadID)
         hist_spec = BilinearHistorySample(
             prevSpecHistory, prevUV, resolution,
             prevViewZ, prevNormalRoughness, expectedPrevZ,
-            center_normal, disocclusion_threshold, denoising_range,
+            center_normal, currentMaterialIdNorm,
+            disocclusion_threshold, denoising_range,
             specFootprint, specValid);
 
         historyValid = historyValid && specValid;
 
-        // Catmull-Rom upgrade when all bilinear samples are valid
+        // Catmull-Rom upgrade: only when ALL bilinear taps are valid AND the 3x3
+        // neighborhood around the reprojected center has the same instance_id.
+        // CatmullRom's 4x4 footprint can reach across object boundaries, pulling
+        // in wrong-surface history and causing ghosting near edges.
         if (historyValid && footprintQuality > 0.99)
         {
-            hist_diff = CatmullRomHistorySample(prevDiffHistory, linearSampler, prevUV, resolution);
-            hist_spec = CatmullRomHistorySample(prevSpecHistory, linearSampler, prevUV, resolution);
+            bool catrom_safe = true;
+            for (int dy = -1; dy <= 1 && catrom_safe; dy++)
+            {
+                for (int dx = -1; dx <= 1 && catrom_safe; dx++)
+                {
+                    int2 np = prevPixelCenter + int2(dx, dy);
+                    np = clamp(np, int2(0, 0), int2(resolution) - int2(1, 1));
+                    float4 npnr = prevNormalRoughness[np];
+                    if (abs(npnr.a - currentMaterialIdNorm) > 0.0005)
+                        catrom_safe = false;
+                }
+            }
+            if (catrom_safe)
+            {
+                hist_diff = CatmullRomHistorySample(prevDiffHistory, linearSampler, prevUV, resolution);
+                hist_spec = CatmullRomHistorySample(prevSpecHistory, linearSampler, prevUV, resolution);
+            }
         }
 
         // Read previous accumulation speed from center of footprint
@@ -129,9 +150,13 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float diff_accum_speed, spec_accum_speed;
     if (disoccluded)
     {
-        // Fixed minimum accumSpeed of 1 for disoccluded pixels (weight = 0.5).
-        // Prevents full-range jumps at object edges where sub-pixel jitter
-        // causes the primary ray to alternate between surfaces every frame.
+        // Use current frame as history stand-in to avoid energy loss.
+        // When all bilinear taps are rejected, hist_diff/spec = float4(0).
+        // Without this, lerp(0, current, 0.5) = 0.5 * current → dark ghosts.
+        // With this, lerp(current, current, 0.5) = current → full energy.
+        // accum_speed = 1 is preserved for edge stability tracking.
+        hist_diff = current_diff;
+        hist_spec = current_spec;
         diff_accum_speed = 1.0;
         spec_accum_speed = 1.0;
     }
@@ -265,6 +290,26 @@ void main(uint3 DTid : SV_DispatchThreadID)
         outDiffuse[pixel] = hist_diff;
         outSpecular[pixel] = hist_spec;
         outInternalData[pixel] = PackInternalData(prev_diff_accum_speed, prev_spec_accum_speed);
+        return;
+    }
+    if (debug_output == 5)
+    {
+        // Material ID diagnostic:
+        //   R = current material ID (normalized), G = prev material ID at reprojected position,
+        //   B = material ID mismatch (1 = mismatch/disoccluded, 0 = match)
+        float prevMatId = 0.0;
+        bool matMismatch = false;
+        if (inScreen)
+        {
+            int2 prevPC = int2(prevUV * float2(resolution));
+            prevPC = clamp(prevPC, int2(0, 0), int2(resolution) - int2(1, 1));
+            float4 pnr = prevNormalRoughness[prevPC];
+            prevMatId = pnr.a;
+            matMismatch = abs(pnr.a - nr.a) > 0.0005;
+        }
+        outDiffuse[pixel] = float4(nr.a, prevMatId, matMismatch ? 1.0 : 0.0, 1.0);
+        outSpecular[pixel] = float4(0, 0, 0, 0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
     }
     // Write outputs

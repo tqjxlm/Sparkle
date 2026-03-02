@@ -124,7 +124,7 @@ def main():
         "--headless", "true",
         "--pipeline", "gpu", "--use_reblur", "true",
         "--spp", "1", "--max_spp", "30",
-        "--camera_animation", "orbit_sweep",
+        # TODO: camera motion now uses TestCase-based approach (ReblurGhostingTest)
         "--test_timeout", "100",
     ], "Motion multi-frame capture (orbit_sweep, 30 spp)")
 
@@ -217,7 +217,6 @@ def main():
         "--headless", "true",
         "--pipeline", "gpu", "--use_reblur", "true",
         "--spp", "1", "--max_spp", "64",
-        "--camera_animation", "none",
     ], "Static camera reblur (64 spp)")
 
     if not ok:

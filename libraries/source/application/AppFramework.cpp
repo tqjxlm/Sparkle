@@ -16,7 +16,6 @@
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
 #include "scene/component/camera/CameraComponent.h"
-#include "scene/component/camera/OrbitCameraComponent.h"
 #include "scene/material/MaterialManager.h"
 
 #if ENABLE_TEST_CASES
@@ -415,46 +414,6 @@ bool AppFramework::MainLoop()
         }
     }
 #endif
-
-    // Camera animation: initialize once after scene is ready, then apply each frame
-    if (scene_async_tasks_completed_ && !camera_animator_initialized_)
-    {
-        auto path_type = CameraAnimator::FromString(render_config_.camera_animation);
-        if (path_type != CameraAnimator::PathType::kNone)
-        {
-            if (auto *camera = dynamic_cast<OrbitCameraComponent *>(GetMainCamera()))
-            {
-                CameraAnimator::OrbitPose initial{};
-                initial.center = camera->GetCenter();
-                initial.radius = camera->GetRadius();
-                initial.pitch = camera->GetPitch();
-                initial.yaw = camera->GetYaw();
-                uint32_t anim_frames = render_config_.camera_animation_frames;
-                if (anim_frames == 0)
-                {
-                    anim_frames = render_config_.max_sample_per_pixel / 2;
-                }
-                camera_animator_.Setup(path_type, anim_frames, initial);
-                camera_animator_start_frame_ = frame_number_;
-                Log(Info, "CameraAnimator active: {} for {} frames starting at frame {} (max_spp={})",
-                    render_config_.camera_animation, anim_frames, frame_number_,
-                    render_config_.max_sample_per_pixel);
-            }
-        }
-        camera_animator_initialized_ = true;
-    }
-
-    {
-        auto anim_frame = static_cast<uint32_t>(frame_number_ - camera_animator_start_frame_);
-        if (camera_animator_.IsActive() && !camera_animator_.IsDone(anim_frame))
-        {
-            auto pose = camera_animator_.GetPose(anim_frame);
-            if (auto *camera = dynamic_cast<OrbitCameraComponent *>(GetMainCamera()))
-            {
-                camera->Setup(pose.center, pose.radius, pose.pitch, pose.yaw);
-            }
-        }
-    }
 
     {
         PROFILE_SCOPE("MainLoop tick scene");

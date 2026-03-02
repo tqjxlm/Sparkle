@@ -61,7 +61,7 @@ def run_capture(py, build_py, framework, use_reblur, label):
     cmd = [py, build_py, "--framework", framework, "--skip_build",
            "--run", "--test_case", "motion_luminance_track",
            "--headless", "true", "--pipeline", "gpu", "--spp", "1",
-           "--max_spp", "60", "--camera_animation", "orbit_sweep",
+           "--max_spp", "60",
            "--clear_screenshots", "true", "--test_timeout", "120"]
     if use_reblur:
         cmd += ["--use_reblur", "true"]

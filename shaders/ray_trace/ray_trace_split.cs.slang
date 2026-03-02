@@ -261,6 +261,7 @@ struct SplitPathOutput
     float metallic;
     float3 total_radiance;  // combined radiance mirroring vanilla's pixel_color
     float3 primary_world_pos;
+    uint material_id;
     bool is_hit;
 };
 
@@ -281,6 +282,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     result.metallic = 0;
     result.total_radiance = float3(0, 0, 0);
     result.primary_world_pos = float3(0, 0, 0);
+    result.material_id = 0;
     result.is_hit = false;
 
     float3 throughput = float3(1, 1, 1);
@@ -336,6 +338,9 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
             result.world_normal = intersection.normal;
             result.roughness = mat_param.roughness;
             result.metallic = mat_param.metallic;
+            // Use instance ID (primitiveId) for disocclusion — unique per object,
+            // unlike materialId which can be shared across different objects.
+            result.material_id = intersection.primitiveId;
             result.albedo = mat_param.base_color;
 
             // View-space Z: transform hit position by view matrix and take Z
@@ -553,7 +558,10 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     if (last_output.is_hit)
     {
         float2 encoded_normal = EncodeNormalOct(last_output.world_normal);
-        normalRoughnessOutput[pixel] = float4(encoded_normal, last_output.roughness, 0);
+        // Pack material ID into alpha for cross-material disocclusion detection.
+        // Normalize to [0,1] range for RGBA16Unorm storage.
+        float material_id_norm = float(last_output.material_id % 1024) / 1023.0;
+        normalRoughnessOutput[pixel] = float4(encoded_normal, last_output.roughness, material_id_norm);
         viewZOutput[pixel] = last_output.view_z;
         albedoOutput[pixel] = float4(last_output.albedo, last_output.metallic);
     }

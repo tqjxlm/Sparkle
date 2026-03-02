@@ -515,7 +515,8 @@ void GPURenderer::Update()
         bool is_ta_diagnostic = render_config_.reblur_debug_pass == DP::TADisocclusion ||
                                 render_config_.reblur_debug_pass == DP::TAMotionVector ||
                                 render_config_.reblur_debug_pass == DP::TADepth ||
-                                render_config_.reblur_debug_pass == DP::TAHistory;
+                                render_config_.reblur_debug_pass == DP::TAHistory ||
+                                render_config_.reblur_debug_pass == DP::TAMaterialId;
         ReblurCompositeShader::UniformBufferData comp_ubo{
             .resolution = {image_size_.x(), image_size_.y()},
             .frame_index = comp_frame_index,

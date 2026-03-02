@@ -82,6 +82,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
         float4 nr = inNormalRoughness[pixel];
         float3 center_normal = DecodeNormalOct(nr.xy);
         float center_roughness = nr.z;
+        uint center_instance_id = uint(round(nr.a * 1023.0));
 
         float frustum_size = GetFrustumSize(min_rect_dim_mul_unproject, center_viewZ);
         float3 center_Xv = GetViewSpacePosition(pixel, center_viewZ);
@@ -118,6 +119,13 @@ void main(uint3 DTid : SV_DispatchThreadID)
                 float4 sample_nr = inNormalRoughness[sample_pixel];
                 float3 sample_normal = DecodeNormalOct(sample_nr.xy);
                 float sample_roughness = sample_nr.z;
+
+                // Instance ID edge-stopping: prevent cross-object reconstruction.
+                // Without this, disoccluded floor pixels pull object radiance from
+                // nearby converged object pixels via the (1+accum) weight preference.
+                uint sample_instance_id = uint(round(sample_nr.a * 1023.0));
+                if (sample_instance_id != center_instance_id)
+                    continue;
 
                 float cos_angle = saturate(dot(center_normal, sample_normal));
                 float angle = acos(cos_angle);

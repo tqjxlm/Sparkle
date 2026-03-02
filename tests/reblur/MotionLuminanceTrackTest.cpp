@@ -16,8 +16,8 @@ namespace sparkle
 /// Captures at frames: 5, 10, 15, 20, 25 (during motion)
 /// Then waits for convergence and captures one final "settled" screenshot.
 ///
-/// Usage: --test_case motion_luminance_track --pipeline gpu --use_reblur true
-///        --camera_animation orbit_sweep --max_spp 60 --spp 1
+/// Usage: --test_case motion_luminance_track --pipeline gpu --use_reblur true --max_spp 60 --spp 1
+/// Note: camera motion removed (CameraAnimator deleted). This test now runs static.
 class MotionLuminanceTrackTest : public TestCase
 {
 public:

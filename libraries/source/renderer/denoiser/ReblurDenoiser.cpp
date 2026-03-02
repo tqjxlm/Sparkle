@@ -422,7 +422,8 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
 
     // Temporal Accumulation: temp1 + history → temp2, writes internal_data
     bool is_ta_diagnostic = debug_pass == DP::TADisocclusion || debug_pass == DP::TAMotionVector ||
-                             debug_pass == DP::TADepth || debug_pass == DP::TAHistory;
+                             debug_pass == DP::TADepth || debug_pass == DP::TAHistory ||
+                             debug_pass == DP::TAMaterialId;
     uint32_t ta_debug =
         is_ta_diagnostic ? (static_cast<uint32_t>(debug_pass) - static_cast<uint32_t>(DP::TADisocclusion) + 1) : 0;
     TemporalAccumulate(inputs, settings, ta_debug);

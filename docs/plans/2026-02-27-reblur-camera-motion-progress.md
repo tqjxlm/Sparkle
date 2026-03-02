@@ -453,3 +453,105 @@ Fix options (not yet implemented):
 1. Move clamp before demodulation or scale limit by inverse albedo
 2. Smooth the PT blend ramp transition instead of abrupt reset
 3. Raise output_limit from 6 to a higher value
+
+## Cross-Object Ghosting Fix (2026-03-02, Session 7)
+
+### Problem
+User reported "Still severe ghosting" — objects leave their history on the floor during camera motion. Visible as crescent-shaped trails behind objects after each nudge.
+
+### Root Cause Investigation
+
+#### Finding 1: normalRoughness.a was always 0
+The path tracer wrote `normalRoughnessOutput[pixel] = float4(encoded_normal, roughness, 0)` — the alpha channel (designed for material/instance ID) was never populated. BilinearHistorySample only checked depth + normal agreement, never object identity.
+
+#### Finding 2: Disoccluded pixels had 50% energy loss
+When all bilinear taps were rejected (disoccluded), `hist_diff = float4(0)`. With `accum_speed = 1`, `lerp(0, current, 0.5) = 0.5 * current` — 50% energy loss creating dark ghosts.
+
+#### Finding 3: Spatial blur lacked instance_id edge-stopping
+`reblur_blur.cs.slang` (PreBlur, Blur, PostBlur) used only normal, depth, roughness, and hit distance for edge-stopping. Object radiance could bleed onto adjacent floor pixels, contaminating spatial filter output.
+
+#### Finding 4: HistoryFix lacked instance_id edge-stopping (ROOT CAUSE)
+`reblur_history_fix.cs.slang` does bilateral spatial reconstruction for recently disoccluded pixels. It uses `(1 + sample_accum)` weight, which **strongly prefers converged pixels** (objects at accum=60+) over newly disoccluded pixels (floor at accum=1). Combined with large stride reaching 10-20 pixels across boundaries, it pulled object radiance onto newly revealed floor pixels. **HistoryFix output is stored as history for the next frame** via `CopyHistoryData`, causing contamination to persist across frames.
+
+#### Finding 5: CatmullRom sampling bypassed instance_id
+When `footprintQuality > 0.99` (all 4 bilinear taps valid), CatmullRom was used with hardware bilinear filtering on a 4x4 area. The outer taps could reach across object boundaries without instance_id checks.
+
+#### Finding 6: Spatial blur `continue` bug
+In the Poisson sample loop, `continue` in the diffuse block skipped the specular block too (both share the same `for` loop). Fixed by restructuring with `if/else`.
+
+### Fixes Implemented
+
+1. **Instance ID in normalRoughness.a** (`ray_trace_split.cs.slang`)
+   - Store `intersection.primitiveId` (actually `CommittedInstanceIndex()`, unique per object) as `float(id % 1024) / 1023.0` in normalRoughness.a
+
+2. **Instance ID check in BilinearHistorySample** (`reblur_reprojection.h.slang`)
+   - Added `currentMaterialIdNorm` parameter. Reject bilinear taps where `abs(pnr.a - currentMaterialIdNorm) > 0.0005`
+
+3. **Disoccluded pixel energy fix** (`reblur_temporal_accumulation.cs.slang`)
+   - When disoccluded: `hist_diff = current_diff; hist_spec = current_spec;` before blending. Result: `lerp(current, current, 0.5) = current` — full energy, accum_speed=1 preserved for tracking
+
+4. **Instance ID edge-stopping in spatial blur** (`reblur_blur.cs.slang`)
+   - Compare `uint(round(sample_nr.a * 1023.0))` against center pixel's instance_id. Skip cross-object samples. Fixed `continue` bug by restructuring to `if/else`.
+
+5. **Instance ID edge-stopping in HistoryFix** (`reblur_history_fix.cs.slang`)
+   - Same instance_id check. Prevents cross-object bilateral reconstruction.
+
+6. **Safe CatmullRom guard** (`reblur_temporal_accumulation.cs.slang`)
+   - Before CatmullRom, check 3x3 neighborhood around reprojected center. If any pixel has different instance_id, fall back to bilinear.
+
+7. **TAMaterialId debug visualization** (debug_output == 5)
+   - R = current instance_id, G = prev instance_id, B = mismatch flag
+
+8. **Temporal stabilization disocclusion bypass** (`reblur_temporal_stabilization.cs.slang`)
+   - When `accum_incoming <= 1.0`: skip stabilized history blend (blend = 0), use 100% PostBlur output
+
+### Verification
+
+Red diagnostic overlay confirmed disocclusion triggers correctly at ALL object boundaries during camera nudges. With 60 frames accumulation per nudge, floor is clean — crescents are only MC noise from low sample count at recently disoccluded pixels (expected behavior at 1 spp). With 10 frames, noise crescents are visible but carry correct floor radiance (no object color contamination).
+
+### CameraAnimator Removal
+
+User explicitly requested: "Remove camera animator everywhere as it can be simulated in TestCase without introducing test only logic."
+
+**Deleted:**
+- `CameraAnimator.h`, `CameraAnimator.cpp`
+
+**Removed from production code:**
+- `AppFramework.h/cpp` — include, `camera_animator_`, `camera_animator_initialized_`, `camera_animator_start_frame_`, all animation logic in Tick
+- `RenderConfig.h/cpp` — `camera_animation`, `camera_animation_frames` config keys
+
+**Test scripts updated:**
+- `reblur_test_suite.py` — replaced tests 17-18 (CameraAnimator tests) with ghosting test (ReblurGhostingTest)
+- Removed `--camera_animation` args from all test scripts
+- Camera motion testing now uses TestCase-based approach (`ReblurGhostingTest`)
+
+### New Test: ReblurGhostingTest (`tests/reblur/ReblurGhostingTest.cpp`)
+- C++ TestCase that warms up 30 frames, nudges camera 5× (3° yaw each), accumulates 10 frames per nudge with screenshot, then settles 30 frames with final screenshot
+- Screenshots: `ghosting_before`, `ghosting_nudge_0..4`, `ghosting_settled`
+- Registered as `reblur_ghosting`
+
+### Files Modified
+- `ray_trace_split.cs.slang` — material_id field in SplitPathOutput, store at bounce 0, write to normalRoughness.a
+- `reblur_reprojection.h.slang` — currentMaterialIdNorm parameter, instance_id check
+- `reblur_temporal_accumulation.cs.slang` — pass instance_id to BilinearHistorySample, energy loss fix, CatmullRom 3x3 guard, TAMaterialId debug mode
+- `reblur_blur.cs.slang` — instance_id edge-stopping, fixed continue bug
+- `reblur_history_fix.cs.slang` — instance_id edge-stopping
+- `reblur_temporal_stabilization.cs.slang` — disocclusion bypass
+- `RenderConfig.h` — TAMaterialId enum, removed camera_animation configs
+- `ReblurDenoiser.cpp` — TAMaterialId diagnostic
+- `GPURenderer.cpp` — TAMaterialId diagnostic
+- `AppFramework.h/cpp` — removed CameraAnimator
+- `RenderConfig.cpp` — removed camera_animation configs
+- `ReblurGhostingTest.cpp` — new test case
+- `reblur_test_suite.py` — replaced CameraAnimator tests with ghosting test
+
+### Full Test Suite Verification (2026-03-02)
+Ran `reblur_test_suite.py --framework macos` after all ghosting fixes + CameraAnimator removal.
+**Result: 26 passed, 0 failed** (697.5s total).
+
+Key metrics:
+- Convergence stability: 0.70% unstable pixels (threshold 1.0%), 1.2x vs vanilla
+- Camera motion quality: 8.68% unstable (threshold 15.0%)
+- Converged history: 31/31 sub-checks pass, noise ratio 1.48x (denoised-only), ghosting FLIP 0.34 <= 0.4
+- End-to-end FLIP: PASS
+- Denoised motion luminance: no dimming, settled quality 1.72x peak
