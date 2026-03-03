@@ -17,7 +17,7 @@ Orchestrates three runs:
 
 Metrics:
   - Denoised luminance ratio: after/before (should be > 0.93)
-  - Denoised noise ratio: after/before (should be < 3.0)
+  - Denoised noise ratio: after/before (should be < 4.0)
   - Denoised-vs-vanilla gap: known demod/remod artifact, measured not asserted
 
 Usage:
@@ -44,7 +44,9 @@ MIN_LUMA_RATIO = 0.93  # max 7% loss from viewpoint change + 1spp blend
 MAX_LUMA_RATIO = 1.07  # max 7% gain
 
 # Denoised noise preservation: after/before laplacian variance ratio
-MAX_NOISE_RATIO = 3.0
+# With higher max_stabilized_frame_num (1024), the "before" is cleaner,
+# so the same camera nudge disruption produces a higher ratio.
+MAX_NOISE_RATIO = 4.0
 
 # Denoised FLIP: before vs after perceptual difference
 MAX_DENOISED_FLIP = 0.25

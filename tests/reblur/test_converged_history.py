@@ -51,7 +51,7 @@ sys.path.insert(0, PROJECT_ROOT)
 # Denoised-only (--reblur_no_pt_blend): isolates denoiser from PT blend ramp
 DENOISED_MIN_LUMA_RATIO = 0.93  # max 7% loss from viewpoint change + 1spp blend
 DENOISED_MAX_LUMA_RATIO = 1.07  # max 7% gain
-DENOISED_NOISE_RATIO_MAX = 3.0  # denoiser should preserve noise level
+DENOISED_NOISE_RATIO_MAX = 4.0  # stronger TS stabilization → cleaner "before", higher ratio
 DENOISED_FLIP_MAX = 0.25        # perceptual before vs after
 # Full pipeline: REBLUR-after vs vanilla-after (ghosting detection)
 # Note: after camera motion the PT blend ramp resets (cumulated_sample_count → 0)
@@ -61,9 +61,9 @@ DENOISED_FLIP_MAX = 0.25        # perceptual before vs after
 GHOSTING_FLIP_MAX = 0.40
 # Full pipeline: noise ratio after/before
 # Before = PT-converged (nearly noiseless), after = denoised output (PT blend
-# ramp reset).  The transition from converged PT to denoised is expected to
-# increase noise significantly.  Run 0.5 validates denoiser noise quality.
-NOISE_RATIO_MAX_FULL = 20.0
+# ramp reset).  Post-nudge noise is dominated by TA motion response (high
+# variance between runs: 5-10x observed).  Not affected by max_stabilized.
+NOISE_RATIO_MAX_FULL = 12.0
 # Temporal accum: noise ratio (raw, before spatial blur)
 NOISE_RATIO_MAX_TEMPORAL = 60.0
 # Disocclusion map: minimum fraction of geometry pixels with valid history

@@ -53,6 +53,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 spec = denoisedSpecular[pixel];
     float4 albedo = albedoMetallic[pixel];
 
+
     float3 denoised_color = diff.rgb * albedo.rgb + spec.rgb;
 
     // Blend denoised composite with path tracer accumulated result.

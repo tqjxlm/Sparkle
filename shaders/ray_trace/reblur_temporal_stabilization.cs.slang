@@ -77,19 +77,21 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float diff_accum_speed, spec_accum_speed;
     UnpackInternalData(packed, diff_accum_speed, spec_accum_speed);
 
-    // Sky pixels: pass through
+    // Sky pixels: pass through (reset stabilized counter)
     if (center_viewZ > denoising_range)
     {
-        outDiffuse[pixel] = inDiffuse[pixel];
+        float4 d = inDiffuse[pixel];
+        outDiffuse[pixel] = float4(d.rgb, 0.0);
         outSpecular[pixel] = inSpecular[pixel];
         outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
     }
 
-    // Stabilization disabled
+    // Stabilization disabled (reset stabilized counter)
     if (max_stabilized_frame_num == 0)
     {
-        outDiffuse[pixel] = inDiffuse[pixel];
+        float4 d = inDiffuse[pixel];
+        outDiffuse[pixel] = float4(d.rgb, 0.0);
         outSpecular[pixel] = inSpecular[pixel];
         outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
@@ -139,17 +141,26 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float2 prevUV = currentUV + motionVec;
 
     float4 stab_diff, stab_spec;
+    // Per-pixel stabilized frame counter stored in .a of the stabilized textures.
+    // Tracks how many consecutive frames this pixel has been stabilized, independent
+    // of TA's accum_speed (which caps at maxAccumulatedFrameNum = 63).
+    // This allows TS to accumulate up to max_stabilized_frame_num (255) for
+    // much stronger noise suppression at convergence.
+    float prev_stab_count = 0.0;
     if (all(prevUV >= 0.0) && all(prevUV <= 1.0))
     {
         int2 prevPixel = int2(prevUV * float2(resolution));
         prevPixel = clamp(prevPixel, int2(0, 0), int2(resolution) - int2(1, 1));
         stab_diff = prevStabilizedDiff[prevPixel];
         stab_spec = prevStabilizedSpec[prevPixel];
+        // Use diffuse .a for the shared stabilized frame counter
+        prev_stab_count = stab_diff.a;
     }
     else
     {
         stab_diff = current_diff;
         stab_spec = current_spec;
+        prev_stab_count = 0.0;
     }
 
     float stab_diff_luma = GetLuminance(stab_diff.rgb);
@@ -247,23 +258,39 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
             clamped_spec_color = current_spec.rgb;
     }
 
-    // Stabilization blend weight: scale with actual accumulation, not frame_index.
-    // Using frame_index causes the blend to ramp to 0.996 within a few frames
-    // (because internal_frame_index increments ~6x per app frame and never resets
-    // on camera motion). This makes freshly disoccluded pixels blend 99.6% with
-    // stale stabilized history, causing severe energy loss during motion.
-    // Using accum_speed alone: disoccluded pixels (accum=0) get 100% PostBlur
-    // output (correct energy), converged pixels (accum=63) get 98.4% stabilization.
-    float diff_stab_frames = min(float(max_stabilized_frame_num), diff_accum_speed);
-    float spec_stab_frames = min(float(max_stabilized_frame_num), spec_accum_speed);
-    float diff_blend = diff_disoccluded ? 0.0 : diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
-    float spec_blend = spec_disoccluded ? 0.0 : spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
+    // Per-pixel stabilized frame counter: increments each frame, resets on
+    // disocclusion, caps at max_stabilized_frame_num.  This decouples the TS
+    // blend weight from TA's accum_speed (max 63), allowing TS to accumulate
+    // up to 255 frames for stronger noise suppression.
+    // Start from TA accum_speed on first frame (bootstraps from TA quality),
+    // then increment independently.  Antilag reduces the counter proportionally.
+    float min_accum = min(diff_accum_incoming, spec_accum_incoming);
+    float stab_count;
+    if (min_accum <= 1.0)
+    {
+        // Disoccluded: reset stabilization counter
+        stab_count = min_accum;
+    }
+    else
+    {
+        // Increment previous counter, but don't exceed max or drop below
+        // current TA accum_speed (TA disocclusion detection is authoritative).
+        float min_antilag = min(diff_antilag, spec_antilag);
+        stab_count = prev_stab_count * min_antilag + 1.0;
+        stab_count = clamp(stab_count, min_accum, float(max_stabilized_frame_num));
+    }
+
+    float diff_stab_frames = diff_disoccluded ? 0.0 : stab_count;
+    float spec_stab_frames = spec_disoccluded ? 0.0 : stab_count;
+    float diff_blend = diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
+    float spec_blend = spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
 
     // Blend current with clamped history
     float3 final_diff = lerp(current_diff.rgb, clamped_diff_color, diff_blend);
     float3 final_spec = lerp(current_spec.rgb, clamped_spec_color, spec_blend);
 
-    outDiffuse[pixel] = float4(final_diff, current_diff.a);
+    // Store stabilized frame counter in diffuse .a for next frame's readback
+    outDiffuse[pixel] = float4(final_diff, stab_count);
     outSpecular[pixel] = float4(final_spec, current_spec.a);
 
     // Write back modified accumulation speed (antilag may have reduced it)
