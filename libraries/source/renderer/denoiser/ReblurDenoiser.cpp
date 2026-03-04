@@ -309,6 +309,21 @@ void ReblurDenoiser::CreatePipelines()
     auto *ta_resources = temporal_accum_pipeline_->GetShaderResource<ReblurTemporalAccumShader>();
     ta_resources->ubo().BindResource(temporal_accum_ub_);
 
+    // Second TA pipeline for diagnostic two-pass mode (separate UBO to avoid overwrite)
+    temporal_accum_pipeline_alt_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurTemporalAccumPipelineAlt");
+    temporal_accum_pipeline_alt_->SetShader<RHIShaderStage::Compute>(temporal_accum_shader_);
+    temporal_accum_pipeline_alt_->Compile();
+
+    temporal_accum_ub_alt_ = rhi_->CreateBuffer({.size = sizeof(ReblurTemporalAccumShader::UniformBufferData),
+                                                  .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                  .mem_properties = RHIMemoryProperty::None,
+                                                  .is_dynamic = true},
+                                                 "ReblurTemporalAccumUBOAlt");
+
+    auto *ta_alt_resources = temporal_accum_pipeline_alt_->GetShaderResource<ReblurTemporalAccumShader>();
+    ta_alt_resources->ubo().BindResource(temporal_accum_ub_alt_);
+
     // History fix pipeline
     history_fix_shader_ = rhi_->CreateShader<ReblurHistoryFixShader>();
     history_fix_pipeline_ =
@@ -426,11 +441,22 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
                              debug_pass == DP::TAMaterialId;
     uint32_t ta_debug =
         is_ta_diagnostic ? (static_cast<uint32_t>(debug_pass) - static_cast<uint32_t>(DP::TADisocclusion) + 1) : 0;
-    TemporalAccumulate(inputs, settings, ta_debug);
 
     if (is_ta_diagnostic)
     {
+        // Two-pass approach: diagnostic modes write non-accumulated data to temp2,
+        // which would corrupt history if fed back via CopyHistoryData.
+        //
+        // Pass 1 (primary pipeline): run with diagnostic output, capture visualization.
+        // Pass 2 (alt pipeline): run normally for proper temporal accumulation.
+        //
+        // Uses separate pipelines with separate UBOs because the RHI's dynamic UBO
+        // Upload is a CPU memcpy — a second Upload would overwrite the first pass's
+        // UBO data before the GPU reads it.
+        TemporalAccumulate(inputs, settings, ta_debug);
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
+        // Pass 2: use alt pipeline (separate UBO) to avoid dynamic buffer overwrite.
+        TemporalAccumulate(inputs, settings, 0, /*use_alt_pipeline=*/true);
         CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
         internal_data_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::Transfer,
@@ -440,6 +466,8 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
         history_valid_ = true;
         return;
     }
+
+    TemporalAccumulate(inputs, settings, ta_debug);
 
     if (debug_pass == DP::TemporalAccum)
     {
@@ -630,9 +658,11 @@ void ReblurDenoiser::Blur(const ReblurInputBuffers &inputs, const ReblurSettings
 }
 
 void ReblurDenoiser::TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
-                                        uint32_t debug_output)
+                                        uint32_t debug_output, bool use_alt_pipeline)
 {
-    auto *resources = temporal_accum_pipeline_->GetShaderResource<ReblurTemporalAccumShader>();
+    auto &pipeline = use_alt_pipeline ? temporal_accum_pipeline_alt_ : temporal_accum_pipeline_;
+    auto &ub = use_alt_pipeline ? temporal_accum_ub_alt_ : temporal_accum_ub_;
+    auto *resources = pipeline->GetShaderResource<ReblurTemporalAccumShader>();
 
     // Bind current frame inputs
     resources->inDiffuse().BindResource(diff_temp1_->GetDefaultView(rhi_));
@@ -666,7 +696,7 @@ void ReblurDenoiser::TemporalAccumulate(const ReblurInputBuffers &inputs, const 
         .enable_firefly_suppression = settings.enable_anti_firefly ? 1u : 0u,
         .debug_output = debug_output,
     };
-    temporal_accum_ub_->Upload(rhi_, &ubo);
+    ub->Upload(rhi_, &ubo);
 
     // Transition inputs to Read.
     // diff_temp1_/spec_temp1_ were just written by Blur (PrePass).
@@ -690,7 +720,7 @@ void ReblurDenoiser::TemporalAccumulate(const ReblurInputBuffers &inputs, const 
                                 .before_stage = RHIPipelineStage::ComputeShader});
 
     rhi_->BeginComputePass(compute_pass_);
-    rhi_->DispatchCompute(temporal_accum_pipeline_, {width_, height_, 1u}, {16u, 16u, 1u});
+    rhi_->DispatchCompute(pipeline, {width_, height_, 1u}, {16u, 16u, 1u});
     rhi_->EndComputePass(compute_pass_);
 }
 

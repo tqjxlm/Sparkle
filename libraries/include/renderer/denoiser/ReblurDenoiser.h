@@ -80,7 +80,7 @@ private:
               uint32_t pass_index, RHIImage *in_diff, RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec,
               RHIImage *internal_data, bool has_temporal_data);
     void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
-                            uint32_t debug_output = 0);
+                            uint32_t debug_output = 0, bool use_alt_pipeline = false);
     void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices);
     void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
                            const ReblurMatrices &matrices);
@@ -123,6 +123,12 @@ private:
     RHIResourceRef<RHIShader> temporal_accum_shader_;
     RHIResourceRef<RHIPipelineState> temporal_accum_pipeline_;
     RHIResourceRef<RHIBuffer> temporal_accum_ub_;
+
+    // Second TA pipeline for diagnostic two-pass mode.
+    // Needed because dynamic UBO uploads (memcpy) overwrite the first pass's
+    // UBO data before the GPU reads it. Using a separate pipeline+UBO avoids this.
+    RHIResourceRef<RHIPipelineState> temporal_accum_pipeline_alt_;
+    RHIResourceRef<RHIBuffer> temporal_accum_ub_alt_;
 
     // History fix pass
     RHIResourceRef<RHIShader> history_fix_shader_;

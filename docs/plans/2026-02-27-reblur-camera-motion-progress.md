@@ -682,3 +682,100 @@ Increased `max_stabilized_frame_num` from 255 to 1024 in `ReblurDenoiser.h`. Lon
 - Converged history: 31/31 PASS
 - Denoiser history: 7/7 PASS
 - Full test suite: 22/25 PASS (2 pre-existing failures, 1 intermittent from run variance)
+
+## TAHistory Debug Mode Fix (2026-03-03, Session 10)
+
+### Problem
+TAHistory debug mode (`--reblur_debug_pass TAHistory`) shows history that never improves as the scene stabilizes. Mean luminance at frame 60 is only 0.002 (near-black), and noise increases rather than decreasing.
+
+### Root Cause Investigation
+
+**Phase 1: Data flow tracing**
+
+Traced the complete TAHistory data flow:
+
+1. **Shader** (`reblur_temporal_accumulation.cs.slang:284-293`): When `debug_output==4`, writes raw reprojected history `hist_diff` to `outDiffuse[pixel]` (= temp2) and **previous** accum speeds to `outInternalData` (= internal_data). Returns early, skipping the `lerp(hist, current, weight)` blending.
+
+2. **C++ code** (`ReblurDenoiser.cpp:431-441`): `CopyHistoryData(diff_temp2_, spec_temp2_)` copies temp2 → diff_history_ and internal_data → prev_internal_data_.
+
+3. **Next frame**: prevDiffHistory = diff_history_ = raw reprojected history (never blended with current frame). Accum speeds = previous frame's speeds (never incremented).
+
+**Result**: Self-referential feedback loop. History echoes back its own reprojected data without incorporating new path tracer samples. Luminance stays near zero because the initial history (frame 1) is the current frame's data at 1spp, and subsequent frames just re-read and re-project this same data, with each reprojection/tone-mapping pass degrading it further.
+
+**All TA diagnostic modes affected**: TADisocclusion, TAMotionVector, TADepth, TAHistory, TAMaterialId — all write diagnostic (non-accumulated) data to temp2, which gets copied to history.
+
+### Reproduction
+
+Created `ReblurTAHistoryTest.cpp` (C++ test case) and `test_ta_history.py` (Python validation):
+
+| Metric | Before Fix | After Fix |
+|--------|-----------|-----------|
+| Early luma (frame 10) | 0.002 | **0.044** |
+| Late luma (frame 60) | 0.002 | **0.165** |
+| Luma increase (late/early) | ~1.0x (stagnant) | **3.77x** (accumulating) |
+| Relative noise (CV) early | — | 0.83 |
+| Relative noise (CV) late | — | 0.62 |
+| CV reduction | ~1.0x (no improvement) | **1.33x** (converging) |
+
+### Fix
+
+**Two-pass approach** (`ReblurDenoiser.cpp:430-447`): For TA diagnostic modes, run `TemporalAccumulate` twice:
+
+1. **Pass 1** (diagnostic): Run with `ta_debug` flag. Diagnostic data written to temp2. `CopyToOutput(temp2)` captures visualization for display.
+2. **Pass 2** (normal): Run with `ta_debug=0`. Properly accumulated result written to temp2. `CopyHistoryData(temp2)` stores correct history for next frame.
+
+This ensures history is properly maintained (blended accumulation stored) while still showing the diagnostic visualization. The extra TA dispatch cost is acceptable in debug mode.
+
+### Files Modified
+- `ReblurDenoiser.cpp` — two-pass TA for diagnostic modes
+
+### Files Created
+- `tests/reblur/ReblurTAHistoryTest.cpp` — C++ test case: early (frame 10) + late (frame 60) screenshots
+- `tests/reblur/test_ta_history.py` — Python validation: luma increase, relative noise reduction, no NaN
+- `reblur_test_suite.py` — added test 24 (TAHistory convergence)
+
+### Initial Test Results
+- TAHistory convergence test: **7/7 PASS**
+- Full test suite: 25/26 pass — **Test 20 TADisocclusion sub-check failed** (38.2% valid reprojection < 60% threshold)
+
+### Root Cause of Test 20 Failure: Dynamic UBO Overwrite
+
+**Symptom:** TADisocclusion diagnostic output showed noisy scene render instead of cyan/magenta diagnostic visualization. Geometry pixel count dropped from 653706 (old code) to 253302 (new code), causing valid reprojection to read 38.2% instead of 99.7%.
+
+**Investigation path:**
+1. Ruled out GPU synchronization — added explicit Transfer→ComputeShader barriers, no effect
+2. Ruled out image layout conflicts — tried saving diagnostic to temp1 via image copy, still dark output
+3. Key experiment: CopyToOutput(temp2) WITHOUT Pass 2 = correct diagnostic. WITH Pass 2 = dark output. ANY second TemporalAccumulate call causes dark output regardless of ordering.
+
+**Root cause:** `RHIBuffer::Upload()` for dynamic buffers (`RHIBuffer.cpp:163-169`) does a CPU `memcpy` to host-mapped GPU memory. When `TemporalAccumulate` is called twice in the same frame, the second `Upload` overwrites the first UBO data **before the GPU executes the first dispatch**. Both passes run with `debug_output=0` (the second upload's value), so no diagnostic visualization appears.
+
+```cpp
+// RHIBuffer.cpp:163-169 — immediate host-side overwrite
+void RHIBuffer::Upload(RHIContext *rhi, const void *data) {
+    if (IsDynamic()) {
+        memcpy(dynamic_allocation_.GetMappedAddress(rhi->GetFrameIndex()), data, GetSize());
+    }
+```
+
+### Fix: Alt Pipeline with Separate UBO
+
+Created a second TA pipeline (`temporal_accum_pipeline_alt_`) with its own UBO (`temporal_accum_ub_alt_`). Each pipeline has independent descriptor sets and UBO memory, so uploads don't conflict.
+
+**Modified `TemporalAccumulate` signature:**
+```cpp
+void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
+                        uint32_t debug_output = 0, bool use_alt_pipeline = false);
+```
+
+**Diagnostic two-pass path:**
+1. **Pass 1** (primary pipeline): TA with diagnostic output → `CopyToOutput` captures visualization
+2. **Pass 2** (alt pipeline, separate UBO): TA with `debug_output=0` → `CopyHistoryData` stores proper history
+
+### Files Modified (Additional)
+- `ReblurDenoiser.h` — added `temporal_accum_pipeline_alt_`, `temporal_accum_ub_alt_` members; updated `TemporalAccumulate` signature
+- `ReblurDenoiser.cpp` — alt pipeline/UBO initialization in constructor; `TemporalAccumulate` selects pipeline/UBO via `use_alt_pipeline` param; diagnostic path uses alt pipeline for Pass 2
+
+### Final Test Results
+- TAHistory convergence test: **7/7 PASS** (luma increase 4.15x, relative noise reduction 1.35x)
+- TADisocclusion test: **PASS** (99.7% valid reprojection, 0.910 footprint quality)
+- Full test suite: **26/26 PASS** (698s total)

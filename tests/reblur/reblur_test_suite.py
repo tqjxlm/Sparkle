@@ -23,6 +23,7 @@ Tests included:
  21. End-to-end FLIP — full REBLUR pipeline screenshot vs ground truth (FLIP <= 0.1)
  22. Denoiser history preservation — pure denoiser quality after camera nudge (no PT blend)
  23. Denoised motion luminance — luminance stability during continuous camera motion
+ 24. TAHistory convergence — TAHistory debug mode shows converging history
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -357,6 +358,14 @@ def main():
         "23. Denoised motion luminance stability (continuous orbit sweep)",
         show_output=True)
     results.append(("Denoised motion luminance stability", ok, dur))
+
+    # --- Test 24: TAHistory debug mode convergence ---
+    ta_history_py = os.path.join(SCRIPT_DIR, "test_ta_history.py")
+    ok, dur, _ = run_command(
+        [py, ta_history_py, "--framework", fw, "--skip_build"],
+        "24. TAHistory debug mode convergence",
+        show_output=True)
+    results.append(("TAHistory convergence", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)
