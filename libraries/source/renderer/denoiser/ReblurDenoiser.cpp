@@ -408,9 +408,9 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
                              const ReblurMatrices &matrices, uint32_t /*frame_index*/,
                              RenderConfig::ReblurDebugPass debug_pass)
 {
-    // DIAGNOSTIC: bypass all NRD processing, copy raw input to output
-    // to measure demod/remod energy loss without denoiser interference.
-    if (false) // DIAGNOSTIC: bypass NRD (change to true to enable)
+    using DP = RenderConfig::ReblurDebugPass;
+
+    if (debug_pass == DP::Passthrough)
     {
         CopyToOutput(const_cast<RHIImage *>(inputs.diffuse_radiance_hit_dist),
                      const_cast<RHIImage *>(inputs.specular_radiance_hit_dist));
@@ -425,8 +425,6 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     // Uses previous frame's accumSpeed for radius adaptation
     Blur(inputs, settings, matrices, 0, inputs.diffuse_radiance_hit_dist, inputs.specular_radiance_hit_dist,
          diff_temp1_.get(), spec_temp1_.get(), prev_internal_data_.get(), history_valid_);
-
-    using DP = RenderConfig::ReblurDebugPass;
 
     if (debug_pass == DP::PrePass)
     {
@@ -486,13 +484,23 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     // History Fix: temp2 → temp1 (wide-stride bilateral for disoccluded regions)
     HistoryFix(inputs, settings, matrices);
 
+    // Store TemporalAccum output (temp2) as history BEFORE Blur overwrites it.
+    // Critical: use TA output, NOT HistoryFix output (temp1). HistoryFix applies
+    // anti-firefly clamping which, when fed back into history, compounds through
+    // the temporal accumulation loop causing systematic energy loss (measured: 32%
+    // at 2048 spp). The TA output in temp2 is still intact here because HistoryFix
+    // reads temp2 but writes to temp1.
+    CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
+
+    // CopyHistoryData leaves internal_data_ in TransferSrc; transition to Read
+    // so Blur/PostBlur can use it as a compute shader resource.
+    internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::Transfer,
+                                .before_stage = RHIPipelineStage::ComputeShader});
+
     if (debug_pass == DP::HistoryFix)
     {
         CopyToOutput(diff_temp1_.get(), spec_temp1_.get());
-        CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());
-        internal_data_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = RHIPipelineStage::Transfer,
-                                    .before_stage = RHIPipelineStage::ComputeShader});
         CopyPreviousFrameData(inputs);
         internal_frame_index_++;
         history_valid_ = true;
@@ -506,10 +514,6 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     if (debug_pass == DP::Blur)
     {
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
-        CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
-        internal_data_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = RHIPipelineStage::Transfer,
-                                    .before_stage = RHIPipelineStage::ComputeShader});
         CopyPreviousFrameData(inputs);
         internal_frame_index_++;
         history_valid_ = true;
@@ -519,16 +523,6 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     // PostBlur: temp2 → denoised output (final spatial refinement, uses new accumSpeed)
     Blur(inputs, settings, matrices, 2, diff_temp2_.get(), spec_temp2_.get(), denoised_diffuse_.get(),
          denoised_specular_.get(), internal_data_.get(), true);
-
-    // Store HistoryFix output (temp1, before spatial blur) as history.
-    // Using pre-blur data prevents spatial blur from compounding frame over frame.
-    // temp1 still holds the HistoryFix output since Blur/PostBlur only read from it.
-    CopyHistoryData(diff_temp1_.get(), spec_temp1_.get());
-
-    // CopyHistoryData leaves internal_data_ in TransferSrc; transition to Read
-    internal_data_->Transition({.target_layout = RHIImageLayout::Read,
-                                .after_stage = RHIPipelineStage::Transfer,
-                                .before_stage = RHIPipelineStage::ComputeShader});
 
     // TemporalStabilization: denoised output → stabilized output (variance clamping)
     // Also writes antilag-modified accumulation speeds to prev_internal_data_

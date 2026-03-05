@@ -19,7 +19,7 @@ struct ReblurSettings
     float diffuse_prepass_blur_radius = 30.f;
     float specular_prepass_blur_radius = 50.f;
     uint32_t max_accumulated_frame_num = 63;
-    uint32_t max_stabilized_frame_num = 1024;
+    uint32_t max_stabilized_frame_num = 63;
     uint32_t history_fix_frame_num = 3;
     float history_fix_stride = 14.f;
     float disocclusion_threshold = 0.01f;
@@ -28,7 +28,7 @@ struct ReblurSettings
     float plane_dist_sensitivity = 0.02f;
     float min_hit_dist_weight = 0.1f;
     float hit_dist_params[4] = {3.f, 0.1f, 20.f, -25.f};
-    float stabilization_strength = 1.f;
+    float stabilization_strength = 1.0f;
     float antilag_sigma_scale = 2.f;
     float antilag_sensitivity = 3.f;
     float fast_history_sigma_scale = 2.f;

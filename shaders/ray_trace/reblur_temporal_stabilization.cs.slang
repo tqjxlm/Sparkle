@@ -142,10 +142,10 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
 
     float4 stab_diff, stab_spec;
     // Per-pixel stabilized frame counter stored in .a of the stabilized textures.
-    // Tracks how many consecutive frames this pixel has been stabilized, independent
-    // of TA's accum_speed (which caps at maxAccumulatedFrameNum = 63).
-    // This allows TS to accumulate up to max_stabilized_frame_num (255) for
-    // much stronger noise suppression at convergence.
+    // Tracks how many consecutive frames this pixel has been stabilized.
+    // Capped at max_stabilized_frame_num (default 63, matching TA).
+    // Higher values cause energy loss due to float16 quantization error
+    // amplified by the EMA's high temporal correlation.
     float prev_stab_count = 0.0;
     if (all(prevUV >= 0.0) && all(prevUV <= 1.0))
     {
@@ -208,11 +208,17 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float diff_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * framerate_scale * diff_non_linear);
     float spec_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * framerate_scale * spec_non_linear);
 
-    // Clamp stabilized history to local color box
-    float diff_lo = diff_mean - diff_sigma * diff_sigma_scale;
-    float diff_hi = diff_mean + diff_sigma * diff_sigma_scale;
-    float spec_lo = spec_mean - spec_sigma * spec_sigma_scale;
-    float spec_hi = spec_mean + spec_sigma * spec_sigma_scale;
+    // Clamp stabilized history to local color box.
+    // At convergence sigma → 0, collapsing the range to [mean, mean] and
+    // clamping every pixel to the neighborhood average (8.5% energy loss).
+    // A minimum sigma floor proportional to the mean prevents this collapse
+    // while still allowing tight clamping during noisy early frames.
+    float diff_sigma_eff = max(diff_sigma, diff_mean * REBLUR_TS_MIN_SIGMA_FRACTION);
+    float spec_sigma_eff = max(spec_sigma, spec_mean * REBLUR_TS_MIN_SIGMA_FRACTION);
+    float diff_lo = diff_mean - diff_sigma_eff * diff_sigma_scale;
+    float diff_hi = diff_mean + diff_sigma_eff * diff_sigma_scale;
+    float spec_lo = spec_mean - spec_sigma_eff * spec_sigma_scale;
+    float spec_hi = spec_mean + spec_sigma_eff * spec_sigma_scale;
 
     // For freshly disoccluded pixels (incoming accum<=1), the stabilized history
     // at the reprojected position belongs to a different surface (the object that
@@ -259,11 +265,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     }
 
     // Per-pixel stabilized frame counter: increments each frame, resets on
-    // disocclusion, caps at max_stabilized_frame_num.  This decouples the TS
-    // blend weight from TA's accum_speed (max 63), allowing TS to accumulate
-    // up to 255 frames for stronger noise suppression.
-    // Start from TA accum_speed on first frame (bootstraps from TA quality),
-    // then increment independently.  Antilag reduces the counter proportionally.
+    // disocclusion, caps at max_stabilized_frame_num.
+    // Antilag reduces the counter proportionally.
     float min_accum = min(diff_accum_incoming, spec_accum_incoming);
     float stab_count;
     if (min_accum <= 1.0)

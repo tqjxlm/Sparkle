@@ -199,35 +199,13 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float diff_weight = 1.0 / (1.0 + diff_accum_speed);
     float spec_weight = 1.0 / (1.0 + spec_accum_speed);
 
-    // Firefly suppression: clamp incoming sample luminance relative to history.
-    // Only apply when history is reliable enough to serve as a reference.
-    // At low accum speeds (after disocclusion or camera motion), the history is
-    // too noisy to distinguish fireflies from legitimate high-variance samples.
-    // Asymmetric clamping at low accum speeds causes systematic energy loss
-    // (measured: 28% luminance drop with threshold at accum >= 4).
-    //
-    // accum >= 16: blend weight is ~6%, history is a stable reference, use 4x clamp.
-    // accum < 16: skip clamping — transient fireflies are diluted by low blend weight.
-    if (enable_firefly_suppression != 0)
-    {
-        if (diff_accum_speed >= 16.0)
-        {
-            float hist_diff_luma = GetLuminance(hist_diff.rgb);
-            float curr_diff_luma = GetLuminance(current_diff.rgb);
-            float max_diff_luma = max(hist_diff_luma * 4.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
-            if (curr_diff_luma > max_diff_luma && curr_diff_luma > 0.0)
-                current_diff.rgb *= max_diff_luma / curr_diff_luma;
-        }
-
-        if (spec_accum_speed >= 16.0)
-        {
-            float hist_spec_luma = GetLuminance(hist_spec.rgb);
-            float curr_spec_luma = GetLuminance(current_spec.rgb);
-            float max_spec_luma = max(hist_spec_luma * 4.0, REBLUR_FIREFLY_SUPPRESSOR_MIN_RELATIVE_SCALE);
-            if (curr_spec_luma > max_spec_luma && curr_spec_luma > 0.0)
-                current_spec.rgb *= max_spec_luma / curr_spec_luma;
-        }
-    }
+    // Firefly suppression is NOT applied here in temporal accumulation.
+    // Reason: the TA output feeds back as history (via CopyHistoryData), so any
+    // per-sample clamping compounds through the exponential moving average,
+    // causing systematic energy loss (measured: 23% at 2048 spp with 4x clamp).
+    // Instead, firefly suppression is handled by HistoryFix (neighborhood mean±2σ
+    // clamp), which operates on the spatial domain and is NOT in the history
+    // feedback loop (CopyHistoryData copies TA output before HistoryFix).
 
     // Linear accumulation: lerp(history, current, weight)
     float4 acc_diff = lerp(hist_diff, current_diff, diff_weight);
