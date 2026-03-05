@@ -40,7 +40,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="REBLUR temporal validation")
     parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -53,7 +53,7 @@ def get_screenshot_dir(framework):
 
 
 def run_capture(framework, debug_pass, max_spp, output_dir, label,
-                use_reblur=True):
+                use_reblur=True, passthrough_args=()):
     """Run app with given params and capture screenshot to output_dir."""
     build_py = os.path.join(PROJECT_ROOT, "build.py")
     cmd = [
@@ -67,7 +67,7 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label,
         "--max_spp", str(max_spp),
         "--reblur_debug_pass", debug_pass,
         "--test_timeout", "120",
-    ]
+    ] + list(passthrough_args)
 
     print(f"\n{'='*60}", flush=True)
     print(f"  {label}", flush=True)
@@ -129,14 +129,14 @@ def validate_image(name, img):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
 
     # Build once
     if not args.skip_build:
         print("Building...", flush=True)
         build_py = os.path.join(PROJECT_ROOT, "build.py")
         result = subprocess.run(
-            [sys.executable, build_py, "--framework", args.framework],
+            [sys.executable, build_py, "--framework", args.framework] + extra_args,
             cwd=PROJECT_ROOT, capture_output=True, text=True,
         )
         if result.returncode != 0:
@@ -154,28 +154,32 @@ def main():
 
     # 1. TemporalAccum at 64 frames
     path = run_capture(args.framework, "TemporalAccum", 64, output_dir,
-                       "TemporalAccum output (64 frames)")
+                       "TemporalAccum output (64 frames)",
+                       passthrough_args=extra_args)
     if not path:
         return 1
     captures["ta_64"] = path
 
     # 2. HistoryFix at 64 frames
     path = run_capture(args.framework, "HistoryFix", 64, output_dir,
-                       "HistoryFix output (64 frames)")
+                       "HistoryFix output (64 frames)",
+                       passthrough_args=extra_args)
     if not path:
         return 1
     captures["hf_64"] = path
 
     # 3. Full pipeline at 4 frames (low convergence baseline)
     path = run_capture(args.framework, "Full", 4, output_dir,
-                       "Full pipeline (4 frames, low convergence)")
+                       "Full pipeline (4 frames, low convergence)",
+                       passthrough_args=extra_args)
     if not path:
         return 1
     captures["full_4"] = path
 
     # 4. Full pipeline at 64 frames (converged)
     path = run_capture(args.framework, "Full", 64, output_dir,
-                       "Full pipeline (64 frames, converged)")
+                       "Full pipeline (64 frames, converged)",
+                       passthrough_args=extra_args)
     if not path:
         return 1
     captures["full_64"] = path
@@ -183,7 +187,7 @@ def main():
     # 5. Vanilla reference at 64 frames (convergence baseline)
     path = run_capture(args.framework, "Full", 64, output_dir,
                        "Vanilla reference (64 frames)",
-                       use_reblur=False)
+                       use_reblur=False, passthrough_args=extra_args)
     if not path:
         return 1
     captures["vanilla_64"] = path

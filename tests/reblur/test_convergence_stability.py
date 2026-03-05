@@ -58,7 +58,7 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_pipeline(framework, use_reblur, max_spp=2048):
+def run_pipeline(framework, use_reblur, max_spp=2048, passthrough_args=()):
     """Run the app and return frame-to-frame instability metrics."""
     cmd = [
         sys.executable, str(BUILD_PY),
@@ -70,7 +70,7 @@ def run_pipeline(framework, use_reblur, max_spp=2048):
         "--test_case", "multi_frame_screenshot",
         "--clear_screenshots", "true",
         "--skip_build",
-    ]
+    ] + list(passthrough_args)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
@@ -108,13 +108,13 @@ def run_pipeline(framework, use_reblur, max_spp=2048):
 def main():
     parser = argparse.ArgumentParser(description="Test ReBLUR convergence stability")
     parser.add_argument("--framework", required=True, choices=SUPPORTED_FRAMEWORKS)
-    args = parser.parse_args()
+    args, extra_args = parser.parse_known_args()
 
     print("=== Test: ReBLUR Convergence Stability ===\n")
 
     # Step 1: Run vanilla baseline
     print("Running vanilla pipeline (2048 spp)...")
-    vanilla = run_pipeline(args.framework, use_reblur=False)
+    vanilla = run_pipeline(args.framework, use_reblur=False, passthrough_args=extra_args)
     if vanilla is None:
         print("FAIL: Vanilla pipeline failed to run")
         return 1
@@ -123,7 +123,7 @@ def main():
 
     # Step 2: Run ReBLUR
     print("\nRunning ReBLUR pipeline (2048 spp)...")
-    reblur = run_pipeline(args.framework, use_reblur=True)
+    reblur = run_pipeline(args.framework, use_reblur=True, passthrough_args=extra_args)
     if reblur is None:
         print("FAIL: ReBLUR pipeline failed to run")
         return 1

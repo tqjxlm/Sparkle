@@ -79,7 +79,7 @@ def parse_args():
     parser.add_argument("--framework", default="macos",
                         choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -243,7 +243,7 @@ def save_diagnostic_images(screenshot_dir, reblur_after,
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -256,7 +256,7 @@ def main():
     # Build
     if not args.skip_build:
         print("\nBuilding...")
-        result = subprocess.run([py, build_py, "--framework", fw],
+        result = subprocess.run([py, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True,
                                 text=True)
         if result.returncode != 0:
@@ -274,7 +274,7 @@ def main():
     print(f"\n{'—' * 60}")
     print("  Run 0: Vanilla baseline (ground truth for nudged viewpoint)")
     print(f"{'—' * 60}")
-    ok = run_app(py, build_py, fw, "vanilla_converged_baseline", [],
+    ok = run_app(py, build_py, fw, "vanilla_converged_baseline", [] + extra_args,
                  "vanilla", use_reblur=False, clear_screenshots=True)
     if not ok:
         all_results.append(("Run 0: vanilla baseline", False))
@@ -303,7 +303,7 @@ def main():
     print("  Run 1: Reblur end-to-end (full pipeline with PT blend)")
     print(f"{'—' * 60}")
     ok = run_app(py, build_py, fw, "reblur_converged_history",
-                 [], "end-to-end")
+                 [] + extra_args, "end-to-end")
     if not ok:
         all_results.append(("Run 1: reblur end-to-end", False))
         _print_summary(all_results)
@@ -351,7 +351,7 @@ def main():
     print("  Run 2: Reblur denoised-only (isolates denoiser)")
     print(f"{'—' * 60}")
     ok = run_app(py, build_py, fw, "reblur_converged_history",
-                 ["--reblur_no_pt_blend", "true"], "denoised-only")
+                 ["--reblur_no_pt_blend", "true"] + extra_args, "denoised-only")
     if not ok:
         all_results.append(("Run 2: reblur denoised-only", False))
         _print_summary(all_results)
@@ -384,7 +384,7 @@ def main():
     print("  Run 3: TADisocclusion mask (pixel classification)")
     print(f"{'—' * 60}")
     ok = run_app(py, build_py, fw, "reblur_converged_history",
-                 ["--reblur_debug_pass", "TADisocclusion"], "disocclusion")
+                 ["--reblur_debug_pass", "TADisocclusion"] + extra_args, "disocclusion")
     if not ok:
         all_results.append(("Run 3: TADisocclusion", False))
         _print_summary(all_results)

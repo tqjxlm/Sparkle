@@ -502,7 +502,7 @@ changes that the limited stabilization can't suppress.
 | `reblur_history_fix.cs.slang` | Always-on anti-firefly | Suppress outliers at all frames |
 | `reblur_temporal_stabilization.cs.slang` | Independent stabilization counter | Decouple from temporal cap |
 | `ReblurDenoiser.h` | max_stabilized_frame_num = 255 | Allow stronger stabilization |
-| `dev/reblur/*.py` | Added --framework argument | Cross-platform test scripts |
+| `tests/reblur/*.py` | Added --framework argument | Cross-platform test scripts |
 
 ---
 

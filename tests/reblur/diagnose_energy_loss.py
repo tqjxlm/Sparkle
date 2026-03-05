@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
     parser.add_argument("--spp", type=int, default=SPP)
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -159,7 +159,7 @@ def analyze_spatial(vanilla_luma, reblur_luma):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     spp = args.spp
     ss_dir = get_screenshot_dir(fw)
@@ -172,7 +172,7 @@ def main():
     if not args.skip_build:
         build_py = os.path.join(PROJECT_ROOT, "build.py")
         print("\nBuilding...")
-        result = subprocess.run([sys.executable, build_py, "--framework", fw],
+        result = subprocess.run([sys.executable, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
@@ -182,16 +182,16 @@ def main():
     print("\nCapturing screenshots...")
 
     vanilla_path = run_capture(fw, "vanilla",
-                               ["--use_reblur", "false"], spp, clear=True)
+                               ["--use_reblur", "false"] + extra_args, spp, clear=True)
     ta_path = run_capture(fw, "temporal_accum",
                           ["--use_reblur", "true", "--reblur_debug_pass",
-                           "TemporalAccum", "--reblur_no_pt_blend", "true"], spp)
+                           "TemporalAccum", "--reblur_no_pt_blend", "true"] + extra_args, spp)
     postblur_path = run_capture(fw, "postblur",
                                 ["--use_reblur", "true", "--reblur_debug_pass",
-                                 "PostBlur", "--reblur_no_pt_blend", "true"], spp)
+                                 "PostBlur", "--reblur_no_pt_blend", "true"] + extra_args, spp)
     full_path = run_capture(fw, "full_denoiser",
                             ["--use_reblur", "true", "--reblur_debug_pass",
-                             "Full", "--reblur_no_pt_blend", "true"], spp)
+                             "Full", "--reblur_no_pt_blend", "true"] + extra_args, spp)
 
     if not all([vanilla_path, ta_path, postblur_path, full_path]):
         print("\nFAIL: could not capture all screenshots")

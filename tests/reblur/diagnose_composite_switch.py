@@ -31,7 +31,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Composite switch diagnostic")
     parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -85,7 +85,7 @@ def run(py, build_py, fw, test_case, extra_args, clear=False):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -97,7 +97,7 @@ def main():
 
     if not args.skip_build:
         print("\nBuilding...")
-        result = subprocess.run([py, build_py, "--framework", fw],
+        result = subprocess.run([py, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
@@ -109,7 +109,7 @@ def main():
     print("  Test A: Full pipeline (default composite)")
     print(f"{'—'*60}")
     run(py, build_py, fw, "reblur_converged_history",
-        ["--use_reblur", "true"], clear=True)
+        ["--use_reblur", "true"] + extra_args, clear=True)
     before_path = find_screenshot(screenshot_dir, "*converged_history_before*")
     after_path = find_screenshot(screenshot_dir, "*converged_history_after*")
     if before_path and after_path:
@@ -128,7 +128,7 @@ def main():
     print("  Test B: Temporal accum only (debug_pass 3)")
     print(f"{'—'*60}")
     run(py, build_py, fw, "reblur_converged_history",
-        ["--use_reblur", "true", "--reblur_debug_pass", "TemporalAccum"])
+        ["--use_reblur", "true", "--reblur_debug_pass", "TemporalAccum"] + extra_args)
     before_path = find_screenshot(screenshot_dir, "*converged_history_before*")
     after_path = find_screenshot(screenshot_dir, "*converged_history_after*")
     if before_path and after_path:

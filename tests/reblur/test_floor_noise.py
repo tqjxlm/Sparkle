@@ -43,7 +43,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Floor noise quality test")
     parser.add_argument("--framework", default="macos", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -113,7 +113,7 @@ def run_app(py, build_py, framework, test_case, extra_args, label,
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -125,7 +125,7 @@ def main():
 
     if not args.skip_build:
         print("\nBuilding...")
-        result = subprocess.run([py, build_py, "--framework", fw],
+        result = subprocess.run([py, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
@@ -137,7 +137,7 @@ def main():
     print(f"\n{'—' * 60}")
     print("  Run 1: Vanilla baseline (converge, screenshot)")
     print(f"{'—' * 60}")
-    ok = run_app(py, build_py, fw, "screenshot", ["--max_spp", "2048"],
+    ok = run_app(py, build_py, fw, "screenshot", ["--max_spp", "2048"] + extra_args,
                  "vanilla", use_reblur=False, clear_screenshots=True)
     if not ok:
         results.append(("Vanilla: test run", False))
@@ -168,7 +168,7 @@ def main():
     print("  Run 2: Denoised-only (converge, --reblur_no_pt_blend)")
     print(f"{'—' * 60}")
     ok = run_app(py, build_py, fw, "screenshot",
-                 ["--max_spp", "2048", "--reblur_no_pt_blend", "true"],
+                 ["--max_spp", "2048", "--reblur_no_pt_blend", "true"] + extra_args,
                  "denoised-only", use_reblur=True)
     if not ok:
         results.append(("Denoised: test run", False))

@@ -40,7 +40,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Motion luminance tracking test")
     parser.add_argument("--framework", default="macos", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -56,7 +56,7 @@ def load_luminance(path):
     return float(np.mean(luma))
 
 
-def run_capture(py, build_py, framework, use_reblur, label):
+def run_capture(py, build_py, framework, use_reblur, label, passthrough_args=()):
     """Run motion_luminance_track test case and return screenshot paths."""
     cmd = [py, build_py, "--framework", framework, "--skip_build",
            "--run", "--test_case", "motion_luminance_track",
@@ -65,6 +65,7 @@ def run_capture(py, build_py, framework, use_reblur, label):
            "--clear_screenshots", "true", "--test_timeout", "120"]
     if use_reblur:
         cmd += ["--use_reblur", "true"]
+    cmd += list(passthrough_args)
     print(f"  cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
     if result.returncode != 0:
@@ -94,7 +95,7 @@ def find_motion_screenshots(screenshot_dir):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -107,7 +108,7 @@ def main():
     # Build
     if not args.skip_build:
         print("\nBuilding...")
-        result = subprocess.run([py, build_py, "--framework", fw],
+        result = subprocess.run([py, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
@@ -119,7 +120,8 @@ def main():
     print(f"\n{'—'*60}")
     print("  Run 1: Vanilla baseline (orbit_sweep)")
     print(f"{'—'*60}")
-    ok = run_capture(py, build_py, fw, use_reblur=False, label="vanilla")
+    ok = run_capture(py, build_py, fw, use_reblur=False, label="vanilla",
+                     passthrough_args=extra_args)
     vanilla_lumas = {}
     if ok:
         all_results.append(("Vanilla: test run", True))
@@ -140,7 +142,8 @@ def main():
     print(f"\n{'—'*60}")
     print("  Run 2: Reblur (orbit_sweep)")
     print(f"{'—'*60}")
-    ok = run_capture(py, build_py, fw, use_reblur=True, label="reblur")
+    ok = run_capture(py, build_py, fw, use_reblur=True, label="reblur",
+                     passthrough_args=extra_args)
     reblur_lumas = {}
     if ok:
         all_results.append(("Reblur: test run", True))

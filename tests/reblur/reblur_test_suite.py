@@ -48,7 +48,7 @@ def parse_args():
     parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true",
                         help="Skip the initial build (assumes already built)")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def run_command(cmd, label, cwd=PROJECT_ROOT, show_output=False):
@@ -134,7 +134,7 @@ def validate_latest_screenshot(framework, label):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -142,14 +142,14 @@ def main():
     pass_validation_py = os.path.join(SCRIPT_DIR, "reblur_pass_validation.py")
     temporal_validation_py = os.path.join(SCRIPT_DIR, "reblur_temporal_validation.py")
     convergence_stability_py = os.path.join(
-        PROJECT_ROOT, "dev", "reblur", "test_convergence_stability.py")
+        SCRIPT_DIR, "test_convergence_stability.py")
 
     results = []
 
     # --- Build ---
     if not args.skip_build:
         ok, dur, _ = run_command(
-            [py, build_py, "--framework", fw],
+            [py, build_py, "--framework", fw] + extra_args,
             "Build")
         if not ok:
             print("\nBuild failed — aborting test suite.", flush=True)
@@ -163,7 +163,7 @@ def main():
     # --- Test 1: Smoke test ---
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
-         "--run", "--test_case", "smoke", "--headless", "true"],
+         "--run", "--test_case", "smoke", "--headless", "true"] + extra_args,
         "1. Smoke test")
     results.append(("Smoke test", ok, dur))
 
@@ -171,7 +171,7 @@ def main():
     ok, dur, _ = run_command(
         [py, functional_test_py,
          "--framework", fw, "--pipeline", "gpu", "--headless", "--skip_build",
-         "--", "--use_reblur", "false", "--spp", "1", "--max_spp", "2048"],
+         "--", "--use_reblur", "false", "--spp", "1", "--max_spp", "2048"] + extra_args,
         "2. Vanilla functional test (FLIP vs ground truth)")
     results.append(("Vanilla functional test", ok, dur))
 
@@ -180,7 +180,7 @@ def main():
         [py, functional_test_py,
          "--framework", fw, "--pipeline", "gpu", "--headless", "--skip_build",
          "--", "--use_reblur", "true", "--reblur_debug_pass", "Passthrough",
-         "--spp", "1", "--max_spp", "2048"],
+         "--spp", "1", "--max_spp", "2048"] + extra_args,
         "3. Split-merge equivalence (debug_pass 255, FLIP vs ground truth)")
     results.append(("Split-merge equivalence", ok, dur))
 
@@ -189,13 +189,13 @@ def main():
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "screenshot", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "64"],
+         "--spp", "1", "--max_spp", "64"] + extra_args,
         "4. REBLUR screenshot (full denoiser pipeline, crash test)")
     results.append(("REBLUR screenshot", ok, dur))
 
     # --- Test 5: Per-pass validation (Python) ---
     ok, dur, _ = run_command(
-        [py, pass_validation_py, "--framework", fw, "--skip_build"],
+        [py, pass_validation_py, "--framework", fw, "--skip_build"] + extra_args,
         "5. REBLUR per-pass validation (PrePass/Blur/PostBlur)",
         show_output=True)
     results.append(("Per-pass validation", ok, dur))
@@ -205,7 +205,7 @@ def main():
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_pass_validation", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "4", "--test_timeout", "60"],
+         "--spp", "1", "--max_spp", "4", "--test_timeout", "60"] + extra_args,
         "6a. REBLUR pass validation (C++ test case)")
     results.append(("C++ pass validation", ok, dur))
     if ok:
@@ -214,7 +214,7 @@ def main():
 
     # --- Test 7: Temporal validation (Python) ---
     ok, dur, _ = run_command(
-        [py, temporal_validation_py, "--framework", fw, "--skip_build"],
+        [py, temporal_validation_py, "--framework", fw, "--skip_build"] + extra_args,
         "7. REBLUR temporal validation (TemporalAccum/HistoryFix/convergence)",
         show_output=True)
     results.append(("Temporal validation", ok, dur))
@@ -224,7 +224,7 @@ def main():
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_temporal_convergence", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"],
+         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"] + extra_args,
         "8a. REBLUR temporal convergence (C++ test, 30+ frames)")
     results.append(("C++ temporal convergence", ok, dur))
     if ok:
@@ -237,7 +237,7 @@ def main():
     smoke_cmd = [py, build_py, "--framework", fw, "--skip_build",
                  "--run", "--test_case", "reblur_smoke", "--headless", "true",
                  "--pipeline", "gpu", "--use_reblur", "true",
-                 "--spp", "1", "--max_spp", "64", "--test_timeout", "120"]
+                 "--spp", "1", "--max_spp", "64", "--test_timeout", "120"] + extra_args
     ok, dur, _ = run_command(smoke_cmd, "9a. REBLUR smoke test (C++ test, 30 frames)")
     if not ok:
         print("  Retrying smoke test (attempt 2/2)...", flush=True)
@@ -250,7 +250,7 @@ def main():
 
     # --- Test 10: Convergence stability (frame-to-frame instability vs vanilla) ---
     ok, dur, _ = run_command(
-        [py, convergence_stability_py, "--framework", fw],
+        [py, convergence_stability_py, "--framework", fw] + extra_args,
         "10. Convergence stability (2048 spp, frame-to-frame vs vanilla)",
         show_output=True)
     results.append(("Convergence stability", ok, dur))
@@ -260,7 +260,7 @@ def main():
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_matrix_infra", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "20", "--test_timeout", "30"],
+         "--spp", "1", "--max_spp", "20", "--test_timeout", "30"] + extra_args,
         "11. M1 Matrix infrastructure (C++ test)")
     results.append(("M1 Matrix infrastructure", ok, dur))
 
@@ -269,14 +269,14 @@ def main():
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_mv_test", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "10", "--test_timeout", "30"],
+         "--spp", "1", "--max_spp", "10", "--test_timeout", "30"] + extra_args,
         "12. M2 Motion vector test (C++ test)")
     results.append(("M2 Motion vector test", ok, dur))
 
     # --- Test 13: M2 Motion vector statistical (Python) ---
     mv_test_py = os.path.join(SCRIPT_DIR, "test_motion_vectors.py")
     ok, dur, _ = run_command(
-        [py, mv_test_py, "--framework", fw, "--skip_build"],
+        [py, mv_test_py, "--framework", fw, "--skip_build"] + extra_args,
         "13. M2 Motion vector statistical validation",
         show_output=True)
     results.append(("M2 MV statistical", ok, dur))
@@ -286,14 +286,14 @@ def main():
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_reprojection", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "60", "--test_timeout", "60"],
+         "--spp", "1", "--max_spp", "60", "--test_timeout", "60"] + extra_args,
         "14. M3 Reprojection test (C++ test)")
     results.append(("M3 Reprojection test", ok, dur))
 
     # --- Test 15: M3 Reprojection statistical (Python) ---
     reproj_test_py = os.path.join(SCRIPT_DIR, "test_reprojection.py")
     ok, dur, _ = run_command(
-        [py, reproj_test_py, "--framework", fw, "--skip_build"],
+        [py, reproj_test_py, "--framework", fw, "--skip_build"] + extra_args,
         "15. M3 Reprojection statistical validation",
         show_output=True)
     results.append(("M3 Reprojection statistical", ok, dur))
@@ -303,7 +303,7 @@ def main():
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_static_nonregression", "--headless", "true",
          "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"],
+         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"] + extra_args,
         "16. Static camera non-regression")
     results.append(("Static non-regression", ok, dur))
 
@@ -314,7 +314,7 @@ def main():
          "--pipeline", "gpu", "--use_reblur", "true",
          "--spp", "1", "--max_spp", "200",
          "--clear_screenshots", "true",
-         "--test_timeout", "120"],
+         "--test_timeout", "120"] + extra_args,
         "17. Ghosting test (camera nudge)")
     results.append(("Ghosting test (camera nudge)", ok, dur))
 
@@ -322,7 +322,7 @@ def main():
     ok, dur, _ = run_command(
         [py, os.path.join(PROJECT_ROOT, "tests", "reblur",
                           "reblur_motion_validation.py"),
-         "--framework", fw, "--skip_build"],
+         "--framework", fw, "--skip_build"] + extra_args,
         "19. Camera motion quality validation",
         show_output=True)
     results.append(("Camera motion quality validation", ok, dur))
@@ -330,7 +330,7 @@ def main():
     # --- Test 20: Converged history + camera delta ---
     converged_hist_py = os.path.join(SCRIPT_DIR, "test_converged_history.py")
     ok, dur, _ = run_command(
-        [py, converged_hist_py, "--framework", fw, "--skip_build"],
+        [py, converged_hist_py, "--framework", fw, "--skip_build"] + extra_args,
         "20. Converged history camera delta (history preservation)",
         show_output=True)
     results.append(("Converged history camera delta", ok, dur))
@@ -339,14 +339,14 @@ def main():
     ok, dur, _ = run_command(
         [py, functional_test_py,
          "--framework", fw, "--pipeline", "gpu", "--headless", "--skip_build",
-         "--", "--use_reblur", "true"],
+         "--", "--use_reblur", "true"] + extra_args,
         "21. End-to-end FLIP (full REBLUR pipeline vs ground truth)")
     results.append(("End-to-end FLIP", ok, dur))
 
     # --- Test 22: Denoiser history preservation (pure denoiser, no PT blend) ---
     denoiser_hist_py = os.path.join(SCRIPT_DIR, "test_denoiser_history.py")
     ok, dur, _ = run_command(
-        [py, denoiser_hist_py, "--framework", fw, "--skip_build"],
+        [py, denoiser_hist_py, "--framework", fw, "--skip_build"] + extra_args,
         "22. Denoiser history preservation (pure denoiser quality after nudge)",
         show_output=True)
     results.append(("Denoiser history preservation", ok, dur))
@@ -354,7 +354,7 @@ def main():
     # --- Test 23: Denoised motion luminance stability ---
     denoised_motion_py = os.path.join(SCRIPT_DIR, "test_denoised_motion_luma.py")
     ok, dur, _ = run_command(
-        [py, denoised_motion_py, "--framework", fw, "--skip_build"],
+        [py, denoised_motion_py, "--framework", fw, "--skip_build"] + extra_args,
         "23. Denoised motion luminance stability (continuous orbit sweep)",
         show_output=True)
     results.append(("Denoised motion luminance stability", ok, dur))
@@ -362,7 +362,7 @@ def main():
     # --- Test 24: TAHistory debug mode convergence ---
     ta_history_py = os.path.join(SCRIPT_DIR, "test_ta_history.py")
     ok, dur, _ = run_command(
-        [py, ta_history_py, "--framework", fw, "--skip_build"],
+        [py, ta_history_py, "--framework", fw, "--skip_build"] + extra_args,
         "24. TAHistory debug mode convergence",
         show_output=True)
     results.append(("TAHistory convergence", ok, dur))

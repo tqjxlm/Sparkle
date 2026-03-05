@@ -36,7 +36,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="REBLUR per-pass validation")
     parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -48,7 +48,8 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_with_debug_pass(framework, debug_pass, skip_build, output_dir):
+def run_with_debug_pass(framework, debug_pass, skip_build, output_dir,
+                        passthrough_args=()):
     """Run app with a specific reblur_debug_pass value and capture screenshot.
 
     Copies the screenshot to output_dir to prevent deletion by subsequent runs.
@@ -67,7 +68,7 @@ def run_with_debug_pass(framework, debug_pass, skip_build, output_dir):
         "--max_spp", str(MAX_SPP),
         "--reblur_debug_pass", debug_pass,
         "--test_timeout", "60",
-    ]
+    ] + list(passthrough_args)
     name = PASS_NAMES.get(debug_pass, f"full (debug_pass={debug_pass})")
     print(f"\n{'='*60}", flush=True)
     print(f"Running with debug_pass={debug_pass} ({name})", flush=True)
@@ -139,7 +140,7 @@ def validate_pass(name, img):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
 
     # Install scipy if needed (for local variance)
     try:
@@ -153,7 +154,7 @@ def main():
         print("Building...", flush=True)
         build_py = os.path.join(PROJECT_ROOT, "build.py")
         result = subprocess.run(
-            [sys.executable, build_py, "--framework", args.framework],
+            [sys.executable, build_py, "--framework", args.framework] + extra_args,
             cwd=PROJECT_ROOT, capture_output=True, text=True,
         )
         if result.returncode != 0:
@@ -169,7 +170,8 @@ def main():
     screenshots = {}
     for debug_pass in ["PrePass", "Blur", "PostBlur", "Full"]:
         path = run_with_debug_pass(args.framework, debug_pass, skip_build=True,
-                                   output_dir=output_dir)
+                                   output_dir=output_dir,
+                                   passthrough_args=extra_args)
         if path is None:
             print(f"FAIL: Could not get screenshot for debug_pass={debug_pass}",
                   flush=True)

@@ -70,7 +70,8 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_app(framework, use_reblur, debug_pass="Full", max_spp=2048, skip_build=False):
+def run_app(framework, use_reblur, debug_pass="Full", max_spp=2048, skip_build=False,
+            passthrough_args=()):
     """Run the app and return screenshots as numpy arrays."""
     build_py = os.path.join(PROJECT_ROOT, "build.py")
     cmd = [
@@ -87,6 +88,7 @@ def run_app(framework, use_reblur, debug_pass="Full", max_spp=2048, skip_build=F
         cmd.append("--skip_build")
     if use_reblur and debug_pass != "Full":
         cmd += ["--reblur_debug_pass", debug_pass]
+    cmd += list(passthrough_args)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
@@ -148,7 +150,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test temporal firefly suppression")
     parser.add_argument("--framework", required=True, choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    args = parser.parse_args()
+    args, extra_args = parser.parse_known_args()
 
     print("=== Test: Temporal Accumulation Firefly Suppression ===\n")
     passed = True
@@ -156,7 +158,7 @@ def main():
     # Test 1: Temporal accumulation output (debug_pass=3)
     print("Step 1: Measuring temporal accumulation output jumps (debug_pass=3)...")
     ta_frames = run_app(args.framework, use_reblur=True, debug_pass="TemporalAccum",
-                        skip_build=args.skip_build)
+                        skip_build=args.skip_build, passthrough_args=extra_args)
     if ta_frames is None:
         print("FAIL: Could not capture temporal accumulation output")
         return 1
@@ -183,7 +185,7 @@ def main():
     # Test 2: Full pipeline output (stabilization)
     print(f"\nStep 2: Measuring full pipeline stability...")
     full_frames = run_app(args.framework, use_reblur=True, debug_pass="Full",
-                          skip_build=args.skip_build)
+                          skip_build=args.skip_build, passthrough_args=extra_args)
     if full_frames is None:
         print("FAIL: Could not capture full pipeline output")
         return 1

@@ -28,7 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="ReBLUR reprojection diagnostic")
     parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -48,13 +48,15 @@ def find_screenshot(screenshot_dir, pattern):
     return matches[0]
 
 
-def run_test(py, build_py, framework, debug_pass, label, clear=False):
+def run_test(py, build_py, framework, debug_pass, label, clear=False,
+             passthrough_args=()):
     cmd = [py, build_py, "--framework", framework, "--skip_build",
            "--run", "--test_case", "reblur_converged_history", "--headless", "true",
            "--pipeline", "gpu", "--spp", "1", "--use_reblur", "true",
            "--reblur_debug_pass", debug_pass]
     if clear:
         cmd += ["--clear_screenshots", "true"]
+    cmd += list(passthrough_args)
     print(f"  cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
     if result.returncode != 0:
@@ -166,7 +168,7 @@ def analyze_depth_diagnostic(screenshot_dir):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -178,7 +180,7 @@ def main():
 
     if not args.skip_build:
         print("\nBuilding...")
-        result = subprocess.run([py, build_py, "--framework", fw],
+        result = subprocess.run([py, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
@@ -188,7 +190,8 @@ def main():
     print(f"\n{'—'*60}")
     print("  Diagnostic 1: Disocclusion map (debug_pass 10)")
     print(f"{'—'*60}")
-    if run_test(py, build_py, fw, "TADisocclusion", "disocclusion", clear=True):
+    if run_test(py, build_py, fw, "TADisocclusion", "disocclusion", clear=True,
+                passthrough_args=extra_args):
         analyze_disocclusion_map(screenshot_dir)
         # Rename to avoid overwrite
         for p in glob.glob(os.path.join(screenshot_dir, "*converged_history_*")):
@@ -199,7 +202,8 @@ def main():
     print(f"\n{'—'*60}")
     print("  Diagnostic 2: Motion vectors (debug_pass 11)")
     print(f"{'—'*60}")
-    if run_test(py, build_py, fw, "TAMotionVector", "motion_vectors"):
+    if run_test(py, build_py, fw, "TAMotionVector", "motion_vectors",
+                passthrough_args=extra_args):
         analyze_motion_vectors(screenshot_dir)
         for p in glob.glob(os.path.join(screenshot_dir, "*converged_history_*")):
             new = p.replace("converged_history", "diag_motion_vec")
@@ -209,7 +213,8 @@ def main():
     print(f"\n{'—'*60}")
     print("  Diagnostic 3: Depth/normal test (debug_pass 12)")
     print(f"{'—'*60}")
-    if run_test(py, build_py, fw, "TADepth", "depth_normal"):
+    if run_test(py, build_py, fw, "TADepth", "depth_normal",
+                passthrough_args=extra_args):
         analyze_depth_diagnostic(screenshot_dir)
         for p in glob.glob(os.path.join(screenshot_dir, "*converged_history_*")):
             new = p.replace("converged_history", "diag_depth_normal")

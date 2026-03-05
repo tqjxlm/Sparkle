@@ -45,7 +45,7 @@ def parse_args():
         description="Denoised motion luminance stability test")
     parser.add_argument("--framework", default="macos", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -77,7 +77,7 @@ def find_motion_screenshots(screenshot_dir):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -90,7 +90,7 @@ def main():
     # Build
     if not args.skip_build:
         print("\nBuilding...")
-        result = subprocess.run([py, build_py, "--framework", fw],
+        result = subprocess.run([py, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
@@ -107,7 +107,7 @@ def main():
            "--headless", "true", "--pipeline", "gpu", "--spp", "1",
            "--max_spp", "60",
            "--clear_screenshots", "true", "--test_timeout", "120",
-           "--use_reblur", "true", "--reblur_no_pt_blend", "true"]
+           "--use_reblur", "true", "--reblur_no_pt_blend", "true"] + extra_args
     print(f"  cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
     if result.returncode != 0:

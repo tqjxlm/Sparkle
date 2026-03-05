@@ -61,7 +61,7 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_app(framework, debug_pass="Full", skip_build=False):
+def run_app(framework, debug_pass="Full", skip_build=False, passthrough_args=()):
     build_py = os.path.join(PROJECT_ROOT, "build.py")
     cmd = [
         sys.executable, build_py,
@@ -77,6 +77,7 @@ def run_app(framework, debug_pass="Full", skip_build=False):
         cmd.append("--skip_build")
     if debug_pass != "Full":
         cmd += ["--reblur_debug_pass", debug_pass]
+    cmd += list(passthrough_args)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
@@ -100,21 +101,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--framework", required=True, choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    args = parser.parse_args()
+    args, extra_args = parser.parse_known_args()
 
     print("=== Test: Stabilization Stale History ===\n")
     passed = True
 
     # Capture PostBlur output
     print("Capturing PostBlur output (debug_pass=2)...")
-    pb_frames = run_app(args.framework, debug_pass="PostBlur", skip_build=args.skip_build)
+    pb_frames = run_app(args.framework, debug_pass="PostBlur", skip_build=args.skip_build,
+                        passthrough_args=extra_args)
     if pb_frames is None:
         print("FAIL: Could not capture PostBlur output")
         return 1
 
     # Capture full pipeline output
     print("Capturing full pipeline output...")
-    full_frames = run_app(args.framework, debug_pass="Full", skip_build=args.skip_build)
+    full_frames = run_app(args.framework, debug_pass="Full", skip_build=args.skip_build,
+                         passthrough_args=extra_args)
     if full_frames is None:
         print("FAIL: Could not capture full pipeline output")
         return 1

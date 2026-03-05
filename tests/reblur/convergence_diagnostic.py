@@ -46,7 +46,8 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def run_app(max_spp, use_reblur, debug_pass="Full", test_case="multi_frame_screenshot"):
+def run_app(max_spp, use_reblur, debug_pass="Full", test_case="multi_frame_screenshot",
+            passthrough_args=()):
     cmd = [
         sys.executable, str(BUILD_PY),
         "--framework", _framework,
@@ -60,6 +61,7 @@ def run_app(max_spp, use_reblur, debug_pass="Full", test_case="multi_frame_scree
     ]
     if use_reblur and debug_pass != "Full":
         cmd += ["--reblur_debug_pass", debug_pass]
+    cmd += list(passthrough_args)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
@@ -116,7 +118,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="ReBLUR convergence diagnostic")
     parser.add_argument("--framework", required=True, choices=SUPPORTED_FRAMEWORKS)
-    args = parser.parse_args()
+    args, extra_args = parser.parse_known_args()
 
     _framework = args.framework
     _screenshot_dir = get_screenshot_dir(args.framework)
@@ -140,7 +142,7 @@ def main():
 
     for label, max_spp, use_reblur, debug_pass in tests:
         print(f"\n--- Running: {label} (max_spp={max_spp}, reblur={use_reblur}, debug_pass={debug_pass}) ---")
-        if run_app(max_spp, use_reblur, debug_pass):
+        if run_app(max_spp, use_reblur, debug_pass, passthrough_args=extra_args):
             n = collect_screenshots(label)
             print(f"  Collected {n} screenshots")
             r = analyze_stability(RESULTS_DIR / label, label)

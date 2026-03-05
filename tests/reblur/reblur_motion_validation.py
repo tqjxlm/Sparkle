@@ -36,7 +36,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Camera motion quality validation")
     parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -94,7 +94,7 @@ def _print_summary(results):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     screenshot_dir = get_screenshot_dir(fw)
 
@@ -107,7 +107,7 @@ def main():
         print("\nBuilding...", flush=True)
         build_py = os.path.join(PROJECT_ROOT, "build.py")
         result = subprocess.run(
-            [sys.executable, build_py, "--framework", fw],
+            [sys.executable, build_py, "--framework", fw] + extra_args,
             cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             print("FAIL: Build failed", flush=True)
@@ -126,7 +126,7 @@ def main():
         "--spp", "1", "--max_spp", "30",
         # TODO: camera motion now uses TestCase-based approach (ReblurGhostingTest)
         "--test_timeout", "100",
-    ], "Motion multi-frame capture (orbit_sweep, 30 spp)")
+    ] + extra_args, "Motion multi-frame capture (orbit_sweep, 30 spp)")
 
     if not ok:
         results.append(("Motion capture run", False))
@@ -217,7 +217,7 @@ def main():
         "--headless", "true",
         "--pipeline", "gpu", "--use_reblur", "true",
         "--spp", "1", "--max_spp", "64",
-    ], "Static camera reblur (64 spp)")
+    ] + extra_args, "Static camera reblur (64 spp)")
 
     if not ok:
         results.append(("Static reblur run", False))

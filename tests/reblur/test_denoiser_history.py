@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument("--framework", default="macos",
                         choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def get_screenshot_dir(framework):
@@ -142,7 +142,7 @@ def rename_screenshots(screenshot_dir, old_pattern, new_prefix):
 
 
 def main():
-    args = parse_args()
+    args, extra_args = parse_args()
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
@@ -155,7 +155,7 @@ def main():
     # Build
     if not args.skip_build:
         print("\nBuilding...")
-        result = subprocess.run([py, build_py, "--framework", fw],
+        result = subprocess.run([py, build_py, "--framework", fw] + extra_args,
                                 cwd=PROJECT_ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             print("FAIL: build failed")
@@ -168,7 +168,7 @@ def main():
     print("  Run 0: Reblur denoised-only (--reblur_no_pt_blend true)")
     print(f"{'—'*60}")
     ok = run_test(py, build_py, fw, "reblur_converged_history",
-                  ["--reblur_no_pt_blend", "true"],
+                  ["--reblur_no_pt_blend", "true"] + extra_args,
                   "denoised-only", clear_screenshots=True)
     if not ok:
         all_results.append(("Denoised-only: test run", False))
@@ -236,7 +236,7 @@ def main():
     print("  Run 1: Vanilla baseline (reference for demod/remod gap measurement)")
     print(f"{'—'*60}")
     ok = run_test(py, build_py, fw, "vanilla_converged_baseline",
-                  [], "vanilla baseline", use_reblur=False)
+                  [] + extra_args, "vanilla baseline", use_reblur=False)
     if ok:
         all_results.append(("Vanilla baseline: test run", True))
         v_before = find_screenshot(screenshot_dir, "*vanilla_baseline_before*")
@@ -257,7 +257,7 @@ def main():
     print(f"{'—'*60}")
     ok = run_test(py, build_py, fw, "reblur_converged_history",
                   ["--reblur_debug_pass", "TemporalAccum",
-                   "--reblur_no_pt_blend", "true"],
+                   "--reblur_no_pt_blend", "true"] + extra_args,
                   "TA debug")
     if ok:
         all_results.append(("TA debug: test run", True))
