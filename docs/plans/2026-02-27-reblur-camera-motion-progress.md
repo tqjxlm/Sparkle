@@ -779,3 +779,51 @@ void TemporalAccumulate(const ReblurInputBuffers &inputs, const ReblurSettings &
 - TAHistory convergence test: **7/7 PASS** (luma increase 4.15x, relative noise reduction 1.35x)
 - TADisocclusion test: **PASS** (99.7% valid reprojection, 0.910 footprint quality)
 - Full test suite: **26/26 PASS** (698s total)
+
+## Semantic Converged History Test Rewrite (2026-03-05, Session 12)
+
+### Problem
+The `test_converged_history.py` test used **full-image statistical analysis** (laplacian variance, mean luminance noise ratios) which does not semantically answer the key question: "Are history-retrieved pixels clean after a camera nudge?" The global metrics mixed history and disoccluded pixels, making it hard to tell if the fix actually works. The test could pass even with noisy history pixels if the disoccluded region was small enough.
+
+### Approach: Region-Segmented Semantic Analysis
+
+Rewrote the test to use the **TADisocclusion mask** to classify every pixel and measure noise **independently per region**:
+
+1. **Three runs**: Vanilla baseline (ground truth), Reblur denoised-only (denoiser output), TADisocclusion (pixel mask)
+2. **Pixel classification**: history (99.7%), disoccluded (0.3%), sky (29.1%)
+3. **Semantic checks**:
+   - **Check A (History cleanness)**: High-frequency residual in history pixels of `reblur_after` vs `vanilla_after`. Measures excess noise in pixels that have valid history. Threshold: < 1.5x vanilla.
+   - **Check B (Noise concentration)**: Disoccluded pixels must be measurably noisier than history pixels. Threshold: > 2.0x ratio.
+   - **Check C (Reprojection validity)**: > 60% geometry pixels with valid history. Threshold: 60%.
+   - **Luma preservation**: Before/after ratio within 7%.
+4. **Diagnostic images saved**: error heatmap vs vanilla, excess noise map, segmented overlay with disoccluded pixels in red.
+
+### Key Findings
+
+| Metric | Value | Threshold | Status |
+|--------|-------|-----------|--------|
+| History noise ratio (reblur/vanilla HF residual) | **1.33x** | < 1.5x | PASS |
+| Noise concentration (disoccl/history) | **8.14x** | > 2.0x | PASS |
+| Reprojection validity | **99.7%** | > 60% | PASS |
+| Footprint quality | **0.910** | > 0.5 | PASS |
+| Luma preservation | **1.006** | [0.93, 1.07] | PASS |
+
+### Noise Breakdown Detail
+- History pixels: mean local_std = 0.038 (vanilla = 0.030, converged reblur = 0.029)
+- Disoccluded pixels: mean local_std = 0.166 (4.4x history)
+- The 1.33x excess noise in history is from:
+  - Bilinear interpolation of history at sub-pixel positions
+  - 5 new 1spp samples blended at weight 1/65 ≈ 1.5% per frame
+  - Spatial blur passes responding to reprojection
+- P90 local_std in history = 0.070, P95 = 0.154 (10% of history pixels near edges have higher noise)
+
+### What Changed
+- **Removed**: full-image laplacian variance, noise ratio before/after, FLIP comparisons, TemporalAccum-only run, full-pipeline run with ghosting FLIP
+- **Added**: TADisocclusion mask segmentation, per-region HF residual analysis, diagnostic image output
+- **Simplified**: 3 runs (from 5), 8 semantic checks (from ~25 sub-checks)
+
+### Files Modified
+- `tests/reblur/test_converged_history.py` — complete rewrite to semantic approach
+
+### Test Results
+- Converged history test: **8/8 PASS**
