@@ -509,6 +509,59 @@ Pre-existing failures (not caused by our changes):
     (or equivalent reprojection of the displayed color), not another tweak to the current
     remodulation inputs.
 
+### Task 8: Add renderer-owned final displayed-color history
+- Status: **DONE**
+- Trial:
+  - Added `reblur_final_history.cs.slang` plus `GPURenderer`-owned history textures for the
+    displayed linear color and previous `viewZ` / `normalRoughness`.
+  - Ran the new pass after `reblur_composite`, reprojecting the previous displayed color with
+    motion vectors and the same depth/normal/material validity tests as REBLUR.
+  - Reused current REBLUR accumulation speed as the displayed-history blend weight so only
+    already-converged pixels keep strong history after a camera nudge.
+- Commands:
+  - `python3 build.py --framework macos --config Release`
+  - `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+
+### Findings from Task 8
+- This is the first trial that fixed the user-visible Run 1 regression instead of only moving
+  denoised-only metrics:
+  - `E2E FLIP = 0.1215`
+  - `Run 1 floor local_std after / vanilla = 0.885x`
+  - `Run 1 floor local_std after / before = 1.037x`
+  - `Run 1 floor luma after / vanilla = 0.992x`
+  - `Run 1 floor luma after / before = 0.994x`
+  - `History cleanness = 1.12x`
+  - `test_converged_history.py = 14 passed, 0 failed`
+- The denoised-only floor bias is still present:
+  - `denoised_after / vanilla_after floor ratio = 0.952x`
+  - `denoised_after / denoised_before floor ratio = 0.998x`
+- Conclusion:
+  - The remaining visible end-to-end dimming/noise issue was a **displayed-color history**
+    problem, not another REBLUR internal radiance-history problem.
+  - Run 1 now preserves converged brightness and low noise across valid-history pixels after
+    the camera nudge, which makes it reasonable to tighten the Run 1 regression thresholds.
+
+### Task 9: Tighten Run 1 regression thresholds to the actual fixed behavior
+- Status: **DONE**
+- Trial:
+  - Tightened `test_converged_history.py` around the corrected full-pipeline behavior.
+  - Added explicit Run 1 history-valid floor **luma** checks so floor dimming can no longer
+    pass as long as noise happens to be low.
+
+### Findings from Task 9
+- New Run 1 thresholds:
+  - `E2E_FLIP_MAX = 0.14`
+  - `HISTORY_NOISE_RATIO_MAX = 1.3`
+  - `E2E_FLOOR_HISTORY_VS_VANILLA_MAX = 1.05`
+  - `E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX = 1.05`
+  - `E2E_FLOOR_LUMA_RATIO in [0.98, 1.02]`
+- Verified with `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+  after the threshold change:
+  - `E2E FLIP = 0.1215`
+  - `Run 1 floor luma after / vanilla = 0.992x`
+  - `Run 1 floor luma after / before = 0.994x`
+  - `14 passed, 0 failed`
+
 ### Additional note
 - `python3 tests/reblur/diagnose_energy_loss.py --framework macos --skip_build --spp 64 --config Release`
   was attempted, but it failed inside the helper because its subprocess calls to `build.py`

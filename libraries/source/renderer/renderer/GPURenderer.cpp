@@ -127,6 +127,36 @@ class ReblurCompositeShader : public RHIShaderInfo
     };
 };
 
+class ReblurFinalHistoryShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ReblurFinalHistoryShader, RHIShaderStage::Compute,
+                     "shaders/ray_trace/reblur_final_history.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(inCurrentColor, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inNormalRoughness, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inMotionVectors, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inInternalData, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevColor, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevNormalRoughness, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(linearSampler, RHIShaderResourceReflection::ResourceType::Sampler)
+    USE_SHADER_RESOURCE(outColor, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+    struct UniformBufferData
+    {
+        Vector2UInt resolution;
+        float disocclusion_threshold;
+        float denoising_range;
+        uint32_t reset_history;
+    };
+};
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy)
     : Renderer(render_config, rhi_context, scene_render_proxy),
@@ -240,6 +270,7 @@ void GPURenderer::Render()
     if (reblur_ && scene_loaded_ && !reblur_scene_load_reset_done_)
     {
         reblur_->Reset();
+        ResetFinalHistory();
         reblur_scene_load_reset_done_ = true;
     }
 
@@ -332,6 +363,7 @@ void GPURenderer::Update()
         // with a dummy black cubemap don't drag down the running average.
         scene_render_proxy_->GetCamera()->MarkPixelDirty();
         dispatched_sample_count_ = 0;
+        ResetFinalHistory();
 
         auto bind_sky_to_pipeline = [&](auto *resources) {
             if ((sky_light != nullptr) && sky_light->GetSkyMap())
@@ -405,6 +437,7 @@ void GPURenderer::Update()
     {
         // structural change, rebuild TLAS
         tlas_->Build();
+        ResetFinalHistory();
 
         auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
         cs_resources->tlas().BindResource(tlas_, true);
@@ -419,6 +452,7 @@ void GPURenderer::Update()
     {
         // non-structural change, update TLAS
         tlas_->Update(primitives_to_update);
+        ResetFinalHistory();
     }
 
     auto *camera = scene_render_proxy_->GetCamera();
@@ -756,11 +790,156 @@ void GPURenderer::InitReblurResources()
     comp_resources->viewZ().BindResource(view_z_->GetDefaultView(rhi_));
     comp_resources->ptAccumulated().BindResource(pt_accumulation_->GetDefaultView(rhi_));
 
+    final_history_[0] = make_aux_image(PixelFormat::RGBAFloat, "ReblurFinalHistory0");
+    final_history_[1] = make_aux_image(PixelFormat::RGBAFloat, "ReblurFinalHistory1");
+    prev_final_view_z_ = make_aux_image(PixelFormat::R32_FLOAT, "ReblurFinalPrevViewZ");
+    prev_final_normal_roughness_ = make_aux_image(PixelFormat::RGBAFloat16, "ReblurFinalPrevNormalRoughness");
+
+    final_history_uniform_buffer_ =
+        rhi_->CreateBuffer({.size = sizeof(ReblurFinalHistoryShader::UniformBufferData),
+                            .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                            .mem_properties = RHIMemoryProperty::None,
+                            .is_dynamic = true},
+                           "ReblurFinalHistoryUniformBuffer");
+
+    final_history_shader_ = rhi_->CreateShader<ReblurFinalHistoryShader>();
+    final_history_pipeline_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurFinalHistoryPipeline");
+    final_history_pipeline_->SetShader<RHIShaderStage::Compute>(final_history_shader_);
+    final_history_pipeline_->Compile();
+
+    auto *final_resources = final_history_pipeline_->GetShaderResource<ReblurFinalHistoryShader>();
+    final_resources->ubo().BindResource(final_history_uniform_buffer_);
+
     // Compute pass for REBLUR dispatches (no timestamp to avoid query reuse within frame)
     reblur_compute_pass_ = rhi_->CreateComputePass("ReblurGPUComputePass", false);
 
     // Create REBLUR denoiser
     reblur_ = std::make_unique<ReblurDenoiser>(rhi_, width, height);
+    ResetFinalHistory();
+}
+
+void GPURenderer::ResetFinalHistory()
+{
+    final_history_valid_ = false;
+    final_history_ping_pong_ = 0;
+}
+
+bool GPURenderer::ShouldStabilizeFinalHistory() const
+{
+    return reblur_ != nullptr && render_config_.reblur_debug_pass == RenderConfig::ReblurDebugPass::Full &&
+           !render_config_.reblur_no_pt_blend;
+}
+
+void GPURenderer::StabilizeFinalHistory()
+{
+    ASSERT(reblur_ != nullptr);
+
+    uint32_t prev_idx = final_history_ping_pong_;
+    uint32_t cur_idx = 1u - final_history_ping_pong_;
+
+    auto *resources = final_history_pipeline_->GetShaderResource<ReblurFinalHistoryShader>();
+    resources->inCurrentColor().BindResource(scene_texture_->GetDefaultView(rhi_));
+    resources->inNormalRoughness().BindResource(normal_roughness_->GetDefaultView(rhi_));
+    resources->inViewZ().BindResource(view_z_->GetDefaultView(rhi_));
+    resources->inMotionVectors().BindResource(motion_vectors_->GetDefaultView(rhi_));
+    resources->inInternalData().BindResource(reblur_->GetInternalData()->GetDefaultView(rhi_));
+    resources->prevColor().BindResource(final_history_[prev_idx]->GetDefaultView(rhi_));
+    resources->prevViewZ().BindResource(prev_final_view_z_->GetDefaultView(rhi_));
+    resources->prevNormalRoughness().BindResource(prev_final_normal_roughness_->GetDefaultView(rhi_));
+    resources->linearSampler().BindResource(final_history_[prev_idx]->GetSampler());
+    resources->outColor().BindResource(final_history_[cur_idx]->GetDefaultView(rhi_));
+
+    ReblurFinalHistoryShader::UniformBufferData ubo{
+        .resolution = {image_size_.x(), image_size_.y()},
+        .disocclusion_threshold = 0.01f,
+        .denoising_range = 1000.f,
+        .reset_history = final_history_valid_ ? 0u : 1u,
+    };
+    final_history_uniform_buffer_->Upload(rhi_, &ubo);
+
+    scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::ComputeShader,
+                                .before_stage = RHIPipelineStage::ComputeShader});
+    normal_roughness_->Transition({.target_layout = RHIImageLayout::Read,
+                                   .after_stage = RHIPipelineStage::Transfer,
+                                   .before_stage = RHIPipelineStage::ComputeShader});
+    view_z_->Transition({.target_layout = RHIImageLayout::Read,
+                         .after_stage = RHIPipelineStage::Transfer,
+                         .before_stage = RHIPipelineStage::ComputeShader});
+    motion_vectors_->Transition({.target_layout = RHIImageLayout::Read,
+                                 .after_stage = RHIPipelineStage::ComputeShader,
+                                 .before_stage = RHIPipelineStage::ComputeShader});
+    reblur_->GetInternalData()->Transition({.target_layout = RHIImageLayout::Read,
+                                            .after_stage = RHIPipelineStage::ComputeShader,
+                                            .before_stage = RHIPipelineStage::ComputeShader});
+    final_history_[prev_idx]->Transition({.target_layout = RHIImageLayout::Read,
+                                          .after_stage = final_history_valid_ ? RHIPipelineStage::Transfer
+                                                                              : RHIPipelineStage::Top,
+                                          .before_stage = RHIPipelineStage::ComputeShader});
+    prev_final_view_z_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = final_history_valid_ ? RHIPipelineStage::Transfer
+                                                                        : RHIPipelineStage::Top,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
+    prev_final_normal_roughness_->Transition({.target_layout = RHIImageLayout::Read,
+                                              .after_stage = final_history_valid_ ? RHIPipelineStage::Transfer
+                                                                                  : RHIPipelineStage::Top,
+                                              .before_stage = RHIPipelineStage::ComputeShader});
+    final_history_[cur_idx]->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                         .after_stage = RHIPipelineStage::Top,
+                                         .before_stage = RHIPipelineStage::ComputeShader});
+
+    rhi_->BeginComputePass(reblur_compute_pass_);
+    rhi_->DispatchCompute(final_history_pipeline_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
+    rhi_->EndComputePass(reblur_compute_pass_);
+
+    view_z_->Transition({.target_layout = RHIImageLayout::TransferSrc,
+                         .after_stage = RHIPipelineStage::ComputeShader,
+                         .before_stage = RHIPipelineStage::Transfer});
+    prev_final_view_z_->Transition({.target_layout = RHIImageLayout::TransferDst,
+                                    .after_stage = final_history_valid_ ? RHIPipelineStage::Transfer
+                                                                        : RHIPipelineStage::Top,
+                                    .before_stage = RHIPipelineStage::Transfer});
+    view_z_->CopyToImage(prev_final_view_z_.get());
+
+    normal_roughness_->Transition({.target_layout = RHIImageLayout::TransferSrc,
+                                   .after_stage = RHIPipelineStage::ComputeShader,
+                                   .before_stage = RHIPipelineStage::Transfer});
+    prev_final_normal_roughness_->Transition({.target_layout = RHIImageLayout::TransferDst,
+                                              .after_stage = final_history_valid_ ? RHIPipelineStage::Transfer
+                                                                                  : RHIPipelineStage::Top,
+                                              .before_stage = RHIPipelineStage::Transfer});
+    normal_roughness_->CopyToImage(prev_final_normal_roughness_.get());
+
+    final_history_[cur_idx]->Transition({.target_layout = RHIImageLayout::TransferSrc,
+                                         .after_stage = RHIPipelineStage::ComputeShader,
+                                         .before_stage = RHIPipelineStage::Transfer});
+    scene_texture_->Transition({.target_layout = RHIImageLayout::TransferDst,
+                                .after_stage = RHIPipelineStage::ComputeShader,
+                                .before_stage = RHIPipelineStage::Transfer});
+    final_history_[cur_idx]->CopyToImage(scene_texture_.get());
+
+    view_z_->Transition({.target_layout = RHIImageLayout::Read,
+                         .after_stage = RHIPipelineStage::Transfer,
+                         .before_stage = RHIPipelineStage::ComputeShader});
+    normal_roughness_->Transition({.target_layout = RHIImageLayout::Read,
+                                   .after_stage = RHIPipelineStage::Transfer,
+                                   .before_stage = RHIPipelineStage::ComputeShader});
+    prev_final_view_z_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::Transfer,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
+    prev_final_normal_roughness_->Transition({.target_layout = RHIImageLayout::Read,
+                                              .after_stage = RHIPipelineStage::Transfer,
+                                              .before_stage = RHIPipelineStage::ComputeShader});
+    final_history_[cur_idx]->Transition({.target_layout = RHIImageLayout::Read,
+                                         .after_stage = RHIPipelineStage::Transfer,
+                                         .before_stage = RHIPipelineStage::ComputeShader});
+    scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::Transfer,
+                                .before_stage = RHIPipelineStage::PixelShader});
+
+    final_history_ping_pong_ = cur_idx;
+    final_history_valid_ = true;
 }
 
 void GPURenderer::RenderReblurPath()
@@ -793,6 +972,7 @@ void GPURenderer::RenderReblurPath()
     // Passthrough: skip denoiser and composite, use the split shader's imageData accumulation directly
     if (render_config_.reblur_debug_pass == RenderConfig::ReblurDebugPass::Passthrough)
     {
+        ResetFinalHistory();
         scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::ComputeShader,
                                     .before_stage = RHIPipelineStage::PixelShader});
@@ -871,9 +1051,16 @@ void GPURenderer::RenderReblurPath()
     rhi_->DispatchCompute(composite_pipeline_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
     rhi_->EndComputePass(reblur_compute_pass_);
 
-    // Transition scene_texture to Read for tone mapping
-    scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                .after_stage = RHIPipelineStage::ComputeShader,
-                                .before_stage = RHIPipelineStage::PixelShader});
+    if (ShouldStabilizeFinalHistory())
+    {
+        StabilizeFinalHistory();
+    }
+    else
+    {
+        ResetFinalHistory();
+        scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = RHIPipelineStage::ComputeShader,
+                                    .before_stage = RHIPipelineStage::PixelShader});
+    }
 }
 } // namespace sparkle

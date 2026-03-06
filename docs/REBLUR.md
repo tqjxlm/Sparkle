@@ -40,7 +40,7 @@ REBLUR requires `--pipeline gpu` which needs hardware ray tracing support. The `
 | iOS      | `ios`     |                                                                                 |
 | Android  | `android` |                                                                                 |
 
-When `--use_reblur true` is set, the renderer switches from the vanilla combined-output path tracer to a split-output path tracer that feeds separate diffuse/specular channels into a 7-stage denoising pipeline, followed by remodulation compositing and standard tone mapping.
+When `--use_reblur true` is set, the renderer switches from the vanilla combined-output path tracer to a split-output path tracer that feeds separate diffuse/specular channels into a 7-stage denoising pipeline, followed by remodulation compositing, an optional displayed-color history reprojection, and standard tone mapping.
 
 ---
 
@@ -156,7 +156,7 @@ Compile-time constants defined in `shaders/include/reblur_config.h.slang`:
 
 ### Pipeline Architecture
 
-REBLUR processes each frame through 7 sequential compute shader stages plus a final composite:
+REBLUR processes each frame through 7 sequential compute shader stages plus a final composite. When PT blend is enabled, the renderer also reprojects the previous displayed color after composite:
 
 ```text
 Split Path Tracer (1 spp)
@@ -177,6 +177,9 @@ Split Path Tracer (1 spp)
   |
   v
 Composite (remodulation + PT blend)
+  |
+  v
+FinalHistory (displayed-color reprojection)
   |
   v
 Tone Mapping -> Screen
@@ -228,6 +231,8 @@ This eliminates demodulation/remodulation artifacts at silhouette edges that are
 
 The PT accumulation uses a separate `pt_accumulation_` texture (not the scene texture) to avoid contaminating the PT's temporal history with denoiser output. Use `--reblur_no_pt_blend true` to force pure denoised output for diagnostic purposes.
 
+When PT blend is enabled for the `Full` output, `GPURenderer` also keeps a renderer-owned history of the displayed linear color. That history is reprojected with motion vectors plus previous `viewZ` / `normalRoughness`, and blended by the current REBLUR accumulation speed. This preserves converged full-pipeline brightness across small camera nudges even though the vanilla PT accumulation itself must reset on camera motion.
+
 ### Texture Budget
 
 At 1920x1080 resolution, REBLUR allocates approximately **246 MB** of GPU memory:
@@ -263,6 +268,7 @@ libraries/
                                   #   pt_accumulation_ texture
   source/renderer/renderer/
     GPURenderer.cpp               # Render flow: split PT -> denoise -> composite
+                                  #   -> final displayed-color history
 
   include/renderer/
     RenderConfig.h                # CLI args: use_reblur, reblur_debug_pass,
@@ -285,6 +291,7 @@ shaders/ray_trace/
   reblur_history_fix.cs.slang           # Stage 4: Disocclusion fill
   reblur_temporal_stabilization.cs.slang# Stage 7: Anti-lag + flicker reduction
   reblur_composite.cs.slang             # Final: remodulation + PT blend
+  reblur_final_history.cs.slang         # Renderer-owned displayed-color reprojection
 
 shaders/include/
   reblur_config.h.slang                 # Compile-time constants
@@ -415,7 +422,8 @@ The `RenderReblurPath()` method:
 2. Constructs `ReblurMatrices` from `CameraRenderProxy` current and previous frame data
 3. Calls `reblur_->Denoise(inputs, settings, matrices, frame_index, debug_pass)`
 4. Runs the composite shader: `denoised_diff * albedo + denoised_spec`, blending with PT accumulated result
-5. Passes the composited result to tone mapping
+5. For `Full` output with PT blend enabled, reprojects the previous displayed linear color and writes a stabilized final-history result
+6. Passes the composited result to tone mapping
 
 On first scene load, `GPURenderer` calls `reblur_->Reset()` to clear any history accumulated during pre-scene-load frames.
 
@@ -490,6 +498,14 @@ On first scene load, `GPURenderer` calls `reblur_->Reset()` to clear any history
 - Remodulates: `color = denoised_diffuse * albedo + denoised_specular`
 - PT blend: `final = lerp(denoised_color, pt_accumulated, frame_index / 256)`
 - Sky pixels are skipped (preserved from vanilla accumulation)
+
+### Displayed-Color History
+
+- **Shader**: `reblur_final_history.cs.slang`
+- Lives in `GPURenderer`, not `ReblurDenoiser`
+- Reprojects the previous displayed linear color using current motion vectors plus previous `viewZ` / `normalRoughness`
+- Uses current REBLUR accumulation speed as the displayed-history reuse weight
+- Enabled only for `Full` output when PT blend is active; skipped for debug passes and `--reblur_no_pt_blend true`
 
 ### Shared Utilities
 

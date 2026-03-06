@@ -46,6 +46,12 @@ private:
 
     void RenderReblurPath();
 
+    void ResetFinalHistory();
+
+    [[nodiscard]] bool ShouldStabilizeFinalHistory() const;
+
+    void StabilizeFinalHistory();
+
     void BindSplitBindlessResources();
 
     RHIResourceRef<RHIShader> compute_shader_;
@@ -95,6 +101,15 @@ private:
     RHIResourceRef<RHIPipelineState> composite_pipeline_;
     RHIResourceRef<RHIBuffer> composite_uniform_buffer_;
     RHIResourceRef<RHIComputePass> reblur_compute_pass_;
+
+    RHIResourceRef<RHIImage> final_history_[2];
+    RHIResourceRef<RHIImage> prev_final_view_z_;
+    RHIResourceRef<RHIImage> prev_final_normal_roughness_;
+    RHIResourceRef<RHIShader> final_history_shader_;
+    RHIResourceRef<RHIPipelineState> final_history_pipeline_;
+    RHIResourceRef<RHIBuffer> final_history_uniform_buffer_;
+    uint32_t final_history_ping_pong_ = 0;
+    bool final_history_valid_ = false;
 
     struct ComputePerformanceRecord
     {

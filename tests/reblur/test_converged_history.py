@@ -26,7 +26,7 @@ Semantic checks:
      history pixels (ratio > 2.0).
   C. Reprojection validity: > 60% of geometry pixels have valid history.
   D. End-to-end floor stability: history-valid floor pixels in Run 1 must stay
-     as clean as Run 0 and nearly unchanged vs Run 1 before.
+     as clean and as bright as Run 0, and nearly unchanged vs Run 1 before.
   E. No NaN/Inf/all-black in any output.
   F. End-to-end FLIP: reblur full pipeline vs vanilla (FLIP <= threshold).
 
@@ -54,8 +54,9 @@ sys.path.insert(0, PROJECT_ROOT)
 # History cleanness: reblur history noise / vanilla noise (same region).
 # 1.0 = identical to converged vanilla, higher = residual noise.
 # After a 2° yaw with 5 frames of re-convergence, valid-history pixels should
-# stay close to the vanilla reference. Ratios above ~1.6x are visibly noisy.
-HISTORY_NOISE_RATIO_MAX = 1.6
+# remain close to the converged vanilla reference. Anything above ~1.3x has
+# visible residual noise in the current reprojection test scene.
+HISTORY_NOISE_RATIO_MAX = 1.3
 # Noise concentration: disoccluded noise / history noise.
 # Higher means noise is more concentrated in disoccluded regions (good).
 NOISE_CONCENTRATION_MIN = 2.0
@@ -67,16 +68,16 @@ MIN_FOOTPRINT_QUALITY = 0.5
 LUMA_RATIO_MIN = 0.93
 LUMA_RATIO_MAX = 1.07
 # End-to-end FLIP: reblur full pipeline "after" vs vanilla "after".
-# After a 2° camera nudge with 5 frames settling, the reblur output has:
-#   - ~75% history pixels (reprojected, clean) + ~25% disoccluded (1spp, noisy)
-#   - PT blend weight resets to ~0 after nudge, so output is ~100% denoiser
-# Threshold is still loose enough to tolerate small disoccluded regions, but
-# rejects clearly degraded whole-frame output.
-E2E_FLIP_MAX = 0.22
+# With valid-history pixels now preserving the previous displayed result,
+# full-pipeline FLIP should stay close to the converged vanilla baseline.
+# Small disoccluded regions still add error, so keep a little headroom.
+E2E_FLIP_MAX = 0.14
 # History-valid floor pixels should stay nearly identical to both the vanilla
 # post-nudge reference and the converged pre-nudge floor in Run 1.
-E2E_FLOOR_HISTORY_VS_VANILLA_MAX = 1.15
-E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX = 1.15
+E2E_FLOOR_HISTORY_VS_VANILLA_MAX = 1.05
+E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX = 1.05
+E2E_FLOOR_LUMA_RATIO_MIN = 0.98
+E2E_FLOOR_LUMA_RATIO_MAX = 1.02
 
 
 def parse_args():
@@ -477,15 +478,25 @@ def main():
         vanilla_floor_noise = float(np.mean(compute_local_std(vanilla_after_luma, floor_window)[floor_history]))
         e2e_before_floor_noise = float(np.mean(compute_local_std(e2e_before_luma, floor_window)[floor_history]))
         e2e_after_floor_noise = float(np.mean(compute_local_std(e2e_after_luma, floor_window)[floor_history]))
+        vanilla_floor_luma = float(np.mean(vanilla_after_luma[floor_history]))
+        e2e_before_floor_luma = float(np.mean(e2e_before_luma[floor_history]))
+        e2e_after_floor_luma = float(np.mean(e2e_after_luma[floor_history]))
 
         floor_vs_vanilla = e2e_after_floor_noise / max(vanilla_floor_noise, 1e-9)
         floor_after_before = e2e_after_floor_noise / max(e2e_before_floor_noise, 1e-9)
+        floor_luma_vs_vanilla = e2e_after_floor_luma / max(vanilla_floor_luma, 1e-9)
+        floor_luma_after_before = e2e_after_floor_luma / max(e2e_before_floor_luma, 1e-9)
 
         print(f"    Run 1 after floor local_std:   {e2e_after_floor_noise:.6f}")
         print(f"    Vanilla after floor local_std: {vanilla_floor_noise:.6f}")
         print(f"    Run 1 before floor local_std:  {e2e_before_floor_noise:.6f}")
         print(f"    After/vanilla ratio:           {floor_vs_vanilla:.3f}x")
         print(f"    After/before ratio:            {floor_after_before:.3f}x")
+        print(f"    Run 1 after floor luma:        {e2e_after_floor_luma:.6f}")
+        print(f"    Vanilla after floor luma:      {vanilla_floor_luma:.6f}")
+        print(f"    Run 1 before floor luma:       {e2e_before_floor_luma:.6f}")
+        print(f"    Luma after/vanilla ratio:      {floor_luma_vs_vanilla:.3f}x")
+        print(f"    Luma after/before ratio:       {floor_luma_after_before:.3f}x")
 
         if floor_vs_vanilla <= E2E_FLOOR_HISTORY_VS_VANILLA_MAX:
             print(f"    PASS: after/vanilla <= {E2E_FLOOR_HISTORY_VS_VANILLA_MAX}")
@@ -500,6 +511,24 @@ def main():
         else:
             print(f"    FAIL: after/before > {E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX}")
             all_results.append(("Run 1 floor after/before", False))
+
+        if E2E_FLOOR_LUMA_RATIO_MIN <= floor_luma_vs_vanilla <= E2E_FLOOR_LUMA_RATIO_MAX:
+            print(f"    PASS: floor luma after/vanilla in "
+                  f"[{E2E_FLOOR_LUMA_RATIO_MIN}, {E2E_FLOOR_LUMA_RATIO_MAX}]")
+            all_results.append(("Run 1 floor luma vs vanilla", True))
+        else:
+            print(f"    FAIL: floor luma after/vanilla outside "
+                  f"[{E2E_FLOOR_LUMA_RATIO_MIN}, {E2E_FLOOR_LUMA_RATIO_MAX}]")
+            all_results.append(("Run 1 floor luma vs vanilla", False))
+
+        if E2E_FLOOR_LUMA_RATIO_MIN <= floor_luma_after_before <= E2E_FLOOR_LUMA_RATIO_MAX:
+            print(f"    PASS: floor luma after/before in "
+                  f"[{E2E_FLOOR_LUMA_RATIO_MIN}, {E2E_FLOOR_LUMA_RATIO_MAX}]")
+            all_results.append(("Run 1 floor luma after/before", True))
+        else:
+            print(f"    FAIL: floor luma after/before outside "
+                  f"[{E2E_FLOOR_LUMA_RATIO_MIN}, {E2E_FLOOR_LUMA_RATIO_MAX}]")
+            all_results.append(("Run 1 floor luma after/before", False))
     else:
         print("    FAIL: no history-valid floor pixels found")
         all_results.append(("Run 1 floor mask", False))
