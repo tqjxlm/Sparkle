@@ -148,20 +148,41 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     // Higher values cause energy loss due to float16 quantization error
     // amplified by the EMA's high temporal correlation.
     float prev_stab_count = 0.0;
-    if (all(prevUV >= 0.0) && all(prevUV <= 1.0))
+
+    // Clamp UV to [0,1] instead of falling back to current PostBlur when
+    // out of bounds. This samples the nearest edge pixel's stabilized
+    // value, which is a much better fallback than raw PostBlur noise.
+    // Matches NVIDIA NRD behavior (uses sampler with clamp-to-edge mode).
+    float2 sampleUV = clamp(prevUV, float2(0.0), float2(1.0));
+    bool prevInBounds = all(prevUV >= 0.0) && all(prevUV <= 1.0);
+
+    // Bilinear sampling of stabilized history for smoother reprojection.
+    // Manual 4-tap bilinear avoids needing a sampler binding.
     {
-        int2 prevPixel = int2(prevUV * float2(resolution));
-        prevPixel = clamp(prevPixel, int2(0, 0), int2(resolution) - int2(1, 1));
-        stab_diff = prevStabilizedDiff[prevPixel];
-        stab_spec = prevStabilizedSpec[prevPixel];
-        // Use diffuse .a for the shared stabilized frame counter
-        prev_stab_count = stab_diff.a;
-    }
-    else
-    {
-        stab_diff = current_diff;
-        stab_spec = current_spec;
-        prev_stab_count = 0.0;
+        float2 prevPixelF = sampleUV * float2(resolution) - 0.5;
+        int2 p00 = int2(floor(prevPixelF));
+        float2 frac = prevPixelF - float2(p00);
+        p00 = clamp(p00, int2(0, 0), int2(resolution) - int2(1, 1));
+        int2 p10 = clamp(p00 + int2(1, 0), int2(0, 0), int2(resolution) - int2(1, 1));
+        int2 p01 = clamp(p00 + int2(0, 1), int2(0, 0), int2(resolution) - int2(1, 1));
+        int2 p11 = clamp(p00 + int2(1, 1), int2(0, 0), int2(resolution) - int2(1, 1));
+
+        float4 d00 = prevStabilizedDiff[p00];
+        float4 d10 = prevStabilizedDiff[p10];
+        float4 d01 = prevStabilizedDiff[p01];
+        float4 d11 = prevStabilizedDiff[p11];
+        stab_diff = lerp(lerp(d00, d10, frac.x), lerp(d01, d11, frac.x), frac.y);
+
+        float4 s00 = prevStabilizedSpec[p00];
+        float4 s10 = prevStabilizedSpec[p10];
+        float4 s01 = prevStabilizedSpec[p01];
+        float4 s11 = prevStabilizedSpec[p11];
+        stab_spec = lerp(lerp(s00, s10, frac.x), lerp(s01, s11, frac.x), frac.y);
+
+        // Use diffuse .a for the shared stabilized frame counter.
+        // For out-of-bounds, use the clamped-edge value but reduce
+        // stab_count to limit ghosting from stale edge history.
+        prev_stab_count = prevInBounds ? stab_diff.a : 0.0;
     }
 
     float stab_diff_luma = GetLuminance(stab_diff.rgb);
@@ -210,10 +231,10 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float spec_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * framerate_scale * spec_non_linear);
 
     // Clamp stabilized history to local color box.
-    // At convergence sigma → 0, collapsing the range to [mean, mean] and
-    // clamping every pixel to the neighborhood average (8.5% energy loss).
-    // A minimum sigma floor proportional to the mean prevents this collapse
-    // while still allowing tight clamping during noisy early frames.
+    // At convergence sigma -> 0, collapsing the range to [mean, mean] and
+    // clamping every pixel to the neighborhood average. This acts as an
+    // implicit spatial filter that decorrelates frozen TA noise -- the
+    // primary TS denoising mechanism (matches NVIDIA NRD behavior).
     float diff_sigma_eff = max(diff_sigma, diff_mean * REBLUR_TS_MIN_SIGMA_FRACTION);
     float spec_sigma_eff = max(spec_sigma, spec_mean * REBLUR_TS_MIN_SIGMA_FRACTION);
     float diff_lo = diff_mean - diff_sigma_eff * diff_sigma_scale;

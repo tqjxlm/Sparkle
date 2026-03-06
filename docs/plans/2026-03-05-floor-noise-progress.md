@@ -1,6 +1,6 @@
 # Floor Noise Investigation Progress
 
-## Date: 2026-03-05
+## Date: 2026-03-05 (updated 2026-03-06)
 
 ## Problem Statement
 E2E noise is too high in the floor area for old (history-valid) pixels.
@@ -113,34 +113,150 @@ cancel correlated noise.
 Analogy: averaging two copies of the same noisy signal gives the same
 noisy signal, no matter how many copies you average.
 
-## Phase 4: Potential Solutions
+## Phase 4: NVIDIA NRD Reference Comparison (2026-03-06)
 
-### For the post-nudge regression (2.15x)
+### Source: https://github.com/NVIDIAGameWorks/RayTracingDenoiser (v4.17)
 
-1. **Accept and document**: The 2.15x spike after a small camera nudge
-   recovers naturally over ~300-500 frames. For interactive use, this
-   means ~5-10 seconds of slightly elevated noise after camera movement.
+### Critical Difference: REBLUR_TS_MIN_SIGMA_FRACTION
 
-2. **Faster PT blend after motion**: Temporarily reduce PT_BLEND_RAMP
-   when camera motion is detected, so the PT accumulated result takes
-   over faster. The PT result doesn't have the frozen noise issue.
+**Our code has `REBLUR_TS_MIN_SIGMA_FRACTION = 1.0`, NVIDIA has NO sigma floor.**
 
-3. **Spatial pre-filter before TS**: Apply a small spatial filter to the
-   PostBlur output before TS, decorrelating the frozen noise by mixing
-   with neighboring pixels. This would reduce the correlation between
-   current and history, letting the TS work better.
+This is the primary cause of our TS ineffectiveness:
 
-### For the static convergence (7.55x at 2048 spp)
+| Aspect | NVIDIA NRD | Our Implementation |
+|--------|------------|-------------------|
+| **Min sigma** | None (sigma -> 0 at convergence) | sigma >= mean * 1.0 |
+| **Clamp range at convergence** | Collapses to [mean, mean] | [-0.7, 2.0] for floor luma ~0.64 |
+| **Effect** | History forced to local mean (spatial filtering) | History unclamped (frozen noise passes through) |
 
-4. **Increase max_stabilized_frame_num**: At stab=63, the TS reduces 1.94x.
-   At stab=256, roughly 4x (more time for decorrelation). But float16
-   energy loss is a concern (1-2.6% at 128-256).
+#### How NVIDIA's sigma clamping works at convergence:
+1. Converged signal -> neighborhood variance -> 0 -> sigma -> 0
+2. `Color::Clamp(mean, sigma*scale, history)` = `clamp(history, mean, mean)` = mean
+3. History luminance is forced to the local neighborhood mean
+4. `lerp(currentLuma, mean, 0.89)` -> mostly the spatial mean -> effectively denoised
+5. The spatial averaging through sigma collapse IS the noise reduction mechanism
 
-5. **Float32 stabilized buffers**: Eliminates float16 energy loss,
-   enabling higher stab counts. Doubles stabilized buffer memory.
+#### Why our sigma floor defeats this:
+1. `REBLUR_TS_MIN_SIGMA_FRACTION = 1.0` -> sigma_eff >= mean * 1.0 = 0.64
+2. Clamp range: [mean - 0.64*2.1, mean + 0.64*2.1] = [-0.7, 2.0]
+3. History NEVER gets clamped -> frozen noise passes through unchanged
+4. The TS blend averages two correlated frozen noise patterns -> no reduction
 
-6. **Reduce PT_BLEND_RAMP from 256 to 128 or 64**: Makes PT blend
-   compensate faster, masking the denoiser's noise limitation.
+#### The "8.5% energy loss" trade-off:
+The comment in our code says the sigma floor prevents energy loss. But this
+"energy loss" IS the denoising mechanism. Clamping to the local mean shifts
+per-pixel luminance toward the neighborhood average, which is exactly what
+spatial denoising does. NVIDIA accepts this trade-off; it's small for natural
+scenes and invisible compared to the noise it eliminates.
+
+### Other Architectural Differences
+
+| Feature | NVIDIA NRD | Our Implementation |
+|---------|------------|-------------------|
+| **Stabilized buffer** | Luminance only (`float`) | Full RGBA (`float4`) |
+| **History sampling** | Bicubic/CatRom with bilinear fallback | Nearest-neighbor |
+| **Neighborhood size** | 3x3 (NRD_BORDER=1) | 5x5 (BORDER=2) |
+| **Blend weight source** | TA accum_speed via GetAdvancedNonLinearAccumSpeed | Separate per-pixel stab_count |
+| **Convergence tuning** | 3-parameter curve (s, b, p) | Fixed 1/(1+accum) |
+| **Default maxAccumulatedFrameNum** | 30 | 63 |
+| **Default maxStabilizedFrameNum** | 63 | 63 |
+| **Antilag** | Mode 2 with quad-wave neighbor adaptation | Mode 2 without quad-wave |
+
+### Key NVIDIA TS Logic (for reference)
+
+```hlsl
+// NVIDIA: No min sigma floor!
+smbDiffLumaHistory = Color::Clamp(diffLumaM1, diffLumaSigma * sigmaScale, smbDiffLumaHistory);
+// At convergence: sigma -> 0 -> history clamped to mean
+
+// NVIDIA: blend weight from TA accum_speed (no separate stab_count)
+float2 params = GetTemporalAccumulationParams(footprintQuality, accumSpeed, antilag);
+// params.x = footprintQuality * (1 - 1/(1+k*accumSpeed)) * antilag
+// params.y = 1.0 + 3.0 * framerateScale * params.x  (sigma scale)
+
+float diffLumaStabilized = lerp(diffLuma, smbDiffLumaHistory, min(weight, gStabilizationStrength));
+// Output: current PostBlur COLOR with stabilized LUMINANCE
+diff = ChangeLuma(diff, diffLumaStabilized);
+```
+
+### Recommended Fix
+
+**Primary fix: Set `REBLUR_TS_MIN_SIGMA_FRACTION = 0.0`** (or very small like 0.01).
+This will allow the sigma clamping to force history toward the local mean at
+convergence, matching NVIDIA's behavior and enabling the TS to reduce frozen noise.
+
+**Secondary improvements (optional, lower priority):**
+1. Switch to luminance-only stabilization (separate float texture)
+2. Use bilinear/bicubic sampling for stabilized history instead of nearest-neighbor
+3. Derive blend weight from TA accum_speed instead of separate stab_count
+
+## Phase 5: Implementation and Validation
+
+### Trial 1: Set REBLUR_TS_MIN_SIGMA_FRACTION = 0.0
+- Status: **NO EFFECT**
+- Change: `reblur_config.h.slang` REBLUR_TS_MIN_SIGMA_FRACTION 1.0 → 0.0
+- Result: No measurable improvement. The actual sigma from frozen TA noise (~0.054,
+  or 8.5% of floor mean luminance 0.64) is far larger than the floor imposed by
+  `mean * 1.0 = 0.64`. Only 0.4% of pixels had sigma < floor. The sigma floor
+  was NOT the bottleneck — the frozen noise itself keeps sigma high enough to
+  prevent clamping from collapsing the range.
+- Kept: The change is still correct (matches NVIDIA, no downside), just not the fix.
+
+### Trial 2: Bilinear sampling + UV clamping for stabilized history
+- Status: **SIGNIFICANT IMPROVEMENT**
+- Changes:
+  1. `reblur_temporal_stabilization.cs.slang`: Replaced nearest-neighbor sampling
+     with manual 4-tap bilinear. Replaced out-of-bounds fallback (100% PostBlur)
+     with UV clamping to [0,1] (matches NVIDIA's clamp-to-edge sampler behavior).
+  2. For OOB pixels, stab_count resets to 0 (prevents ghosting from stale edge history).
+- Root cause addressed: With a 142-pixel camera shift on a 1280-wide image, ~11% of
+  floor pixels had prevUV outside [0,1]. The original code fell back to 100% PostBlur
+  (raw noise), which dominated the overall metric. The bilinear sampling also reduces
+  sub-pixel reprojection artifacts for in-bounds pixels.
+
+#### Results (strip-by-strip analysis):
+
+| Region           | TS reduction BEFORE fix | TS reduction AFTER fix |
+|------------------|------------------------|----------------------|
+| Left quarter     | 0.96x (worse!)         | 1.12x                |
+| Mid-left         | 1.18x                  | 3.06x                |
+| Mid-right        | 1.17x                  | 2.32x                |
+| Right quarter    | 1.04x                  | 1.55x                |
+| **Overall**      | **1.02x**              | **1.39x**            |
+
+| Metric                              | Before fix | After fix |
+|-------------------------------------|-----------|-----------|
+| Overall noise increase (after/before nudge) | 2.15x | 1.58x |
+| TS reduction after nudge            | 1.02x     | 1.39x     |
+
+- Left quarter remains weak (1.12x) due to geometric complexity near objects
+  (table legs, chair bases create genuine disocclusions).
+- Center floor shows strong TS noise reduction (2.3-3.1x), confirming the fix
+  works well for pixels with valid reprojection.
+
+### Regression test results (after Trial 2)
+
+Full test suite: 22 passed, 4 failed (all failures pre-existing, unrelated to TS changes).
+
+Converged history test (most relevant): **10/10 passed**
+- History cleanness: 2.21x (threshold < 3.0x)
+- E2E FLIP: 0.0923 (threshold < 0.25)
+- Luma preservation: 0.990 (no energy loss)
+- Reprojection validity: 99.7%
+- Noise concentration: 6.77x (threshold > 2.0x)
+
+Pre-existing failures (not caused by our changes):
+- Per-pass validation: Blur debug pass crash
+- Temporal validation / C++ temporal convergence: crash
+- Ghosting test: timeout (needs more frames)
+- TAHistory convergence: luma increase threshold mismatch
+
+### Remaining improvements (not yet attempted)
+
+1. Luminance-only stabilization (separate `float` texture, matches NVIDIA)
+2. Reduce BORDER from 2 to 1 (match NVIDIA's 3x3 neighborhood)
+3. Derive blend weight from TA accum_speed instead of separate stab_count
+4. Bicubic/CatRom sampling (NVIDIA uses this with bilinear fallback)
 
 ## Files
 
@@ -158,3 +274,12 @@ noisy signal, no matter how many copies you average.
 ### Code changes (diagnostic only, not production fixes)
 - Added `TSStabCount` debug pass to `ReblurDebugPass` enum
 - Added `debug_output` UBO field to TS shader (currently unused in normal mode)
+
+### NVIDIA NRD Reference
+- `/d/Projects/NRD_reference/` - cloned NRD v4.17
+- `/d/Projects/NRD_MathLib/` - cloned MathLib (Color::Clamp definition)
+- Key files:
+  - `Shaders/REBLUR_TemporalStabilization.cs.hlsl` - TS shader
+  - `Shaders/REBLUR_Common.hlsli` - ComputeAntilag, GetTemporalAccumulationParams
+  - `Shaders/REBLUR_Config.hlsli` - Config defines
+  - `Include/NRDSettings.h` - Default settings (maxStabilizedFrameNum=63)

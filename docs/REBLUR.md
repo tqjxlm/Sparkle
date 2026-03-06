@@ -671,3 +671,18 @@ Low values indicate disocclusion or history rejection. Monotonically increasing 
 - [NVIDIA NRD](https://github.com/NVIDIA-RTX/NRD) (v4.17.1)
 - Ray Tracing Gems II, Chapter 49: "ReBLUR: A Hierarchical Recurrent Denoiser" (Dmitry Zhdan)
 - GTC 2020: "Fast Denoising with Self-Stabilizing Recurrent Blurs"
+
+### Local Reference Clone
+
+A shallow clone of NVIDIA's official NRD implementation (v4.17) is available at
+`/d/Projects/NRD_reference/` for comparison when debugging or extending REBLUR.
+The companion math library (MathLib) is at `/d/Projects/NRD_MathLib/`.
+
+Key files for TS comparison:
+- `NRD_reference/Shaders/REBLUR_TemporalStabilization.cs.hlsl` -- Official TS shader
+- `NRD_reference/Shaders/REBLUR_Common.hlsli` -- `ComputeAntilag`, `GetTemporalAccumulationParams`
+- `NRD_reference/Shaders/REBLUR_Config.hlsli` -- Config defines (no `TS_MIN_SIGMA_FRACTION`)
+- `NRD_reference/Include/NRDSettings.h` -- Default settings (`maxStabilizedFrameNum=63`)
+- `NRD_MathLib/ml.hlsli` -- `Color::Clamp` = `clamp(value, mean-sigma, mean+sigma)`
+
+Notable differences from our implementation documented in `docs/plans/2026-03-05-floor-noise-progress.md` (Phase 4).
