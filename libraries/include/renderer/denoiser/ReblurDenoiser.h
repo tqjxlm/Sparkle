@@ -83,7 +83,7 @@ private:
                             uint32_t debug_output = 0, bool use_alt_pipeline = false);
     void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices);
     void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
-                           const ReblurMatrices &matrices);
+                           const ReblurMatrices &matrices, uint32_t debug_output = 0);
     void CopyToOutput(RHIImage *diff, RHIImage *spec);
     void CopyPreviousFrameData(const ReblurInputBuffers &inputs);
     void CopyHistoryData(RHIImage *diff, RHIImage *spec);

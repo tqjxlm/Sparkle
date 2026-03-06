@@ -13,6 +13,7 @@
     uint frame_index;
     uint max_stabilized_frame_num;
     float framerate_scale;
+    uint debug_output;
 };
 
 // Current denoised output (from PostBlur)

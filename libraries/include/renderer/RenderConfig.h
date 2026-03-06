@@ -59,6 +59,7 @@ struct RenderConfig : public ConfigCollection
         TADepth,        // temporal accum diagnostic: depth
         TAHistory,      // temporal accum diagnostic: raw reprojected history
         TAMaterialId,   // temporal accum diagnostic: material ID mismatch
+        TSStabCount,    // temporal stabilization diagnostic: stab_count, blend, antilag
         Passthrough,    // no denoising, use raw split PT output
     };
 

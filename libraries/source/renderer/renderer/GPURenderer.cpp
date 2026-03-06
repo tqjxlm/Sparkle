@@ -517,10 +517,11 @@ void GPURenderer::Update()
                                 render_config_.reblur_debug_pass == DP::TADepth ||
                                 render_config_.reblur_debug_pass == DP::TAHistory ||
                                 render_config_.reblur_debug_pass == DP::TAMaterialId;
+        bool is_ts_diagnostic = render_config_.reblur_debug_pass == DP::TSStabCount;
         ReblurCompositeShader::UniformBufferData comp_ubo{
             .resolution = {image_size_.x(), image_size_.y()},
             .frame_index = comp_frame_index,
-            .composite_mode = is_ta_diagnostic ? 1u : 0u,
+            .composite_mode = (is_ta_diagnostic || is_ts_diagnostic) ? 1u : 0u,
         };
         composite_uniform_buffer_->Upload(rhi_, &comp_ubo);
     }

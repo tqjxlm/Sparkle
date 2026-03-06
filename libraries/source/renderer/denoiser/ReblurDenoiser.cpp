@@ -183,6 +183,7 @@ public:
         uint32_t frame_index;
         uint32_t max_stabilized_frame_num;
         float framerate_scale;
+        uint32_t debug_output;
     };
 };
 
@@ -529,7 +530,8 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
     // Skipped for PostBlur debug (isolate PostBlur output)
     if (debug_pass != DP::PostBlur && settings.max_stabilized_frame_num > 0)
     {
-        TemporalStabilize(inputs, settings, matrices);
+        uint32_t ts_debug = (debug_pass == DP::TSStabCount) ? 1u : 0u;
+        TemporalStabilize(inputs, settings, matrices, ts_debug);
 
         // Copy stabilized result into denoised_diffuse_/denoised_specular_ for composite
         uint32_t cur_idx = stab_ping_pong_;
@@ -786,7 +788,7 @@ void ReblurDenoiser::HistoryFix(const ReblurInputBuffers &inputs, const ReblurSe
 }
 
 void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
-                                       const ReblurMatrices &matrices)
+                                       const ReblurMatrices &matrices, uint32_t debug_output)
 {
     auto *resources = temporal_stab_pipeline_->GetShaderResource<ReblurTemporalStabShader>();
 
@@ -821,6 +823,7 @@ void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const R
         .frame_index = internal_frame_index_,
         .max_stabilized_frame_num = settings.max_stabilized_frame_num,
         .framerate_scale = matrices.framerate_scale,
+        .debug_output = debug_output,
     };
     temporal_stab_ub_->Upload(rhi_, &ubo);
 
