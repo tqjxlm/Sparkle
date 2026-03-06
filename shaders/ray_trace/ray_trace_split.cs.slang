@@ -87,15 +87,16 @@ float3 SampleEmissive(inout Intersection intersection, MaterialParameters mat_pa
     return emissive_color_sampled * mat_param.emissive_color;
 }
 
-float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i, out float out_pdf)
+float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i,
+                     out float out_pdf, out bool out_is_specular_lobe)
 {
     if (mat_param.eta > 0)
     {
-        return BxdfDieletric(w_o, w_i, out_pdf, mat_param, intersection);
+        return BxdfDieletric(w_o, w_i, out_pdf, out_is_specular_lobe, mat_param, intersection);
     }
     else
     {
-        return BxdfMetal(w_o, w_i, out_pdf, mat_param, intersection);
+        return BxdfMetal(w_o, w_i, out_pdf, out_is_specular_lobe, mat_param, intersection);
     }
 }
 
@@ -109,7 +110,8 @@ bool IsRayOccluded(RayDesc ray_desc)
     return ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
-float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf)
+float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf,
+                      out float3 out_diffuse, out float3 out_specular)
 {
     float3 sample_direction = CosineWeightedHemisphere::Sample();
     float3 w_i = TransformBasisToWorld(sample_direction, intersection.normal, intersection.tangent.xyz);
@@ -122,6 +124,8 @@ float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, f
     if (IsRayOccluded(ray_desc))
     {
         out_pdf = 0;
+        out_diffuse = 0;
+        out_specular = 0;
         return 0;
     }
 
@@ -135,15 +139,19 @@ float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, f
     surface.metallic = mat_param.metallic;
     surface.emissive = mat_param.emissive_color;
 
-    float3 radiance = CalculateDirectLighting(w_o, w_i, light_sample, surface);
+    DirectLightingComponents lighting = CalculateDirectLightingComponents(w_o, w_i, light_sample, surface);
     float cosine_theta = SaturateDot(w_i, intersection.normal);
+    float inv_pdf = cosine_theta / (out_pdf + Eps);
+    out_diffuse = lighting.diffuse * inv_pdf;
+    out_specular = lighting.specular * inv_pdf;
 
-    return radiance * cosine_theta / (out_pdf + Eps);
+    return out_diffuse + out_specular;
 }
 
-float3 SampleLights(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf)
+float3 SampleLights(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf,
+                    out float3 out_diffuse, out float3 out_specular)
 {
-    return SampleSkyLight(intersection, mat_param, w_o, out_pdf);
+    return SampleSkyLight(intersection, mat_param, w_o, out_pdf, out_diffuse, out_specular);
 }
 
 float GetLightPdf(float3 normal, float3 w_i)
@@ -265,6 +273,58 @@ struct SplitPathOutput
     bool is_hit;
 };
 
+struct PrimaryHitData
+{
+    float3 world_normal;
+    float roughness;
+    float view_z;
+    float3 albedo;
+    float metallic;
+    float3 world_pos;
+    uint material_id;
+    bool is_hit;
+};
+
+PrimaryHitData SamplePrimaryHitData(RayDesc ray_desc)
+{
+    RayQuery<RAY_FLAG_NONE> ray_query;
+    Intersection intersection;
+
+    PrimaryHitData result;
+    result.world_normal = float3(0, 0, 1);
+    result.roughness = 1.0;
+    result.view_z = 1e6;
+    result.albedo = float3(0, 0, 0);
+    result.metallic = 0.0;
+    result.world_pos = float3(0, 0, 0);
+    result.material_id = 0;
+    result.is_hit = false;
+
+    ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray_desc);
+    while (ray_query.Proceed())
+    {
+    }
+
+    if (ray_query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+        return result;
+
+    GetIntersection(ray_desc, ray_query, intersection);
+    MaterialParameters mat_param = GetMaterial(intersection);
+
+    result.is_hit = true;
+    result.world_pos = intersection.position;
+    result.world_normal = intersection.normal;
+    result.roughness = mat_param.roughness;
+    result.metallic = mat_param.metallic;
+    result.material_id = intersection.primitiveId;
+    result.albedo = mat_param.base_color;
+
+    float4 view_pos = mul(view_matrix, float4(intersection.position, 1.0));
+    result.view_z = view_pos.z;
+
+    return result;
+}
+
 SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
 {
     RayQuery<RAY_FLAG_NONE> ray_query;
@@ -385,21 +445,27 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         // Surface sampling
         float3 next_direction;
         float bsdf_pdf = 1.f;
-        float3 this_throughput = SampleSurface(intersection, mat_param, -ray_desc.Direction, next_direction, bsdf_pdf);
+        bool sampled_specular_lobe = false;
+        float3 this_throughput =
+            SampleSurface(intersection, mat_param, -ray_desc.Direction, next_direction, bsdf_pdf, sampled_specular_lobe);
 
         if (enable_nee != 0)
         {
             float light_pdf = 0.f;
-            float3 nee_radiance = SampleLights(intersection, mat_param, -ray_desc.Direction, light_pdf);
+            float3 nee_diffuse = 0;
+            float3 nee_specular = 0;
+            float3 nee_radiance = SampleLights(intersection, mat_param, -ray_desc.Direction, light_pdf,
+                                               nee_diffuse, nee_specular);
             float light_mis_weight = GetMISWeight(light_pdf, bsdf_pdf);
             float3 nee_contrib = nee_radiance * throughput * light_mis_weight;
             result.total_radiance += nee_contrib;
 
             if (bounce == 0)
             {
-                // NEE at primary hit: split based on lobe type
-                // For simplicity, attribute NEE to diffuse channel
-                result.diffuse_radiance += nee_contrib;
+                // Split primary direct lighting into diffuse/specular lobes so
+                // only the diffuse term is demodulated by albedo later.
+                result.diffuse_radiance += nee_diffuse * throughput * light_mis_weight;
+                result.specular_radiance += nee_specular * throughput * light_mis_weight;
             }
             else if (is_diffuse_path)
             {
@@ -416,22 +482,7 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         // At bounce 0, determine if this is a diffuse or specular path
         if (bounce == 0)
         {
-            // Heuristic: if the sampled direction is close to the reflection direction,
-            // treat it as specular; otherwise diffuse.
-            float3 w_o = -ray_desc.Direction;
-            float3 reflect_dir = reflect(-w_o, intersection.normal);
-            float cos_angle = dot(next_direction, reflect_dir);
-
-            // For metals, everything is specular
-            // For dielectrics with low roughness and high cos_angle, treat as specular
-            if (mat_param.metallic > 0.5 || (cos_angle > 0.5 && mat_param.roughness < 0.5))
-            {
-                is_diffuse_path = false;
-            }
-            else
-            {
-                is_diffuse_path = true;
-            }
+            is_diffuse_path = !sampled_specular_lobe;
         }
 
         throughput *= this_throughput;
@@ -457,22 +508,16 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         ray_desc.Direction = next_direction;
     }
 
-    // Clamp diffuse+specular to output_limit before demodulation.
-    // This matches the vanilla PT's energy budget (which clamps total_radiance
-    // to output_limit) while preventing Float16 overflow after demodulation.
-    // Without this clamp, bright radiance on dark surfaces produces demodulated
-    // values exceeding Float16 max (65504), causing systematic energy loss
-    // when the denoiser textures (RGBAFloat16) clip the values.
+    // Clamp diffuse+specular to the same per-channel energy budget as vanilla
+    // before demodulation. Using the same RGB clamp as the combined signal
+    // avoids darkening non-saturated channels when only one component is hot.
+    // It also prevents Float16 overflow after demodulation.
     if (result.is_hit)
     {
-        float3 sum = result.diffuse_radiance + result.specular_radiance;
-        float max_component = max(sum.r, max(sum.g, sum.b));
-        if (max_component > output_limit)
-        {
-            float scale = output_limit / max_component;
-            result.diffuse_radiance *= scale;
-            result.specular_radiance *= scale;
-        }
+        float3 clamped_total = min(result.total_radiance, output_limit.xxx);
+        float3 scale = clamped_total / max(result.total_radiance, float3(1e-6, 1e-6, 1e-6));
+        result.diffuse_radiance *= scale;
+        result.specular_radiance *= scale;
     }
 
     // Demodulate: divide out albedo from diffuse
@@ -512,10 +557,22 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     float4 diff_accum = float4(0, 0, 0, 0);
     float4 spec_accum = float4(0, 0, 0, 0);
     float3 this_combined = float3(0, 0, 0);
+    float3 albedo_accum = 0;
+    float metallic_accum = 0.0;
+    float albedo_weight_sum = 0.0;
 
-    // G-buffer from last sample (single sample per pixel typically for denoiser input)
-    SplitPathOutput last_output;
-    last_output.is_hit = false;
+    // Use a deterministic pixel-center primary hit for G-buffer data so the
+    // denoiser remodulates against stable albedo / normal / viewZ values while
+    // the radiance sample itself remains stochastic.
+    float2 center_uv = (float2(pixel) + 0.5) * pixel_size;
+    center_uv.y = 1.0f - center_uv.y;
+    RayDesc gbuffer_ray_desc;
+    gbuffer_ray_desc.Origin = camera.position;
+    gbuffer_ray_desc.Direction = normalize(camera.lowerLeft + center_uv.x * camera.max_u + center_uv.y * camera.max_v -
+                                           gbuffer_ray_desc.Origin);
+    gbuffer_ray_desc.TMin = Tolerance;
+    gbuffer_ray_desc.TMax = 1000.0f;
+    PrimaryHitData primary_hit = SamplePrimaryHitData(gbuffer_ray_desc);
 
     for (uint i = 0; i < spp; i++)
     {
@@ -542,7 +599,12 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         diff_accum += float4(output.diffuse_radiance, output.diffuse_hit_dist);
         spec_accum += float4(output.specular_radiance, output.specular_hit_dist);
 
-        last_output = output;
+        if (output.is_hit)
+        {
+            albedo_accum += output.albedo;
+            metallic_accum += output.metallic;
+            albedo_weight_sum += 1.0;
+        }
     }
 
     // Average over SPP
@@ -555,15 +617,18 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     specularOutput[pixel] = spec_accum;
 
     // Write G-buffer data from the last sample
-    if (last_output.is_hit)
+    if (primary_hit.is_hit)
     {
-        float2 encoded_normal = EncodeNormalOct(last_output.world_normal);
+        float2 encoded_normal = EncodeNormalOct(primary_hit.world_normal);
         // Pack material ID into alpha for cross-material disocclusion detection.
         // Normalize to [0,1] range for RGBA16Unorm storage.
-        float material_id_norm = float(last_output.material_id % 1024) / 1023.0;
-        normalRoughnessOutput[pixel] = float4(encoded_normal, last_output.roughness, material_id_norm);
-        viewZOutput[pixel] = last_output.view_z;
-        albedoOutput[pixel] = float4(last_output.albedo, last_output.metallic);
+        float material_id_norm = float(primary_hit.material_id % 1024) / 1023.0;
+        normalRoughnessOutput[pixel] = float4(encoded_normal, primary_hit.roughness, material_id_norm);
+        viewZOutput[pixel] = primary_hit.view_z;
+        float inv_albedo_weight = 1.0 / max(albedo_weight_sum, 1.0);
+        float3 composite_albedo = albedo_accum * inv_albedo_weight;
+        float composite_metallic = metallic_accum * inv_albedo_weight;
+        albedoOutput[pixel] = float4(composite_albedo, composite_metallic);
     }
     else
     {
@@ -575,9 +640,9 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
 
     // Motion vectors: compute from world position projected through current and previous matrices.
     // Convention: MV = prevUV - currentUV (where did this pixel come from in the previous frame?)
-    if (last_output.is_hit)
+    if (primary_hit.is_hit)
     {
-        float3 worldPos = last_output.primary_world_pos;
+        float3 worldPos = primary_hit.world_pos;
 
         float4 clipCurr = mul(world_to_clip, float4(worldPos, 1.0));
         float2 uvCurr = clipCurr.xy / clipCurr.w * 0.5 + 0.5;

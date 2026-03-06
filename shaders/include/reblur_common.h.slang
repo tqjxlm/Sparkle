@@ -67,6 +67,23 @@ float GetHitDistFactor(float hit_dist, float frustum_size)
     return saturate(hit_dist / max(frustum_size, 1e-6));
 }
 
+// NRD-style hit-distance weight parameters for spatial filtering.
+// Using normalized hit distance keeps the rejection behavior scene-scale
+// invariant and makes the kernel much stricter once stable history exists.
+float2 GetHitDistanceWeightParams(float hit_dist, float non_linear_accum_speed, float roughness = 1.0)
+{
+    float smc = GetSpecMagicCurve(roughness);
+    float norm = lerp(0.0005, 1.0, min(non_linear_accum_speed, smc));
+    float a = 1.0 / max(norm, 1e-6);
+    float b = hit_dist * a;
+    return float2(a, -b);
+}
+
+float ComputeWeight(float x, float px, float py)
+{
+    return smoothstep(1.0, 0.0, abs(x * px + py));
+}
+
 // Specular lobe tangent half-angle (approximation of GGX lobe extent)
 float GetSpecularLobeTanHalfAngle(float roughness, float percent_of_volume)
 {

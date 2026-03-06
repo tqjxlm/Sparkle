@@ -258,6 +258,148 @@ Pre-existing failures (not caused by our changes):
 3. Derive blend weight from TA accum_speed instead of separate stab_count
 4. Bicubic/CatRom sampling (NVIDIA uses this with bilinear fallback)
 
+## Phase 6: Reproduction Against `test_converged_history.py` (2026-03-06 afternoon)
+
+### Task 1: Re-run the user-referenced end-to-end harness
+- Status: **DONE**
+- Command: `python3 tests/reblur/test_converged_history.py --framework macos --skip_build`
+- Run mode: invoked through `build.py` for every capture, per user instruction.
+- Result: **9 passed, 1 failed**
+
+### Findings
+- Run 0 (vanilla baseline) passed and produced clean before/after references.
+- Run 1 (full end-to-end with PT blend) still looks materially worse than Run 0:
+  - **E2E FLIP vs vanilla: 0.1736**
+  - **E2E luma ratio: 0.9214**
+- Run 2 + Run 3 show the residual noise is not explained by disocclusion:
+  - **Valid reprojection: 99.7%**
+  - **Footprint quality: 0.910**
+  - **Disoccluded pixels: 0.3% of geometry**
+- History-valid pixels remain too noisy:
+  - **Reblur history HF residual: 0.060334**
+  - **Vanilla history HF residual: 0.018369**
+  - **History noise ratio: 3.28x**
+- Current thresholds still hide the real regression in Run 1:
+  - `E2E_FLIP_MAX = 0.25` passes even though the floor visibly regresses.
+  - `HISTORY_NOISE_RATIO_MAX = 3.0` was already loose and now fails anyway.
+
+### Conclusion after Task 1
+- The last TS sampling fix improved the metric relative to older trials, but it did
+  **not** solve the camera-nudge floor-noise issue.
+- The remaining problem is real denoiser residual noise on history-valid pixels,
+  not a reprojection coverage failure.
+- Next task: run per-stage diagnostics again and identify which pass keeps the
+  floor noisy after the nudge before tightening the thresholds.
+
+### Task 2: Re-run per-stage floor diagnostics on current-source Release build
+- Status: **DONE**
+- Commands:
+  - `python3 build.py --framework macos --config Release`
+  - `python3 tests/reblur/diagnose_nudge_floor_noise.py --framework macos --skip_build --config Release`
+- Reason: verify the issue against a fresh build from `HEAD` and isolate the
+  exact pass responsible for the visible floor noise.
+
+### Findings from Task 2
+- A fresh Release build reproduces the same semantic failure as Task 1:
+  - **Run 1 FLIP: 0.1915**
+  - **History noise ratio: 3.28x**
+- Per-stage floor metrics show the regression is still isolated to **Temporal Stabilization**:
+
+| Stage | Before lap_var | After lap_var | After/Before |
+|-------|----------------|---------------|--------------|
+| TemporalAccum | 0.536570 | 0.450352 | 0.84x |
+| PostBlur | 0.503590 | 0.483541 | 0.96x |
+| **Full (denoised-only)** | **0.125103** | **0.157013** | **1.26x** |
+
+- Floor reprojection remains effectively perfect:
+  - **Floor + history:** 368538 pixels
+  - **Floor + disoccluded:** 102 pixels
+- Interpretation:
+  - The nudge itself is **not** increasing TA or PostBlur floor noise.
+  - TS still reduces noise strongly in both states, but its output remains too
+    noisy in absolute terms and regresses modestly after the nudge.
+  - This means the unresolved issue is no longer history sampling coverage;
+    it is the TS reconstruction model itself.
+
+### Next step after Task 2
+- Trial a TS model closer to NRD's luminance stabilization path so the final
+  output uses current-frame spatial color while only stabilizing luminance.
+
+### Task 3: Restore long TS history without reintroducing energy loss
+- Status: **DONE**
+- Changes:
+  - Kept `max_accumulated_frame_num = 511` (the earlier cap-only trial was the
+    only thing that meaningfully reduced TA/PostBlur floor noise).
+  - Changed stabilized ping-pong history from **RGBA16F** to **RGBA32F**.
+  - Added `reblur_copy_stabilized.cs.slang` so TS can write float32 history and
+    only quantize once when copying back into the float16 composite inputs.
+  - Raised `max_stabilized_frame_num` back to **255** now that the recurrent
+    float16 quantization loop is gone.
+- Commands:
+  - `python3 build.py --framework macos --config Release`
+  - `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+  - `python3 tests/reblur/diagnose_nudge_floor_noise.py --framework macos --skip_build --config Release`
+
+### Findings from Task 3
+- The precision fix materially improved the exact user-reported failure mode:
+  - **Run 1 E2E FLIP vs vanilla:** `0.1954`
+  - **Run 1 E2E luma ratio:** `0.9185`
+  - **History noise ratio:** `1.33x` (down from `3.28x`)
+- The history-valid floor is now close to the vanilla and pre-nudge floor:
+  - **Run 1 history-valid floor local_std / vanilla-after:** `1.069x`
+  - **Run 1 history-valid floor local_std / Run 1 before:** `1.072x`
+- Denoised-only floor quality is no longer the dominant regression:
+  - **Denoised floor local_std before:** `0.01756`
+  - **Denoised floor local_std after:** `0.02010`
+  - **After/before:** `1.20x`
+- Per-stage floor laplacian variance still rises after the nudge, but the
+  remaining increase is modest in absolute noise terms:
+
+| Stage | Before lap_var | After lap_var | After/Before |
+|-------|----------------|---------------|--------------|
+| TemporalAccum | 0.049565 | 0.061121 | 1.23x |
+| PostBlur | 0.035486 | 0.047250 | 1.33x |
+| Full (denoised-only) | 0.007089 | 0.018954 | 2.67x |
+
+### Conclusion after Task 3
+- The cap-only fix was insufficient because `max_stabilized_frame_num > 63`
+  used to reintroduce TS energy loss through recurrent float16 quantization.
+- Keeping stabilized history in float32 removes that failure mode and allows a
+  longer TS horizon (`255`) without bringing back the old luminance regression.
+- This is the first configuration that both:
+  - preserves energy well enough for the full pipeline, and
+  - brings Run 1 history-valid floor noise close to the vanilla / pre-nudge floor.
+
+### Task 4: Tighten `test_converged_history.py` against the real floor regression
+- Status: **DONE**
+- Changes:
+  - Tightened `HISTORY_NOISE_RATIO_MAX` from `3.0` to `1.6`.
+  - Tightened `E2E_FLIP_MAX` from `0.25` to `0.22`.
+  - Added two explicit Run 1 history-valid floor checks:
+    - `after / vanilla-after <= 1.15`
+    - `after / before <= 1.15`
+- Command:
+  - `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+
+### Findings from Task 4
+- The updated regression now validates the failure mode the user called out
+  instead of relying on the old loose aggregate proxy:
+  - **Run 1 floor after / vanilla-after:** `1.069x`
+  - **Run 1 floor after / before:** `1.072x`
+  - **History cleanness:** `1.33x`
+  - **E2E FLIP:** `0.1954`
+- Final verification result: **12 passed, 0 failed**
+
+### Final state after Phase 6
+- Production fix:
+  - stabilized history uses float32 precision
+  - `max_accumulated_frame_num = 511`
+  - `max_stabilized_frame_num = 255`
+- Regression coverage now directly checks:
+  - history-valid floor noise in Run 1 against Run 0
+  - history-valid floor noise in Run 1 against Run 1 before
+  - overall history cleanness and whole-frame FLIP as secondary guards
+
 ## Files
 
 ### Diagnostics
@@ -283,3 +425,92 @@ Pre-existing failures (not caused by our changes):
   - `Shaders/REBLUR_Common.hlsli` - ComputeAntilag, GetTemporalAccumulationParams
   - `Shaders/REBLUR_Config.hlsli` - Config defines
   - `Include/NRDSettings.h` - Default settings (maxStabilizedFrameNum=63)
+
+## Phase 7: Residual E2E FLIP / Dim Floor Investigation (2026-03-06)
+
+### Task 5: Re-isolate the remaining dim-floor bias by pass
+- Status: **DONE**
+- Commands:
+  - `python3 build.py --framework macos --skip_build --run --test_case reblur_converged_history --headless true --pipeline gpu --spp 1 --use_reblur true --reblur_debug_pass Passthrough --clear_screenshots true --config Release`
+  - `python3 build.py --framework macos --skip_build --run --test_case reblur_converged_history --headless true --pipeline gpu --spp 1 --use_reblur true --reblur_debug_pass PrePass --reblur_no_pt_blend true --clear_screenshots true --config Release`
+  - `python3 build.py --framework macos --skip_build --run --test_case reblur_converged_history --headless true --pipeline gpu --spp 1 --use_reblur true --reblur_debug_pass TemporalAccum --reblur_no_pt_blend true --clear_screenshots true --config Release`
+
+### Findings from Task 5
+- The raw split path tracer is still correct:
+  - `Passthrough before floor luma = 0.649144`
+  - This matches the vanilla floor baseline and rules out the split PT / combined accumulation path as the source of the dim-floor regression.
+- The denoiser path is where the bias appears:
+  - `TemporalAccum before floor luma = 0.608567`
+  - This is already ~`6.3%` below the passthrough floor on the same mask, so the persistent dimness exists before HistoryFix, PostBlur, or Temporal Stabilization.
+- The `PrePass` debug view was much darker (`0.341283` on the same mask), but that result is diagnostic-only:
+  - `PrePass` debug exits before updating temporal history, so it repeatedly runs as an isolated single-frame spatial filter.
+  - That makes it useful for locating aggressive spatial bias, but not a direct proxy for the converged full pipeline.
+- Conclusion:
+  - The remaining E2E "After is dimmer than Before" problem is not a TS regression anymore.
+  - It is a denoiser under-exposure problem that is already present by `TemporalAccum`, likely driven by overly permissive spatial reuse / hit-distance weighting in the blur inputs that feed TA.
+
+### Task 6: Test stable G-buffer / lobe split hypotheses against the floor-luma gap
+- Status: **DONE**
+- Trials:
+  1. Replaced the denoiser G-buffer path with a deterministic pixel-center primary hit for
+     `normalRoughness`, `viewZ`, `motionVectors`, and `albedoMetallic`, while leaving the
+     radiance ray stochastic.
+  2. Replaced the heuristic primary-lobe classification with the actual sampled lobe.
+  3. Split primary-hit NEE into diffuse and specular components instead of forcing all NEE
+     into the diffuse channel.
+- Commands:
+  - `python3 build.py --framework macos --config Release`
+  - `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+  - `python3 tests/reblur/diagnose_nudge_floor_noise.py --framework macos --skip_build --config Release`
+
+### Findings from Task 6
+- The deterministic G-buffer trial materially improved denoised before/after stability, but
+  it did **not** remove the persistent floor bias versus vanilla:
+  - `denoised_after / denoised_before = 0.998`
+  - `denoised_after / vanilla_after = 0.952`
+  - `e2e_after / e2e_before = 0.950`
+- The end-to-end metrics only moved marginally:
+  - `E2E FLIP = 0.1900`
+  - `E2E luma ratio = 0.9228`
+- Stage-localized floor luma still showed the bias entering no later than TA:
+  - `TemporalAccum before = 0.6136`
+  - `PostBlur before = 0.6123`
+  - `Full denoised before = 0.6188`
+- The sampled-lobe / split-NEE cleanup compiled and is architecturally more correct, but it
+  produced no meaningful change in the floor-luma ratios.
+- Conclusion:
+  - The remaining gap is not from the old stochastic G-buffer or the old lobe-classification
+    heuristic.
+  - It is a persistent denoised-vs-vanilla brightness gap.
+
+### Task 7: Prototype stabilized remodulation albedo
+- Status: **DONE**
+- Trial:
+  - Switched `albedoMetallic` to use the stochastic primary-hit sample average from the split
+    tracer and added a new `reblur_stabilize_albedo.cs.slang` pass that temporally stabilizes
+    the remodulation albedo before the final full composite.
+- Commands:
+  - `python3 build.py --framework macos --config Release`
+  - `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+
+### Findings from Task 7
+- The stabilized-albedo prototype slightly improved whole-frame metrics, but it did **not**
+  move the floor-luma regression the user called out:
+  - `E2E FLIP: 0.1900 -> 0.1891`
+  - `E2E luma ratio: 0.9228 -> 0.9256`
+  - `e2e_after / vanilla_after floor ratio: 0.95068 -> 0.95058` (no real change)
+  - `denoised_after / vanilla_after floor ratio: 0.95198 -> 0.95229` (no real change)
+- History-valid floor noise stayed good, but the denoised history cleanness actually moved the
+  wrong way (`1.12x` vs vanilla, still passing but worse than the prior trial).
+- Conclusion:
+  - The missing fix is **not** stabilized remodulation albedo.
+  - The visible `After` dimness is now strongly isolated as a deeper denoised-vs-vanilla
+    brightness gap; the next plausible architectural fix is a post-composite temporal history
+    (or equivalent reprojection of the displayed color), not another tweak to the current
+    remodulation inputs.
+
+### Additional note
+- `python3 tests/reblur/diagnose_energy_loss.py --framework macos --skip_build --spp 64 --config Release`
+  was attempted, but it failed inside the helper because its subprocess calls to `build.py`
+  hit `git submodule update --init --recursive` exit `128`. Direct `build.py` invocations from
+  the repo root continued to work.

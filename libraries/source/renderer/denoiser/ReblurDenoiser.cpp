@@ -187,6 +187,59 @@ public:
     };
 };
 
+class ReblurCopyStabilizedShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ReblurCopyStabilizedShader, RHIShaderStage::Compute,
+                     "shaders/ray_trace/reblur_copy_stabilized.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(inDiffuse, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inSpecular, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(outDiffuse, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(outSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+public:
+    struct UniformBufferData
+    {
+        Vector2UInt resolution;
+    };
+};
+
+class ReblurCompositeAlbedoShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(ReblurCompositeAlbedoShader, RHIShaderStage::Compute,
+                     "shaders/ray_trace/reblur_stabilize_albedo.cs.slang", "main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(inAlbedoMetallic, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inNormalRoughness, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inMotionVectors, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(inInternalData, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevAlbedoMetallic, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevViewZ, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(prevNormalRoughness, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(linearSampler, RHIShaderResourceReflection::ResourceType::Sampler)
+    USE_SHADER_RESOURCE(outAlbedoMetallic, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+public:
+    struct UniformBufferData
+    {
+        Vector2UInt resolution;
+        float disocclusion_threshold;
+        float denoising_range;
+        uint32_t reset_history;
+    };
+};
+
 ReblurDenoiser::ReblurDenoiser(RHIContext *rhi, uint32_t width, uint32_t height)
     : rhi_(rhi), width_(width), height_(height)
 {
@@ -208,6 +261,8 @@ ReblurDenoiser::ReblurDenoiser(RHIContext *rhi, uint32_t width, uint32_t height)
     init_to_read(prev_internal_data_.get());
     init_to_read(prev_view_z_.get());
     init_to_read(prev_normal_roughness_.get());
+    init_to_read(stabilized_albedo_metallic_.get());
+    init_to_read(prev_stabilized_albedo_metallic_.get());
     for (int i = 0; i < 2; i++)
     {
         init_to_read(diff_stabilized_[i].get());
@@ -257,15 +312,17 @@ void ReblurDenoiser::CreateTextures()
     // Previous-frame buffers
     prev_view_z_ = make_image(PixelFormat::R32_FLOAT, width_, height_, "ReblurPrevViewZ");
     prev_normal_roughness_ = make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurPrevNormalRoughness");
+    stabilized_albedo_metallic_ =
+        make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurStabilizedAlbedoMetallic");
+    prev_stabilized_albedo_metallic_ =
+        make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurPrevStabilizedAlbedoMetallic");
 
     // Stabilized history (ping-pong)
     for (int i = 0; i < 2; i++)
     {
         std::string suffix = std::to_string(i);
-        diff_stabilized_[i] =
-            make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurDiffStabilized" + suffix);
-        spec_stabilized_[i] =
-            make_image(PixelFormat::RGBAFloat16, width_, height_, "ReblurSpecStabilized" + suffix);
+        diff_stabilized_[i] = make_image(PixelFormat::RGBAFloat, width_, height_, "ReblurDiffStabilized" + suffix);
+        spec_stabilized_[i] = make_image(PixelFormat::RGBAFloat, width_, height_, "ReblurSpecStabilized" + suffix);
     }
 
     uint32_t tile_w = (width_ + 15) / 16;
@@ -357,6 +414,36 @@ void ReblurDenoiser::CreatePipelines()
     auto *ts_resources = temporal_stab_pipeline_->GetShaderResource<ReblurTemporalStabShader>();
     ts_resources->ubo().BindResource(temporal_stab_ub_);
 
+    copy_stabilized_shader_ = rhi_->CreateShader<ReblurCopyStabilizedShader>();
+    copy_stabilized_pipeline_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurCopyStabilizedPipeline");
+    copy_stabilized_pipeline_->SetShader<RHIShaderStage::Compute>(copy_stabilized_shader_);
+    copy_stabilized_pipeline_->Compile();
+
+    copy_stabilized_ub_ = rhi_->CreateBuffer({.size = sizeof(ReblurCopyStabilizedShader::UniformBufferData),
+                                              .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                              .mem_properties = RHIMemoryProperty::None,
+                                              .is_dynamic = true},
+                                             "ReblurCopyStabilizedUBO");
+
+    auto *copy_resources = copy_stabilized_pipeline_->GetShaderResource<ReblurCopyStabilizedShader>();
+    copy_resources->ubo().BindResource(copy_stabilized_ub_);
+
+    composite_albedo_shader_ = rhi_->CreateShader<ReblurCompositeAlbedoShader>();
+    composite_albedo_pipeline_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurCompositeAlbedoPipeline");
+    composite_albedo_pipeline_->SetShader<RHIShaderStage::Compute>(composite_albedo_shader_);
+    composite_albedo_pipeline_->Compile();
+
+    composite_albedo_ub_ = rhi_->CreateBuffer({.size = sizeof(ReblurCompositeAlbedoShader::UniformBufferData),
+                                               .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                               .mem_properties = RHIMemoryProperty::None,
+                                               .is_dynamic = true},
+                                              "ReblurCompositeAlbedoUBO");
+
+    auto *albedo_resources = composite_albedo_pipeline_->GetShaderResource<ReblurCompositeAlbedoShader>();
+    albedo_resources->ubo().BindResource(composite_albedo_ub_);
+
     // Blur pipelines (separate per pass to avoid descriptor set conflicts within a frame)
     static constexpr const char *PassNames[] = {"PrePass", "Blur", "PostBlur"};
     blur_shader_ = rhi_->CreateShader<ReblurBlurShader>();
@@ -416,6 +503,14 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
         CopyToOutput(const_cast<RHIImage *>(inputs.diffuse_radiance_hit_dist),
                      const_cast<RHIImage *>(inputs.specular_radiance_hit_dist));
         history_valid_ = true;
+        internal_frame_index_++;
+        return;
+    }
+
+    if (debug_pass == DP::InputComposite)
+    {
+        CopyToOutput(const_cast<RHIImage *>(inputs.diffuse_radiance_hit_dist),
+                     const_cast<RHIImage *>(inputs.specular_radiance_hit_dist));
         internal_frame_index_++;
         return;
     }
@@ -538,7 +633,8 @@ void ReblurDenoiser::Denoise(const ReblurInputBuffers &inputs, const ReblurSetti
         CopyStabilizedHistory(diff_stabilized_[cur_idx].get(), spec_stabilized_[cur_idx].get());
     }
 
-    CopyPreviousFrameData(inputs);
+    StabilizeCompositeAlbedo(inputs, settings);
+    CopyPreviousFrameData(inputs, stabilized_albedo_metallic_.get());
 
     internal_frame_index_++;
     history_valid_ = true;
@@ -866,37 +962,100 @@ void ReblurDenoiser::TemporalStabilize(const ReblurInputBuffers &inputs, const R
 
 void ReblurDenoiser::CopyStabilizedHistory(RHIImage *diff, RHIImage *spec)
 {
-    // Copy stabilized output to denoised output for composite
-    diff->Transition({.target_layout = RHIImageLayout::TransferSrc,
-                      .after_stage = RHIPipelineStage::ComputeShader,
-                      .before_stage = RHIPipelineStage::Transfer});
-    denoised_diffuse_->Transition({.target_layout = RHIImageLayout::TransferDst,
-                                   .after_stage = RHIPipelineStage::ComputeShader,
-                                   .before_stage = RHIPipelineStage::Transfer});
-    diff->CopyToImage(denoised_diffuse_.get());
+    auto *resources = copy_stabilized_pipeline_->GetShaderResource<ReblurCopyStabilizedShader>();
+    resources->inDiffuse().BindResource(diff->GetDefaultView(rhi_));
+    resources->inSpecular().BindResource(spec->GetDefaultView(rhi_));
+    resources->outDiffuse().BindResource(denoised_diffuse_->GetDefaultView(rhi_));
+    resources->outSpecular().BindResource(denoised_specular_->GetDefaultView(rhi_));
 
-    spec->Transition({.target_layout = RHIImageLayout::TransferSrc,
-                      .after_stage = RHIPipelineStage::ComputeShader,
-                      .before_stage = RHIPipelineStage::Transfer});
-    denoised_specular_->Transition({.target_layout = RHIImageLayout::TransferDst,
-                                    .after_stage = RHIPipelineStage::ComputeShader,
-                                    .before_stage = RHIPipelineStage::Transfer});
-    spec->CopyToImage(denoised_specular_.get());
+    ReblurCopyStabilizedShader::UniformBufferData ubo{
+        .resolution = {width_, height_},
+    };
+    copy_stabilized_ub_->Upload(rhi_, &ubo);
 
-    // Transition stabilized back to Read for next frame
     diff->Transition({.target_layout = RHIImageLayout::Read,
-                      .after_stage = RHIPipelineStage::Transfer,
+                      .after_stage = RHIPipelineStage::ComputeShader,
                       .before_stage = RHIPipelineStage::ComputeShader});
     spec->Transition({.target_layout = RHIImageLayout::Read,
-                      .after_stage = RHIPipelineStage::Transfer,
+                      .after_stage = RHIPipelineStage::ComputeShader,
                       .before_stage = RHIPipelineStage::ComputeShader});
+    denoised_diffuse_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                   .after_stage = RHIPipelineStage::ComputeShader,
+                                   .before_stage = RHIPipelineStage::ComputeShader});
+    denoised_specular_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                    .after_stage = RHIPipelineStage::ComputeShader,
+                                    .before_stage = RHIPipelineStage::ComputeShader});
+
+    rhi_->BeginComputePass(compute_pass_);
+    rhi_->DispatchCompute(copy_stabilized_pipeline_, {width_, height_, 1u}, {16u, 16u, 1u});
+    rhi_->EndComputePass(compute_pass_);
 
     denoised_diffuse_->Transition({.target_layout = RHIImageLayout::Read,
-                                   .after_stage = RHIPipelineStage::Transfer,
+                                   .after_stage = RHIPipelineStage::ComputeShader,
                                    .before_stage = RHIPipelineStage::ComputeShader});
     denoised_specular_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = RHIPipelineStage::Transfer,
+                                    .after_stage = RHIPipelineStage::ComputeShader,
                                     .before_stage = RHIPipelineStage::ComputeShader});
+}
+
+void ReblurDenoiser::StabilizeCompositeAlbedo(const ReblurInputBuffers &inputs, const ReblurSettings &settings)
+{
+    auto *resources = composite_albedo_pipeline_->GetShaderResource<ReblurCompositeAlbedoShader>();
+    resources->inAlbedoMetallic().BindResource(inputs.albedo_metallic->GetDefaultView(rhi_));
+    resources->inNormalRoughness().BindResource(inputs.normal_roughness->GetDefaultView(rhi_));
+    resources->inViewZ().BindResource(inputs.view_z->GetDefaultView(rhi_));
+    resources->inMotionVectors().BindResource(inputs.motion_vectors->GetDefaultView(rhi_));
+    resources->inInternalData().BindResource(internal_data_->GetDefaultView(rhi_));
+    resources->prevAlbedoMetallic().BindResource(prev_stabilized_albedo_metallic_->GetDefaultView(rhi_));
+    resources->prevViewZ().BindResource(prev_view_z_->GetDefaultView(rhi_));
+    resources->prevNormalRoughness().BindResource(prev_normal_roughness_->GetDefaultView(rhi_));
+    resources->linearSampler().BindResource(prev_stabilized_albedo_metallic_->GetSampler());
+    resources->outAlbedoMetallic().BindResource(stabilized_albedo_metallic_->GetDefaultView(rhi_));
+
+    ReblurCompositeAlbedoShader::UniformBufferData ubo{
+        .resolution = {width_, height_},
+        .disocclusion_threshold = settings.disocclusion_threshold,
+        .denoising_range = 1000.f,
+        .reset_history = history_valid_ ? 0u : 1u,
+    };
+    composite_albedo_ub_->Upload(rhi_, &ubo);
+
+    inputs.albedo_metallic->Transition({.target_layout = RHIImageLayout::Read,
+                                        .after_stage = RHIPipelineStage::ComputeShader,
+                                        .before_stage = RHIPipelineStage::ComputeShader});
+    inputs.normal_roughness->Transition({.target_layout = RHIImageLayout::Read,
+                                         .after_stage = RHIPipelineStage::ComputeShader,
+                                         .before_stage = RHIPipelineStage::ComputeShader});
+    inputs.view_z->Transition({.target_layout = RHIImageLayout::Read,
+                               .after_stage = RHIPipelineStage::ComputeShader,
+                               .before_stage = RHIPipelineStage::ComputeShader});
+    inputs.motion_vectors->Transition({.target_layout = RHIImageLayout::Read,
+                                       .after_stage = RHIPipelineStage::ComputeShader,
+                                       .before_stage = RHIPipelineStage::ComputeShader});
+    internal_data_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::ComputeShader,
+                                .before_stage = RHIPipelineStage::ComputeShader});
+    prev_stabilized_albedo_metallic_->Transition({.target_layout = RHIImageLayout::Read,
+                                                  .after_stage = RHIPipelineStage::Transfer,
+                                                  .before_stage = RHIPipelineStage::ComputeShader});
+    prev_view_z_->Transition({.target_layout = RHIImageLayout::Read,
+                              .after_stage = RHIPipelineStage::Transfer,
+                              .before_stage = RHIPipelineStage::ComputeShader});
+    prev_normal_roughness_->Transition({.target_layout = RHIImageLayout::Read,
+                                        .after_stage = RHIPipelineStage::Transfer,
+                                        .before_stage = RHIPipelineStage::ComputeShader});
+
+    stabilized_albedo_metallic_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                             .after_stage = RHIPipelineStage::Top,
+                                             .before_stage = RHIPipelineStage::ComputeShader});
+
+    rhi_->BeginComputePass(compute_pass_);
+    rhi_->DispatchCompute(composite_albedo_pipeline_, {width_, height_, 1u}, {16u, 16u, 1u});
+    rhi_->EndComputePass(compute_pass_);
+
+    stabilized_albedo_metallic_->Transition({.target_layout = RHIImageLayout::Read,
+                                             .after_stage = RHIPipelineStage::ComputeShader,
+                                             .before_stage = RHIPipelineStage::ComputeShader});
 }
 
 void ReblurDenoiser::CopyHistoryData(RHIImage *diff, RHIImage *spec)
@@ -945,7 +1104,7 @@ void ReblurDenoiser::CopyHistoryData(RHIImage *diff, RHIImage *spec)
                                      .before_stage = RHIPipelineStage::ComputeShader});
 }
 
-void ReblurDenoiser::CopyPreviousFrameData(const ReblurInputBuffers &inputs)
+void ReblurDenoiser::CopyPreviousFrameData(const ReblurInputBuffers &inputs, RHIImage *albedo_history_source)
 {
     // Transition sources to TransferSrc, destinations to TransferDst
     inputs.view_z->Transition({.target_layout = RHIImageLayout::TransferSrc,
@@ -964,6 +1123,15 @@ void ReblurDenoiser::CopyPreviousFrameData(const ReblurInputBuffers &inputs)
                                         .before_stage = RHIPipelineStage::Transfer});
     inputs.normal_roughness->CopyToImage(prev_normal_roughness_.get());
 
+    RHIImage *albedo_src = albedo_history_source != nullptr ? albedo_history_source : inputs.albedo_metallic;
+    albedo_src->Transition({.target_layout = RHIImageLayout::TransferSrc,
+                            .after_stage = RHIPipelineStage::ComputeShader,
+                            .before_stage = RHIPipelineStage::Transfer});
+    prev_stabilized_albedo_metallic_->Transition({.target_layout = RHIImageLayout::TransferDst,
+                                                  .after_stage = RHIPipelineStage::Top,
+                                                  .before_stage = RHIPipelineStage::Transfer});
+    albedo_src->CopyToImage(prev_stabilized_albedo_metallic_.get());
+
     // Transition prev buffers to Read for next frame's temporal accumulation
     prev_view_z_->Transition({.target_layout = RHIImageLayout::Read,
                               .after_stage = RHIPipelineStage::Transfer,
@@ -971,6 +1139,9 @@ void ReblurDenoiser::CopyPreviousFrameData(const ReblurInputBuffers &inputs)
     prev_normal_roughness_->Transition({.target_layout = RHIImageLayout::Read,
                                         .after_stage = RHIPipelineStage::Transfer,
                                         .before_stage = RHIPipelineStage::ComputeShader});
+    prev_stabilized_albedo_metallic_->Transition({.target_layout = RHIImageLayout::Read,
+                                                  .after_stage = RHIPipelineStage::Transfer,
+                                                  .before_stage = RHIPipelineStage::ComputeShader});
 
     // Transition source inputs back to Read (they are borrowed from the caller)
     inputs.view_z->Transition({.target_layout = RHIImageLayout::Read,
@@ -979,6 +1150,9 @@ void ReblurDenoiser::CopyPreviousFrameData(const ReblurInputBuffers &inputs)
     inputs.normal_roughness->Transition({.target_layout = RHIImageLayout::Read,
                                          .after_stage = RHIPipelineStage::Transfer,
                                          .before_stage = RHIPipelineStage::ComputeShader});
+    albedo_src->Transition({.target_layout = RHIImageLayout::Read,
+                            .after_stage = RHIPipelineStage::Transfer,
+                            .before_stage = RHIPipelineStage::ComputeShader});
 }
 
 RHIImage *ReblurDenoiser::GetDenoisedDiffuse() const
@@ -994,6 +1168,11 @@ RHIImage *ReblurDenoiser::GetDenoisedSpecular() const
 RHIImage *ReblurDenoiser::GetInternalData() const
 {
     return internal_data_.get();
+}
+
+RHIImage *ReblurDenoiser::GetCompositeAlbedoMetallic() const
+{
+    return stabilized_albedo_metallic_.get();
 }
 
 void ReblurDenoiser::Reset()

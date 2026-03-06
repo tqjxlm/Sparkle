@@ -143,10 +143,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
 
     float4 stab_diff, stab_spec;
     // Per-pixel stabilized frame counter stored in .a of the stabilized textures.
-    // Tracks how many consecutive frames this pixel has been stabilized.
-    // Capped at max_stabilized_frame_num (default 63, matching TA).
-    // Higher values cause energy loss due to float16 quantization error
-    // amplified by the EMA's high temporal correlation.
+    // Tracks how many consecutive frames this pixel has been stabilized and is
+    // allowed to grow independently of TA's accumulation speed.
     float prev_stab_count = 0.0;
 
     // Clamp UV to [0,1] instead of falling back to current PostBlur when

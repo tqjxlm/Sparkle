@@ -60,6 +60,7 @@ struct RenderConfig : public ConfigCollection
         TAHistory,      // temporal accum diagnostic: raw reprojected history
         TAMaterialId,   // temporal accum diagnostic: material ID mismatch
         TSStabCount,    // temporal stabilization diagnostic: stab_count, blend, antilag
+        InputComposite, // raw split input composite: diff * albedo + spec
         Passthrough,    // no denoising, use raw split PT output
     };
 

@@ -34,6 +34,7 @@ struct Intersection
 struct SampleResult
 {
     bool is_valid;
+    bool is_specular_lobe;
     float3 throughput;
     float3 local_w_i;
     float pdf;
@@ -43,6 +44,7 @@ SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
 {
     SampleResult result;
     result.is_valid = false;
+    result.is_specular_lobe = true;
     result.pdf = 0.0f;
     
     float3 local_w_m = SampleMicroFacetNormal(local_w_o, mat_param.roughness);
@@ -96,6 +98,7 @@ SampleResult BxdfLambertian(float3 local_w_o, MaterialParameters mat_param)
 {
     SampleResult result;
     result.is_valid = true;
+    result.is_specular_lobe = false;
     result.local_w_i = CosineWeightedHemisphere::Sample();
     result.throughput = mat_param.base_color;
     result.pdf = CosineWeightedHemisphere::Pdf(result.local_w_i);
@@ -103,7 +106,8 @@ SampleResult BxdfLambertian(float3 local_w_o, MaterialParameters mat_param)
     return result;
 }
 
-float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, MaterialParameters mat_param, Intersection intersection)
+float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, out bool out_is_specular_lobe,
+                 MaterialParameters mat_param, Intersection intersection)
 {
     // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
@@ -122,11 +126,13 @@ float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, MaterialParamete
     // back to world space
     w_i = normalize(TransformBasisToWorld(result.local_w_i, intersection.normal, intersection.tangent.xyz));
     out_pdf = result.pdf;
+    out_is_specular_lobe = result.is_specular_lobe;
 
     return result.throughput;
 }
 
-float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, MaterialParameters mat_param, Intersection intersection)
+float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, out bool out_is_specular_lobe,
+                     MaterialParameters mat_param, Intersection intersection)
 {
     // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
@@ -156,6 +162,7 @@ float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, MaterialPara
 
     // back to world space
     w_i = normalize(TransformBasisToWorld(local_w_i, intersection.normal, intersection.tangent.xyz));
+    out_is_specular_lobe = true;
 
     return mat_param.base_color;
 }

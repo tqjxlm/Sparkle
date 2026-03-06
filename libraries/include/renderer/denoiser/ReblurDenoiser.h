@@ -18,8 +18,8 @@ struct ReblurSettings
     float min_blur_radius = 1.f;
     float diffuse_prepass_blur_radius = 30.f;
     float specular_prepass_blur_radius = 50.f;
-    uint32_t max_accumulated_frame_num = 63;
-    uint32_t max_stabilized_frame_num = 63;
+    uint32_t max_accumulated_frame_num = 511;
+    uint32_t max_stabilized_frame_num = 255;
     uint32_t history_fix_frame_num = 3;
     float history_fix_stride = 14.f;
     float disocclusion_threshold = 0.01f;
@@ -69,6 +69,7 @@ public:
     [[nodiscard]] RHIImage *GetDenoisedDiffuse() const;
     [[nodiscard]] RHIImage *GetDenoisedSpecular() const;
     [[nodiscard]] RHIImage *GetInternalData() const;
+    [[nodiscard]] RHIImage *GetCompositeAlbedoMetallic() const;
 
     void Reset();
 
@@ -84,8 +85,9 @@ private:
     void HistoryFix(const ReblurInputBuffers &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices);
     void TemporalStabilize(const ReblurInputBuffers &inputs, const ReblurSettings &settings,
                            const ReblurMatrices &matrices, uint32_t debug_output = 0);
+    void StabilizeCompositeAlbedo(const ReblurInputBuffers &inputs, const ReblurSettings &settings);
     void CopyToOutput(RHIImage *diff, RHIImage *spec);
-    void CopyPreviousFrameData(const ReblurInputBuffers &inputs);
+    void CopyPreviousFrameData(const ReblurInputBuffers &inputs, RHIImage *albedo_history_source = nullptr);
     void CopyHistoryData(RHIImage *diff, RHIImage *spec);
     void CopyStabilizedHistory(RHIImage *diff, RHIImage *spec);
 
@@ -118,6 +120,8 @@ private:
     // Previous-frame buffers
     RHIResourceRef<RHIImage> prev_view_z_;
     RHIResourceRef<RHIImage> prev_normal_roughness_;
+    RHIResourceRef<RHIImage> stabilized_albedo_metallic_;
+    RHIResourceRef<RHIImage> prev_stabilized_albedo_metallic_;
 
     // Temporal accumulation pass
     RHIResourceRef<RHIShader> temporal_accum_shader_;
@@ -145,6 +149,16 @@ private:
     RHIResourceRef<RHIShader> temporal_stab_shader_;
     RHIResourceRef<RHIPipelineState> temporal_stab_pipeline_;
     RHIResourceRef<RHIBuffer> temporal_stab_ub_;
+
+    // Copy stabilized float32 history back to float16 denoised outputs
+    RHIResourceRef<RHIShader> copy_stabilized_shader_;
+    RHIResourceRef<RHIPipelineState> copy_stabilized_pipeline_;
+    RHIResourceRef<RHIBuffer> copy_stabilized_ub_;
+
+    // Composite albedo stabilization
+    RHIResourceRef<RHIShader> composite_albedo_shader_;
+    RHIResourceRef<RHIPipelineState> composite_albedo_pipeline_;
+    RHIResourceRef<RHIBuffer> composite_albedo_ub_;
 
     // Stabilized history (ping-pong)
     RHIResourceRef<RHIImage> diff_stabilized_[2];

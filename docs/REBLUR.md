@@ -80,8 +80,8 @@ All denoiser behavior is controlled through `ReblurSettings`, passed to `ReblurD
 
 | Parameter                   | Default | Description                                                                          |
 | --------------------------- | ------- | ------------------------------------------------------------------------------------ |
-| `max_accumulated_frame_num` | `63`    | Maximum temporal accumulation count. Capped at 63 for float16 packing compatibility  |
-| `max_stabilized_frame_num`  | `255`   | Independent stabilization counter limit. Uses `frame_index` directly, not accumSpeed |
+| `max_accumulated_frame_num` | `511`   | Maximum temporal accumulation count. Stored in `RG16F` internal data, so integer counts remain exact well past the default |
+| `max_stabilized_frame_num`  | `255`   | Independent per-pixel stabilization counter limit, persisted in stabilized history alpha instead of being capped by TA accumSpeed |
 | `history_fix_frame_num`     | `3`     | Number of early frames where HistoryFix is active to fill disoccluded regions        |
 | `history_fix_stride`        | `14.0`  | Pixel stride of the 5x5 bilateral kernel used in HistoryFix                          |
 
@@ -238,7 +238,7 @@ At 1920x1080 resolution, REBLUR allocates approximately **246 MB** of GPU memory
 | G-buffer (normal, viewZ, MV, albedo) | 4        | mixed   | 28 MB       |
 | Ping-pong temporaries                | 4        | RGBA16F | 64 MB       |
 | History buffers                      | 2        | RGBA16F | 32 MB       |
-| Stabilized history (ping-pong)       | 4        | RGBA16F | 64 MB       |
+| Stabilized history (ping-pong)       | 4        | RGBA32F | 128 MB      |
 | Previous-frame data                  | 3        | mixed   | 20 MB       |
 | Internal data + tiles                | 3        | mixed   | ~6 MB       |
 | **Total**                            | **~26**  |         | **~246 MB** |
@@ -482,6 +482,7 @@ On first scene load, `GPURenderer` calls `reblur_->Reset()` to clear any history
 - **Framerate scaling**: temporal feedback alpha is scaled by `framerate_scale` for consistent behavior across framerates
 - **Disocclusion bypass**: when `accum_incoming <= 1.0`, skips stabilized history blend entirely and uses 100% PostBlur output. Prevents pulling stale stabilized history onto newly disoccluded pixels
 - Uses motion-vector-based reprojection to sample previous stabilized history
+- Stabilized history ping-pong uses `RGBA32F` so a long EMA horizon does not accumulate float16 quantization bias frame over frame
 
 ### Composite
 

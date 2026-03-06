@@ -77,13 +77,14 @@ float3 SampleEmissive(inout Intersection intersection, MaterialParameters mat_pa
 
 float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i, out float out_pdf)
 {
+    bool is_specular_lobe = false;
     if (mat_param.eta > 0)
     {
-        return BxdfDieletric(w_o, w_i, out_pdf, mat_param, intersection);
+        return BxdfDieletric(w_o, w_i, out_pdf, is_specular_lobe, mat_param, intersection);
     }
     else
     {
-        return BxdfMetal(w_o, w_i, out_pdf, mat_param, intersection);
+        return BxdfMetal(w_o, w_i, out_pdf, is_specular_lobe, mat_param, intersection);
     }
 }
 

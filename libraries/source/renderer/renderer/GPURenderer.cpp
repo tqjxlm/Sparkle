@@ -838,9 +838,13 @@ void GPURenderer::RenderReblurPath()
 
     // Bind denoised output to composite and dispatch
     auto *comp_resources = composite_pipeline_->GetShaderResource<ReblurCompositeShader>();
+    using DP = RenderConfig::ReblurDebugPass;
+    RHIImage *composite_albedo = render_config_.reblur_debug_pass == DP::Full
+        ? reblur_->GetCompositeAlbedoMetallic()
+        : albedo_metallic_.get();
     comp_resources->denoisedDiffuse().BindResource(reblur_->GetDenoisedDiffuse()->GetDefaultView(rhi_));
     comp_resources->denoisedSpecular().BindResource(reblur_->GetDenoisedSpecular()->GetDefaultView(rhi_));
-    comp_resources->albedoMetallic().BindResource(albedo_metallic_->GetDefaultView(rhi_));
+    comp_resources->albedoMetallic().BindResource(composite_albedo->GetDefaultView(rhi_));
     comp_resources->internalData().BindResource(reblur_->GetInternalData()->GetDefaultView(rhi_));
 
     // Transition denoised output to Read and scene_texture to General (read-write) for composite
@@ -850,6 +854,9 @@ void GPURenderer::RenderReblurPath()
     reblur_->GetDenoisedSpecular()->Transition({.target_layout = RHIImageLayout::Read,
                                                 .after_stage = RHIPipelineStage::ComputeShader,
                                                 .before_stage = RHIPipelineStage::ComputeShader});
+    composite_albedo->Transition({.target_layout = RHIImageLayout::Read,
+                                  .after_stage = RHIPipelineStage::ComputeShader,
+                                  .before_stage = RHIPipelineStage::ComputeShader});
     // PT accumulation buffer to Read for composite to sample
     pt_accumulation_->Transition({.target_layout = RHIImageLayout::Read,
                                   .after_stage = RHIPipelineStage::ComputeShader,

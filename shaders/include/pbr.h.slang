@@ -19,6 +19,12 @@ struct IBLConfig
     SamplerState brdf_sampler;
 };
 
+struct DirectLightingComponents
+{
+    float3 diffuse;
+    float3 specular;
+};
+
 float3 SampleDiffuseIBL(RenderConfig config, float3 dir, IBLConfig ibl)
 {
     if (config.has_diffuse_ibl == 1)
@@ -43,15 +49,19 @@ float3 SampleSpecularIBL(RenderConfig config, float3 dir, float roughness, IBLCo
     }
 }
 
-float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttributes surface)
+DirectLightingComponents CalculateDirectLightingComponents(float3 V, float3 L, float3 radiance, SurfaceAttributes surface)
 {
+    DirectLightingComponents result;
+    result.diffuse = (float3)0;
+    result.specular = (float3)0;
+
     float3 N = surface.normal;
     float NdotL = SaturateDot(N, L);
     float NdotV = max(SaturateDot(N, V), Eps);
 
     float3 H_raw = V + L;
     if (dot(H_raw, H_raw) < Eps)
-        return (float3)0;
+        return result;
     float3 H = normalize(H_raw);
     float HdotV = SaturateDot(H, V);
 
@@ -83,7 +93,16 @@ float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttri
     // diffuse
     float3 diffuse = surface.albedo * InvPi;
 
-    return (kD * diffuse + kS * specular) * radiance * NdotL;
+    result.diffuse = kD * diffuse * radiance * NdotL;
+    result.specular = kS * specular * radiance * NdotL;
+
+    return result;
+}
+
+float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttributes surface)
+{
+    DirectLightingComponents result = CalculateDirectLightingComponents(V, L, radiance, surface);
+    return result.diffuse + result.specular;
 }
 
 float3 CalculateAmbientLighting(RenderConfig config, float3 V, SkyLight sky_light, SurfaceAttributes surface,

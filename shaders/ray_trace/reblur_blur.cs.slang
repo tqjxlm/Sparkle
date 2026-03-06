@@ -89,14 +89,6 @@ float GetSpecNormalWeight(float3 center_normal, float3 sample_normal, float roug
     return smoothstep(threshold, 0.0, angle);
 }
 
-float GetHitDistWeight(float center_hit_dist, float sample_hit_dist, float min_weight)
-{
-    float diff = abs(center_hit_dist - sample_hit_dist);
-    float max_val = max(center_hit_dist, sample_hit_dist);
-    float relative_diff = diff / max(max_val, 1e-6);
-    return lerp(min_weight, 1.0, exp(-relative_diff * relative_diff * 4.0));
-}
-
 float GetGaussianWeight(float distance_sq)
 {
     return exp(-0.5 * distance_sq);
@@ -229,6 +221,16 @@ float GetGaussianWeight(float distance_sq)
     float spec_weight_sum = 1.0;
 
     float adjusted_lobe_fraction = lobe_angle_fraction * fraction_scale;
+    float2 diff_hit_weight_params = GetHitDistanceWeightParams(center_diff_hit_norm, diff_non_linear, 1.0);
+    float2 spec_hit_weight_params =
+        GetHitDistanceWeightParams(center_spec_hit_norm, spec_non_linear, center_roughness);
+    float diff_min_hit_weight = min_hit_dist_weight * fraction_scale;
+    float spec_min_hit_weight = min_hit_dist_weight * fraction_scale * smc;
+    if (blur_pass_index != 0)
+    {
+        diff_min_hit_weight *= diff_non_linear;
+        spec_min_hit_weight *= spec_non_linear;
+    }
 
     for (int i = 0; i < REBLUR_POISSON_SAMPLE_NUM; i++)
     {
@@ -260,8 +262,10 @@ float GetGaussianWeight(float distance_sq)
                     // Normal weight
                     float w_normal = GetNormalWeight(center_normal, sample_normal, adjusted_lobe_fraction);
 
-                    // Hit distance weight
-                    float w_hit = GetHitDistWeight(center_diff_hit_norm, sample_diff.a, min_hit_dist_weight);
+                    // NRD-style normalized hit-distance rejection keeps the kernel
+                    // from leaking dark contact regions into the open floor.
+                    float w_hit =
+                        diff_min_hit_weight + ComputeWeight(sample_diff.a, diff_hit_weight_params.x, diff_hit_weight_params.y);
 
                     // Gaussian spatial weight
                     float w_gauss = GetGaussianWeight(dot(offset, offset));
@@ -303,9 +307,8 @@ float GetGaussianWeight(float distance_sq)
                     float w_normal = GetSpecNormalWeight(center_normal, sample_normal, center_roughness,
                                                           adjusted_lobe_fraction, spec_non_linear);
 
-                    // Hit distance weight modulated by specular magic curve
-                    float spec_min_hit_weight = min_hit_dist_weight * fraction_scale * smc;
-                    float w_hit = GetHitDistWeight(center_spec_hit_norm, sample_spec.a, spec_min_hit_weight);
+                    float w_hit =
+                        spec_min_hit_weight + ComputeWeight(sample_spec.a, spec_hit_weight_params.x, spec_hit_weight_params.y);
 
                     // Roughness weight for specular: prevents blur leaking across roughness boundaries
                     float w_roughness = GetRoughnessWeight(center_roughness, sample_roughness, roughness_fraction);

@@ -25,8 +25,10 @@ Semantic checks:
   B. Noise concentration: disoccluded pixels must be measurably noisier than
      history pixels (ratio > 2.0).
   C. Reprojection validity: > 60% of geometry pixels have valid history.
-  D. No NaN/Inf/all-black in any output.
-  E. End-to-end FLIP: reblur full pipeline vs vanilla (FLIP <= threshold).
+  D. End-to-end floor stability: history-valid floor pixels in Run 1 must stay
+     as clean as Run 0 and nearly unchanged vs Run 1 before.
+  E. No NaN/Inf/all-black in any output.
+  F. End-to-end FLIP: reblur full pipeline vs vanilla (FLIP <= threshold).
 
 Saves diagnostic images to screenshot dir for visual inspection.
 
@@ -51,9 +53,9 @@ sys.path.insert(0, PROJECT_ROOT)
 # --- Thresholds ---
 # History cleanness: reblur history noise / vanilla noise (same region).
 # 1.0 = identical to converged vanilla, higher = residual noise.
-# After a 2° yaw with 5 frames of re-convergence, REBLUR has residual
-# TS ghosting + denoiser noise. 3.0x is a reasonable bound.
-HISTORY_NOISE_RATIO_MAX = 3.0
+# After a 2° yaw with 5 frames of re-convergence, valid-history pixels should
+# stay close to the vanilla reference. Ratios above ~1.6x are visibly noisy.
+HISTORY_NOISE_RATIO_MAX = 1.6
 # Noise concentration: disoccluded noise / history noise.
 # Higher means noise is more concentrated in disoccluded regions (good).
 NOISE_CONCENTRATION_MIN = 2.0
@@ -68,9 +70,13 @@ LUMA_RATIO_MAX = 1.07
 # After a 2° camera nudge with 5 frames settling, the reblur output has:
 #   - ~75% history pixels (reprojected, clean) + ~25% disoccluded (1spp, noisy)
 #   - PT blend weight resets to ~0 after nudge, so output is ~100% denoiser
-# Threshold is set to catch severe regressions (energy loss > 15%, ghosting)
-# while allowing inherent post-nudge noise from disoccluded regions.
-E2E_FLIP_MAX = 0.25
+# Threshold is still loose enough to tolerate small disoccluded regions, but
+# rejects clearly degraded whole-frame output.
+E2E_FLIP_MAX = 0.22
+# History-valid floor pixels should stay nearly identical to both the vanilla
+# post-nudge reference and the converged pre-nudge floor in Run 1.
+E2E_FLOOR_HISTORY_VS_VANILLA_MAX = 1.15
+E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX = 1.15
 
 
 def parse_args():
@@ -122,6 +128,15 @@ def compute_hf_residual(luma, sigma=2.0):
     Isolates noise + fine texture from low-frequency scene content.
     """
     return np.abs(luma - gaussian_filter(luma, sigma=sigma))
+
+
+def get_floor_mask(luma):
+    """Floor = lower 40% of image with moderate luminance."""
+    h, _ = luma.shape
+    mask = np.zeros_like(luma, dtype=bool)
+    mask[int(h * 0.6):, :] = True
+    mask &= (luma > 0.05) & (luma < 0.85)
+    return mask
 
 
 def check_valid(path):
@@ -310,17 +325,19 @@ def main():
         return 1
     all_results.append(("Run 1: reblur end-to-end", True))
 
+    e2e_before_path = find_screenshot(sdir, "*converged_history_before*")
     e2e_after_path = find_screenshot(sdir, "*converged_history_after*")
-    if not e2e_after_path:
-        print("  FAIL: end-to-end after screenshot not found")
+    if not e2e_before_path or not e2e_after_path:
+        print("  FAIL: end-to-end screenshots not found")
         all_results.append(("Run 1: screenshot found", False))
         _print_summary(all_results)
         return 1
 
-    failures = check_valid(e2e_after_path)
-    if failures:
-        for f in failures:
-            all_results.append((f"Run 1: e2e_after {f}", False))
+    for path, tag in [(e2e_before_path, "e2e_before"), (e2e_after_path, "e2e_after")]:
+        failures = check_valid(path)
+        if failures:
+            for f in failures:
+                all_results.append((f"Run 1: {tag} {f}", False))
 
     # FLIP: reblur end-to-end vs vanilla (both at nudged viewpoint)
     e2e_flip = compute_flip(e2e_after_path, vanilla_after_path)
@@ -343,6 +360,8 @@ def main():
           f"Ratio: {e2e_luma_ratio:.4f}")
 
     rename_screenshots(sdir, "*converged_history_*", "reblur_e2e")
+    e2e_before_path = find_screenshot(sdir, "*reblur_e2e_before*")
+    e2e_after_path = find_screenshot(sdir, "*reblur_e2e_after*")
 
     # ====================================================================
     # Run 2: Reblur denoised-only (converge -> nudge -> 5 frames settle)
@@ -410,6 +429,8 @@ def main():
     # Load images
     reblur_after_img, reblur_after_luma = load_luminance(reblur_after_path)
     _, reblur_before_luma = load_luminance(reblur_before_path)
+    _, e2e_before_luma = load_luminance(e2e_before_path)
+    _, e2e_after_luma = load_luminance(e2e_after_path)
     _, vanilla_after_luma = load_luminance(vanilla_after_path)
 
     # Create masks from TADisocclusion
@@ -445,6 +466,43 @@ def main():
     else:
         print(f"    FAIL: footprint quality {mean_fp:.3f} < {MIN_FOOTPRINT_QUALITY}")
         all_results.append(("Footprint quality", False))
+
+    # --- Check D: Run 1 floor stability on history-valid pixels ---
+    print(f"\n  Check D: Run 1 history-valid floor stability")
+    floor_history = get_floor_mask(vanilla_after_luma) & history
+    floor_history_count = int(np.sum(floor_history))
+    print(f"    History-valid floor pixels: {floor_history_count}")
+    if floor_history_count > 0:
+        floor_window = 5
+        vanilla_floor_noise = float(np.mean(compute_local_std(vanilla_after_luma, floor_window)[floor_history]))
+        e2e_before_floor_noise = float(np.mean(compute_local_std(e2e_before_luma, floor_window)[floor_history]))
+        e2e_after_floor_noise = float(np.mean(compute_local_std(e2e_after_luma, floor_window)[floor_history]))
+
+        floor_vs_vanilla = e2e_after_floor_noise / max(vanilla_floor_noise, 1e-9)
+        floor_after_before = e2e_after_floor_noise / max(e2e_before_floor_noise, 1e-9)
+
+        print(f"    Run 1 after floor local_std:   {e2e_after_floor_noise:.6f}")
+        print(f"    Vanilla after floor local_std: {vanilla_floor_noise:.6f}")
+        print(f"    Run 1 before floor local_std:  {e2e_before_floor_noise:.6f}")
+        print(f"    After/vanilla ratio:           {floor_vs_vanilla:.3f}x")
+        print(f"    After/before ratio:            {floor_after_before:.3f}x")
+
+        if floor_vs_vanilla <= E2E_FLOOR_HISTORY_VS_VANILLA_MAX:
+            print(f"    PASS: after/vanilla <= {E2E_FLOOR_HISTORY_VS_VANILLA_MAX}")
+            all_results.append(("Run 1 floor vs vanilla", True))
+        else:
+            print(f"    FAIL: after/vanilla > {E2E_FLOOR_HISTORY_VS_VANILLA_MAX}")
+            all_results.append(("Run 1 floor vs vanilla", False))
+
+        if floor_after_before <= E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX:
+            print(f"    PASS: after/before <= {E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX}")
+            all_results.append(("Run 1 floor after/before", True))
+        else:
+            print(f"    FAIL: after/before > {E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX}")
+            all_results.append(("Run 1 floor after/before", False))
+    else:
+        print("    FAIL: no history-valid floor pixels found")
+        all_results.append(("Run 1 floor mask", False))
 
     # --- Check A: History cleanness ---
     # Compare local noise (high-frequency residual) in history pixels of
