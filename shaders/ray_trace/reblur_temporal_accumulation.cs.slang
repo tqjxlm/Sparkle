@@ -90,57 +90,75 @@ void main(uint3 DTid : SV_DispatchThreadID)
     {
         int2 prevPixelCenter = int2(prevUV * float2(resolution));
         prevPixelCenter = clamp(prevPixelCenter, int2(0, 0), int2(resolution) - int2(1, 1));
-
         float expectedPrevZ = prevViewZ[prevPixelCenter];
         float currentMaterialIdNorm = nr.a;
+        int2 historyOrigin = int2(0, 0);
+        float4 historyWeights = 0.0;
+        bool allSamplesValid = false;
 
         hist_diff = BilinearHistorySample(
             prevDiffHistory, prevUV, resolution,
             prevViewZ, prevNormalRoughness, expectedPrevZ,
             center_normal, currentMaterialIdNorm,
             disocclusion_threshold, denoising_range,
-            footprintQuality, historyValid);
-
-        // Sample specular with same occlusion pattern
-        float specFootprint;
-        bool specValid;
-        hist_spec = BilinearHistorySample(
-            prevSpecHistory, prevUV, resolution,
-            prevViewZ, prevNormalRoughness, expectedPrevZ,
-            center_normal, currentMaterialIdNorm,
-            disocclusion_threshold, denoising_range,
-            specFootprint, specValid);
-
-        historyValid = historyValid && specValid;
+            footprintQuality, historyValid, allSamplesValid, historyOrigin, historyWeights);
 
         // Catmull-Rom upgrade: only when ALL bilinear taps are valid AND the 3x3
         // neighborhood around the reprojected center has the same instance_id.
         // CatmullRom's 4x4 footprint can reach across object boundaries, pulling
         // in wrong-surface history and causing ghosting near edges.
-        if (historyValid && footprintQuality > 0.99)
+        if (historyValid)
         {
-            bool catrom_safe = true;
-            for (int dy = -1; dy <= 1 && catrom_safe; dy++)
+            hist_spec = SampleBilinearTexture(prevSpecHistory, historyOrigin, resolution, historyWeights);
+
+            float2 prev_packed = SampleBilinearTexture(prevInternalData, historyOrigin, resolution, historyWeights);
+            UnpackInternalData(prev_packed, prev_diff_accum_speed, prev_spec_accum_speed);
+
+            if (!allSamplesValid)
             {
-                for (int dx = -1; dx <= 1 && catrom_safe; dx++)
+                float4 centerPrevNR = prevNormalRoughness[prevPixelCenter];
+                float centerPrevZ = prevViewZ[prevPixelCenter];
+                bool centerSampleValid = centerPrevZ <= denoising_range;
+                if (centerSampleValid)
                 {
-                    int2 np = prevPixelCenter + int2(dx, dy);
-                    np = clamp(np, int2(0, 0), int2(resolution) - int2(1, 1));
-                    float4 npnr = prevNormalRoughness[np];
-                    if (abs(npnr.a - currentMaterialIdNorm) > 0.0005)
-                        catrom_safe = false;
+                    float3 centerPrevNormal = DecodeNormalOct(centerPrevNR.xy);
+                    centerSampleValid =
+                        dot(centerPrevNormal, center_normal) >= 0.75 &&
+                        abs(centerPrevNR.a - currentMaterialIdNorm) <= 0.0005;
+                }
+
+                if (centerSampleValid)
+                {
+                    hist_diff = prevDiffHistory[prevPixelCenter];
+                    hist_spec = prevSpecHistory[prevPixelCenter];
+                    UnpackInternalData(prevInternalData[prevPixelCenter],
+                                       prev_diff_accum_speed, prev_spec_accum_speed);
+                    footprintQuality = 1.0;
                 }
             }
-            if (catrom_safe)
+
+            if (allSamplesValid)
             {
-                hist_diff = CatmullRomHistorySample(prevDiffHistory, linearSampler, prevUV, resolution);
-                hist_spec = CatmullRomHistorySample(prevSpecHistory, linearSampler, prevUV, resolution);
+                bool catrom_safe = true;
+                for (int dy = -1; dy <= 1 && catrom_safe; dy++)
+                {
+                    for (int dx = -1; dx <= 1 && catrom_safe; dx++)
+                    {
+                        int2 np = prevPixelCenter + int2(dx, dy);
+                        np = clamp(np, int2(0, 0), int2(resolution) - int2(1, 1));
+                        float4 npnr = prevNormalRoughness[np];
+                        if (abs(npnr.a - currentMaterialIdNorm) > 0.0005)
+                            catrom_safe = false;
+                    }
+                }
+
+                if (catrom_safe)
+                {
+                    hist_diff = CatmullRomHistorySample(prevDiffHistory, linearSampler, prevUV, resolution);
+                    hist_spec = CatmullRomHistorySample(prevSpecHistory, linearSampler, prevUV, resolution);
+                }
             }
         }
-
-        // Read previous accumulation speed from center of footprint
-        float2 prev_packed = prevInternalData[prevPixelCenter];
-        UnpackInternalData(prev_packed, prev_diff_accum_speed, prev_spec_accum_speed);
     }
 
     // Disocclusion: either out-of-screen or no valid history samples
@@ -172,28 +190,11 @@ void main(uint3 DTid : SV_DispatchThreadID)
         spec_accum_speed = max(spec_accum_speed, 1.0);
     }
 
-    // Specular parallax: view-dependent highlights move differently than surfaces.
-    // Surface motion vectors don't capture the "virtual motion" of specular reflections.
-    // For smooth surfaces with camera motion, reduce specular history trust.
-    if (!disoccluded)
-    {
-        float roughness = nr.z;
-        float2 mv_pixels = motionVec * float2(resolution);
-        float mv_mag = length(mv_pixels);
-
-        // Threshold > 1px to ignore sub-pixel jitter (TAA jitter causes ~0.7px MVs)
-        if (mv_mag > 1.5)
-        {
-            // Sensitivity: 1.0 for mirrors (roughness=0), 0 at roughness >= 0.5
-            // At roughness >= 0.5 specular lobe is broad enough for surface MVs
-            float sensitivity = saturate(1.0 - roughness * 2.0);
-
-            // Reduce accumulation speed toward 1.0 (fast re-convergence)
-            float parallax_reduction = saturate(mv_mag * sensitivity / 5.0);
-            spec_accum_speed = lerp(spec_accum_speed, 1.0, parallax_reduction);
-            spec_accum_speed = max(spec_accum_speed, 1.0);
-        }
-    }
+    // Surface-motion reprojection is the only specular path currently implemented.
+    // The old "specular parallax" heuristic aggressively reset smooth-surface
+    // history on any camera nudge, which made the blue sphere lose history even
+    // when the user-visible motion was tiny. Leave the history intact here until
+    // a real VMB path is implemented.
 
     // Separate blend weights per channel
     float diff_weight = 1.0 / (1.0 + diff_accum_speed);

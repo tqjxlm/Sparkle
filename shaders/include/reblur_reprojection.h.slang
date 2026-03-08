@@ -7,6 +7,36 @@
 // Returns: sampled history value, sets footprintQuality to [0,1].
 // currentMaterialIdNorm: normalized material ID of the current pixel (from normalRoughness.a).
 // Material ID mismatch → disocclusion (prevents cross-object ghosting).
+float4 SampleBilinearTexture(Texture2D<float4> tex, int2 bilinearOrigin, uint2 resolution, float4 bilinearWeights)
+{
+    int2 maxPixel = int2(resolution) - int2(1, 1);
+    int2 p00 = clamp(bilinearOrigin, int2(0, 0), maxPixel);
+    int2 p10 = clamp(bilinearOrigin + int2(1, 0), int2(0, 0), maxPixel);
+    int2 p01 = clamp(bilinearOrigin + int2(0, 1), int2(0, 0), maxPixel);
+    int2 p11 = clamp(bilinearOrigin + int2(1, 1), int2(0, 0), maxPixel);
+
+    float4 result = tex[p00] * bilinearWeights.x;
+    result += tex[p10] * bilinearWeights.y;
+    result += tex[p01] * bilinearWeights.z;
+    result += tex[p11] * bilinearWeights.w;
+    return result;
+}
+
+float2 SampleBilinearTexture(Texture2D<float2> tex, int2 bilinearOrigin, uint2 resolution, float4 bilinearWeights)
+{
+    int2 maxPixel = int2(resolution) - int2(1, 1);
+    int2 p00 = clamp(bilinearOrigin, int2(0, 0), maxPixel);
+    int2 p10 = clamp(bilinearOrigin + int2(1, 0), int2(0, 0), maxPixel);
+    int2 p01 = clamp(bilinearOrigin + int2(0, 1), int2(0, 0), maxPixel);
+    int2 p11 = clamp(bilinearOrigin + int2(1, 1), int2(0, 0), maxPixel);
+
+    float2 result = tex[p00] * bilinearWeights.x;
+    result += tex[p10] * bilinearWeights.y;
+    result += tex[p01] * bilinearWeights.z;
+    result += tex[p11] * bilinearWeights.w;
+    return result;
+}
+
 float4 BilinearHistorySample(
     Texture2D<float4> prevTexture,
     float2 prevUV,
@@ -16,14 +46,19 @@ float4 BilinearHistorySample(
     float expectedPrevZ,
     float3 currentNormal,
     float currentMaterialIdNorm,
-    float disoccThreshold,
+    float disocclusionThreshold,
     float denoisingRange,
     out float footprintQuality,
-    out bool isValid)
+    out bool isValid,
+    out bool allSamplesValid,
+    out int2 bilinearOrigin,
+    out float4 bilinearWeights)
 {
     float2 prevPixelF = prevUV * float2(resolution) - 0.5;
     int2 tl = int2(floor(prevPixelF));
     float2 f = prevPixelF - float2(tl);
+    bilinearOrigin = tl;
+    bilinearWeights = 0.0;
 
     // Bilinear weights
     float4 bw = float4(
@@ -37,7 +72,6 @@ float4 BilinearHistorySample(
     int2 offsets[4] = { int2(0,0), int2(1,0), int2(0,1), int2(1,1) };
 
     float4 occMask = float4(0, 0, 0, 0);
-    float4 result = float4(0, 0, 0, 0);
 
     [unroll]
     for (int i = 0; i < 4; i++)
@@ -56,14 +90,14 @@ float4 BilinearHistorySample(
 
         // Depth-based occlusion test
         float zDiff = abs(pz - expectedPrevZ);
-        float zThresh = disoccThreshold * max(abs(expectedPrevZ), 1.0);
+        float zThresh = disocclusionThreshold * max(abs(expectedPrevZ), 1.0);
         if (zDiff > zThresh)
             continue;
 
         // Normal agreement test
         float4 pnr = prevNormalRough[p];
         float3 pn = DecodeNormalOct(pnr.xy);
-        if (dot(pn, currentNormal) < 0.5)
+        if (dot(pn, currentNormal) < 0.75)
             continue;
 
         // Material ID test: reject history from different surfaces.
@@ -74,19 +108,53 @@ float4 BilinearHistorySample(
 
         // This sample is valid
         occMask[i] = 1.0;
-        result += bw[i] * prevTexture[p];
     }
 
-    float weightSum = dot(bw * occMask, float4(1, 1, 1, 1));
+    float4 customWeights = bw * occMask;
+    float weightSum = dot(customWeights, float4(1, 1, 1, 1));
     isValid = weightSum > 1e-6;
+    allSamplesValid = isValid && all(occMask > 0.5);
 
     if (isValid)
-        result /= weightSum;
+    {
+        if (allSamplesValid)
+        {
+            bilinearWeights = customWeights / weightSum;
+        }
+        else
+        {
+            // A partial bilinear footprint means one or more taps landed on a
+            // different surface. Renormalizing the remaining taps shifts the
+            // effective sample position across the silhouette, which shows up
+            // as a wrong-side halo on small camera nudges. Fall back to the
+            // dominant valid tap instead; keep footprintQuality low so the
+            // caller still treats this as a fragile reprojection.
+            int dominantIndex = 0;
+            float dominantWeight = customWeights.x;
+            if (customWeights.y > dominantWeight)
+            {
+                dominantIndex = 1;
+                dominantWeight = customWeights.y;
+            }
+            if (customWeights.z > dominantWeight)
+            {
+                dominantIndex = 2;
+                dominantWeight = customWeights.z;
+            }
+            if (customWeights.w > dominantWeight)
+            {
+                dominantIndex = 3;
+            }
+
+            bilinearWeights[dominantIndex] = 1.0;
+        }
+    }
 
     // Footprint quality: fraction of valid bilinear area
-    footprintQuality = sqrt(dot(bw, occMask));
+    footprintQuality = sqrt(saturate(weightSum));
 
-    return result;
+    return isValid ? SampleBilinearTexture(prevTexture, bilinearOrigin, resolution, bilinearWeights)
+                   : float4(0, 0, 0, 0);
 }
 
 // Catmull-Rom (5-tap optimized) history sampling.

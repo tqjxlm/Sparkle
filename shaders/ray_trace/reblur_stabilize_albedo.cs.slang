@@ -48,7 +48,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     float footprintQuality = 0.0;
     bool historyValid = false;
+    bool allSamplesValid = false;
     float4 history = current;
+    int2 historyOrigin = int2(0, 0);
+    float4 historyWeights = 0.0;
 
     if (inScreen)
     {
@@ -61,9 +64,29 @@ void main(uint3 DTid : SV_DispatchThreadID)
             prevViewZ, prevNormalRoughness, expectedPrevZ,
             center_normal, current_material_id,
             disocclusion_threshold, denoising_range,
-            footprintQuality, historyValid);
+            footprintQuality, historyValid, allSamplesValid, historyOrigin, historyWeights);
 
-        if (historyValid && footprintQuality > 0.99)
+        if (historyValid && !allSamplesValid)
+        {
+            float4 centerPrevNR = prevNormalRoughness[prevPixelCenter];
+            float centerPrevZ = prevViewZ[prevPixelCenter];
+            bool centerSampleValid = centerPrevZ <= denoising_range;
+            if (centerSampleValid)
+            {
+                float3 centerPrevNormal = DecodeNormalOct(centerPrevNR.xy);
+                centerSampleValid =
+                    dot(centerPrevNormal, center_normal) >= 0.75 &&
+                    abs(centerPrevNR.a - current_material_id) <= 0.0005;
+            }
+
+            if (centerSampleValid)
+            {
+                history = prevAlbedoMetallic[prevPixelCenter];
+                footprintQuality = 1.0;
+            }
+        }
+
+        if (historyValid && allSamplesValid)
         {
             bool catrom_safe = true;
             for (int dy = -1; dy <= 1 && catrom_safe; dy++)

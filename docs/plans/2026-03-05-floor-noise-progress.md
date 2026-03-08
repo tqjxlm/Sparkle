@@ -567,3 +567,319 @@ Pre-existing failures (not caused by our changes):
   was attempted, but it failed inside the helper because its subprocess calls to `build.py`
   hit `git submodule update --init --recursive` exit `128`. Direct `build.py` invocations from
   the repo root continued to work.
+
+### Task 10: Restore valid sphere reprojection after the failed previous-depth experiment
+- Status: **DONE**
+- Trials:
+  - Added a sphere-local analysis using the lower-middle blue sphere mask from the vanilla
+    `after` screenshot because the whole-frame Run 1 thresholds were not specific enough to
+    catch this regression.
+  - Ran native macOS `TADisocclusion` and confirmed the current shader was incorrectly marking
+    the entire blue sphere as disoccluded after the 2 degree camera nudge.
+  - Reverted the experimental previous-surface-view-Z reprojection path, restoring TA's
+    center-sampled `prevViewZ` depth validation while keeping the newer shared bilinear-weight
+    reuse / Catmull-Rom safety changes.
+- Commands:
+  - `python3 build.py --framework macos --config Release`
+  - `python3 build.py --framework macos --skip_build --run --test_case reblur_converged_history --headless true --pipeline gpu --spp 1 --use_reblur true --reblur_debug_pass TADisocclusion --clear_screenshots true --config Release`
+  - `python3 build.py --framework macos --skip_build --run --test_case reblur_converged_history --headless true --pipeline gpu --spp 1 --use_reblur true --reblur_no_pt_blend true --clear_screenshots true --config Release`
+  - `python3 build.py --framework macos --skip_build --run --test_case reblur_converged_history --headless true --pipeline gpu --spp 1 --use_reblur true --clear_screenshots true --config Release`
+
+### Findings from Task 10
+- The failed previous-depth trial was the direct cause of the sphere-wide history loss:
+  - Before revert: `TADisocclusion` on the blue sphere was `0% history / 100% disoccluded`.
+  - After revert: the same sphere became `100% history-valid` with mean footprint quality
+    `0.910` on the left, center, and right regions.
+- The denoised-only sphere immediately recovered from the hard reprojection failure:
+  - `sphere after_vs_vanilla_std_ratio: 6.75x -> 0.89x`
+  - `right edge after_vs_vanilla_std_ratio: 6.67x -> 0.98x`
+- After the reprojection fix, the remaining user-visible issue was no longer "missing
+  history". It was specifically in the displayed-color path:
+  - End-to-end sphere noise improved from the broken `6.71x` state down to `2.70x`, but the
+    sphere right edge was still visibly noisy at `5.43x`.
+- Conclusion:
+  - The current code must **not** use the previous-surface-view-Z validation path as
+    implemented here.
+  - With valid surface-motion reprojection restored, the remaining sphere artifact moved
+    downstream to the final displayed-color history weighting.
+
+### Task 11: Make displayed-color history follow the stable channel
+- Status: **DONE**
+- Trial:
+  - Changed `reblur_final_history.cs.slang` to use
+    `max(diff_accum_speed, spec_accum_speed)` instead of `min(...)` for the displayed-color
+    history weight.
+  - Rationale: the displayed result should keep strong history if either radiance channel is
+    already stable enough; the old `min(...)` path let a low specular accumulation speed leak
+    fresh noisy composite back into valid-history sphere pixels.
+- Commands:
+  - `python3 build.py --framework macos --config Release`
+  - `python3 build.py --framework macos --skip_build --run --test_case reblur_converged_history --headless true --pipeline gpu --spp 1 --use_reblur true --clear_screenshots true --config Release`
+  - `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+
+### Findings from Task 11
+- The remaining user-visible sphere noise collapsed once displayed-color history stopped using
+  the overly conservative `min(...)` weighting:
+  - `E2E sphere after_vs_vanilla_std_ratio: 2.70x -> 0.91x`
+  - `E2E sphere after_vs_before_std_ratio: 2.70x -> 0.91x`
+  - `E2E right-edge after_vs_vanilla_std_ratio: 5.43x -> 0.97x`
+  - `E2E right-edge after_vs_before_std_ratio: 6.18x -> 1.09x`
+- The repo's semantic regression test is back to passing with the native macOS path:
+  - `E2E FLIP = 0.1208`
+  - `History cleanness = 0.81x`
+  - `Noise concentration = 17.63x`
+  - `Reprojection validity = 100.0%`
+  - `test_converged_history.py = 14 passed, 0 failed`
+- Residual note:
+  - The denoised-only sphere still has a valid-history brightness drop (`sphere luma
+    after/before ~= 0.82x`), but that no longer leaks into the user-visible Run 1 output after
+    the displayed-color history fix.
+
+### Task 12: Add a motion-side history shell regression that actually catches the current bug
+- Status: **DONE**
+- Trials:
+  - Added `tests/reblur/test_motion_side_history.py`, a new camera-nudge regression that:
+    - captures vanilla, full-pipeline REBLUR, denoised-only REBLUR, `TADisocclusion`, and
+      `TAMaterialId`,
+    - extracts visible object silhouettes from the `TAMaterialId` current-ID channel,
+    - matches before/after connected components by centroid motion,
+    - measures only the **history-valid motion-leading shell** of each object,
+    - compares that shell's high-frequency residual against the converged vanilla reference and
+      against the motion-trailing shell.
+  - Did **not** add a separate primitive-ID renderer debug mode because `TAMaterialId` already
+    provides a usable silhouette signal for this regression.
+  - Fixed two harness issues during implementation:
+    - `build.py` subprocesses inside the Python test hit the existing `git submodule update`
+      sandbox problem, so the new test directly runs the built app when `--skip_build` is used.
+    - archived screenshots were initially moved inside the main screenshots directory and then
+      deleted by later `--clear_screenshots true` runs, so the test now archives into
+      `~/Documents/sparkle/screenshots/motion_side_debug/`.
+  - Wired the new test into `tests/reblur/reblur_test_suite.py` and documented it in
+    `docs/REBLUR.md`.
+- Commands:
+  - `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile tests/reblur/test_motion_side_history.py`
+  - `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile tests/reblur/reblur_test_suite.py`
+  - `python3 tests/reblur/test_motion_side_history.py --framework macos --skip_build --config Release`
+
+### Findings from Task 12
+- The new regression captures the exact user-reported failure mode:
+  - `Before components: 8`
+  - `After components: 8`
+  - `Matched components: 8`
+  - All matched motion-leading shells are still marked history-valid:
+    - `median leading valid fraction = 1.000` for both full-pipeline and denoised-only runs
+  - But those history-valid motion-leading shells are much noisier than they should be:
+    - Full pipeline:
+      - `top-3 leading HF ratio mean = 6.08x`
+      - `top-3 lead/trail asym mean = 6.77x`
+    - Denoised-only:
+      - `top-3 leading HF ratio mean = 5.49x`
+      - `top-3 lead/trail asym mean = 5.49x`
+- Worst current failures from the new per-object printout:
+  - Full pipeline:
+    - `comp 77: lead/van = 10.53x, lead/trail = 13.39x`
+    - `comp 2: lead/van = 4.50x, lead/trail = 2.51x`
+    - `comp 72: lead/van = 3.22x, lead/trail = 3.83x`
+  - Denoised-only:
+    - `comp 77: lead/van = 9.48x, lead/trail = 10.59x`
+    - `comp 2: lead/van = 4.12x, lead/trail = 2.42x`
+    - `comp 73: lead/van = 2.86x, lead/trail = 2.81x`
+- Diagnostics now saved for visual debugging at:
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_overlay_e2e.png`
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_excess_e2e.png`
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_overlay_denoised.png`
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_excess_denoised.png`
+- Conclusion:
+  - The remaining regression is **not** that the motion-leading shells are being classified as
+    disoccluded. They are still history-valid.
+  - The bug is that the history-valid motion-leading shells of multiple objects are receiving a
+    noisy result anyway, in both the denoised-only and full-pipeline outputs.
+
+### Task 13: Stop Blur/PostBlur from re-noising valid-history silhouette shells
+- Status: **DONE**
+- Trials:
+  - Re-ran `tests/reblur/test_motion_side_history.py` as the primary acceptance test and used it
+    to iterate on both the denoised-only and full-pipeline outputs.
+  - Captured intermediate pass screenshots for `TAHistory`, `TemporalAccum`, `HistoryFix`,
+    `Blur`, and `PostBlur`, then measured the same motion-leading shell metric against the
+    converged vanilla reference.
+  - Trial 1: added NRD-style view-angle skew to the Blur pass kernel in
+    `reblur_blur.cs.slang`. This reduced the artifact but did not remove it robustly.
+  - Trial 2: made `reblur_final_history.cs.slang` reject all partial reprojection footprints.
+    This fixed the shell regression, but it regressed the old floor stability check in
+    `test_converged_history.py`:
+    - `Run 1 floor after/vanilla ratio = 1.107x`
+    - `Run 1 floor after/before ratio = 1.286x`
+  - Trial 3: narrowed `reblur_final_history.cs.slang` to a current-frame boundary-only cutoff.
+    That preserved the floor but was too narrow to cover the full noisy shell band.
+  - Final fix:
+    - `reblur_blur.cs.slang`: kept the diffuse view-angle skew and added a 5x5
+      material-boundary-band early out for Blur/PostBlur so silhouette pixels keep the already
+      clean temporal result instead of being spatially re-blurred into a halo.
+    - `reblur_final_history.cs.slang`: kept a 5x5 current-boundary test, but only suppresses
+      displayed-color history when that boundary-band pixel also has a partial reprojection
+      footprint (`!allSamplesValid`). That preserves the floor history while still refusing
+      fragile final-history reuse on moving silhouette shells.
+- Commands:
+  - `python3 tests/reblur/test_motion_side_history.py --framework macos --skip_build --config Release`
+  - `python3 tests/reblur/test_converged_history.py --framework macos --skip_build --config Release`
+  - `python3 tests/reblur/reblur_pass_validation.py --framework macos --skip_build --config Release`
+
+### Findings from Task 13
+- Stage localization before the final fix showed the remaining regression was spatial, not
+  reprojection:
+  - `TemporalAccum`: top-3 leading HF ratio mean `1.48x`, asym `1.23x`
+  - `HistoryFix`: top-3 leading HF ratio mean `1.42x`, asym `1.23x`
+  - `Blur`: top-3 leading HF ratio mean `6.02x`, asym `5.00x`
+  - `PostBlur`: top-3 leading HF ratio mean `6.02x`, asym `5.00x`
+- The new motion-shell regression now passes in both modes:
+  - Full pipeline:
+    - `top-3 leading HF ratio mean = 1.08x`
+    - `top-3 lead/trail asym mean = 1.12x`
+  - Denoised-only:
+    - `top-3 leading HF ratio mean = 1.03x`
+    - `top-3 lead/trail asym mean = 1.12x`
+- The original semantic nudge regression is also back to clean:
+  - `E2E FLIP = 0.0972`
+  - `Run 1 floor after/vanilla ratio = 0.857x`
+  - `Run 1 floor after/before ratio = 0.995x`
+  - `test_converged_history.py = 14 passed, 0 failed`
+- The blur-path sanity check still passes after the boundary-band early out:
+  - `PrePass std = 0.270733`
+  - `Blur std = 0.126725`
+  - `PostBlur std = 0.123725`
+  - `reblur_pass_validation.py = PASS`
+- Updated diagnostics remain in:
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_overlay_e2e.png`
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_excess_e2e.png`
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_overlay_denoised.png`
+  - `~/Documents/sparkle/screenshots/motion_side_debug/diag_motion_side_excess_denoised.png`
+- Conclusion:
+  - The remaining bug was not missing temporal history. It was the spatial Blur/PostBlur stages
+    re-filtering already-valid silhouette pixels into a one-sided halo.
+  - Once Blur/PostBlur stopped touching the material-boundary shell, only a narrow
+    boundary-plus-partial-footprint guard was needed in the displayed-color history path.
+
+### Task 14: Add a semantic Run 1 e2e regression for the visible wrong-side shell
+- Status: **DONE**
+- Trials:
+  - The user reported that the earlier shell regressions were still missing the actual visible
+    e2e failure, so I added a new Python regression focused on the displayed Run 1 output instead
+    of denoised-only or intermediate-pass high-frequency ratios.
+  - Added `tests/reblur/test_run1_semantic_e2e.py`, which:
+    - captures `vanilla`, full-pipeline `reblur_converged_history`, `TADisocclusion`, and
+      `TAMaterialId`,
+    - matches object silhouettes between `before` and `after`,
+    - isolates only the **history-valid motion-leading shell** for each object,
+    - compares that shell against the converged vanilla Run 0 image,
+    - classifies shell pixels as visually wrong only when they exceed the object's own core error
+      envelope, and
+    - fails when a component develops a **continuous bad arc** on the history-valid shell.
+  - Added `--analyze_only` to the new test so it can reuse already archived screenshots instead of
+    invoking the app again. It falls back to `~/Documents/sparkle/screenshots/motion_side_debug/`
+    if the new archive folder has not been populated yet.
+  - Wired the new regression into `tests/reblur/reblur_test_suite.py` and documented it in
+    `docs/REBLUR.md`.
+- Commands:
+  - `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile tests/reblur/test_run1_semantic_e2e.py`
+  - `python3 tests/reblur/test_run1_semantic_e2e.py --framework macos --analyze_only`
+
+### Findings from Task 14
+- The new semantic regression fails on the current user-visible screenshots exactly where the user
+  said it should:
+  - analyzed components: `8`
+  - failed components: `4`
+  - failure reason:
+    - `4 components have a visible wrong-side shell arc; max allowed is 1`
+- Per-component semantic failures on the current archived e2e output:
+  - `comp 73`: `bad_arc = 5 bins`, `bad_frac = 0.115`
+  - `comp 76`: `bad_arc = 4 bins`, `bad_frac = 0.170`
+  - `comp 72`: `bad_arc = 7 bins`, `bad_frac = 0.175`
+  - `comp 74`: `bad_arc = 5 bins`, `bad_frac = 0.157`
+- Large components that remain visually acceptable under this criterion:
+  - `comp 1`: `bad_arc = 1 bin`
+  - `comp 2`: `bad_arc = 1 bin`
+- Diagnostics from the semantic e2e regression are now saved to:
+  - `~/Documents/sparkle/screenshots/run1_semantic_debug/diag_run1_semantic_overlay.png`
+  - `~/Documents/sparkle/screenshots/run1_semantic_debug/diag_run1_semantic_error.png`
+- Conclusion:
+  - We now have a solid **user-visible** acceptance test for the exact complaint: a history-valid
+    motion-leading shell should not grow a visible wrong-looking arc in Run 1.
+  - This regression is stricter than the earlier high-frequency shell test and currently confirms
+    that the e2e issue is still unfixed.
+
+### Task 15: Use the semantic Run 1 regression to re-localize and reduce the shell bug
+- Status: **IN PROGRESS**
+- Trials:
+  - Re-ran both regressions on the current build:
+    - `test_run1_semantic_e2e.py` now fails the fresh build with `6` bad-shell components.
+    - `test_motion_side_history.py` also fails again on the fresh build (`top-3 lead/van = 6.07x`),
+      so the older metric is no longer falsely passing.
+  - Added a semantic per-stage sweep using the new arc detector against each stage's own
+    `before -> after` pair (`PrePass`, `TemporalAccum`, `HistoryFix`, `Blur`, `PostBlur`).
+  - Trial 1: in `reblur_reprojection.h.slang`, changed partial reprojection footprints from
+    renormalized bilinear filtering to a dominant valid tap.
+    - Effect:
+      - large-shell e2e failures improved noticeably (components `1` and `2` stabilized),
+      - but the small-object shell failures remained.
+  - Trial 2: narrowed `reblur_final_history.cs.slang` so the current-boundary cutoff only rejects
+    truly fragile partial footprints (`footprintQuality < 0.75`).
+    - Effect: did not remove the remaining shell arcs.
+  - Trial 3: for partial footprints whose reprojected center texel is still on the same surface,
+    switched `reblur_temporal_accumulation.cs.slang`,
+    `reblur_final_history.cs.slang`, and
+    `reblur_stabilize_albedo.cs.slang`
+    to use that exact center texel instead of any corner-derived footprint.
+    - Also stopped penalizing `footprintQuality` for that center-sample path.
+    - Effect:
+      - large components `1` and `2` now pass the semantic e2e regression consistently,
+      - remaining failures are concentrated in the smaller objects.
+  - Trial 4: tightened the per-sample reprojection normal test from `dot >= 0.5` to `dot >= 0.75`.
+    - Effect: no meaningful change to the remaining small-object failures.
+- Commands:
+  - `python3 tests/reblur/test_run1_semantic_e2e.py --framework macos --skip_build --config Release`
+  - `python3 tests/reblur/test_motion_side_history.py --framework macos --skip_build --config Release`
+  - semantic stage sweeps run through ad-hoc Python harnesses against:
+    - `PrePass`
+    - `TAHistory`
+    - `TemporalAccum`
+    - `HistoryFix`
+    - `Blur`
+    - `PostBlur`
+
+### Findings from Task 15
+- The semantic stage sweep changed the root-cause ranking:
+  - `PrePass` is mostly acceptable under the semantic shell detector.
+  - The user-visible wrong-side shell arc first appears in **`TemporalAccum`**, not `Blur`.
+  - `HistoryFix`, `Blur`, and `PostBlur` largely inherit that already-bad shell.
+- Critical observation from `TADisocclusion` on the shell pixels:
+  - the history-valid motion-leading shells all report almost the same partial footprint quality:
+    - `footprintQuality ~= 0.9098`
+  - so the remaining issue is dominated by **partial reprojection footprints**.
+- `TAHistory` split the remaining bug into two classes:
+  - Large matte shells:
+    - raw history is acceptable, but temporal accumulation / displayed-history weighting was still
+      injecting too much current noise.
+    - This is the part improved by the center-sample override and footprint-quality fix.
+  - Small objects:
+    - raw `TAHistory` is already wrong before TA blending:
+      - `TAHistory failed components = [73, 76, 72, 75, 77, 74]`
+    - so the unresolved bug is still **reprojection-side** for those objects.
+- Current semantic e2e status after the successful large-shell reductions:
+  - passing:
+    - `comp 1`
+    - `comp 2`
+    - `comp 75`
+  - still failing:
+    - `comp 73`
+    - `comp 76`
+    - `comp 72`
+    - `comp 77`
+    - `comp 74`
+  - current failure:
+    - `5 components have a visible wrong-side shell arc; max allowed is 1`
+- Current conclusion:
+  - The earlier "Blur/PostBlur halo" diagnosis was incomplete for the fresh build.
+  - The remaining regression is now localized more precisely:
+    - **large-object shell failures were mostly weighting / partial-footprint reuse**
+    - **small-object shell failures are still bad raw reprojection history**

@@ -40,6 +40,18 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 nr = inNormalRoughness[pixel];
     float3 center_normal = DecodeNormalOct(nr.xy);
     float current_material_id = nr.a;
+    const int boundary_radius = 2;
+    bool current_boundary = false;
+    for (int dy = -boundary_radius; dy <= boundary_radius && !current_boundary; dy++)
+    {
+        for (int dx = -boundary_radius; dx <= boundary_radius && !current_boundary; dx++)
+        {
+            int2 np = clamp(int2(pixel) + int2(dx, dy), int2(0, 0), int2(resolution) - int2(1, 1));
+            float4 npnr = inNormalRoughness[np];
+            if (abs(npnr.a - current_material_id) > 0.0005)
+                current_boundary = true;
+        }
+    }
 
     float2 motionVec = inMotionVectors[pixel];
     float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
@@ -48,7 +60,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     float footprintQuality = 0.0;
     bool historyValid = false;
+    bool allSamplesValid = false;
     float4 history = current;
+    int2 historyOrigin = int2(0, 0);
+    float4 historyWeights = 0.0;
 
     if (inScreen)
     {
@@ -61,9 +76,29 @@ void main(uint3 DTid : SV_DispatchThreadID)
             prevViewZ, prevNormalRoughness, expectedPrevZ,
             center_normal, current_material_id,
             disocclusion_threshold, denoising_range,
-            footprintQuality, historyValid);
+            footprintQuality, historyValid, allSamplesValid, historyOrigin, historyWeights);
 
-        if (historyValid && footprintQuality > 0.99)
+        if (historyValid && !allSamplesValid)
+        {
+            float4 centerPrevNR = prevNormalRoughness[prevPixelCenter];
+            float centerPrevZ = prevViewZ[prevPixelCenter];
+            bool centerSampleValid = centerPrevZ <= denoising_range;
+            if (centerSampleValid)
+            {
+                float3 centerPrevNormal = DecodeNormalOct(centerPrevNR.xy);
+                centerSampleValid =
+                    dot(centerPrevNormal, center_normal) >= 0.75 &&
+                    abs(centerPrevNR.a - current_material_id) <= 0.0005;
+            }
+
+            if (centerSampleValid)
+            {
+                history = prevColor[prevPixelCenter];
+                footprintQuality = 1.0;
+            }
+        }
+
+        if (historyValid && allSamplesValid)
         {
             bool catrom_safe = true;
             for (int dy = -1; dy <= 1 && catrom_safe; dy++)
@@ -89,10 +124,22 @@ void main(uint3 DTid : SV_DispatchThreadID)
         return;
     }
 
+    bool fragile_partial_footprint = !allSamplesValid && footprintQuality < 0.75;
+    if (current_boundary && fragile_partial_footprint)
+    {
+        outColor[pixel] = current;
+        return;
+    }
+
     float diff_accum_speed = 0.0;
     float spec_accum_speed = 0.0;
     UnpackInternalData(inInternalData[pixel], diff_accum_speed, spec_accum_speed);
-    float accum = min(diff_accum_speed, spec_accum_speed);
+    // Displayed-color history should follow whichever radiance channel is already
+    // stable enough to keep the final composite from falling back to fresh 1spp
+    // noise. Using min() was overly conservative on smooth spheres: a low spec
+    // accumulation speed dragged the whole displayed history weight down even
+    // when the pixel still had valid surface history.
+    float accum = max(diff_accum_speed, spec_accum_speed);
 
     float history_weight = accum / (accum + 1.0);
     history_weight *= footprintQuality;

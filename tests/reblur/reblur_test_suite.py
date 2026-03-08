@@ -367,6 +367,22 @@ def main():
         show_output=True)
     results.append(("TAHistory convergence", ok, dur))
 
+    # --- Test 25: Motion-side history-valid shell regression ---
+    motion_side_py = os.path.join(SCRIPT_DIR, "test_motion_side_history.py")
+    ok, dur, _ = run_command(
+        [py, motion_side_py, "--framework", fw, "--skip_build"] + extra_args,
+        "25. Motion-side history-valid shell regression",
+        show_output=True)
+    results.append(("Motion-side history-valid shell", ok, dur))
+
+    # --- Test 26: Semantic Run 1 end-to-end shell regression ---
+    run1_semantic_py = os.path.join(SCRIPT_DIR, "test_run1_semantic_e2e.py")
+    ok, dur, _ = run_command(
+        [py, run1_semantic_py, "--framework", fw, "--skip_build"] + extra_args,
+        "26. Semantic Run 1 end-to-end shell regression",
+        show_output=True)
+    results.append(("Semantic Run 1 end-to-end shell", ok, dur))
+
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)
     passed = sum(1 for _, ok, _ in results if ok)

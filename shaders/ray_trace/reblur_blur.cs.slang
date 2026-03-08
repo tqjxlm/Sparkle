@@ -38,7 +38,13 @@
 
 float2 RotateVector(float4 rotator_val, float2 v)
 {
-    return float2(v.x * rotator_val.x - v.y * rotator_val.y, v.x * rotator_val.y + v.y * rotator_val.x);
+    return float2(v.x * rotator_val.x + v.y * rotator_val.z, v.x * rotator_val.y + v.y * rotator_val.w);
+}
+
+float4 ScaleRotator(float4 rotator_val, float2 scale)
+{
+    return float4(rotator_val.x * scale.x, rotator_val.y * scale.x,
+                  rotator_val.z * scale.y, rotator_val.w * scale.y);
 }
 
 // Transform world normal to view space using view matrix rows
@@ -55,6 +61,15 @@ float3 GetViewSpacePosition(uint2 px, float view_z)
     float2 uv = (float2(px) + 0.5) / float2(resolution);
     float2 ndc = uv * 2.0 - 1.0;
     return float3(ndc.x * unproject_x * view_z, ndc.y * unproject_y * view_z, view_z);
+}
+
+float3 GetViewVector(float3 view_pos)
+{
+    float len_sq = dot(view_pos, view_pos);
+    if (len_sq <= 1e-6)
+        return float3(0.0, 0.0, -1.0);
+
+    return -view_pos * rsqrt(len_sq);
 }
 
 // Plane-distance geometry weight (NRD approach)
@@ -115,6 +130,30 @@ float GetGaussianWeight(float distance_sq)
     float3 center_normal = DecodeNormalOct(nr.xy);
     float center_roughness = nr.z;
     uint center_instance_id = uint(round(nr.a * 1023.0));
+
+    if (blur_pass_index != 0)
+    {
+        const int boundary_radius = 2;
+        bool boundary_band = false;
+        for (int dy = -boundary_radius; dy <= boundary_radius && !boundary_band; dy++)
+        {
+            for (int dx = -boundary_radius; dx <= boundary_radius && !boundary_band; dx++)
+            {
+                int2 np = clamp(int2(pixel) + int2(dx, dy), int2(0, 0), int2(resolution) - int2(1, 1));
+                float4 npnr = inNormalRoughness[uint2(np)];
+                uint sample_instance_id = uint(round(npnr.a * 1023.0));
+                if (sample_instance_id != center_instance_id)
+                    boundary_band = true;
+            }
+        }
+
+        if (boundary_band)
+        {
+            outDiffuse[pixel] = center_diff;
+            outSpecular[pixel] = center_spec;
+            return;
+        }
+    }
 
     // Hit distance is in alpha channel (normalized)
     float center_diff_hit_norm = center_diff.a;
@@ -196,6 +235,8 @@ float GetGaussianWeight(float distance_sq)
     // Compute view-space position and normal for plane distance weight
     float3 center_Xv = GetViewSpacePosition(pixel, center_viewZ);
     float3 center_Nv = WorldToViewNormal(center_normal);
+    float3 center_Vv = GetViewVector(center_Xv);
+    float NoV = saturate(abs(dot(center_Nv, center_Vv)));
 
     // Blend Poisson rotation from per-frame (golden angle) to per-pixel (deterministic)
     // as accumulation progresses. At high accumSpeed, per-pixel rotation eliminates
@@ -232,13 +273,18 @@ float GetGaussianWeight(float distance_sq)
         spec_min_hit_weight *= spec_non_linear;
     }
 
+    float2 diff_skew = lerp(1.0 - abs(center_Nv.xy), float2(1.0, 1.0), NoV);
+    diff_skew /= max(max(diff_skew.x, diff_skew.y), 1e-6);
+    float4 diff_rotator = ScaleRotator(effective_rotator, diff_skew * diff_radius);
+    float4 spec_rotator = ScaleRotator(effective_rotator, float2(spec_radius, spec_radius));
+
     for (int i = 0; i < REBLUR_POISSON_SAMPLE_NUM; i++)
     {
-        float2 offset = RotateVector(effective_rotator, g_Special8[i]);
+        float2 offset = g_Special8[i];
 
         // Diffuse sample
         {
-            float2 sample_uv_offset = offset * diff_radius;
+            float2 sample_uv_offset = RotateVector(diff_rotator, offset);
             int2 sample_pixel = int2(pixel) + int2(round(sample_uv_offset));
             sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
 
@@ -281,7 +327,7 @@ float GetGaussianWeight(float distance_sq)
 
         // Specular sample
         {
-            float2 sample_uv_offset = offset * spec_radius;
+            float2 sample_uv_offset = RotateVector(spec_rotator, offset);
             int2 sample_pixel = int2(pixel) + int2(round(sample_uv_offset));
             sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
 

@@ -321,11 +321,13 @@ tests/reblur/
   MotionLuminanceTrackTest.cpp          # Luminance tracking during motion
 
   # Python test suites
-  reblur_test_suite.py                  # Master suite (23 tests)
+  reblur_test_suite.py                  # Master suite (26 tests)
   reblur_pass_validation.py             # Per-pass spatial validation
   reblur_temporal_validation.py         # Per-pass temporal validation
   reblur_motion_validation.py           # Camera motion quality tests
   test_converged_history.py             # History preservation after camera nudge
+  test_motion_side_history.py           # Motion-side shell regression after camera nudge
+  test_run1_semantic_e2e.py             # Semantic Run 1 shell regression on e2e output
   test_denoiser_history.py              # Pure denoiser quality after nudge
   test_denoised_motion_luma.py          # Luminance stability during motion
   test_material_id_ghosting.py          # Cross-object ghosting validation
@@ -580,7 +582,7 @@ python3 build.py --framework <FRAMEWORK>  # Build first
 python3 tests/reblur/reblur_test_suite.py --framework <FRAMEWORK>
 ```
 
-The master suite (`reblur_test_suite.py`) runs 23 test cases covering:
+The master suite (`reblur_test_suite.py`) runs 25 test cases covering:
 
 | Category              | Tests | Validates                                                       |
 | --------------------- | ----- | --------------------------------------------------------------- |
@@ -592,7 +594,7 @@ The master suite (`reblur_test_suite.py`) runs 23 test cases covering:
 | Motion infrastructure | 6     | Matrix storage, MV computation, reprojection, static regression |
 | Ghosting              | 1     | Camera nudge cross-object ghosting detection                    |
 | Camera motion quality | 1     | Temporal stability and reconvergence under motion               |
-| History preservation  | 3     | Converged history, denoiser-only quality, motion luminance      |
+| History preservation  | 4     | Converged history, motion-side shell regression, denoiser-only quality, motion luminance |
 | End-to-end            | 1     | Full pipeline FLIP vs ground truth                              |
 
 **Latest results (2026-03-02):** 26 passed, 0 failed (697.5s total).
