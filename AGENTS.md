@@ -5,6 +5,20 @@ This file provides guidance to AI coding agents when working with this repositor
 * Read [README.md](README.md) for general background of this project and the location of other docs.
 * Read other docs on demand.
 
+## First Principles Thinking
+
+Follow First Principles Thinking. Tyipical steps are:
+
+1. Identify and Define Your Current Assumptions
+2. Breakdown the Problem into Fundamental Truths
+3. Create New Solutions from Scratch
+
+In practice, that can mean:
+
+1. Think about the foundamental reason behind my question before answering or implementing. I might not be asking the correct quetion. Do not listen to me blindly. Ask more questions to clarify or provide alternative questions.
+2. Perform reasoning from bottom up to solve the real cause, not just superficial behaviour.
+3. If an assumption comes from experience or memory, do not adopt it blindly. Treat every problem as a new problem.
+
 ## Test Driven Development
 
 * Always run build tests and functional tests to ensure quality. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) and [docs/CI.md](docs/CI.md) for details.
