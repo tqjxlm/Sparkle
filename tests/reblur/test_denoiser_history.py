@@ -82,7 +82,8 @@ def load_image(path):
 
 def load_luminance(path):
     img = load_image(path)
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     return img, luma
 
 
@@ -104,19 +105,17 @@ def compute_flip(path_a, path_b):
     img_b = load_image(path_b)
     if img_a.shape != img_b.shape:
         return None
-    _, mean_flip, _ = nbflip.evaluate(img_a, img_b, False, True, False, True, {})
+    _, mean_flip, _ = nbflip.evaluate(
+        img_a, img_b, False, True, False, True, {})
     return float(mean_flip)
 
 
 def run_test(py, build_py, framework, test_case, extra_args, label,
-             use_reblur=True, clear_screenshots=False):
+             clear_screenshots=False):
     cmd = [py, build_py, "--framework", framework, "--skip_build",
-           "--run", "--test_case", test_case, "--headless", "true",
-           "--pipeline", "gpu", "--spp", "1"]
+           "--run", "--test_case", test_case, "--headless", "true"]
     if clear_screenshots:
         cmd += ["--clear_screenshots", "true"]
-    if use_reblur:
-        cmd += ["--use_reblur", "true"]
     cmd += extra_args
     print(f"  cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT,
@@ -198,15 +197,18 @@ def main():
 
     print(f"  Before: mean_luma={mean_b:.6f}, noise={noise_b:.6f}")
     print(f"  After:  mean_luma={mean_a:.6f}, noise={noise_a:.6f}")
-    print(f"  Luma ratio:  {luma_ratio:.4f} ({(1-luma_ratio)*100:.1f}% change)")
+    print(
+        f"  Luma ratio:  {luma_ratio:.4f} ({(1-luma_ratio)*100:.1f}% change)")
     print(f"  Noise ratio: {noise_ratio:.2f}x")
 
     # Luminance preservation
     if MIN_LUMA_RATIO <= luma_ratio <= MAX_LUMA_RATIO:
-        print(f"  PASS: luma ratio {luma_ratio:.4f} in [{MIN_LUMA_RATIO}, {MAX_LUMA_RATIO}]")
+        print(
+            f"  PASS: luma ratio {luma_ratio:.4f} in [{MIN_LUMA_RATIO}, {MAX_LUMA_RATIO}]")
         all_results.append(("Denoised-only: luma preserved", True))
     else:
-        print(f"  FAIL: luma ratio {luma_ratio:.4f} outside [{MIN_LUMA_RATIO}, {MAX_LUMA_RATIO}]")
+        print(
+            f"  FAIL: luma ratio {luma_ratio:.4f} outside [{MIN_LUMA_RATIO}, {MAX_LUMA_RATIO}]")
         all_results.append(("Denoised-only: luma preserved", False))
 
     # Noise preservation
@@ -236,7 +238,7 @@ def main():
     print("  Run 1: Vanilla baseline (reference for demod/remod gap measurement)")
     print(f"{'—'*60}")
     ok = run_test(py, build_py, fw, "vanilla_converged_baseline",
-                  [] + extra_args, "vanilla baseline", use_reblur=False)
+                  [] + extra_args, "vanilla baseline")
     if ok:
         all_results.append(("Vanilla baseline: test run", True))
         v_before = find_screenshot(screenshot_dir, "*vanilla_baseline_before*")
@@ -247,7 +249,8 @@ def main():
             gap = (vanilla_mean - mean_b) / max(vanilla_mean, 1e-6) * 100
             print(f"  Vanilla converged luma: {vanilla_mean:.6f}")
             print(f"  Denoised converged luma: {mean_b:.6f}")
-            print(f"  Demod/remod gap: {gap:.1f}% (known artifact, informational)")
+            print(
+                f"  Demod/remod gap: {gap:.1f}% (known artifact, informational)")
     else:
         all_results.append(("Vanilla baseline: test run", False))
 
@@ -261,12 +264,14 @@ def main():
                   "TA debug")
     if ok:
         all_results.append(("TA debug: test run", True))
-        ta_before = find_screenshot(screenshot_dir, "*converged_history_before*")
+        ta_before = find_screenshot(
+            screenshot_dir, "*converged_history_before*")
         ta_after = find_screenshot(screenshot_dir, "*converged_history_after*")
         if ta_before and ta_after:
             _, ta_luma_b = load_luminance(ta_before)
             _, ta_luma_a = load_luminance(ta_after)
-            ta_ratio = float(np.mean(ta_luma_a)) / max(float(np.mean(ta_luma_b)), 1e-6)
+            ta_ratio = float(np.mean(ta_luma_a)) / \
+                max(float(np.mean(ta_luma_b)), 1e-6)
             ta_noise_b = compute_laplacian_variance(ta_luma_b)
             ta_noise_a = compute_laplacian_variance(ta_luma_a)
             ta_noise_ratio = ta_noise_a / max(ta_noise_b, 1e-10)

@@ -18,10 +18,18 @@ namespace sparkle
 ///
 /// The C++ test validates no crash. Python companion validates MV pixel values.
 ///
-/// Usage: --test_case reblur_mv_test --pipeline gpu --use_reblur true --spp 1 --max_spp 10
+/// Usage: --test_case reblur_mv_test
 class ReblurMotionVectorTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", true);
+        EnforceConfig("spp", 1u);
+        EnforceConfig("max_spp", 10u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *camera = app.GetMainCamera();

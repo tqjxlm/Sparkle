@@ -6,7 +6,6 @@ Tests included:
   3. Split-merge equivalence — split shader with debug_pass 255 matches ground truth (FLIP <= 0.1)
   4. REBLUR screenshot — split path + full denoiser pipeline runs without crash
   5. REBLUR per-pass validation — spatial passes produce valid output with decreasing variance
-  6. REBLUR pass validation (C++) — native test case + screenshot pixel validation
   7. REBLUR temporal validation — TemporalAccum/HistoryFix produce valid output, convergence
   8. REBLUR temporal convergence (C++) — 30+ frames temporal pipeline + screenshot pixel validation
   9. REBLUR smoke test (C++) — 30 frames + screenshot
@@ -18,7 +17,7 @@ Tests included:
  15. M3 Reprojection statistical — pixel-level validation of reprojection output
  16. Static non-regression — motion infrastructure doesn't regress static camera quality
  17. Ghosting test (camera nudge) — camera nudge + screenshot to detect cross-object ghosting
- 18. Camera motion quality validation — temporal stability and reconvergence under motion
+  19. Camera motion quality validation — temporal stability and reconvergence under motion
  20. Converged history camera delta — small yaw after convergence preserves history
  21. End-to-end FLIP — full REBLUR pipeline screenshot vs ground truth (FLIP <= 0.1)
  22. Denoiser history preservation — pure denoiser quality after camera nudge (no PT blend)
@@ -29,6 +28,7 @@ Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
 """
 
+from dev.utils import extract_log_path
 import argparse
 import glob
 import os
@@ -40,12 +40,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, PROJECT_ROOT)
 
-from dev.utils import extract_log_path
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="REBLUR test suite")
-    parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
+    parser.add_argument("--framework", default="glfw",
+                        choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true",
                         help="Skip the initial build (assumes already built)")
     return parser.parse_known_args()
@@ -107,7 +106,8 @@ def validate_latest_screenshot(framework, label):
     path = matches[0]
 
     img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     mean_luma = float(np.mean(luma))
     has_nan = bool(np.any(np.isnan(img)))
     has_inf = bool(np.any(np.isinf(img)))
@@ -138,9 +138,11 @@ def main():
     fw = args.framework
     py = sys.executable
     build_py = os.path.join(PROJECT_ROOT, "build.py")
-    functional_test_py = os.path.join(PROJECT_ROOT, "dev", "functional_test.py")
+    functional_test_py = os.path.join(
+        PROJECT_ROOT, "dev", "functional_test.py")
     pass_validation_py = os.path.join(SCRIPT_DIR, "reblur_pass_validation.py")
-    temporal_validation_py = os.path.join(SCRIPT_DIR, "reblur_temporal_validation.py")
+    temporal_validation_py = os.path.join(
+        SCRIPT_DIR, "reblur_temporal_validation.py")
     convergence_stability_py = os.path.join(
         SCRIPT_DIR, "test_convergence_stability.py")
 
@@ -200,21 +202,10 @@ def main():
         show_output=True)
     results.append(("Per-pass validation", ok, dur))
 
-    # --- Test 6: REBLUR pass validation (C++ test case + screenshot validation) ---
-    ok, dur, _ = run_command(
-        [py, build_py, "--framework", fw, "--skip_build",
-         "--run", "--test_case", "reblur_pass_validation", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "4", "--test_timeout", "60"] + extra_args,
-        "6a. REBLUR pass validation (C++ test case)")
-    results.append(("C++ pass validation", ok, dur))
-    if ok:
-        ok2, dur2, _ = validate_latest_screenshot(fw, "C++ pass validation screenshot")
-        results.append(("C++ pass validation (pixels)", ok2, dur2))
-
     # --- Test 7: Temporal validation (Python) ---
     ok, dur, _ = run_command(
-        [py, temporal_validation_py, "--framework", fw, "--skip_build"] + extra_args,
+        [py, temporal_validation_py, "--framework",
+            fw, "--skip_build"] + extra_args,
         "7. REBLUR temporal validation (TemporalAccum/HistoryFix/convergence)",
         show_output=True)
     results.append(("Temporal validation", ok, dur))
@@ -223,12 +214,12 @@ def main():
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_temporal_convergence", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"] + extra_args,
+         "--use_reblur", "true", "--max_spp", "64", "--test_timeout", "120"] + extra_args,
         "8a. REBLUR temporal convergence (C++ test, 30+ frames)")
     results.append(("C++ temporal convergence", ok, dur))
     if ok:
-        ok2, dur2, _ = validate_latest_screenshot(fw, "C++ temporal convergence screenshot")
+        ok2, dur2, _ = validate_latest_screenshot(
+            fw, "C++ temporal convergence screenshot")
         results.append(("C++ temporal convergence (pixels)", ok2, dur2))
 
     # --- Test 9: REBLUR smoke test (C++ test case, 30 frames + screenshot) ---
@@ -236,16 +227,17 @@ def main():
     # Retry up to 2 times on failure.
     smoke_cmd = [py, build_py, "--framework", fw, "--skip_build",
                  "--run", "--test_case", "reblur_smoke", "--headless", "true",
-                 "--pipeline", "gpu", "--use_reblur", "true",
-                 "--spp", "1", "--max_spp", "64", "--test_timeout", "120"] + extra_args
-    ok, dur, _ = run_command(smoke_cmd, "9a. REBLUR smoke test (C++ test, 30 frames)")
+                 "--test_timeout", "120"] + extra_args
+    ok, dur, _ = run_command(
+        smoke_cmd, "9a. REBLUR smoke test (C++ test, 30 frames)")
     if not ok:
         print("  Retrying smoke test (attempt 2/2)...", flush=True)
         ok, dur2, _ = run_command(smoke_cmd, "9a. REBLUR smoke test (retry)")
         dur += dur2
     results.append(("REBLUR smoke test", ok, dur))
     if ok:
-        ok2, dur2, _ = validate_latest_screenshot(fw, "REBLUR smoke test screenshot")
+        ok2, dur2, _ = validate_latest_screenshot(
+            fw, "REBLUR smoke test screenshot")
         results.append(("REBLUR smoke test (pixels)", ok2, dur2))
 
     # --- Test 10: Convergence stability (frame-to-frame instability vs vanilla) ---
@@ -259,8 +251,7 @@ def main():
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_matrix_infra", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "20", "--test_timeout", "30"] + extra_args,
+         "--test_timeout", "30"] + extra_args,
         "11. M1 Matrix infrastructure (C++ test)")
     results.append(("M1 Matrix infrastructure", ok, dur))
 
@@ -268,8 +259,7 @@ def main():
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_mv_test", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "10", "--test_timeout", "30"] + extra_args,
+         "--test_timeout", "30"] + extra_args,
         "12. M2 Motion vector test (C++ test)")
     results.append(("M2 Motion vector test", ok, dur))
 
@@ -285,8 +275,7 @@ def main():
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_reprojection", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "60", "--test_timeout", "60"] + extra_args,
+         "--test_timeout", "60"] + extra_args,
         "14. M3 Reprojection test (C++ test)")
     results.append(("M3 Reprojection test", ok, dur))
 
@@ -302,8 +291,7 @@ def main():
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_static_nonregression", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "64", "--test_timeout", "120"] + extra_args,
+         "--test_timeout", "120"] + extra_args,
         "16. Static camera non-regression")
     results.append(("Static non-regression", ok, dur))
 
@@ -311,8 +299,6 @@ def main():
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_ghosting", "--headless", "true",
-         "--pipeline", "gpu", "--use_reblur", "true",
-         "--spp", "1", "--max_spp", "200",
          "--clear_screenshots", "true",
          "--test_timeout", "120"] + extra_args,
         "17. Ghosting test (camera nudge)")
@@ -352,7 +338,8 @@ def main():
     results.append(("Denoiser history preservation", ok, dur))
 
     # --- Test 23: Denoised motion luminance stability ---
-    denoised_motion_py = os.path.join(SCRIPT_DIR, "test_denoised_motion_luma.py")
+    denoised_motion_py = os.path.join(
+        SCRIPT_DIR, "test_denoised_motion_luma.py")
     ok, dur, _ = run_command(
         [py, denoised_motion_py, "--framework", fw, "--skip_build"] + extra_args,
         "23. Denoised motion luminance stability (continuous orbit sweep)",
@@ -395,7 +382,8 @@ def main():
         status = "PASS" if ok else "FAIL"
         print(f"  [{status}]  {name:<40s}  ({dur:.1f}s)", flush=True)
     print(f"{'='*70}", flush=True)
-    print(f"  {passed} passed, {failed} failed  ({total_duration:.1f}s total)", flush=True)
+    print(
+        f"  {passed} passed, {failed} failed  ({total_duration:.1f}s total)", flush=True)
     print(f"{'='*70}", flush=True)
 
     return 0 if failed == 0 else 1

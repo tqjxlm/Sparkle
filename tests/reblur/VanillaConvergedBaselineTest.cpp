@@ -23,10 +23,17 @@ namespace sparkle
 /// Phase 5: Wait for IsReadyForAutoScreenshot() to become true (full re-convergence).
 /// Phase 6: Take "after" screenshot.
 ///
-/// Usage: --test_case vanilla_converged_baseline --pipeline gpu --spp 1
+/// Usage: --test_case vanilla_converged_baseline
 class VanillaConvergedBaselineTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", false);
+        EnforceConfig("spp", 1u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *camera = app.GetMainCamera();

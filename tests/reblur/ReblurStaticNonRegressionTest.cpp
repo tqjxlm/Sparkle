@@ -18,10 +18,18 @@ namespace sparkle
 /// - Screenshot is not all-black, no NaN
 /// - Accumulation should be progressing (sample count increases)
 ///
-/// Usage: --test_case reblur_static_nonregression --pipeline gpu --use_reblur true --spp 1 --max_spp 64
+/// Usage: --test_case reblur_static_nonregression
 class ReblurStaticNonRegressionTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", true);
+        EnforceConfig("spp", 1u);
+        EnforceConfig("max_spp", 64u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *camera = app.GetMainCamera();

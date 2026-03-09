@@ -81,6 +81,21 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     config_manager.LoadAll();
 
     app_config_.Init();
+
+#if ENABLE_TEST_CASES
+    if (!app_config_.test_case.empty())
+    {
+        test_case_ = TestCaseRegistry::Create(app_config_.test_case);
+        if (!test_case_)
+        {
+            return false;
+        }
+
+        test_case_->EnforceConfigs();
+        Log(Info, "Test case '{}' loaded", test_case_->GetName());
+    }
+#endif
+
     render_config_.Init();
     rhi_config_.Init();
 
@@ -201,18 +216,6 @@ bool AppFramework::Init()
     initialized_ = true;
 
     Log(Info, "Init success. Main loop started");
-
-#if ENABLE_TEST_CASES
-    if (!app_config_.test_case.empty())
-    {
-        test_case_ = TestCaseRegistry::Create(app_config_.test_case);
-        if (!test_case_)
-        {
-            return false;
-        }
-        Log(Info, "Test case '{}' loaded", test_case_->GetName());
-    }
-#endif
 
     return true;
 }

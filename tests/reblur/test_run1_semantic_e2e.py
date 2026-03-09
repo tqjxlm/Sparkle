@@ -103,12 +103,13 @@ def load_image(path):
 
 def load_luminance(path):
     img = load_image(path)
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     return img, luma
 
 
 def get_direct_run_command(framework, test_case, extra_args,
-                           use_reblur=True, clear_screenshots=False):
+                           clear_screenshots=False):
     if framework == "macos":
         executable = os.path.join(
             PROJECT_ROOT, "build_system", "macos", "output", "build",
@@ -120,30 +121,23 @@ def get_direct_run_command(framework, test_case, extra_args,
     else:
         raise ValueError(f"Unsupported direct-run framework: {framework}")
 
-    cmd = [executable, "--test_case", test_case, "--headless", "true",
-           "--pipeline", "gpu", "--spp", "1"]
+    cmd = [executable, "--test_case", test_case, "--headless", "true"]
     if clear_screenshots:
         cmd += ["--clear_screenshots", "true"]
-    if use_reblur:
-        cmd += ["--use_reblur", "true"]
     cmd += extra_args
     return cmd
 
 
 def run_app(py, build_py, framework, test_case, extra_args, label,
-            use_reblur=True, clear_screenshots=False, direct_run=False):
+            clear_screenshots=False, direct_run=False):
     if direct_run:
         cmd = get_direct_run_command(
-            framework, test_case, extra_args,
-            use_reblur=use_reblur, clear_screenshots=clear_screenshots)
+            framework, test_case, extra_args, clear_screenshots=clear_screenshots)
     else:
         cmd = [py, build_py, "--framework", framework, "--skip_build",
-               "--run", "--test_case", test_case, "--headless", "true",
-               "--pipeline", "gpu", "--spp", "1"]
+               "--run", "--test_case", test_case, "--headless", "true"]
         if clear_screenshots:
             cmd += ["--clear_screenshots", "true"]
-        if use_reblur:
-            cmd += ["--use_reblur", "true"]
         cmd += extra_args
 
     print(f"  cmd: {' '.join(cmd)}")
@@ -190,7 +184,7 @@ def extract_components(material_id_path):
             "cx": float(np.mean(xs)),
             "cy": float(np.mean(ys)),
             "bbox": (int(np.min(xs)), int(np.min(ys)),
-                      int(np.max(xs)), int(np.max(ys))),
+                     int(np.max(xs)), int(np.max(ys))),
         })
 
     components.sort(key=lambda c: c["area"], reverse=True)
@@ -264,11 +258,13 @@ def analyze_semantic_run1(e2e_after_path, vanilla_after_path,
     labels_before, before_components = extract_components(material_before_path)
     labels_after, after_components = extract_components(material_after_path)
     matches = match_components(before_components, after_components)
-    history_mask, disoccluded_mask = load_history_masks(disocclusion_after_path)
+    history_mask, disoccluded_mask = load_history_masks(
+        disocclusion_after_path)
 
     del vanilla_img, labels_before
 
-    rgb_error = np.max(np.abs(eval_img - load_image(vanilla_after_path)), axis=2)
+    rgb_error = np.max(
+        np.abs(eval_img - load_image(vanilla_after_path)), axis=2)
     luma_error = np.abs(eval_luma - vanilla_luma)
 
     h, w = history_mask.shape
@@ -284,8 +280,10 @@ def analyze_semantic_run1(e2e_after_path, vanilla_after_path,
             continue
 
         comp_mask = labels_after == match["after"]["label_id"]
-        shell_mask = comp_mask & ~binary_erosion(comp_mask, iterations=SHELL_EROSION_PX)
-        core_mask = binary_erosion(comp_mask, iterations=CORE_EROSION_PX) & history_mask
+        shell_mask = comp_mask & ~binary_erosion(
+            comp_mask, iterations=SHELL_EROSION_PX)
+        core_mask = binary_erosion(
+            comp_mask, iterations=CORE_EROSION_PX) & history_mask
         if np.sum(core_mask) < MIN_CORE_PIXELS:
             continue
 
@@ -306,14 +304,16 @@ def analyze_semantic_run1(e2e_after_path, vanilla_after_path,
         luma_threshold = max(
             MIN_LUMA_BAD_THRESHOLD,
             float(np.quantile(luma_error[core_mask], 0.95)) + LUMA_CORE_BAD_MARGIN)
-        bad_pixels = (rgb_error > rgb_threshold) | (luma_error > luma_threshold)
+        bad_pixels = (rgb_error > rgb_threshold) | (
+            luma_error > luma_threshold)
         bad_leading_history = bad_pixels & leading_history
 
         ys, xs = np.where(leading_history)
         rel_angle = np.arctan2(ys - match["after"]["cy"], xs - match["after"]["cx"]) - \
             np.arctan2(motion_dir[1], motion_dir[0])
         rel_angle = (rel_angle + np.pi) % (2.0 * np.pi) - np.pi
-        bin_indices = np.floor((rel_angle + np.pi) / (2.0 * np.pi) * ARC_BIN_COUNT).astype(int)
+        bin_indices = np.floor((rel_angle + np.pi) /
+                               (2.0 * np.pi) * ARC_BIN_COUNT).astype(int)
         bin_indices = np.clip(bin_indices, 0, ARC_BIN_COUNT - 1)
 
         occupied_bins = np.zeros(ARC_BIN_COUNT, dtype=bool)
@@ -326,7 +326,8 @@ def analyze_semantic_run1(e2e_after_path, vanilla_after_path,
             bad_fraction_per_bin[bin_index] = float(
                 np.mean(bad_leading_history[ys[bin_mask], xs[bin_mask]]))
 
-        bad_bins = occupied_bins & (bad_fraction_per_bin >= BAD_BIN_FRACTION_THRESHOLD)
+        bad_bins = occupied_bins & (
+            bad_fraction_per_bin >= BAD_BIN_FRACTION_THRESHOLD)
         longest_bad_arc = compute_longest_circular_run(bad_bins)
         failed = longest_bad_arc > MAX_BAD_ARC_RUN_BINS
 
@@ -447,7 +448,8 @@ def get_archived_paths(screenshot_dir, artifact_dir):
         ], "material id after"),
         "disocclusion_after": find_existing_artifact([
             os.path.join(artifact_dir, "run1_semantic_disocclusion_after.png"),
-            os.path.join(motion_side_dir, "motion_side_disocclusion_after.png"),
+            os.path.join(motion_side_dir,
+                         "motion_side_disocclusion_after.png"),
         ], "disocclusion after"),
     }
 
@@ -485,8 +487,7 @@ def main():
         print("  Run 0: Vanilla baseline")
         print(f"{'-' * 70}")
         ok = run_app(py, build_py, fw, "vanilla_converged_baseline",
-                     extra_args, "vanilla", use_reblur=False,
-                     clear_screenshots=True, direct_run=direct_run)
+                     extra_args, "vanilla", clear_screenshots=True, direct_run=direct_run)
         if not ok:
             return 1
         _, vanilla_after_path = archive_run_pair(

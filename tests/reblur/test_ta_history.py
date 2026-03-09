@@ -75,7 +75,8 @@ def find_screenshot(screenshot_dir, pattern):
 
 def load_luminance(path):
     img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     return img, luma
 
 
@@ -131,8 +132,6 @@ def main():
 
     cmd = [py, build_py, "--framework", fw, "--skip_build",
            "--run", "--test_case", "reblur_ta_history", "--headless", "true",
-           "--pipeline", "gpu", "--use_reblur", "true", "--spp", "1",
-           "--max_spp", "64", "--reblur_debug_pass", "TAHistory",
            "--reblur_no_pt_blend", "true",
            "--clear_screenshots", "true",
            "--test_timeout", "120"] + extra_args
@@ -212,14 +211,17 @@ def main():
 
     # 1. No NaN/Inf
     if early_bad <= MAX_BAD_PIXEL_FRAC:
-        print(f"\n  PASS: early bad pixels {early_bad:.6f} <= {MAX_BAD_PIXEL_FRAC}")
+        print(
+            f"\n  PASS: early bad pixels {early_bad:.6f} <= {MAX_BAD_PIXEL_FRAC}")
         all_results.append(("Early: no NaN/Inf", True))
     else:
-        print(f"\n  FAIL: early bad pixels {early_bad:.6f} > {MAX_BAD_PIXEL_FRAC}")
+        print(
+            f"\n  FAIL: early bad pixels {early_bad:.6f} > {MAX_BAD_PIXEL_FRAC}")
         all_results.append(("Early: no NaN/Inf", False))
 
     if late_bad <= MAX_BAD_PIXEL_FRAC:
-        print(f"  PASS: late bad pixels {late_bad:.6f} <= {MAX_BAD_PIXEL_FRAC}")
+        print(
+            f"  PASS: late bad pixels {late_bad:.6f} <= {MAX_BAD_PIXEL_FRAC}")
         all_results.append(("Late: no NaN/Inf", True))
     else:
         print(f"  FAIL: late bad pixels {late_bad:.6f} > {MAX_BAD_PIXEL_FRAC}")
@@ -235,19 +237,23 @@ def main():
 
     # 3. Luminance increases (history accumulating signal)
     if luma_increase >= MIN_LUMA_INCREASE:
-        print(f"  PASS: luma increase {luma_increase:.2f}x >= {MIN_LUMA_INCREASE}x")
+        print(
+            f"  PASS: luma increase {luma_increase:.2f}x >= {MIN_LUMA_INCREASE}x")
         all_results.append(("History accumulating (luma increase)", True))
     else:
-        print(f"  FAIL: luma increase {luma_increase:.2f}x < {MIN_LUMA_INCREASE}x")
+        print(
+            f"  FAIL: luma increase {luma_increase:.2f}x < {MIN_LUMA_INCREASE}x")
         print(f"         History is NOT accumulating")
         all_results.append(("History accumulating (luma increase)", False))
 
     # 4. Relative noise decreases (SNR improving)
     if cv_reduction >= MIN_RELATIVE_NOISE_REDUCTION:
-        print(f"  PASS: relative noise reduction {cv_reduction:.2f}x >= {MIN_RELATIVE_NOISE_REDUCTION}x")
+        print(
+            f"  PASS: relative noise reduction {cv_reduction:.2f}x >= {MIN_RELATIVE_NOISE_REDUCTION}x")
         all_results.append(("History converging (relative noise)", True))
     else:
-        print(f"  FAIL: relative noise reduction {cv_reduction:.2f}x < {MIN_RELATIVE_NOISE_REDUCTION}x")
+        print(
+            f"  FAIL: relative noise reduction {cv_reduction:.2f}x < {MIN_RELATIVE_NOISE_REDUCTION}x")
         print(f"         History SNR is NOT improving")
         all_results.append(("History converging (relative noise)", False))
 

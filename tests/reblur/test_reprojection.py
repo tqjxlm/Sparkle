@@ -26,8 +26,10 @@ sys.path.insert(0, PROJECT_ROOT)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Reprojection statistical test")
-    parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
+    parser = argparse.ArgumentParser(
+        description="Reprojection statistical test")
+    parser.add_argument("--framework", default="glfw",
+                        choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
     return parser.parse_known_args()
 
@@ -75,10 +77,10 @@ def main():
     print("\n--- Running reprojection test (motion + settle + screenshot) ---")
     cmd = [py, build_py, "--framework", fw, "--skip_build",
            "--run", "--test_case", "reblur_reprojection", "--headless", "true",
-           "--pipeline", "gpu", "--use_reblur", "true",
-           "--spp", "1", "--max_spp", "60", "--test_timeout", "60"] + extra_args
+           "--test_timeout", "60"] + extra_args
     print(f"  cmd: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT,
+                            capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  FAIL: app exited with code {result.returncode}")
         if result.stderr:
@@ -102,7 +104,8 @@ def main():
         results.append(("Screenshot found", True))
         print(f"  Screenshot: {path}")
 
-        img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+        img = np.array(Image.open(path).convert(
+            "RGB"), dtype=np.float32) / 255.0
         h, w, _ = img.shape
         luma = (img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152
                 + img[:, :, 2] * 0.0722)

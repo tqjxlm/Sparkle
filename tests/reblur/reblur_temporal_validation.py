@@ -12,6 +12,7 @@ Usage:
   python tests/reblur/reblur_temporal_validation.py --framework glfw [--skip_build]
 """
 
+from dev.utils import extract_log_path
 import argparse
 import glob
 import os
@@ -27,7 +28,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, PROJECT_ROOT)
 
-from dev.utils import extract_log_path
 
 PASS_NAMES = {
     "TemporalAccum": "TemporalAccum",
@@ -38,7 +38,8 @@ PASS_NAMES = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description="REBLUR temporal validation")
-    parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
+    parser.add_argument("--framework", default="glfw",
+                        choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
     return parser.parse_known_args()
 
@@ -61,9 +62,7 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label,
         "--run", "--test_case", "reblur_temporal_convergence",
         "--clear_screenshots", "true",
         "--headless", "true",
-        "--pipeline", "gpu",
         "--use_reblur", "true" if use_reblur else "false",
-        "--spp", "1",
         "--max_spp", str(max_spp),
         "--reblur_debug_pass", debug_pass,
         "--test_timeout", "120",
@@ -74,7 +73,8 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label,
     print(f"  debug_pass={debug_pass}, max_spp={max_spp}", flush=True)
     print(f"{'='*60}", flush=True)
 
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT,
+                            capture_output=True, text=True)
     log_path = extract_log_path(result.stdout)
     log_info = f" — log: {log_path}" if log_path else ""
     if result.returncode != 0:
@@ -91,7 +91,8 @@ def run_capture(framework, debug_pass, max_spp, output_dir, label,
         return None
     matches.sort(key=os.path.getmtime, reverse=True)
     mode = "reblur" if use_reblur else "vanilla"
-    dst = os.path.join(output_dir, f"temporal_{mode}_{debug_pass}_spp{max_spp}.png")
+    dst = os.path.join(
+        output_dir, f"temporal_{mode}_{debug_pass}_spp{max_spp}.png")
     shutil.copy2(matches[0], dst)
     print(f"  Screenshot: {dst}", flush=True)
     return dst
@@ -122,7 +123,8 @@ def validate_image(name, img):
     print(f"\n--- {name} ---", flush=True)
     print(f"  Mean luminance:    {metrics['mean_luminance']:.6f}", flush=True)
     print(f"  Std luminance:     {metrics['std_luminance']:.6f}", flush=True)
-    print(f"  Black pixel ratio: {metrics['black_pixel_ratio']:.4f}", flush=True)
+    print(
+        f"  Black pixel ratio: {metrics['black_pixel_ratio']:.4f}", flush=True)
     print(f"  Has NaN:           {metrics['has_nan']}", flush=True)
     print(f"  Has Inf:           {metrics['has_inf']}", flush=True)
     return metrics
@@ -196,11 +198,16 @@ def main():
     images = {k: load_screenshot(v) for k, v in captures.items()}
     metrics = {}
 
-    metrics["ta_64"] = validate_image("TemporalAccum (64 frames)", images["ta_64"])
-    metrics["hf_64"] = validate_image("HistoryFix (64 frames)", images["hf_64"])
-    metrics["full_4"] = validate_image("FullPipeline (4 frames)", images["full_4"])
-    metrics["full_64"] = validate_image("FullPipeline (64 frames)", images["full_64"])
-    metrics["vanilla_64"] = validate_image("Vanilla (64 frames)", images["vanilla_64"])
+    metrics["ta_64"] = validate_image(
+        "TemporalAccum (64 frames)", images["ta_64"])
+    metrics["hf_64"] = validate_image(
+        "HistoryFix (64 frames)", images["hf_64"])
+    metrics["full_4"] = validate_image(
+        "FullPipeline (4 frames)", images["full_4"])
+    metrics["full_64"] = validate_image(
+        "FullPipeline (64 frames)", images["full_64"])
+    metrics["vanilla_64"] = validate_image(
+        "Vanilla (64 frames)", images["vanilla_64"])
 
     # --- Assertions ---
     failures = []
@@ -215,7 +222,8 @@ def main():
     # 2. No output should be all black
     for key, m in metrics.items():
         if m["mean_luminance"] < 1e-4:
-            failures.append(f"{key}: output is all black (mean_luma={m['mean_luminance']:.6f})")
+            failures.append(
+                f"{key}: output is all black (mean_luma={m['mean_luminance']:.6f})")
 
     # 3. Temporal convergence: 64-frame full pipeline should be brighter than 4-frame
     #    (more temporal samples → closer to reference → higher mean luminance).

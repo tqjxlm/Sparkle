@@ -20,10 +20,18 @@ namespace sparkle
 /// The render proxy update is asynchronous (render thread), so continuous motion
 /// ensures prev != current on any given check frame.
 ///
-/// Usage: --test_case reblur_matrix_infra --pipeline gpu --use_reblur true --spp 1 --max_spp 20
+/// Usage: --test_case reblur_matrix_infra
 class ReblurMatrixInfraTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", true);
+        EnforceConfig("spp", 1u);
+        EnforceConfig("max_spp", 20u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *camera = app.GetMainCamera();

@@ -26,10 +26,17 @@ namespace sparkle
 /// C++ test validates no crash and logs camera delta.
 /// Python companion (test_converged_history.py) validates noise levels.
 ///
-/// Usage: --test_case reblur_converged_history --pipeline gpu --use_reblur true --spp 1
+/// Usage: --test_case reblur_converged_history
 class ReblurConvergedHistoryTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", true);
+        EnforceConfig("spp", 1u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *camera = app.GetMainCamera();

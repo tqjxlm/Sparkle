@@ -10,6 +10,7 @@ Usage:
   python tests/reblur/reblur_pass_validation.py --framework glfw [--skip_build]
 """
 
+from dev.utils import extract_log_path
 import argparse
 import glob
 import os
@@ -25,7 +26,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, PROJECT_ROOT)
 
-from dev.utils import extract_log_path
 
 PASS_NAMES = {"PrePass": "PrePass", "Blur": "Blur", "PostBlur": "PostBlur"}
 MAX_SPP = 4  # low SPP to see denoiser effect clearly
@@ -34,7 +34,8 @@ WARMUP_FRAMES = 5  # frames before screenshot
 
 def parse_args():
     parser = argparse.ArgumentParser(description="REBLUR per-pass validation")
-    parser.add_argument("--framework", default="glfw", choices=("glfw", "macos"))
+    parser.add_argument("--framework", default="glfw",
+                        choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
     return parser.parse_known_args()
 
@@ -59,7 +60,7 @@ def run_with_debug_pass(framework, debug_pass, skip_build, output_dir,
     if skip_build:
         cmd.append("--skip_build")
     cmd += [
-        "--run", "--test_case", "reblur_pass_validation",
+        "--run", "--test_case", "screenshot",
         "--clear_screenshots", "true",
         "--headless", "true",
         "--pipeline", "gpu",
@@ -73,11 +74,13 @@ def run_with_debug_pass(framework, debug_pass, skip_build, output_dir,
     print(f"\n{'='*60}", flush=True)
     print(f"Running with debug_pass={debug_pass} ({name})", flush=True)
     print(f"{'='*60}", flush=True)
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT,
+                            capture_output=True, text=True)
     log_path = extract_log_path(result.stdout)
     log_info = f" — log: {log_path}" if log_path else ""
     if result.returncode != 0:
-        print(f"FAIL: App crashed with debug_pass={debug_pass}{log_info}", flush=True)
+        print(
+            f"FAIL: App crashed with debug_pass={debug_pass}{log_info}", flush=True)
         return None
     print(f"  OK{log_info}", flush=True)
 
@@ -86,7 +89,8 @@ def run_with_debug_pass(framework, debug_pass, skip_build, output_dir,
     pattern = os.path.join(screenshot_dir, "*.png")
     matches = glob.glob(pattern)
     if not matches:
-        print(f"FAIL: No screenshot found for debug_pass={debug_pass}", flush=True)
+        print(
+            f"FAIL: No screenshot found for debug_pass={debug_pass}", flush=True)
         return None
     matches.sort(key=os.path.getmtime, reverse=True)
     src = matches[0]
@@ -132,7 +136,8 @@ def validate_pass(name, img):
     print(f"  Mean luminance:    {metrics['mean_luminance']:.6f}", flush=True)
     print(f"  Std luminance:     {metrics['std_luminance']:.6f}", flush=True)
     print(f"  Max luminance:     {metrics['max_luminance']:.6f}", flush=True)
-    print(f"  Black pixel ratio: {metrics['black_pixel_ratio']:.4f}", flush=True)
+    print(
+        f"  Black pixel ratio: {metrics['black_pixel_ratio']:.4f}", flush=True)
     print(f"  Has NaN:           {metrics['has_nan']}", flush=True)
     print(f"  Has Inf:           {metrics['has_inf']}", flush=True)
 
@@ -202,11 +207,13 @@ def main():
     for dp, m in metrics.items():
         name = PASS_NAMES.get(dp, "FullPipeline")
         if m["mean_luminance"] < 1e-4:
-            failures.append(f"{name}: output is all black (mean_luma={m['mean_luminance']:.6f})")
+            failures.append(
+                f"{name}: output is all black (mean_luma={m['mean_luminance']:.6f})")
 
     # 3. Variance should decrease across spatial passes (PrePass -> Blur -> PostBlur)
     # Note: after tone mapping, the variance comparison is approximate
-    stds = [metrics["PrePass"]["std_luminance"], metrics["Blur"]["std_luminance"], metrics["PostBlur"]["std_luminance"]]
+    stds = [metrics["PrePass"]["std_luminance"], metrics["Blur"]
+            ["std_luminance"], metrics["PostBlur"]["std_luminance"]]
     print(f"\nVariance progression: PrePass={stds[0]:.6f} -> Blur={stds[1]:.6f} -> PostBlur={stds[2]:.6f}",
           flush=True)
 

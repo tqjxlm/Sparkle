@@ -14,10 +14,16 @@ namespace sparkle
 /// -> Blur -> PostBlur across 30+ frames, ensuring history read/write and
 /// internal_data ping-pong work correctly.
 ///
-/// Usage: --test_case reblur_temporal_convergence --pipeline gpu --use_reblur true --spp 1 --max_spp 64
+/// Usage: --test_case reblur_temporal_convergence
 class ReblurTemporalConvergenceTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("spp", 1u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         // Log progress at key milestones

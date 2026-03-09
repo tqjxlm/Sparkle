@@ -22,11 +22,19 @@ namespace sparkle
 ///
 /// Python companion (test_ta_history.py) validates noise decreases.
 ///
-/// Usage: --test_case reblur_ta_history --pipeline gpu --use_reblur true --spp 1
-///        --max_spp 64 --reblur_debug_pass TAHistory
+/// Usage: --test_case reblur_ta_history
 class ReblurTAHistoryTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", true);
+        EnforceConfig("spp", 1u);
+        EnforceConfig("max_spp", 64u);
+        EnforceConfig("reblur_debug_pass", std::string("TAHistory"));
+    }
+
     Result OnTick(AppFramework &app) override
     {
         if (frame_ == 1)

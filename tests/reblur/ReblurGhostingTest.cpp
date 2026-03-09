@@ -22,10 +22,18 @@ namespace sparkle
 /// Screenshots are named "ghosting_before" (pre-motion baseline),
 /// "ghosting_nudge_N" (after each nudge), and "ghosting_settled" (reconverged).
 ///
-/// Usage: --test_case reblur_ghosting --pipeline gpu --use_reblur true --spp 1 --max_spp 200
+/// Usage: --test_case reblur_ghosting
 class ReblurGhostingTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", true);
+        EnforceConfig("spp", 1u);
+        EnforceConfig("max_spp", 200u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *camera = app.GetMainCamera();

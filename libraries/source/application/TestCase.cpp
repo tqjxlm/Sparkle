@@ -4,12 +4,39 @@
 
 #include "application/AppConfig.h"
 #include "application/AppFramework.h"
+#include "core/ConfigManager.h"
 #include "core/Logger.h"
+#include "core/math/Utilities.h"
 
 #include <map>
 
 namespace sparkle
 {
+namespace
+{
+template <class T> void EnforceTestConfig(const TestCase &test_case, const std::string &config_name, const T &value)
+{
+    auto *config = ConfigManager::Instance().GetConfig<T>(config_name);
+    if (!config)
+    {
+        Log(Error, "Test case '{}' cannot enforce missing config '{}'", test_case.GetName(), config_name);
+        return;
+    }
+
+    if (utilities::IsSame(config->Get(), value))
+    {
+        return;
+    }
+
+    Log(Info, "Test case '{}' enforces config {}={}", test_case.GetName(), config_name, value);
+    config->Set(value);
+}
+} // namespace
+
+void TestCase::EnforceConfigs()
+{
+    OnEnforceConfigs();
+}
 
 TestCase::Result TestCase::Tick(AppFramework &app)
 {
@@ -27,6 +54,26 @@ TestCase::Result TestCase::Tick(AppFramework &app)
     }
 
     return result;
+}
+
+void TestCase::EnforceConfig(const std::string &config_name, bool value) const
+{
+    EnforceTestConfig(*this, config_name, value);
+}
+
+void TestCase::EnforceConfig(const std::string &config_name, uint32_t value) const
+{
+    EnforceTestConfig(*this, config_name, value);
+}
+
+void TestCase::EnforceConfig(const std::string &config_name, float value) const
+{
+    EnforceTestConfig(*this, config_name, value);
+}
+
+void TestCase::EnforceConfig(const std::string &config_name, const std::string &value) const
+{
+    EnforceTestConfig(*this, config_name, value);
 }
 
 namespace

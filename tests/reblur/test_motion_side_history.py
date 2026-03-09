@@ -93,7 +93,8 @@ def load_image(path):
 
 def load_luminance(path):
     img = load_image(path)
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     return img, luma
 
 
@@ -102,7 +103,7 @@ def compute_hf_residual(luma, sigma=2.0):
 
 
 def get_direct_run_command(framework, test_case, extra_args,
-                           use_reblur=True, clear_screenshots=False):
+                           clear_screenshots=False):
     if framework == "macos":
         executable = os.path.join(
             PROJECT_ROOT, "build_system", "macos", "output", "build",
@@ -114,30 +115,23 @@ def get_direct_run_command(framework, test_case, extra_args,
     else:
         raise ValueError(f"Unsupported direct-run framework: {framework}")
 
-    cmd = [executable, "--test_case", test_case, "--headless", "true",
-           "--pipeline", "gpu", "--spp", "1"]
+    cmd = [executable, "--test_case", test_case, "--headless", "true"]
     if clear_screenshots:
         cmd += ["--clear_screenshots", "true"]
-    if use_reblur:
-        cmd += ["--use_reblur", "true"]
     cmd += extra_args
     return cmd
 
 
 def run_app(py, build_py, framework, test_case, extra_args, label,
-            use_reblur=True, clear_screenshots=False, direct_run=False):
+            clear_screenshots=False, direct_run=False):
     if direct_run:
         cmd = get_direct_run_command(
-            framework, test_case, extra_args,
-            use_reblur=use_reblur, clear_screenshots=clear_screenshots)
+            framework, test_case, extra_args, clear_screenshots=clear_screenshots)
     else:
         cmd = [py, build_py, "--framework", framework, "--skip_build",
-               "--run", "--test_case", test_case, "--headless", "true",
-               "--pipeline", "gpu", "--spp", "1"]
+               "--run", "--test_case", test_case, "--headless", "true"]
         if clear_screenshots:
             cmd += ["--clear_screenshots", "true"]
-        if use_reblur:
-            cmd += ["--use_reblur", "true"]
         cmd += extra_args
 
     print(f"  cmd: {' '.join(cmd)}")
@@ -186,7 +180,7 @@ def extract_components(material_id_path):
             "cx": float(np.mean(xs)),
             "cy": float(np.mean(ys)),
             "bbox": (int(np.min(xs)), int(np.min(ys)),
-                      int(np.max(xs)), int(np.max(ys))),
+                     int(np.max(xs)), int(np.max(ys))),
         })
 
     components.sort(key=lambda c: c["area"], reverse=True)
@@ -254,7 +248,8 @@ def analyze_pass(pass_name, eval_after_path, vanilla_after_path,
             continue
 
         comp_mask = labels_after == match["after"]["label_id"]
-        shell_mask = comp_mask & ~binary_erosion(comp_mask, iterations=SHELL_EROSION_PX)
+        shell_mask = comp_mask & ~binary_erosion(
+            comp_mask, iterations=SHELL_EROSION_PX)
         if np.sum(shell_mask) < MIN_REGION_PIXELS * 2:
             continue
 
@@ -324,8 +319,10 @@ def analyze_pass(pass_name, eval_after_path, vanilla_after_path,
             "vanilla_hf": vanilla_hf,
         }
 
-    lead_ratios = np.array([m["lead_ratio"] for m in component_metrics], dtype=np.float32)
-    asymmetry = np.array([m["asymmetry"] for m in component_metrics], dtype=np.float32)
+    lead_ratios = np.array([m["lead_ratio"]
+                           for m in component_metrics], dtype=np.float32)
+    asymmetry = np.array([m["asymmetry"]
+                         for m in component_metrics], dtype=np.float32)
     lead_valid = np.array([m["lead_history_fraction"] for m in component_metrics],
                           dtype=np.float32)
     top_count = min(3, len(component_metrics))
@@ -375,7 +372,8 @@ def save_diagnostics(artifact_dir, tag, analysis):
     Image.fromarray(overlay).save(
         os.path.join(artifact_dir, f"diag_motion_side_overlay_{tag}.png"))
 
-    excess = np.clip((analysis["eval_hf"] - analysis["vanilla_hf"]) / 0.05, 0, 1)
+    excess = np.clip(
+        (analysis["eval_hf"] - analysis["vanilla_hf"]) / 0.05, 0, 1)
     heatmap = np.zeros_like(overlay)
     heatmap[:, :, 0] = (excess * 255).astype(np.uint8)
     heatmap[:, :, 2] = ((1.0 - excess) * 64).astype(np.uint8)
@@ -422,8 +420,7 @@ def main():
     print(f"{'-' * 70}")
     direct_run = args.skip_build and fw in ("macos", "glfw")
     ok = run_app(py, build_py, fw, "vanilla_converged_baseline",
-                 extra_args, "vanilla", use_reblur=False,
-                 clear_screenshots=True, direct_run=direct_run)
+                 extra_args, "vanilla", clear_screenshots=True, direct_run=direct_run)
     if not ok:
         return 1
     vanilla_before_path, vanilla_after_path = archive_run_pair(
@@ -523,7 +520,8 @@ def main():
     print(f"  After components:  {len(after_components)}")
     print(f"  Matched components: {len(matches)}")
     if len(matches) < MIN_ANALYZED_COMPONENTS:
-        print(f"FAIL: only {len(matches)} matched components, need >= {MIN_ANALYZED_COMPONENTS}")
+        print(
+            f"FAIL: only {len(matches)} matched components, need >= {MIN_ANALYZED_COMPONENTS}")
         return 1
 
     full_analysis = analyze_pass(

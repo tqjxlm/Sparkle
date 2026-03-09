@@ -112,7 +112,8 @@ def load_image(path):
 
 def load_luminance(path):
     img = load_image(path)
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     return img, luma
 
 
@@ -165,7 +166,8 @@ def compute_flip(img_a_path, img_b_path):
     if img_a.shape != img_b.shape:
         print(f"  WARN: image shape mismatch: {img_a.shape} vs {img_b.shape}")
         return None
-    _, mean_flip, _ = nbflip.evaluate(img_a, img_b, False, True, False, True, {})
+    _, mean_flip, _ = nbflip.evaluate(
+        img_a, img_b, False, True, False, True, {})
     return float(mean_flip)
 
 
@@ -188,15 +190,12 @@ def create_masks(disocclusion_path):
 
 
 def run_app(py, build_py, framework, test_case, extra_args, label,
-            use_reblur=True, clear_screenshots=False):
+            clear_screenshots=False):
     """Run a C++ test case. Returns success bool."""
     cmd = [py, build_py, "--framework", framework, "--skip_build",
-           "--run", "--test_case", test_case, "--headless", "true",
-           "--pipeline", "gpu", "--spp", "1"]
+           "--run", "--test_case", test_case, "--headless", "true"]
     if clear_screenshots:
         cmd += ["--clear_screenshots", "true"]
-    if use_reblur:
-        cmd += ["--use_reblur", "true"]
     cmd += extra_args
     print(f"  cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT,
@@ -291,7 +290,7 @@ def main():
     print("  Run 0: Vanilla baseline (ground truth for nudged viewpoint)")
     print(f"{'—' * 60}")
     ok = run_app(py, build_py, fw, "vanilla_converged_baseline", [] + extra_args,
-                 "vanilla", use_reblur=False, clear_screenshots=True)
+                 "vanilla", clear_screenshots=True)
     if not ok:
         all_results.append(("Run 0: vanilla baseline", False))
         _print_summary(all_results)
@@ -447,9 +446,11 @@ def main():
     valid_pct = hist_count / max(geo_count, 1) * 100
 
     print(f"\n  Pixel classification:")
-    print(f"    Geometry:    {geo_count} ({geo_count / in_screen.size * 100:.1f}%)")
+    print(
+        f"    Geometry:    {geo_count} ({geo_count / in_screen.size * 100:.1f}%)")
     print(f"    History:     {hist_count} ({valid_pct:.1f}% of geometry)")
-    print(f"    Disoccluded: {disoccl_count} ({disoccl_count / max(geo_count, 1) * 100:.1f}% of geometry)")
+    print(
+        f"    Disoccluded: {disoccl_count} ({disoccl_count / max(geo_count, 1) * 100:.1f}% of geometry)")
 
     # --- Check C: Reprojection validity ---
     print(f"\n  Check C: Reprojection validity")
@@ -462,10 +463,12 @@ def main():
 
     mean_fp = float(np.mean(fp_quality[history])) if hist_count > 0 else 0
     if mean_fp >= MIN_FOOTPRINT_QUALITY:
-        print(f"    PASS: footprint quality {mean_fp:.3f} >= {MIN_FOOTPRINT_QUALITY}")
+        print(
+            f"    PASS: footprint quality {mean_fp:.3f} >= {MIN_FOOTPRINT_QUALITY}")
         all_results.append(("Footprint quality", True))
     else:
-        print(f"    FAIL: footprint quality {mean_fp:.3f} < {MIN_FOOTPRINT_QUALITY}")
+        print(
+            f"    FAIL: footprint quality {mean_fp:.3f} < {MIN_FOOTPRINT_QUALITY}")
         all_results.append(("Footprint quality", False))
 
     # --- Check D: Run 1 floor stability on history-valid pixels ---
@@ -475,41 +478,57 @@ def main():
     print(f"    History-valid floor pixels: {floor_history_count}")
     if floor_history_count > 0:
         floor_window = 5
-        vanilla_floor_noise = float(np.mean(compute_local_std(vanilla_after_luma, floor_window)[floor_history]))
-        e2e_before_floor_noise = float(np.mean(compute_local_std(e2e_before_luma, floor_window)[floor_history]))
-        e2e_after_floor_noise = float(np.mean(compute_local_std(e2e_after_luma, floor_window)[floor_history]))
+        vanilla_floor_noise = float(np.mean(compute_local_std(
+            vanilla_after_luma, floor_window)[floor_history]))
+        e2e_before_floor_noise = float(
+            np.mean(compute_local_std(e2e_before_luma, floor_window)[floor_history]))
+        e2e_after_floor_noise = float(
+            np.mean(compute_local_std(e2e_after_luma, floor_window)[floor_history]))
         vanilla_floor_luma = float(np.mean(vanilla_after_luma[floor_history]))
         e2e_before_floor_luma = float(np.mean(e2e_before_luma[floor_history]))
         e2e_after_floor_luma = float(np.mean(e2e_after_luma[floor_history]))
 
-        floor_vs_vanilla = e2e_after_floor_noise / max(vanilla_floor_noise, 1e-9)
-        floor_after_before = e2e_after_floor_noise / max(e2e_before_floor_noise, 1e-9)
-        floor_luma_vs_vanilla = e2e_after_floor_luma / max(vanilla_floor_luma, 1e-9)
-        floor_luma_after_before = e2e_after_floor_luma / max(e2e_before_floor_luma, 1e-9)
+        floor_vs_vanilla = e2e_after_floor_noise / \
+            max(vanilla_floor_noise, 1e-9)
+        floor_after_before = e2e_after_floor_noise / \
+            max(e2e_before_floor_noise, 1e-9)
+        floor_luma_vs_vanilla = e2e_after_floor_luma / \
+            max(vanilla_floor_luma, 1e-9)
+        floor_luma_after_before = e2e_after_floor_luma / \
+            max(e2e_before_floor_luma, 1e-9)
 
-        print(f"    Run 1 after floor local_std:   {e2e_after_floor_noise:.6f}")
+        print(
+            f"    Run 1 after floor local_std:   {e2e_after_floor_noise:.6f}")
         print(f"    Vanilla after floor local_std: {vanilla_floor_noise:.6f}")
-        print(f"    Run 1 before floor local_std:  {e2e_before_floor_noise:.6f}")
+        print(
+            f"    Run 1 before floor local_std:  {e2e_before_floor_noise:.6f}")
         print(f"    After/vanilla ratio:           {floor_vs_vanilla:.3f}x")
         print(f"    After/before ratio:            {floor_after_before:.3f}x")
         print(f"    Run 1 after floor luma:        {e2e_after_floor_luma:.6f}")
         print(f"    Vanilla after floor luma:      {vanilla_floor_luma:.6f}")
-        print(f"    Run 1 before floor luma:       {e2e_before_floor_luma:.6f}")
-        print(f"    Luma after/vanilla ratio:      {floor_luma_vs_vanilla:.3f}x")
-        print(f"    Luma after/before ratio:       {floor_luma_after_before:.3f}x")
+        print(
+            f"    Run 1 before floor luma:       {e2e_before_floor_luma:.6f}")
+        print(
+            f"    Luma after/vanilla ratio:      {floor_luma_vs_vanilla:.3f}x")
+        print(
+            f"    Luma after/before ratio:       {floor_luma_after_before:.3f}x")
 
         if floor_vs_vanilla <= E2E_FLOOR_HISTORY_VS_VANILLA_MAX:
-            print(f"    PASS: after/vanilla <= {E2E_FLOOR_HISTORY_VS_VANILLA_MAX}")
+            print(
+                f"    PASS: after/vanilla <= {E2E_FLOOR_HISTORY_VS_VANILLA_MAX}")
             all_results.append(("Run 1 floor vs vanilla", True))
         else:
-            print(f"    FAIL: after/vanilla > {E2E_FLOOR_HISTORY_VS_VANILLA_MAX}")
+            print(
+                f"    FAIL: after/vanilla > {E2E_FLOOR_HISTORY_VS_VANILLA_MAX}")
             all_results.append(("Run 1 floor vs vanilla", False))
 
         if floor_after_before <= E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX:
-            print(f"    PASS: after/before <= {E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX}")
+            print(
+                f"    PASS: after/before <= {E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX}")
             all_results.append(("Run 1 floor after/before", True))
         else:
-            print(f"    FAIL: after/before > {E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX}")
+            print(
+                f"    FAIL: after/before > {E2E_FLOOR_HISTORY_AFTER_BEFORE_MAX}")
             all_results.append(("Run 1 floor after/before", False))
 
         if E2E_FLOOR_LUMA_RATIO_MIN <= floor_luma_vs_vanilla <= E2E_FLOOR_LUMA_RATIO_MAX:
@@ -551,10 +570,12 @@ def main():
     print(f"    (1.0 = identical to converged; higher = residual noise)")
 
     if history_noise_ratio <= HISTORY_NOISE_RATIO_MAX:
-        print(f"    PASS: {history_noise_ratio:.2f}x <= {HISTORY_NOISE_RATIO_MAX}x")
+        print(
+            f"    PASS: {history_noise_ratio:.2f}x <= {HISTORY_NOISE_RATIO_MAX}x")
         all_results.append(("History cleanness", True))
     else:
-        print(f"    FAIL: {history_noise_ratio:.2f}x > {HISTORY_NOISE_RATIO_MAX}x")
+        print(
+            f"    FAIL: {history_noise_ratio:.2f}x > {HISTORY_NOISE_RATIO_MAX}x")
         all_results.append(("History cleanness", False))
 
     # --- Check B: Noise concentration ---
@@ -562,15 +583,20 @@ def main():
     print(f"\n  Check B: Noise concentration (disoccluded vs history)")
     if disoccl_count > 0:
         reblur_disoccl_noise = float(np.mean(reblur_hf[disoccluded]))
-        concentration_ratio = reblur_disoccl_noise / max(reblur_hist_noise, 1e-9)
-        print(f"    Reblur disoccluded HF residual: {reblur_disoccl_noise:.6f}")
-        print(f"    Concentration ratio (disoccl/hist): {concentration_ratio:.2f}x")
+        concentration_ratio = reblur_disoccl_noise / \
+            max(reblur_hist_noise, 1e-9)
+        print(
+            f"    Reblur disoccluded HF residual: {reblur_disoccl_noise:.6f}")
+        print(
+            f"    Concentration ratio (disoccl/hist): {concentration_ratio:.2f}x")
 
         if concentration_ratio >= NOISE_CONCENTRATION_MIN:
-            print(f"    PASS: {concentration_ratio:.2f}x >= {NOISE_CONCENTRATION_MIN}x")
+            print(
+                f"    PASS: {concentration_ratio:.2f}x >= {NOISE_CONCENTRATION_MIN}x")
             all_results.append(("Noise concentration", True))
         else:
-            print(f"    FAIL: {concentration_ratio:.2f}x < {NOISE_CONCENTRATION_MIN}x")
+            print(
+                f"    FAIL: {concentration_ratio:.2f}x < {NOISE_CONCENTRATION_MIN}x")
             all_results.append(("Noise concentration", False))
     else:
         print(f"    SKIP: no disoccluded pixels (0.0% of geometry)")
@@ -594,11 +620,15 @@ def main():
     print(f"\n  Informational: Noise breakdown by scene region")
     local_noise = compute_local_std(reblur_after_luma, window=7)
     vanilla_local = compute_local_std(vanilla_after_luma, window=7)
-    print(f"    Reblur history local_std:     {np.mean(local_noise[history]):.6f}")
-    print(f"    Vanilla history local_std:    {np.mean(vanilla_local[history]):.6f}")
-    print(f"    Reblur converged local_std:   {np.mean(compute_local_std(reblur_before_luma, 7)[in_screen]):.6f}")
+    print(
+        f"    Reblur history local_std:     {np.mean(local_noise[history]):.6f}")
+    print(
+        f"    Vanilla history local_std:    {np.mean(vanilla_local[history]):.6f}")
+    print(
+        f"    Reblur converged local_std:   {np.mean(compute_local_std(reblur_before_luma, 7)[in_screen]):.6f}")
     if disoccl_count > 0:
-        print(f"    Reblur disoccluded local_std: {np.mean(local_noise[disoccluded]):.6f}")
+        print(
+            f"    Reblur disoccluded local_std: {np.mean(local_noise[disoccluded]):.6f}")
 
     # Noise distribution in history pixels
     hist_noise_vals = local_noise[history]

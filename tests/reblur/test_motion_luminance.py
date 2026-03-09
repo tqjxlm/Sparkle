@@ -33,12 +33,15 @@ sys.path.insert(0, PROJECT_ROOT)
 
 # Thresholds
 MAX_LUMINANCE_GAP = 0.15       # max allowed (vanilla-reblur)/vanilla per frame
-MAX_GAP_TREND_SLOPE = 0.005    # max slope of gap vs frame (expanding dim detection)
+# max slope of gap vs frame (expanding dim detection)
+MAX_GAP_TREND_SLOPE = 0.005
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Motion luminance tracking test")
-    parser.add_argument("--framework", default="macos", choices=("glfw", "macos"))
+    parser = argparse.ArgumentParser(
+        description="Motion luminance tracking test")
+    parser.add_argument("--framework", default="macos",
+                        choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
     return parser.parse_known_args()
 
@@ -52,7 +55,8 @@ def get_screenshot_dir(framework):
 
 def load_luminance(path):
     img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     return float(np.mean(luma))
 
 
@@ -60,14 +64,14 @@ def run_capture(py, build_py, framework, use_reblur, label, passthrough_args=())
     """Run motion_luminance_track test case and return screenshot paths."""
     cmd = [py, build_py, "--framework", framework, "--skip_build",
            "--run", "--test_case", "motion_luminance_track",
-           "--headless", "true", "--pipeline", "gpu", "--spp", "1",
-           "--max_spp", "60",
+           "--headless", "true",
            "--clear_screenshots", "true", "--test_timeout", "120"]
     if use_reblur:
         cmd += ["--use_reblur", "true"]
     cmd += list(passthrough_args)
     print(f"  cmd: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT,
+                            capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  FAIL: {label} exited with code {result.returncode}")
         if result.stderr:
@@ -180,17 +184,21 @@ def main():
         if motion_gaps:
             max_gap = max(motion_gaps)
             mean_gap = sum(motion_gaps) / len(motion_gaps)
-            print(f"\n  Max gap during motion: {max_gap:.4f} ({max_gap*100:.1f}%)")
-            print(f"  Mean gap during motion: {mean_gap:.4f} ({mean_gap*100:.1f}%)")
+            print(
+                f"\n  Max gap during motion: {max_gap:.4f} ({max_gap*100:.1f}%)")
+            print(
+                f"  Mean gap during motion: {mean_gap:.4f} ({mean_gap*100:.1f}%)")
 
             # Check gap threshold
             if max_gap <= MAX_LUMINANCE_GAP:
                 print(f"  PASS: max gap {max_gap:.4f} <= {MAX_LUMINANCE_GAP}")
-                all_results.append((f"Max luminance gap <= {MAX_LUMINANCE_GAP}", True))
+                all_results.append(
+                    (f"Max luminance gap <= {MAX_LUMINANCE_GAP}", True))
             else:
                 print(f"  FAIL: max gap {max_gap:.4f} > {MAX_LUMINANCE_GAP} "
                       f"(denoised output too dim)")
-                all_results.append((f"Max luminance gap <= {MAX_LUMINANCE_GAP}", False))
+                all_results.append(
+                    (f"Max luminance gap <= {MAX_LUMINANCE_GAP}", False))
 
             # Check trend (expanding dim region)
             if len(motion_gaps) >= 3:
@@ -198,7 +206,8 @@ def main():
                 slope = np.polyfit(x, motion_gaps, 1)[0]
                 print(f"  Gap trend slope: {slope:.6f} per frame-step")
                 if slope <= MAX_GAP_TREND_SLOPE:
-                    print(f"  PASS: gap trend {slope:.6f} <= {MAX_GAP_TREND_SLOPE}")
+                    print(
+                        f"  PASS: gap trend {slope:.6f} <= {MAX_GAP_TREND_SLOPE}")
                     all_results.append(
                         (f"Gap trend slope <= {MAX_GAP_TREND_SLOPE}", True))
                 else:

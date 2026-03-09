@@ -19,6 +19,7 @@
 ## TestCase System
 
 * A `TestCase` is a C++ class that runs inside the app after the scene finishes loading.
+* Before render and RHI config init, the selected test case may override config values via `OnEnforceConfigs()`.
 * Each frame, `AppFramework` calls `Tick()`. When `Tick()` returns `Pass` or `Fail` the app
 exits with code `0` or `1` respectively.
 
@@ -61,7 +62,8 @@ finish within the given number of frames it is reported as `Fail`. Default is `0
 
 1. Create a `.cpp` file anywhere under `tests/`.
 2. Subclass `sparkle::TestCase` and implement `OnTick()`.
-3. Register with `TestCaseRegistrar<T>` using a unique name string.
+3. If the test needs fixed runtime config, optionally override `OnEnforceConfigs()`.
+4. Register with `TestCaseRegistrar<T>` using a unique name string.
 
 The registered name is injected into the test instance and available via
 `TestCase::GetName()`, so log messages do not need to duplicate it manually.
@@ -76,6 +78,11 @@ namespace sparkle
 class MyFeatureTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+    }
+
     Result OnTick(AppFramework &app) override
     {
         // Inspect app state each frame. Return Pending to keep running.
@@ -111,6 +118,6 @@ error; the first registration wins.
 | `smoke`                  | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp)                                         | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline.                                                                                                                                        |
 | `screenshot`             | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp)                     | Waits for renderer ready, clears all existing screenshots optionally, captures one, then passes. Used by functional tests and visual QA.                                                                                   |
 | `multi_frame_screenshot` | [tests/screenshot/MultiFrameScreenshotTest.cpp](../tests/screenshot/MultiFrameScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots optionally, captures five, then passes. Used by functional tests and visual QA for temporal analysis.                                                            |
-| `gpu_convergence_debug`  | [tests/gpu/GpuConvergenceDebugTest.cpp](../tests/gpu/GpuConvergenceDebugTest.cpp)                 | Run with `--measure_gpu_convergence true`; verifies that reduced GPU residual-variance metrics are read back to CPU, remain numerically valid, and do not falsely report an early stable streak on the default scene.      |
-| `gpu_convergence_report` | [tests/gpu/GpuConvergenceDebugTest.cpp](../tests/gpu/GpuConvergenceDebugTest.cpp)                 | Run with `--measure_gpu_convergence true`; waits until `max_spp` is reached and logs the current reduced GPU residual-variance and half-window variance-improvement metrics before passing.                                |
-| `gpu_convergence_curve`  | [tests/gpu/GpuConvergenceDebugTest.cpp](../tests/gpu/GpuConvergenceDebugTest.cpp)                 | Run with `--measure_gpu_convergence true`; waits for the scene to finish loading, then logs per-frame mean/max variance samples through the configured `max_spp` run so the full convergence curve can be plotted offline. |
+| `gpu_convergence_debug`  | [tests/gpu/GpuConvergenceDebugTest.cpp](../tests/gpu/GpuConvergenceDebugTest.cpp)                 | Enforces GPU convergence measurement, then verifies that reduced GPU residual-variance metrics are read back to CPU, remain numerically valid, and do not falsely report an early stable streak on the default scene.      |
+| `gpu_convergence_report` | [tests/gpu/GpuConvergenceDebugTest.cpp](../tests/gpu/GpuConvergenceDebugTest.cpp)                 | Enforces GPU convergence measurement, waits until `max_spp` is reached, and logs the current reduced GPU residual-variance and half-window variance-improvement metrics before passing.                                     |
+| `gpu_convergence_curve`  | [tests/gpu/GpuConvergenceDebugTest.cpp](../tests/gpu/GpuConvergenceDebugTest.cpp)                 | Enforces GPU convergence measurement, waits for the scene to finish loading, then logs per-frame mean/max variance samples through the configured `max_spp` run so the full convergence curve can be plotted offline.     |

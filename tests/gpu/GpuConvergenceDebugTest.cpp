@@ -17,24 +17,18 @@ using Result = TestCase::Result;
 constexpr uint32_t EarlyStabilityGuardSampleCount = 16;
 } // namespace
 
-/// Usage: --test_case gpu_convergence_debug --pipeline gpu --measure_gpu_convergence true
+/// Usage: --test_case gpu_convergence_debug
 class GpuConvergenceDebugTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("measure_gpu_convergence", true);
+    }
+
     Result OnTick(AppFramework &app) override
     {
-        if (!app.GetRenderConfig().IsRayTracingMode())
-        {
-            Log(Error, "{} requires --pipeline gpu", GetName());
-            return Result::Fail;
-        }
-
-        if (!app.GetRenderConfig().measure_gpu_convergence)
-        {
-            Log(Error, "{} requires --measure_gpu_convergence true", GetName());
-            return Result::Fail;
-        }
-
         auto metrics = app.GetRenderFramework()->GetLatestPerformanceMetrics();
         if (!metrics.valid)
         {
@@ -112,24 +106,18 @@ private:
     uint32_t last_frame_count_ = 0;
 };
 
-/// Usage: --test_case gpu_convergence_report --pipeline gpu --measure_gpu_convergence true
+/// Usage: --test_case gpu_convergence_report
 class GpuConvergenceReportTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("measure_gpu_convergence", true);
+    }
+
     Result OnTick(AppFramework &app) override
     {
-        if (!app.GetRenderConfig().IsRayTracingMode())
-        {
-            Log(Error, "{} requires --pipeline gpu", GetName());
-            return Result::Fail;
-        }
-
-        if (!app.GetRenderConfig().measure_gpu_convergence)
-        {
-            Log(Error, "{} requires --measure_gpu_convergence true", GetName());
-            return Result::Fail;
-        }
-
         const auto target_sample_count = app.GetRenderConfig().max_sample_per_pixel;
         auto metrics = app.GetRenderFramework()->GetLatestPerformanceMetrics();
         if (!metrics.valid || metrics.sample_count < target_sample_count)
@@ -149,24 +137,18 @@ public:
     }
 };
 
-/// Usage: --test_case gpu_convergence_curve --pipeline gpu --measure_gpu_convergence true
+/// Usage: --test_case gpu_convergence_curve
 class GpuConvergenceCurveTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("measure_gpu_convergence", true);
+    }
+
     Result OnTick(AppFramework &app) override
     {
-        if (!app.GetRenderConfig().IsRayTracingMode())
-        {
-            Log(Error, "{} requires --pipeline gpu", GetName());
-            return Result::Fail;
-        }
-
-        if (!app.GetRenderConfig().measure_gpu_convergence)
-        {
-            Log(Error, "{} requires --measure_gpu_convergence true", GetName());
-            return Result::Fail;
-        }
-
         const auto target_sample_count = app.GetRenderConfig().max_sample_per_pixel;
         ScheduleCapture(app);
         return MaybeFlushHistory(target_sample_count);

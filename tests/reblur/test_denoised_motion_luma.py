@@ -43,7 +43,8 @@ MIN_SETTLED_RATIO = 0.90
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Denoised motion luminance stability test")
-    parser.add_argument("--framework", default="macos", choices=("glfw", "macos"))
+    parser.add_argument("--framework", default="macos",
+                        choices=("glfw", "macos"))
     parser.add_argument("--skip_build", action="store_true")
     return parser.parse_known_args()
 
@@ -57,7 +58,8 @@ def get_screenshot_dir(framework):
 
 def load_luminance(path):
     img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
-    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * 0.7152 + img[:, :, 2] * 0.0722
+    luma = img[:, :, 0] * 0.2126 + img[:, :, 1] * \
+        0.7152 + img[:, :, 2] * 0.0722
     return float(np.mean(luma))
 
 
@@ -104,12 +106,12 @@ def main():
     print(f"{'—'*60}")
     cmd = [py, build_py, "--framework", fw, "--skip_build",
            "--run", "--test_case", "motion_luminance_track",
-           "--headless", "true", "--pipeline", "gpu", "--spp", "1",
-           "--max_spp", "60",
+           "--headless", "true",
            "--clear_screenshots", "true", "--test_timeout", "120",
            "--use_reblur", "true", "--reblur_no_pt_blend", "true"] + extra_args
     print(f"  cmd: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT,
+                            capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  FAIL: app exited with code {result.returncode}")
         all_results.append(("Test run", False))
@@ -143,13 +145,16 @@ def main():
         ratio = motion_lumas[i] / max(motion_lumas[i - 1], 1e-6)
         min_ratio = min(min_ratio, ratio)
         if ratio < MIN_FRAME_TO_FRAME_RATIO:
-            print(f"  Frame {i}: ratio={ratio:.4f} (DROP from {motion_lumas[i-1]:.4f} to {motion_lumas[i]:.4f})")
+            print(
+                f"  Frame {i}: ratio={ratio:.4f} (DROP from {motion_lumas[i-1]:.4f} to {motion_lumas[i]:.4f})")
 
     if min_ratio >= MIN_FRAME_TO_FRAME_RATIO:
-        print(f"  PASS: min f2f ratio {min_ratio:.4f} >= {MIN_FRAME_TO_FRAME_RATIO}")
+        print(
+            f"  PASS: min f2f ratio {min_ratio:.4f} >= {MIN_FRAME_TO_FRAME_RATIO}")
         all_results.append(("Frame-to-frame stability", True))
     else:
-        print(f"  FAIL: min f2f ratio {min_ratio:.4f} < {MIN_FRAME_TO_FRAME_RATIO}")
+        print(
+            f"  FAIL: min f2f ratio {min_ratio:.4f} < {MIN_FRAME_TO_FRAME_RATIO}")
         all_results.append(("Frame-to-frame stability", False))
 
     # --- Check 2: Luminance trend (no expanding dim region) ---
@@ -161,10 +166,12 @@ def main():
         print(f"\n  --- Luminance trend (frames 1+) ---")
         print(f"  Slope: {slope:.6f} per frame-step")
         if slope >= MIN_LUMA_SLOPE:
-            print(f"  PASS: slope {slope:.6f} >= {MIN_LUMA_SLOPE} (not dimming)")
+            print(
+                f"  PASS: slope {slope:.6f} >= {MIN_LUMA_SLOPE} (not dimming)")
             all_results.append(("No expanding dim region", True))
         else:
-            print(f"  FAIL: slope {slope:.6f} < {MIN_LUMA_SLOPE} (luminance decreasing)")
+            print(
+                f"  FAIL: slope {slope:.6f} < {MIN_LUMA_SLOPE} (luminance decreasing)")
             all_results.append(("No expanding dim region", False))
 
     # --- Check 3: Settled quality ---
@@ -176,10 +183,12 @@ def main():
         print(f"  Settled luma:     {settled_luma:.6f}")
         print(f"  Ratio:            {settled_ratio:.4f}")
         if settled_ratio >= MIN_SETTLED_RATIO:
-            print(f"  PASS: settled ratio {settled_ratio:.4f} >= {MIN_SETTLED_RATIO}")
+            print(
+                f"  PASS: settled ratio {settled_ratio:.4f} >= {MIN_SETTLED_RATIO}")
             all_results.append(("Settled quality", True))
         else:
-            print(f"  FAIL: settled ratio {settled_ratio:.4f} < {MIN_SETTLED_RATIO}")
+            print(
+                f"  FAIL: settled ratio {settled_ratio:.4f} < {MIN_SETTLED_RATIO}")
             all_results.append(("Settled quality", False))
 
     _print_summary(all_results)

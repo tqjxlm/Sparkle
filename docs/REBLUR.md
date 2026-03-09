@@ -309,7 +309,6 @@ shaders/include/
 tests/reblur/
   # C++ test cases
   ReblurSmokeTest.cpp                   # Launch + 30-frame capture
-  ReblurPassValidationTest.cpp          # Per-stage crash safety (10 frames)
   ReblurTemporalConvergenceTest.cpp     # 30+ frame convergence validation
   ReblurMatrixInfraTest.cpp             # Previous-frame matrix storage
   ReblurMotionVectorTest.cpp            # MV computation under camera motion

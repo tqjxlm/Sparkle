@@ -8,6 +8,14 @@ namespace sparkle
 class ReblurSmokeTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+        EnforceConfig("use_reblur", true);
+        EnforceConfig("spp", 1u);
+        EnforceConfig("max_spp", 64u);
+    }
+
     Result OnTick(AppFramework &app) override
     {
         // Wait for convergence (30 frames with REBLUR)
