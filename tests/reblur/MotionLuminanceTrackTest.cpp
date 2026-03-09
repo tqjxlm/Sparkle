@@ -34,7 +34,7 @@ public:
         {
             if (active_request_->IsCompleted())
             {
-                Log(Info, "MotionLuminanceTrackTest: captured '{}' at frame {}", active_request_->GetName(), frame_);
+                Log(Info, "{}: captured '{}' at frame {}", GetName(), active_request_->GetName(), frame_);
                 active_request_.reset();
                 captured_count_++;
 
@@ -54,19 +54,18 @@ public:
             if (frame_ >= target_frame)
             {
                 auto name = std::format("motion_track_{}", captured_count_);
-                active_request_ = app.RequestTakeScreenshot(name);
-                Log(Info, "MotionLuminanceTrackTest: requesting '{}' at frame {} (target {})", name, frame_,
-                    target_frame);
+                active_request_ = app.GetRenderFramework()->RequestTakeScreenshot(name);
+                Log(Info, "{}: requesting '{}' at frame {} (target {})", GetName(), name, frame_, target_frame);
             }
             return Result::Pending;
         }
 
         // Phase 2: Wait for convergence after motion ends, then capture settled frame
-        if (app.IsReadyForAutoScreenshot())
+        if (app.GetRenderFramework()->IsReadyForAutoScreenshot())
         {
             auto name = std::format("motion_track_settled");
-            active_request_ = app.RequestTakeScreenshot(name);
-            Log(Info, "MotionLuminanceTrackTest: requesting settled screenshot at frame {}", frame_);
+            active_request_ = app.GetRenderFramework()->RequestTakeScreenshot(name);
+            Log(Info, "{}: requesting settled screenshot at frame {}", GetName(), frame_);
             return Result::Pending;
         }
 
@@ -74,9 +73,9 @@ public:
     }
 
 private:
-    static constexpr uint32_t CaptureInterval = 5;  // every 5 frames
-    static constexpr uint32_t MotionCaptures = 5;    // 5 captures during motion (frames 5,10,15,20,25)
-    static constexpr uint32_t TotalCaptures = 6;     // + 1 settled capture
+    static constexpr uint32_t CaptureInterval = 5; // every 5 frames
+    static constexpr uint32_t MotionCaptures = 5;  // 5 captures during motion (frames 5,10,15,20,25)
+    static constexpr uint32_t TotalCaptures = 6;   // + 1 settled capture
     uint32_t captured_count_ = 0;
     std::shared_ptr<ScreenshotRequest> active_request_;
 };

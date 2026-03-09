@@ -76,7 +76,7 @@ public:
         if (!request_)
         {
             Log(Info, "ReblurStaticNonRegression: requesting screenshot at frame {}", frame_);
-            request_ = app.RequestTakeScreenshot("reblur_static_nonregression");
+            request_ = app.GetRenderFramework()->RequestTakeScreenshot("reblur_static_nonregression");
         }
 
         return Result::Pending;

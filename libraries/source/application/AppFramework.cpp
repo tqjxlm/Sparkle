@@ -210,7 +210,7 @@ bool AppFramework::Init()
         {
             return false;
         }
-        Log(Info, "Test case '{}' loaded", app_config_.test_case);
+        Log(Info, "Test case '{}' loaded", test_case_->GetName());
     }
 #endif
 
@@ -403,12 +403,12 @@ bool AppFramework::MainLoop()
         const auto result = test_case_->Tick(*this);
         if (result == TestCase::Result::Pass)
         {
-            Log(Info, "TestCase PASS");
+            Log(Info, "Test case '{}' passed", test_case_->GetName());
             RequestExit();
         }
         else if (result == TestCase::Result::Fail)
         {
-            Log(Error, "TestCase FAIL");
+            Log(Error, "Test case '{}' failed", test_case_->GetName());
             exit_code_ = 1;
             RequestExit();
         }
@@ -825,21 +825,6 @@ void AppFramework::RequestExit()
 void AppFramework::CaptureNextFrames(int count)
 {
     rhi_->CaptureNextFrames(count);
-}
-
-std::shared_ptr<ScreenshotRequest> AppFramework::RequestTakeScreenshot(const std::string &name)
-{
-    return render_framework_->RequestTakeScreenshot(name);
-}
-
-bool AppFramework::IsReadyForAutoScreenshot() const
-{
-    return render_framework_->IsReadyForAutoScreenshot();
-}
-
-PerformanceMetrics AppFramework::GetLatestPerformanceMetrics() const
-{
-    return render_framework_ ? render_framework_->GetLatestPerformanceMetrics() : PerformanceMetrics{};
 }
 
 CameraComponent *AppFramework::GetMainCamera() const

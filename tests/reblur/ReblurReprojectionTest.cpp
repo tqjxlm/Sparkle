@@ -40,7 +40,7 @@ public:
         {
             if (frame_ == 1)
             {
-                Log(Info, "ReblurReprojectionTest: warmup phase (frames 1-{})", WarmupFrames);
+                Log(Info, "{}: warmup phase (frames 1-{})", GetName(), WarmupFrames);
             }
             return Result::Pending;
         }
@@ -57,7 +57,7 @@ public:
 
             if (frame_ == WarmupFrames + 1)
             {
-                Log(Info, "ReblurReprojectionTest: motion phase started (frames {}-{})", WarmupFrames + 1,
+                Log(Info, "{}: motion phase started (frames {}-{})", GetName(), WarmupFrames + 1,
                     WarmupFrames + MotionFrames);
             }
 
@@ -66,7 +66,7 @@ public:
             {
                 auto *proxy = static_cast<CameraRenderProxy *>(camera->GetRenderProxy());
                 float delta = (proxy->GetPosture().position - proxy->GetPositionPrev()).norm();
-                Log(Info, "ReblurReprojectionTest: mid-motion camera delta = {:.6f}", delta);
+                Log(Info, "{}: mid-motion camera delta = {:.6f}", GetName(), delta);
             }
 
             return Result::Pending;
@@ -77,7 +77,7 @@ public:
         {
             if (frame_ == WarmupFrames + MotionFrames + 1)
             {
-                Log(Info, "ReblurReprojectionTest: settle phase (frames {}-{})", frame_,
+                Log(Info, "{}: settle phase (frames {}-{})", GetName(), frame_,
                     WarmupFrames + MotionFrames + SettleFrames);
             }
             return Result::Pending;
@@ -86,14 +86,14 @@ public:
         // Phase 4: Take screenshot and pass
         if (request_ && request_->IsCompleted())
         {
-            Log(Info, "ReblurReprojectionTest: screenshot captured after {} frames — PASS", frame_);
+            Log(Info, "{}: screenshot captured after {} frames — PASS", GetName(), frame_);
             return Result::Pass;
         }
 
         if (!request_)
         {
-            Log(Info, "ReblurReprojectionTest: requesting screenshot at frame {}", frame_);
-            request_ = app.RequestTakeScreenshot("reblur_reprojection");
+            Log(Info, "{}: requesting screenshot at frame {}", GetName(), frame_);
+            request_ = app.GetRenderFramework()->RequestTakeScreenshot("reblur_reprojection");
         }
 
         return Result::Pending;

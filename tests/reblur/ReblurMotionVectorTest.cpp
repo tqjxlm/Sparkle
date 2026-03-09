@@ -33,14 +33,14 @@ public:
         // Phase 1: Take static screenshot at frame 3
         if (frame_ == 3 && !static_request_)
         {
-            Log(Info, "ReblurMotionVectorTest: requesting static-camera screenshot (frame {})", frame_);
-            static_request_ = app.RequestTakeScreenshot("reblur_mv_static");
+            Log(Info, "{}: requesting static-camera screenshot (frame {})", GetName(), frame_);
+            static_request_ = app.GetRenderFramework()->RequestTakeScreenshot("reblur_mv_static");
         }
 
         if (static_request_ && !static_screenshot_done_ && static_request_->IsCompleted())
         {
             static_screenshot_done_ = true;
-            Log(Info, "ReblurMotionVectorTest: static screenshot captured");
+            Log(Info, "{}: static screenshot captured", GetName());
         }
 
         // Phase 2: Move camera at frame 5
@@ -50,12 +50,12 @@ public:
             if (orbit)
             {
                 orbit->Setup(Vector3::Zero(), 3.0f, 25.0f, 90.0f);
-                Log(Info, "ReblurMotionVectorTest: moved orbit camera for MV generation");
+                Log(Info, "{}: moved orbit camera for MV generation", GetName());
             }
             else
             {
                 camera->GetNode()->SetTransform(Vector3(2.0f, 0.0f, 0.0f));
-                Log(Info, "ReblurMotionVectorTest: moved camera via SetTransform");
+                Log(Info, "{}: moved camera via SetTransform", GetName());
             }
         }
 
@@ -65,15 +65,15 @@ public:
             // Verify MV should be non-zero by checking camera delta
             auto *proxy = static_cast<CameraRenderProxy *>(camera->GetRenderProxy());
             float pos_delta = (proxy->GetPosture().position - proxy->GetPositionPrev()).norm();
-            Log(Info, "ReblurMotionVectorTest: camera position delta = {:.6f}", pos_delta);
+            Log(Info, "{}: camera position delta = {:.6f}", GetName(), pos_delta);
 
-            Log(Info, "ReblurMotionVectorTest: requesting motion-camera screenshot (frame {})", frame_);
-            motion_request_ = app.RequestTakeScreenshot("reblur_mv_motion");
+            Log(Info, "{}: requesting motion-camera screenshot (frame {})", GetName(), frame_);
+            motion_request_ = app.GetRenderFramework()->RequestTakeScreenshot("reblur_mv_motion");
         }
 
         if (motion_request_ && motion_request_->IsCompleted())
         {
-            Log(Info, "ReblurMotionVectorTest: motion screenshot captured — PASS (no crash)");
+            Log(Info, "{}: motion screenshot captured — PASS (no crash)", GetName());
             return Result::Pass;
         }
 

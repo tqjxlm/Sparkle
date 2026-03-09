@@ -1,9 +1,12 @@
 #include "application/AppFramework.h"
+#include "application/RenderFramework.h"
 #include "application/TestCase.h"
 
 #include "core/Logger.h"
+#include "core/task/TaskManager.h"
 
 #include <cmath>
+#include <mutex>
 #include <vector>
 
 namespace sparkle
@@ -20,21 +23,19 @@ class GpuConvergenceDebugTest : public TestCase
 public:
     Result OnTick(AppFramework &app) override
     {
-        constexpr const char *test_name = "GpuConvergenceDebugTest";
-
         if (!app.GetRenderConfig().IsRayTracingMode())
         {
-            Log(Error, "{} requires --pipeline gpu", test_name);
+            Log(Error, "{} requires --pipeline gpu", GetName());
             return Result::Fail;
         }
 
         if (!app.GetRenderConfig().measure_gpu_convergence)
         {
-            Log(Error, "{} requires --measure_gpu_convergence true", test_name);
+            Log(Error, "{} requires --measure_gpu_convergence true", GetName());
             return Result::Fail;
         }
 
-        auto metrics = app.GetLatestPerformanceMetrics();
+        auto metrics = app.GetRenderFramework()->GetLatestPerformanceMetrics();
         if (!metrics.valid)
         {
             return Result::Pending;
@@ -48,14 +49,14 @@ public:
             std::isfinite(metrics.max_relative_variance_improvement);
         if (!finite_metrics)
         {
-            Log(Error, "{} received non-finite metrics", test_name);
+            Log(Error, "{} received non-finite metrics", GetName());
             return Result::Fail;
         }
 
         if (metrics.sample_count < 3 || metrics.frame_count < 3 || metrics.compared_pixels != expected_pixels)
         {
             Log(Error, "{} got invalid coverage: sample_count={} frame_count={} compared_pixels={} expected={}",
-                test_name, metrics.sample_count, metrics.frame_count, metrics.compared_pixels, expected_pixels);
+                GetName(), metrics.sample_count, metrics.frame_count, metrics.compared_pixels, expected_pixels);
             return Result::Fail;
         }
 
@@ -66,7 +67,7 @@ public:
             Log(Error,
                 "{} got invalid variance values: compared_pixels={} mean_variance={} mean_relative_improvement={} "
                 "max_relative_improvement={}",
-                test_name, metrics.compared_pixels, metrics.mean_luma_variance,
+                GetName(), metrics.compared_pixels, metrics.mean_luma_variance,
                 metrics.mean_relative_variance_improvement, metrics.max_relative_variance_improvement);
             return Result::Fail;
         }
@@ -97,7 +98,7 @@ public:
             Log(Error,
                 "{} became stable too early: sample_count={} stable_frame_streak={} mean_relative_improvement={} "
                 "threshold={} stability_frames={}",
-                test_name, metrics.sample_count, stable_frame_streak_, metrics.mean_relative_variance_improvement,
+                GetName(), metrics.sample_count, stable_frame_streak_, metrics.mean_relative_variance_improvement,
                 app.GetRenderConfig().gpu_convergence_threshold,
                 app.GetRenderConfig().gpu_convergence_stability_frames);
             return Result::Fail;
@@ -119,29 +120,29 @@ public:
     {
         if (!app.GetRenderConfig().IsRayTracingMode())
         {
-            Log(Error, "GpuConvergenceReportTest requires --pipeline gpu");
+            Log(Error, "{} requires --pipeline gpu", GetName());
             return Result::Fail;
         }
 
         if (!app.GetRenderConfig().measure_gpu_convergence)
         {
-            Log(Error, "GpuConvergenceReportTest requires --measure_gpu_convergence true");
+            Log(Error, "{} requires --measure_gpu_convergence true", GetName());
             return Result::Fail;
         }
 
         const auto target_sample_count = app.GetRenderConfig().max_sample_per_pixel;
-        auto metrics = app.GetLatestPerformanceMetrics();
+        auto metrics = app.GetRenderFramework()->GetLatestPerformanceMetrics();
         if (!metrics.valid || metrics.sample_count < target_sample_count)
         {
             return Result::Pending;
         }
 
         Log(Info,
-            "GpuConvergenceReportTest: sample_count={} frame_count={} compared_pixels={} mean_luma_variance={} "
+            "{}: sample_count={} frame_count={} compared_pixels={} mean_luma_variance={} "
             "max_luma_variance={} "
             "mean_variance_improvement={} max_variance_improvement={} mean_relative_variance_improvement={} "
             "max_relative_variance_improvement={}",
-            metrics.sample_count, metrics.frame_count, metrics.compared_pixels, metrics.mean_luma_variance,
+            GetName(), metrics.sample_count, metrics.frame_count, metrics.compared_pixels, metrics.mean_luma_variance,
             metrics.max_luma_variance, metrics.mean_variance_improvement, metrics.max_variance_improvement,
             metrics.mean_relative_variance_improvement, metrics.max_relative_variance_improvement);
         return Result::Pass;
@@ -156,78 +157,104 @@ public:
     {
         if (!app.GetRenderConfig().IsRayTracingMode())
         {
-            Log(Error, "GpuConvergenceCurveTest requires --pipeline gpu");
+            Log(Error, "{} requires --pipeline gpu", GetName());
             return Result::Fail;
         }
 
         if (!app.GetRenderConfig().measure_gpu_convergence)
         {
-            Log(Error, "GpuConvergenceCurveTest requires --measure_gpu_convergence true");
+            Log(Error, "{} requires --measure_gpu_convergence true", GetName());
             return Result::Fail;
         }
 
         const auto target_sample_count = app.GetRenderConfig().max_sample_per_pixel;
-        auto metrics = app.GetLatestPerformanceMetrics();
+        ScheduleCapture(app);
+        return MaybeFlushHistory(target_sample_count);
+    }
+
+private:
+    void ScheduleCapture(AppFramework &app)
+    {
+        auto *render_framework = app.GetRenderFramework();
+        TaskManager::RunInRenderThread([this, render_framework]() { CaptureLatestMetrics(*render_framework); }, false);
+    }
+
+    void CaptureLatestMetrics(RenderFramework &render_framework)
+    {
+        const auto metrics = render_framework.GetLatestPerformanceMetrics();
         if (metrics.sample_count == 0 || metrics.frame_count == 0)
         {
-            return Result::Pending;
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(history_mutex_);
+        if (capture_failed_)
+        {
+            return;
         }
 
         if (history_.empty())
         {
             if (metrics.sample_count != 1 || metrics.frame_count != 1)
             {
-                Log(Error,
-                    "GpuConvergenceCurveTest expected first post-load sample/frame to be 1, got sample_count={} "
-                    "frame_count={}",
-                    metrics.sample_count, metrics.frame_count);
-                return Result::Fail;
+                Log(Error, "{} expected first post-load sample/frame to be 1, got sample_count={} frame_count={}",
+                    GetName(), metrics.sample_count, metrics.frame_count);
+                capture_failed_ = true;
+                return;
             }
 
             history_.push_back(metrics);
-            return Result::Pending;
+            return;
         }
 
         const auto &last_metrics = history_.back();
         if (metrics.frame_count == last_metrics.frame_count)
         {
-            return MaybeFlushHistory(target_sample_count);
+            return;
         }
 
         if (metrics.sample_count < last_metrics.sample_count || metrics.frame_count < last_metrics.frame_count)
         {
             Log(Error,
-                "GpuConvergenceCurveTest observed performance metrics reset during capture: last_sample_count={} "
+                "{} observed performance metrics reset during capture: last_sample_count={} "
                 "sample_count={} last_frame_count={} frame_count={}",
-                last_metrics.sample_count, metrics.sample_count, last_metrics.frame_count, metrics.frame_count);
-            return Result::Fail;
+                GetName(), last_metrics.sample_count, metrics.sample_count, last_metrics.frame_count,
+                metrics.frame_count);
+            capture_failed_ = true;
+            return;
         }
 
         if (metrics.frame_count != last_metrics.frame_count + 1u ||
             metrics.sample_count != last_metrics.sample_count + 1u)
         {
             Log(Error,
-                "GpuConvergenceCurveTest missed a frame during capture: last_sample_count={} sample_count={} "
+                "{} missed a frame during capture: last_sample_count={} sample_count={} "
                 "last_frame_count={} frame_count={}",
-                last_metrics.sample_count, metrics.sample_count, last_metrics.frame_count, metrics.frame_count);
-            return Result::Fail;
+                GetName(), last_metrics.sample_count, metrics.sample_count, last_metrics.frame_count,
+                metrics.frame_count);
+            capture_failed_ = true;
+            return;
         }
 
         history_.push_back(metrics);
-        return MaybeFlushHistory(target_sample_count);
     }
 
-private:
     Result MaybeFlushHistory(uint32_t target_sample_count)
     {
-        if (history_.back().sample_count < target_sample_count)
+        std::lock_guard<std::mutex> lock(history_mutex_);
+        if (capture_failed_)
+        {
+            return Result::Fail;
+        }
+
+        if (history_.empty() || history_.back().sample_count < target_sample_count)
         {
             return Result::Pending;
         }
 
         if (history_.size() != target_sample_count)
         {
-            Log(Error, "GpuConvergenceCurveTest expected {} samples from 1..{}, got count={}", target_sample_count,
+            Log(Error, "{} expected {} samples from 1..{}, got count={}", GetName(), target_sample_count,
                 target_sample_count, history_.size());
             return Result::Fail;
         }
@@ -238,23 +265,24 @@ private:
             const auto expected_sample_count = sample_index + 1u;
             if (metrics.sample_count != expected_sample_count || metrics.frame_count != expected_sample_count)
             {
-                Log(Error,
-                    "GpuConvergenceCurveTest expected sample/frame {} at index {}, got sample_count={} frame_count={}",
+                Log(Error, "{} expected sample/frame {} at index {}, got sample_count={} frame_count={}", GetName(),
                     expected_sample_count, sample_index, metrics.sample_count, metrics.frame_count);
                 return Result::Fail;
             }
 
             Log(Info,
-                "GpuConvergenceCurveTest: sample_count={} frame_count={} valid={} mean_luma_variance={} "
+                "{}: sample_count={} frame_count={} valid={} mean_luma_variance={} "
                 "max_luma_variance={}",
-                metrics.sample_count, metrics.frame_count, metrics.valid ? 1u : 0u, metrics.mean_luma_variance,
-                metrics.max_luma_variance);
+                GetName(), metrics.sample_count, metrics.frame_count, metrics.valid ? 1u : 0u,
+                metrics.mean_luma_variance, metrics.max_luma_variance);
         }
 
         return Result::Pass;
     }
 
+    std::mutex history_mutex_;
     std::vector<PerformanceMetrics> history_;
+    bool capture_failed_ = false;
 };
 
 static TestCaseRegistrar<GpuConvergenceDebugTest> gpu_convergence_debug_registrar("gpu_convergence_debug");

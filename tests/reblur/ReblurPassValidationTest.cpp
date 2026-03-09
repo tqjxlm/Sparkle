@@ -25,14 +25,14 @@ public:
 
         if (request_ && request_->IsCompleted())
         {
-            Log(Info, "ReblurPassValidationTest: screenshot captured after {} frames", frame_);
+            Log(Info, "{}: screenshot captured after {} frames", GetName(), frame_);
             return Result::Pass;
         }
 
         if (!request_)
         {
-            Log(Info, "ReblurPassValidationTest: requesting screenshot at frame {}", frame_);
-            request_ = app.RequestTakeScreenshot("reblur_pass_validation");
+            Log(Info, "{}: requesting screenshot at frame {}", GetName(), frame_);
+            request_ = app.GetRenderFramework()->RequestTakeScreenshot("reblur_pass_validation");
         }
 
         return Result::Pending;

@@ -15,9 +15,9 @@ public:
             return Result::Pass;
         }
 
-        if (!request_ && app.IsReadyForAutoScreenshot())
+        if (!request_ && app.GetRenderFramework()->IsReadyForAutoScreenshot())
         {
-            request_ = app.RequestTakeScreenshot("screenshot");
+            request_ = app.GetRenderFramework()->RequestTakeScreenshot("screenshot");
         }
 
         return Result::Pending;

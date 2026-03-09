@@ -181,7 +181,7 @@ void ConvergenceMeasurePass::Measure(RHIImage *sample_stats_image, RHIPipelineSt
         for (auto i = 0u; i < tile_count; ++i)
         {
             const auto &tile = raw_metrics[i];
-            total_variance += tile.sum_variance;
+            total_variance += static_cast<double>(tile.sum_variance);
             active_pixels += tile.active_pixels;
             max_variance = std::max(max_variance, tile.max_variance);
         }
@@ -267,3 +267,4 @@ void ConvergenceMeasurePass::InvalidateLatestMetrics(uint32_t sample_count, uint
     UpdateLatestMetrics({.valid = false, .sample_count = sample_count, .frame_count = frame_count});
 }
 } // namespace sparkle
+

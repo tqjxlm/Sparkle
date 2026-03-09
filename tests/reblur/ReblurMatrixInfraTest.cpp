@@ -48,18 +48,17 @@ public:
 
             float pos_delta = (pos - pos_prev).norm();
 
-            Log(Info, "ReblurMatrixInfraTest: frame 3 (static) — pos_delta={:.6f}", pos_delta);
+            Log(Info, "{}: frame 3 (static) — pos_delta={:.6f}", GetName(), pos_delta);
 
             if (pos_delta > 1e-4f)
             {
-                Log(Error, "ReblurMatrixInfraTest: FAIL — position changed without camera motion (delta={:.6f})",
-                    pos_delta);
+                Log(Error, "{}: FAIL — position changed without camera motion (delta={:.6f})", GetName(), pos_delta);
                 return Result::Fail;
             }
 
             // Record initial position before motion begins
             initial_position_ = pos;
-            Log(Info, "ReblurMatrixInfraTest: initial position = ({:.4f}, {:.4f}, {:.4f})", pos.x(), pos.y(), pos.z());
+            Log(Info, "{}: initial position = ({:.4f}, {:.4f}, {:.4f})", GetName(), pos.x(), pos.y(), pos.z());
         }
 
         // Phase 2: Continuous motion (frames 4-12) — change yaw by 5 degrees each frame
@@ -80,8 +79,8 @@ public:
             float pos_delta = (pos - pos_prev).norm();
             float mat_diff = (vp - vp_prev).norm();
 
-            Log(Info, "ReblurMatrixInfraTest: frame {} (motion) — pos_delta={:.6f}, mat_diff={:.6f}", frame_,
-                pos_delta, mat_diff);
+            Log(Info, "{}: frame {} (motion) — pos_delta={:.6f}, mat_diff={:.6f}", GetName(), frame_, pos_delta,
+                mat_diff);
 
             // Once we observe non-zero delta, record it
             if (pos_delta > 1e-4f)
@@ -105,14 +104,14 @@ public:
             // Semantic: Must have observed frame-to-frame position delta during motion
             if (!observed_motion_)
             {
-                Log(Error, "ReblurMatrixInfraTest: FAIL — never observed position delta during motion phase");
+                Log(Error, "{}: FAIL — never observed position delta during motion phase", GetName());
                 return Result::Fail;
             }
 
             // Semantic: Must have observed VP matrix change during motion
             if (!observed_matrix_change_)
             {
-                Log(Error, "ReblurMatrixInfraTest: FAIL — never observed VP matrix change during motion phase");
+                Log(Error, "{}: FAIL — never observed VP matrix change during motion phase", GetName());
                 return Result::Fail;
             }
 
@@ -121,20 +120,20 @@ public:
             float identity_diff = (vp_prev - identity).norm();
             if (identity_diff < 1e-6f)
             {
-                Log(Error, "ReblurMatrixInfraTest: FAIL — prev VP is still identity");
+                Log(Error, "{}: FAIL — prev VP is still identity", GetName());
                 return Result::Fail;
             }
 
             // Statistical: Cumulative displacement from initial position should be substantial
             float displacement = (pos - initial_position_).norm();
-            Log(Info, "ReblurMatrixInfraTest: cumulative displacement = {:.6f}", displacement);
+            Log(Info, "{}: cumulative displacement = {:.6f}", GetName(), displacement);
             if (displacement < 0.01f)
             {
-                Log(Error, "ReblurMatrixInfraTest: FAIL — negligible displacement ({:.6f})", displacement);
+                Log(Error, "{}: FAIL — negligible displacement ({:.6f})", GetName(), displacement);
                 return Result::Fail;
             }
 
-            Log(Info, "ReblurMatrixInfraTest: PASS — all matrix infrastructure checks passed");
+            Log(Info, "{}: PASS — all matrix infrastructure checks passed", GetName());
             return Result::Pass;
         }
 

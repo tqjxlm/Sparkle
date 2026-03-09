@@ -31,21 +31,21 @@ public:
     {
         if (frame_ == 1)
         {
-            Log(Info, "ReblurTAHistoryTest: started (TAHistory debug mode)");
+            Log(Info, "{}: started (TAHistory debug mode)", GetName());
         }
 
         // Phase 1: Take "early" screenshot at frame 10
         if (frame_ == EarlyFrame && !early_request_)
         {
-            Log(Info, "ReblurTAHistoryTest: requesting 'early' screenshot at frame {}", frame_);
-            early_request_ = app.RequestTakeScreenshot("ta_history_early");
+            Log(Info, "{}: requesting 'early' screenshot at frame {}", GetName(), frame_);
+            early_request_ = app.GetRenderFramework()->RequestTakeScreenshot("ta_history_early");
             return Result::Pending;
         }
 
         if (early_request_ && !early_done_ && early_request_->IsCompleted())
         {
             early_done_ = true;
-            Log(Info, "ReblurTAHistoryTest: 'early' screenshot captured");
+            Log(Info, "{}: 'early' screenshot captured", GetName());
         }
 
         if (frame_ >= EarlyFrame && !early_done_)
@@ -56,14 +56,14 @@ public:
         // Phase 2: Take "late" screenshot at frame 60
         if (frame_ == LateFrame && !late_request_)
         {
-            Log(Info, "ReblurTAHistoryTest: requesting 'late' screenshot at frame {}", frame_);
-            late_request_ = app.RequestTakeScreenshot("ta_history_late");
+            Log(Info, "{}: requesting 'late' screenshot at frame {}", GetName(), frame_);
+            late_request_ = app.GetRenderFramework()->RequestTakeScreenshot("ta_history_late");
             return Result::Pending;
         }
 
         if (late_request_ && late_request_->IsCompleted())
         {
-            Log(Info, "ReblurTAHistoryTest: 'late' screenshot captured at frame {} — PASS", frame_);
+            Log(Info, "{}: 'late' screenshot captured at frame {} — PASS", GetName(), frame_);
             return Result::Pass;
         }
 

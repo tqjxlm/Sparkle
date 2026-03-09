@@ -38,16 +38,16 @@ public:
         // Phase 1: Wait for full convergence
         if (!first_converged_)
         {
-            if (app.IsReadyForAutoScreenshot())
+            if (app.GetRenderFramework()->IsReadyForAutoScreenshot())
             {
                 first_converged_ = true;
-                Log(Info, "VanillaConvergedBaselineTest: first convergence reached at frame {}", frame_);
+                Log(Info, "{}: first convergence reached at frame {}", GetName(), frame_);
             }
             else
             {
                 if (frame_ == 1)
                 {
-                    Log(Info, "VanillaConvergedBaselineTest: waiting for first convergence...");
+                    Log(Info, "{}: waiting for first convergence...", GetName());
                 }
                 return Result::Pending;
             }
@@ -56,15 +56,15 @@ public:
         // Phase 2: Take "before" screenshot
         if (!before_request_)
         {
-            Log(Info, "VanillaConvergedBaselineTest: requesting 'before' screenshot at frame {}", frame_);
-            before_request_ = app.RequestTakeScreenshot("vanilla_baseline_before");
+            Log(Info, "{}: requesting 'before' screenshot at frame {}", GetName(), frame_);
+            before_request_ = app.GetRenderFramework()->RequestTakeScreenshot("vanilla_baseline_before");
             return Result::Pending;
         }
 
         if (!before_done_ && before_request_->IsCompleted())
         {
             before_done_ = true;
-            Log(Info, "VanillaConvergedBaselineTest: 'before' screenshot captured");
+            Log(Info, "{}: 'before' screenshot captured", GetName());
         }
 
         if (!before_done_)
@@ -81,12 +81,11 @@ public:
                 float old_yaw = orbit->GetYaw();
                 float new_yaw = old_yaw + YawDelta;
                 orbit->Setup(orbit->GetCenter(), orbit->GetRadius(), orbit->GetPitch(), new_yaw);
-                Log(Info, "VanillaConvergedBaselineTest: applied {:.1f} deg yaw delta ({:.1f} -> {:.1f})",
-                    YawDelta, old_yaw, new_yaw);
+                Log(Info, "{}: applied {:.1f} deg yaw delta ({:.1f} -> {:.1f})", GetName(), YawDelta, old_yaw, new_yaw);
             }
             else
             {
-                Log(Warn, "VanillaConvergedBaselineTest: camera is not OrbitCameraComponent, cannot nudge");
+                Log(Warn, "{}: camera is not OrbitCameraComponent, cannot nudge", GetName());
                 return Result::Fail;
             }
             nudge_applied_ = true;
@@ -99,10 +98,10 @@ public:
         // become false before waiting for re-convergence.
         if (!reset_confirmed_)
         {
-            if (!app.IsReadyForAutoScreenshot())
+            if (!app.GetRenderFramework()->IsReadyForAutoScreenshot())
             {
                 reset_confirmed_ = true;
-                Log(Info, "VanillaConvergedBaselineTest: reset confirmed at frame {}", frame_);
+                Log(Info, "{}: reset confirmed at frame {}", GetName(), frame_);
             }
             else
             {
@@ -113,10 +112,10 @@ public:
         // Phase 5: Wait for full re-convergence
         if (!second_converged_)
         {
-            if (app.IsReadyForAutoScreenshot())
+            if (app.GetRenderFramework()->IsReadyForAutoScreenshot())
             {
                 second_converged_ = true;
-                Log(Info, "VanillaConvergedBaselineTest: second convergence reached at frame {}", frame_);
+                Log(Info, "{}: second convergence reached at frame {}", GetName(), frame_);
             }
             else
             {
@@ -127,14 +126,14 @@ public:
         // Phase 6: Take "after" screenshot
         if (!after_request_)
         {
-            Log(Info, "VanillaConvergedBaselineTest: requesting 'after' screenshot at frame {}", frame_);
-            after_request_ = app.RequestTakeScreenshot("vanilla_baseline_after");
+            Log(Info, "{}: requesting 'after' screenshot at frame {}", GetName(), frame_);
+            after_request_ = app.GetRenderFramework()->RequestTakeScreenshot("vanilla_baseline_after");
             return Result::Pending;
         }
 
         if (after_request_->IsCompleted())
         {
-            Log(Info, "VanillaConvergedBaselineTest: 'after' screenshot captured at frame {} — PASS", frame_);
+            Log(Info, "{}: 'after' screenshot captured at frame {} — PASS", GetName(), frame_);
             return Result::Pass;
         }
 

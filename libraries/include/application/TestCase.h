@@ -26,10 +26,25 @@ public:
     /// Calls OnTick(), increments the frame counter, and enforces the timeout.
     Result Tick(AppFramework &app);
 
+    [[nodiscard]] const std::string &GetName() const
+    {
+        return name_;
+    }
+
 protected:
     virtual Result OnTick(AppFramework &app) = 0;
 
     uint32_t frame_ = 0;
+
+private:
+    friend class TestCaseRegistry;
+
+    void SetName(std::string name)
+    {
+        name_ = std::move(name);
+    }
+
+    std::string name_;
 };
 
 class TestCaseRegistry

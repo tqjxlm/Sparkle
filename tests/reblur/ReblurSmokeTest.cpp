@@ -19,7 +19,7 @@ public:
 
         if (!request_)
         {
-            request_ = app.RequestTakeScreenshot("reblur_smoke");
+            request_ = app.GetRenderFramework()->RequestTakeScreenshot("reblur_smoke");
         }
 
         return Result::Pending;

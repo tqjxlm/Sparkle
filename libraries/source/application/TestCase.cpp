@@ -21,13 +21,14 @@ TestCase::Result TestCase::Tick(AppFramework &app)
         uint32_t timeout = app.GetAppConfig().test_timeout;
         if (timeout > 0 && frame_ > timeout)
         {
-            Log(Error, "Test case timed out after {} frames", timeout);
+            Log(Error, "Test case '{}' timed out after {} frames", GetName(), timeout);
             return Result::Fail;
         }
     }
 
     return result;
 }
+
 namespace
 {
 std::map<std::string, TestCaseRegistry::Factory> &GetRegistry()
@@ -56,14 +57,17 @@ std::unique_ptr<TestCase> TestCaseRegistry::Create(const std::string &name)
             std::string list;
             for (const auto &[k, v] : registry)
             {
-                if (!list.empty()) list += ", ";
+                if (!list.empty())
+                    list += ", ";
                 list += k;
             }
             return list.empty() ? "(none)" : list;
         }());
         return nullptr;
     }
-    return it->second();
+    auto test_case = it->second();
+    test_case->SetName(it->first);
+    return test_case;
 }
 
 } // namespace sparkle

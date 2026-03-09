@@ -45,12 +45,12 @@ public:
         {
             if (frame_ == 1)
             {
-                Log(Info, "ReblurConvergedHistoryTest: waiting for convergence...");
+                Log(Info, "{}: waiting for convergence...", GetName());
             }
-            if (app.IsReadyForAutoScreenshot())
+            if (app.GetRenderFramework()->IsReadyForAutoScreenshot())
             {
                 converged_ = true;
-                Log(Info, "ReblurConvergedHistoryTest: convergence reached at frame {}", frame_);
+                Log(Info, "{}: convergence reached at frame {}", GetName(), frame_);
             }
             else
             {
@@ -61,8 +61,8 @@ public:
         // Phase 2: Request "before" screenshot
         if (!before_request_)
         {
-            Log(Info, "ReblurConvergedHistoryTest: requesting 'before' screenshot at frame {}", frame_);
-            before_request_ = app.RequestTakeScreenshot("converged_history_before");
+            Log(Info, "{}: requesting 'before' screenshot at frame {}", GetName(), frame_);
+            before_request_ = app.GetRenderFramework()->RequestTakeScreenshot("converged_history_before");
             return Result::Pending;
         }
 
@@ -70,7 +70,7 @@ public:
         if (!before_done_ && before_request_->IsCompleted())
         {
             before_done_ = true;
-            Log(Info, "ReblurConvergedHistoryTest: 'before' screenshot captured");
+            Log(Info, "{}: 'before' screenshot captured", GetName());
         }
 
         if (!before_done_)
@@ -86,12 +86,11 @@ public:
                 float old_yaw = orbit->GetYaw();
                 float new_yaw = old_yaw + YawDelta;
                 orbit->Setup(orbit->GetCenter(), orbit->GetRadius(), orbit->GetPitch(), new_yaw);
-                Log(Info, "ReblurConvergedHistoryTest: applied {:.1f} deg yaw delta ({:.1f} -> {:.1f})",
-                    YawDelta, old_yaw, new_yaw);
+                Log(Info, "{}: applied {:.1f} deg yaw delta ({:.1f} -> {:.1f})", GetName(), YawDelta, old_yaw, new_yaw);
             }
             else
             {
-                Log(Warn, "ReblurConvergedHistoryTest: camera is not OrbitCameraComponent, cannot nudge");
+                Log(Warn, "{}: camera is not OrbitCameraComponent, cannot nudge", GetName());
                 return Result::Fail;
             }
             nudge_applied_ = true;
@@ -107,7 +106,7 @@ public:
             {
                 auto *proxy = static_cast<CameraRenderProxy *>(camera->GetRenderProxy());
                 float delta = (proxy->GetPosture().position - proxy->GetPositionPrev()).norm();
-                Log(Info, "ReblurConvergedHistoryTest: camera position delta = {:.6f}", delta);
+                Log(Info, "{}: camera position delta = {:.6f}", GetName(), delta);
             }
             return Result::Pending;
         }
@@ -115,14 +114,14 @@ public:
         // Phase 5: Request "after" screenshot
         if (!after_request_)
         {
-            Log(Info, "ReblurConvergedHistoryTest: requesting 'after' screenshot at frame {}", frame_);
-            after_request_ = app.RequestTakeScreenshot("converged_history_after");
+            Log(Info, "{}: requesting 'after' screenshot at frame {}", GetName(), frame_);
+            after_request_ = app.GetRenderFramework()->RequestTakeScreenshot("converged_history_after");
             return Result::Pending;
         }
 
         if (after_request_->IsCompleted())
         {
-            Log(Info, "ReblurConvergedHistoryTest: 'after' screenshot captured at frame {} — PASS", frame_);
+            Log(Info, "{}: 'after' screenshot captured at frame {} — PASS", GetName(), frame_);
             return Result::Pass;
         }
 
@@ -141,6 +140,5 @@ private:
     uint32_t nudge_frame_ = 0;
 };
 
-static TestCaseRegistrar<ReblurConvergedHistoryTest> reblur_converged_history_registrar(
-    "reblur_converged_history");
+static TestCaseRegistrar<ReblurConvergedHistoryTest> reblur_converged_history_registrar("reblur_converged_history");
 } // namespace sparkle

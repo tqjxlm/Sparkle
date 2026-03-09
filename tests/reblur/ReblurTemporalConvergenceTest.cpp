@@ -23,15 +23,15 @@ public:
         // Log progress at key milestones
         if (frame_ == 1)
         {
-            Log(Info, "ReblurTemporalConvergenceTest: frame 1 — first frame (reset_history)");
+            Log(Info, "{}: frame 1 — first frame (reset_history)", GetName());
         }
         else if (frame_ == 2)
         {
-            Log(Info, "ReblurTemporalConvergenceTest: frame 2 — first frame with valid history");
+            Log(Info, "{}: frame 2 — first frame with valid history", GetName());
         }
         else if (frame_ == ConvergenceFrames)
         {
-            Log(Info, "ReblurTemporalConvergenceTest: frame {} — convergence target reached", frame_);
+            Log(Info, "{}: frame {} — convergence target reached", GetName(), frame_);
         }
 
         // Wait for temporal convergence
@@ -42,14 +42,14 @@ public:
 
         if (request_ && request_->IsCompleted())
         {
-            Log(Info, "ReblurTemporalConvergenceTest: screenshot captured after {} frames — PASS", frame_);
+            Log(Info, "{}: screenshot captured after {} frames — PASS", GetName(), frame_);
             return Result::Pass;
         }
 
         if (!request_)
         {
-            Log(Info, "ReblurTemporalConvergenceTest: requesting screenshot at frame {}", frame_);
-            request_ = app.RequestTakeScreenshot("reblur_temporal_convergence");
+            Log(Info, "{}: requesting screenshot at frame {}", GetName(), frame_);
+            request_ = app.GetRenderFramework()->RequestTakeScreenshot("reblur_temporal_convergence");
         }
 
         return Result::Pending;

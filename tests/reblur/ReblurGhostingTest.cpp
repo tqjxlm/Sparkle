@@ -41,7 +41,7 @@ public:
         {
             if (active_request_->IsCompleted())
             {
-                Log(Info, "ReblurGhostingTest: captured '{}' at frame {}", active_request_->GetName(), frame_);
+                Log(Info, "{}: captured '{}' at frame {}", GetName(), active_request_->GetName(), frame_);
                 active_request_.reset();
             }
             else
@@ -58,7 +58,7 @@ public:
                 // Record initial pose
                 initial_yaw_ = orbit->GetYaw();
                 current_yaw_ = initial_yaw_;
-                Log(Info, "ReblurGhostingTest: initial yaw = {:.1f}", initial_yaw_);
+                Log(Info, "{}: initial yaw = {:.1f}", GetName(), initial_yaw_);
             }
             return Result::Pending;
         }
@@ -66,9 +66,9 @@ public:
         // Capture "before" baseline screenshot (converged, pre-motion)
         if (!before_captured_)
         {
-            active_request_ = app.RequestTakeScreenshot("ghosting_before");
+            active_request_ = app.GetRenderFramework()->RequestTakeScreenshot("ghosting_before");
             before_captured_ = true;
-            Log(Info, "ReblurGhostingTest: capturing 'before' at frame {}", frame_);
+            Log(Info, "{}: capturing 'before' at frame {}", GetName(), frame_);
             return Result::Pending;
         }
 
@@ -85,8 +85,7 @@ public:
                 }
                 nudge_frame_ = frame_;
                 nudge_applied_ = true;
-                Log(Info, "ReblurGhostingTest: nudge {} — yaw {:.1f} at frame {}", nudge_index_, current_yaw_,
-                    frame_);
+                Log(Info, "{}: nudge {} — yaw {:.1f} at frame {}", GetName(), nudge_index_, current_yaw_, frame_);
             }
 
             // Accumulate for AccumFrames before capturing
@@ -97,7 +96,7 @@ public:
 
             // Capture screenshot after accumulation
             auto name = std::format("ghosting_nudge_{}", nudge_index_);
-            active_request_ = app.RequestTakeScreenshot(name);
+            active_request_ = app.GetRenderFramework()->RequestTakeScreenshot(name);
             nudge_index_++;
             nudge_applied_ = false;
             return Result::Pending;
@@ -112,19 +111,19 @@ public:
         // Capture final settled screenshot
         if (!settled_captured_)
         {
-            active_request_ = app.RequestTakeScreenshot("ghosting_settled");
+            active_request_ = app.GetRenderFramework()->RequestTakeScreenshot("ghosting_settled");
             settled_captured_ = true;
             return Result::Pending;
         }
 
-        Log(Info, "ReblurGhostingTest: all {} screenshots captured — PASS", NudgeCount + 2);
+        Log(Info, "{}: all {} screenshots captured — PASS", GetName(), NudgeCount + 2);
         return Result::Pass;
     }
 
 private:
     static constexpr uint32_t WarmupFrames = 30;
     static constexpr uint32_t NudgeCount = 5;
-    static constexpr float YawStep = 3.0f;  // degrees per nudge
+    static constexpr float YawStep = 3.0f; // degrees per nudge
     static constexpr uint32_t AccumFrames = 10;
     static constexpr uint32_t SettleFrames = 30;
 
