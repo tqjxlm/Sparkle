@@ -2,6 +2,7 @@
 
 #include "core/math/Types.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/debug/PerformanceMetrics.h"
 #include "rhi/RHIImage.h"
 
 #include <atomic>
@@ -66,6 +67,11 @@ public:
     }
 
     [[nodiscard]] virtual bool IsReadyForAutoScreenshot() const;
+
+    [[nodiscard]] virtual PerformanceMetrics GetLatestPerformanceMetrics() const
+    {
+        return {};
+    }
 
     static std::unique_ptr<Renderer> CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                                                     SceneRenderProxy *scene_render_proxy);

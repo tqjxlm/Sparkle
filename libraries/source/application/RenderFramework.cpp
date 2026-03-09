@@ -133,8 +133,20 @@ void RenderFramework::RenderLoop()
 
             renderer_->Render();
 
-            ready_for_auto_screenshot_.store(
-                IsSceneFullyLoaded() && renderer_->IsReadyForAutoScreenshot(), std::memory_order_release);
+            {
+                std::lock_guard<std::mutex> lock(performance_metrics_mutex_);
+                if (scene_loaded_notified_)
+                {
+                    latest_performance_metrics_ = renderer_->GetLatestPerformanceMetrics();
+                }
+                else
+                {
+                    latest_performance_metrics_ = {};
+                }
+            }
+
+            ready_for_auto_screenshot_.store(IsSceneFullyLoaded() && renderer_->IsReadyForAutoScreenshot(),
+                                             std::memory_order_release);
 
             ProcessScreenshotRequest();
 
@@ -285,6 +297,10 @@ void RenderFramework::RecreateRendererIfNecessary()
     }
 
     renderer_ = Renderer::CreateRenderer(render_config_, rhi_, scene_->GetRenderProxy());
+    {
+        std::lock_guard<std::mutex> lock(performance_metrics_mutex_);
+        latest_performance_metrics_ = {};
+    }
 
     renderer_created_event_.Trigger();
 }
@@ -385,6 +401,8 @@ void RenderFramework::NotifySceneLoaded()
             renderer_->NotifySceneLoaded();
         }
         scene_loaded_notified_ = true;
+        std::lock_guard<std::mutex> lock(performance_metrics_mutex_);
+        latest_performance_metrics_ = {};
     });
 }
 
@@ -406,6 +424,12 @@ std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const 
 bool RenderFramework::IsReadyForAutoScreenshot() const
 {
     return ready_for_auto_screenshot_.load(std::memory_order_acquire);
+}
+
+PerformanceMetrics RenderFramework::GetLatestPerformanceMetrics() const
+{
+    std::lock_guard<std::mutex> lock(performance_metrics_mutex_);
+    return latest_performance_metrics_;
 }
 
 void RenderFramework::ProcessScreenshotRequest()

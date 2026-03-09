@@ -55,6 +55,7 @@ struct Camera
 [[vk::binding(11, 1)]] RWTexture2D<float2> motionVectorOutput;
 [[vk::binding(12, 1)]] RWTexture2D<float4> albedoOutput;
 [[vk::binding(13, 1)]] RWTexture2D<float4> ptAccumulation;
+[[vk::binding(14, 1)]] RWTexture2D<float2> sampleStatsOutput;
 
 // set 2: bindless resources, shared by the whole scene
 [[vk::binding(0, 2)]] Texture2D textures[];
@@ -557,6 +558,8 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
     float4 diff_accum = float4(0, 0, 0, 0);
     float4 spec_accum = float4(0, 0, 0, 0);
     float3 this_combined = float3(0, 0, 0);
+    float luma_mean = 0.0;
+    float luma_m2 = 0.0;
     float3 albedo_accum = 0;
     float metallic_accum = 0.0;
     float albedo_weight_sum = 0.0;
@@ -594,6 +597,12 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
         // Accumulate combined radiance (identical to vanilla's per-sample clamping)
         float3 combined_clamped = min(output.total_radiance, output_limit);
         this_combined += combined_clamped;
+        float sample_luma = GetLuminance(combined_clamped);
+        float sample_index = float(i) + 1.0;
+        float delta = sample_luma - luma_mean;
+        luma_mean += delta / sample_index;
+        float delta2 = sample_luma - luma_mean;
+        luma_m2 += delta * delta2;
 
         // Diffuse/specular clamped to output_limit pre-demodulation (matching vanilla PT)
         diff_accum += float4(output.diffuse_radiance, output.diffuse_hit_dist);
@@ -668,6 +677,8 @@ SplitPathOutput SamplePixelSplit(RayDesc ray_desc)
 
         motionVectorOutput[pixel] = uvPrev - uvCurr;
     }
+
+    sampleStatsOutput[pixel] = float2(luma_mean, max(luma_m2, 0.0));
 
     // Motion vector debug visualization (DebugMode::MotionVectors = 12)
     if (debug_mode == 12)

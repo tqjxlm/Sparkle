@@ -9,6 +9,7 @@
 #include "core/math/Types.h"
 #include "core/task/TaskFuture.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/debug/PerformanceMetrics.h"
 #include "rhi/RHIConfig.h"
 
 #include <memory>
@@ -121,6 +122,8 @@ public:
 
     [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
     [[nodiscard]] bool IsReadyForAutoScreenshot() const;
+
+    [[nodiscard]] PerformanceMetrics GetLatestPerformanceMetrics() const;
 
 #if ENABLE_TEST_CASES
     [[nodiscard]] int GetExitCode() const

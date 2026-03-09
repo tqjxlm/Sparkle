@@ -3,12 +3,14 @@
 #include "core/Event.h"
 #include "core/Timer.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/debug/PerformanceMetrics.h"
 
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <vector>
 
 namespace sparkle
 {
@@ -21,11 +23,24 @@ struct ThreadTaskQueue;
 class ScreenshotRequest
 {
 public:
-    explicit ScreenshotRequest(std::string name) : name_(std::move(name)) {}
+    explicit ScreenshotRequest(std::string name) : name_(std::move(name))
+    {
+    }
 
-    [[nodiscard]] const std::string &GetName() const { return name_; }
-    [[nodiscard]] bool IsCompleted() const { return completed_.load(std::memory_order_acquire); }
-    void MarkCompleted() { completed_.store(true, std::memory_order_release); }
+    [[nodiscard]] const std::string &GetName() const
+    {
+        return name_;
+    }
+
+    [[nodiscard]] bool IsCompleted() const
+    {
+        return completed_.load(std::memory_order_acquire);
+    }
+
+    void MarkCompleted()
+    {
+        completed_.store(true, std::memory_order_release);
+    }
 
 private:
     std::string name_;
@@ -77,6 +92,8 @@ public:
 
     // Thread-safe. Returns true when the renderer has accumulated enough samples for a screenshot.
     [[nodiscard]] bool IsReadyForAutoScreenshot() const;
+
+    [[nodiscard]] PerformanceMetrics GetLatestPerformanceMetrics() const;
 
 private:
     [[nodiscard]] bool IsSceneFullyLoaded() const;
@@ -135,6 +152,8 @@ private:
 
     bool scene_loaded_notified_ = false;
     std::atomic<bool> ready_for_auto_screenshot_{false};
+    mutable std::mutex performance_metrics_mutex_;
+    PerformanceMetrics latest_performance_metrics_;
 
     std::mutex screenshot_queue_mutex_;
     std::queue<std::shared_ptr<ScreenshotRequest>> screenshot_queue_;

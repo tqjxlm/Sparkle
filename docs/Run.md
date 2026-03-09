@@ -34,31 +34,32 @@ The base storage path varies by platform:
 
 ### Important Configs
 
-| cvar                | type   | default    | pipelines         | description                                                                                                  |
-| ------------------- | ------ | ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
-| `pipeline`          | string | `forward`  | all               | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                                      |
-| `scene`             | string | *(empty)*  | all               | Scene to render. Empty = default test scene. Other values = path under `resources/models/`                   |
-| `width` / `height`  | uint   | 1280 / 720 | all               | Render resolution                                                                                            |
-| `max-spp`           | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                                            |
-| `spp`               | uint   | 1          | cpu, gpu          | Rays per sample per frame                                                                                    |
-| `bounce`            | uint   | 8          | cpu, gpu          | Max ray bounces per path                                                                                     |
-| `thread`            | uint   | 64         | cpu               | Max threads for CPU path tracer                                                                              |
-| `validation`        | bool   | false      | vulkan only       | Enable Vulkan validation layers                                                                              |
-| `vsync`             | bool   | false      | all               | Enable vsync                                                                                                 |
-| `ssao`              | bool   | false      | forward, deferred | Enable SSAO                                                                                                  |
-| `diffuse_ibl`       | bool   | true       | forward, deferred | Enable diffuse IBL                                                                                           |
-| `specular_ibl`      | bool   | true       | forward, deferred | Enable specular IBL                                                                                          |
-| `spatial_denoise`   | bool   | false      | gpu               | Spatial denoise post-process                                                                                 |
-| `enable_nee`        | bool   | false      | gpu               | Next event estimation                                                                                        |
-| `debug_mode`        | string | *(empty)*  | all               | Renderer debug output mode                                                                                   |
-| `screen_log`        | bool   | true       | all               | On-screen log overlay                                                                                        |
-| `rebuild_cache`     | bool   | false      | all               | Force rebuild all cook caches                                                                                |
-| `target_framerate`  | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                                   |
-| `load_last_session` | bool   | false      | all               | Restore last session (camera, config) on startup                                                             |
-| `clear_screenshots` | bool   | false      | all               | Clear old screenshots in the screenshots directory before taking a new screenshot                            |
-| `headless`          | bool   | false      | all               | Run without creating a window and without input (desktop GLFW and macOS frameworks; not supported on mobile) |
-| `camera_animation`  | string | `none`     | gpu               | Camera animation path: `none`, `orbit_sweep` (360° orbit), `dolly` (forward/back)                           |
-| `camera_animation_frames` | uint | 0     | gpu               | Frames of camera animation before stopping (0 = max_spp / 2)                                                |
+| cvar                               | type   | default    | pipelines         | description                                                                                                                                                         |
+| ---------------------------------- | ------ | ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pipeline`                         | string | `forward`  | all               | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                                                                                             |
+| `scene`                            | string | *(empty)*  | all               | Scene to render. Empty = default test scene. Other values = path under `resources/models/`                                                                          |
+| `width` / `height`                 | uint   | 1280 / 720 | all               | Render resolution                                                                                                                                                   |
+| `max-spp`                          | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                                                                                                   |
+| `spp`                              | uint   | 1          | cpu, gpu          | Rays per sample per frame                                                                                                                                           |
+| `bounce`                           | uint   | 8          | cpu, gpu          | Max ray bounces per path                                                                                                                                            |
+| `thread`                           | uint   | 64         | cpu               | Max threads for CPU path tracer                                                                                                                                     |
+| `validation`                       | bool   | false      | vulkan only       | Enable Vulkan validation layers                                                                                                                                     |
+| `vsync`                            | bool   | false      | all               | Enable vsync                                                                                                                                                        |
+| `ssao`                             | bool   | false      | forward, deferred | Enable SSAO                                                                                                                                                         |
+| `diffuse_ibl`                      | bool   | true       | forward, deferred | Enable diffuse IBL                                                                                                                                                  |
+| `specular_ibl`                     | bool   | true       | forward, deferred | Enable specular IBL                                                                                                                                                 |
+| `spatial_denoise`                  | bool   | false      | gpu               | Spatial denoise post-process                                                                                                                                        |
+| `enable_nee`                       | bool   | false      | gpu               | Next event estimation                                                                                                                                               |
+| `debug_mode`                       | string | *(empty)*  | all               | Renderer debug output mode                                                                                                                                          |
+| `screen_log`                       | bool   | true       | all               | On-screen log overlay                                                                                                                                               |
+| `rebuild_cache`                    | bool   | false      | all               | Force rebuild all cook caches                                                                                                                                       |
+| `target_framerate`                 | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                                                                                          |
+| `load_last_session`                | bool   | false      | all               | Restore last session (camera, config) on startup                                                                                                                    |
+| `clear_screenshots`                | bool   | false      | all               | Clear old screenshots in the screenshots directory before taking a new screenshot                                                                                   |
+| `measure_gpu_convergence`          | bool   | false      | gpu               | Run a GPU convergence analysis pass that estimates residual luma variance from per-frame sample statistics and exposes reduced metrics on CPU                       |
+| `gpu_convergence_threshold`        | float  | 0.01       | gpu               | Relative variance-improvement tolerance used by the stability detector over the half-sample comparison window; compare against `mean_relative_variance_improvement` |
+| `gpu_convergence_stability_frames` | uint   | 16         | gpu               | Number of consecutive frames whose mean relative variance improvement stays below `gpu_convergence_threshold` before the frame is considered stable                 |
+| `headless`                         | bool   | false      | all               | Run without creating a window and without input (desktop GLFW and macOS frameworks; not supported on mobile)                                                        |
 
 Search across the project for keyword "ConfigValue" for more available configs.
 

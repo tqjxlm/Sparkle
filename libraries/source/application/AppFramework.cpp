@@ -837,6 +837,11 @@ bool AppFramework::IsReadyForAutoScreenshot() const
     return render_framework_->IsReadyForAutoScreenshot();
 }
 
+PerformanceMetrics AppFramework::GetLatestPerformanceMetrics() const
+{
+    return render_framework_ ? render_framework_->GetLatestPerformanceMetrics() : PerformanceMetrics{};
+}
+
 CameraComponent *AppFramework::GetMainCamera() const
 {
     return main_scene_->GetMainCamera();

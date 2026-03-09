@@ -35,6 +35,7 @@ struct Camera
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
+[[vk::binding(7, 1)]] RWTexture2D<float2> sampleStatsOutput;
 [[vk::binding(2, 1)]] StructuredBuffer<uint> materialIdBuffer;
 [[vk::binding(3, 1)]] StructuredBuffer<MaterialParameters> materialBuffer;
 [[vk::binding(4, 1)]] TextureCube<float4> skyMap;
@@ -46,6 +47,11 @@ struct Camera
 [[vk::binding(1, 2)]] StructuredBuffer<uint> indexBuffers[];
 [[vk::binding(2, 2)]] StructuredBuffer<float> vertexBuffers[];
 [[vk::binding(3, 2)]] StructuredBuffer<VertexAttribute> vertexAttributeBuffers[];
+
+float GetLuminance(float3 color)
+{
+    return dot(color, float3(0.2126, 0.7152, 0.0722));
+}
 
 float3 SampleNormal(uint texture_id, float2 tex_coord)
 {
@@ -404,6 +410,8 @@ float3 SamplePixel(RayDesc ray_desc)
     float3 all_samples = imageData[pixel].rgb;
 
     float3 this_samples = (float3)0;
+    float luma_mean = 0.0f;
+    float luma_m2 = 0.0f;
 
     InitRandomBase(pixel.x, pixel.y, time_seed);
 
@@ -435,6 +443,13 @@ float3 SamplePixel(RayDesc ray_desc)
         this_pixel = min(this_pixel, output_limit);
 
         this_samples += this_pixel;
+
+        float sample_luma = GetLuminance(this_pixel);
+        float sample_index = float(i) + 1.0f;
+        float delta = sample_luma - luma_mean;
+        luma_mean += delta / sample_index;
+        float delta2 = sample_luma - luma_mean;
+        luma_m2 += delta * delta2;
     }
 
     float moving_average = (float)total_sample_count / (total_sample_count + spp);
@@ -442,4 +457,5 @@ float3 SamplePixel(RayDesc ray_desc)
 
     // output
     imageData[pixel] = float4(all_samples, 1.f);
+    sampleStatsOutput[pixel] = float2(luma_mean, max(luma_m2, 0.0f));
 }

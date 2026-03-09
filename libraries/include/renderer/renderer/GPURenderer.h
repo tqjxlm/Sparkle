@@ -3,6 +3,7 @@
 #include "renderer/renderer/Renderer.h"
 
 #include "core/Timer.h"
+#include "renderer/debug/PerformanceMonitor.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
@@ -30,6 +31,8 @@ public:
     void InitRenderResources() override;
 
     [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
+
+    [[nodiscard]] PerformanceMetrics GetLatestPerformanceMetrics() const override;
 
     ~GPURenderer() override;
 
@@ -61,12 +64,14 @@ private:
     RHIResourceRef<RHITLAS> tlas_;
 
     RHIResourceRef<RHIImage> scene_texture_;
+    RHIResourceRef<RHIImage> performance_sample_stats_;
     RHIResourceRef<RHIRenderTarget> scene_rt_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
 
     RHIResourceRef<RHIImage> tone_mapping_output_;
     RHIResourceRef<RHIRenderTarget> tone_mapping_rt_;
     std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
+    PerformanceMonitor performance_monitor_;
 
     std::unique_ptr<class ClearTexturePass> clear_pass_;
     std::unique_ptr<class UiPass> ui_pass_;
@@ -121,8 +126,9 @@ private:
 
     uint32_t last_second_total_spp_ = 0;
     uint32_t dispatched_sample_count_ = 0;
+    uint32_t current_frame_spp_ = 0;
 
-    bool reblur_scene_load_reset_done_ = false;
+    bool scene_load_reset_done_ = false;
 
     TimerCaller spp_logger_;
 };

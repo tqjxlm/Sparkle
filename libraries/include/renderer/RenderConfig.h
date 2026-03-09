@@ -108,10 +108,13 @@ struct RenderConfig : public ConfigCollection
     bool use_dynamic_spp;
     bool enable_nee;
     bool clear_screenshots;
+    bool measure_gpu_convergence = false;
+    float gpu_convergence_threshold = 0.01f;
+    uint32_t gpu_convergence_stability_frames = 16;
     ReblurDebugPass reblur_debug_pass;
     float target_framerate;
     float gpu_time_budget_ratio;
-    bool reblur_no_pt_blend;          // force composite to use pure denoised output
+    bool reblur_no_pt_blend; // force composite to use pure denoised output
 
 protected:
     void Validate() override;

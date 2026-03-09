@@ -41,6 +41,18 @@ static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU 
 static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
 static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear all existing screenshots", "renderer",
                                                   false);
+static ConfigValue<bool> config_measure_gpu_convergence("measure_gpu_convergence",
+                                                        "measure GPU pipeline convergence via residual luma variance",
+                                                        "renderer", false);
+static ConfigValue<float> config_gpu_convergence_threshold(
+    "gpu_convergence_threshold",
+    "scene-average relative variance-improvement threshold for the GPU convergence criterion over the half-sample "
+    "comparison window",
+    "renderer", 0.01f);
+static ConfigValue<uint32_t> config_gpu_convergence_stability_frames(
+    "gpu_convergence_stability_frames",
+    "number of consecutive frames with low variance improvement required before the GPU frame is considered stable",
+    "renderer", 16);
 static ConfigValue<bool> config_reblur_no_pt_blend("reblur_no_pt_blend",
                                                    "force composite to use pure denoised output (skip PT blend ramp)",
                                                    "renderer", false);
@@ -67,6 +79,10 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_gpu_budget_ratio, gpu_time_budget_ratio);
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
+    ConfigCollectionHelper::RegisterConfig(this, config_measure_gpu_convergence, measure_gpu_convergence);
+    ConfigCollectionHelper::RegisterConfig(this, config_gpu_convergence_threshold, gpu_convergence_threshold);
+    ConfigCollectionHelper::RegisterConfig(this, config_gpu_convergence_stability_frames,
+                                           gpu_convergence_stability_frames);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_debug_pass, reblur_debug_pass);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_no_pt_blend, reblur_no_pt_blend);
     Validate();
@@ -117,6 +133,27 @@ void RenderConfig::Validate()
         Log(Warn, "reblur requires gpu pipeline. disabling");
         config_use_reblur.Set(false);
         use_reblur = false;
+    }
+
+    if (measure_gpu_convergence && !IsRayTracingMode())
+    {
+        Log(Warn, "measure_gpu_convergence requires gpu pipeline. disabling");
+        config_measure_gpu_convergence.Set(false);
+        measure_gpu_convergence = false;
+    }
+
+    if (gpu_convergence_threshold <= 0.f)
+    {
+        Log(Warn, "gpu_convergence_threshold must be positive. reset to 0.01");
+        config_gpu_convergence_threshold.Set(0.01f);
+        gpu_convergence_threshold = 0.01f;
+    }
+
+    if (gpu_convergence_stability_frames == 0)
+    {
+        Log(Warn, "gpu_convergence_stability_frames must be positive. reset to 16");
+        config_gpu_convergence_stability_frames.Set(16u);
+        gpu_convergence_stability_frames = 16;
     }
 
     if (use_ssao)
