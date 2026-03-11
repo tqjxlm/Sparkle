@@ -46,6 +46,11 @@ TestCase::Result TestCase::Tick(AppFramework &app)
     if (result == Result::Pending)
     {
         uint32_t timeout = app.GetAppConfig().test_timeout;
+        if (timeout == 0)
+        {
+            timeout = GetDefaultTimeoutFrames();
+        }
+
         if (timeout > 0 && frame_ > timeout)
         {
             Log(Error, "Test case '{}' timed out after {} frames", GetName(), timeout);

@@ -41,6 +41,13 @@ protected:
 
     virtual Result OnTick(AppFramework &app) = 0;
 
+    /// Optional per-test timeout in frames. When the app config does not
+    /// provide --test_timeout, Tick() uses this value instead.
+    [[nodiscard]] virtual uint32_t GetDefaultTimeoutFrames() const
+    {
+        return 0;
+    }
+
     void EnforceConfig(const std::string &config_name, bool value) const;
     void EnforceConfig(const std::string &config_name, uint32_t value) const;
     void EnforceConfig(const std::string &config_name, float value) const;
