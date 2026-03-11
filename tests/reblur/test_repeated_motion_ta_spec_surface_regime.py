@@ -19,6 +19,7 @@ import sys
 import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_erosion, gaussian_filter, label
+from ghosting_harness import run_ghosting_app
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -78,23 +79,6 @@ def load_luminance(path):
 def compute_hf_residual(luma, sigma=2.0):
     return np.abs(luma - gaussian_filter(luma, sigma=sigma))
 
-
-def run_app(py, build_py, framework, extra_args, label, clear_screenshots=False):
-    cmd = [py, build_py, "--framework", framework, "--skip_build",
-           "--run", "--test_case", "reblur_ghosting", "--headless", "true"]
-    if clear_screenshots:
-        cmd += ["--clear_screenshots", "true"]
-    cmd += extra_args
-    print(f"  cmd: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT,
-                            capture_output=True, text=True, timeout=900)
-    if result.returncode != 0:
-        print(f"  FAIL: {label} exited with code {result.returncode}")
-        if result.stderr:
-            for line in result.stderr.strip().splitlines()[-5:]:
-                print(f"    {line}")
-        return False
-    return True
 
 
 def prepare_artifact_dir(screenshot_dir):
@@ -308,7 +292,7 @@ def main():
         print("\n" + "-" * 70)
         print(f"  Run: {label}")
         print("-" * 70)
-        ok = run_app(py, build_py, args.framework, extra_args + extra, label,
+        ok = run_ghosting_app(py, build_py, PROJECT_ROOT, args.framework, extra_args + extra, label,
                      clear_screenshots=True)
         if not ok:
             return 1
@@ -371,3 +355,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

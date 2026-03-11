@@ -303,8 +303,7 @@ def main():
     ok, dur, _ = run_command(
         [py, build_py, "--framework", fw, "--skip_build",
          "--run", "--test_case", "reblur_ghosting", "--headless", "true",
-         "--clear_screenshots", "true",
-         "--test_timeout", "120"] + extra_args,
+         "--clear_screenshots", "true"] + extra_args,
         "17. Ghosting test (camera nudge)")
     results.append(("Ghosting test (camera nudge)", ok, dur))
 

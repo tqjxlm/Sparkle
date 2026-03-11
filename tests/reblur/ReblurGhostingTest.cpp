@@ -36,6 +36,11 @@ public:
         EnforceConfig("max_spp", 400u);
     }
 
+    [[nodiscard]] uint32_t GetDefaultTimeoutFrames() const override
+    {
+        return DefaultTimeoutFrames;
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *camera = app.GetMainCamera();
@@ -162,6 +167,15 @@ private:
     static constexpr uint32_t NudgeCount = 5;
     static constexpr uint32_t FastCaptureFrames = 2;
     static constexpr uint32_t SettleFrames = 30;
+    static constexpr uint32_t BaselineCaptureFrames = 3;
+    static constexpr uint32_t PerNudgeFrames = 34;
+    static constexpr uint32_t ExpectedPassFrames =
+        StartupDelayFrames + WarmupFrames + BaselineCaptureFrames + NudgeCount * PerNudgeFrames;
+    static constexpr uint32_t TimeoutSlackFrames = 17;
+    static constexpr uint32_t DefaultTimeoutFrames = ExpectedPassFrames + TimeoutSlackFrames;
+    // The current state machine should finish at about frame 213:
+    //   10 startup + 30 warmup + 3 baseline-capture frames + 5 * 34 per-nudge frames.
+    // The inferred timeout lives here because the sequence is deterministic.
 
     float initial_yaw_ = 0.0f;
     float current_yaw_ = 0.0f;

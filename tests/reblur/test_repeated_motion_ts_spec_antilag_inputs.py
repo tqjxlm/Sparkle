@@ -20,6 +20,7 @@ import sys
 import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_erosion, label
+from ghosting_harness import run_ghosting_app
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -57,23 +58,6 @@ def get_screenshot_dir(framework):
 def load_image(path):
     return np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
 
-
-def run_app(py, build_py, framework, extra_args, label, clear_screenshots=False):
-    cmd = [py, build_py, "--framework", framework, "--skip_build",
-           "--run", "--test_case", "reblur_ghosting", "--headless", "true"]
-    if clear_screenshots:
-        cmd += ["--clear_screenshots", "true"]
-    cmd += extra_args
-    print(f"  cmd: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT,
-                            capture_output=True, text=True, timeout=900)
-    if result.returncode != 0:
-        print(f"  FAIL: {label} exited with code {result.returncode}")
-        if result.stderr:
-            for line in result.stderr.strip().splitlines()[-5:]:
-                print(f"    {line}")
-        return False
-    return True
 
 
 def prepare_artifact_dir(screenshot_dir):
@@ -354,7 +338,7 @@ def main():
         print(f"\n{'-' * 70}")
         print(f"  Run: {prefix}")
         print(f"{'-' * 70}")
-        ok = run_app(py, build_py, fw, flags + list(extra_args),
+        ok = run_ghosting_app(py, build_py, PROJECT_ROOT, fw, flags + list(extra_args),
                      prefix, clear_screenshots=True)
         if not ok:
             return 1
@@ -416,3 +400,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

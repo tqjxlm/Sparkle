@@ -68,10 +68,11 @@ MIN_FOOTPRINT_QUALITY = 0.5
 LUMA_RATIO_MIN = 0.93
 LUMA_RATIO_MAX = 1.07
 # End-to-end FLIP: reblur full pipeline "after" vs vanilla "after".
-# With valid-history pixels now preserving the previous displayed result,
-# full-pipeline FLIP should stay close to the converged vanilla baseline.
-# Small disoccluded regions still add error, so keep a little headroom.
-E2E_FLIP_MAX = 0.14
+# Mean whole-frame FLIP is a weak metric for localized motion-leading shell
+# noise, so keep this as a secondary sanity gate only. Still, the current bad
+# GLFW Run 1 state already lands around 0.076-0.081 while looking visibly
+# wrong, so the threshold must sit below that range to avoid a false pass.
+E2E_FLIP_MAX = 0.07
 # History-valid floor pixels should stay nearly identical to both the vanilla
 # post-nudge reference and the converged pre-nudge floor in Run 1.
 E2E_FLOOR_HISTORY_VS_VANILLA_MAX = 1.05
