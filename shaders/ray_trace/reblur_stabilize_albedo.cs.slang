@@ -1,3 +1,4 @@
+#include "reblur_config.h.slang"
 #include "reblur_data.h.slang"
 #include "reblur_reprojection.h.slang"
 
@@ -28,12 +29,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
     if (pixel.x >= resolution.x || pixel.y >= resolution.y)
         return;
 
-    float4 current = inAlbedoMetallic[pixel];
+    float3 current_albedo = inAlbedoMetallic[pixel].rgb;
     float center_viewZ = inViewZ[pixel];
 
     if (center_viewZ > denoising_range || reset_history != 0)
     {
-        outAlbedoMetallic[pixel] = current;
+        outAlbedoMetallic[pixel] = float4(current_albedo, 0.0);
         return;
     }
 
@@ -42,6 +43,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float current_material_id = nr.a;
 
     float2 motionVec = inMotionVectors[pixel];
+    float motion_pixels = length(motionVec * float2(resolution));
     float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
     float2 prevUV = currentUV + motionVec;
     bool inScreen = all(prevUV >= 0.0) && all(prevUV <= 1.0);
@@ -49,7 +51,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float footprintQuality = 0.0;
     bool historyValid = false;
     bool allSamplesValid = false;
-    float4 history = current;
+    float4 history = float4(current_albedo, 0.0);
     int2 historyOrigin = int2(0, 0);
     float4 historyWeights = 0.0;
 
@@ -108,17 +110,16 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     if (!inScreen || !historyValid)
     {
-        outAlbedoMetallic[pixel] = current;
+        outAlbedoMetallic[pixel] = float4(current_albedo, 0.0);
         return;
     }
 
-    float diff_accum_speed = 0.0;
-    float spec_accum_speed = 0.0;
-    UnpackInternalData(inInternalData[pixel], diff_accum_speed, spec_accum_speed);
-    float accum = min(diff_accum_speed, spec_accum_speed);
-
-    float history_weight = accum / (accum + 1.0);
-    history_weight *= footprintQuality;
-
-    outAlbedoMetallic[pixel] = lerp(current, history, saturate(history_weight));
+    float2 packed = inInternalData[pixel];
+    bool motion_reset = motion_pixels > REBLUR_TS_MOTION_RESET_THRESHOLD_PX;
+    float prev_history_age = history.a;
+    float history_age = motion_reset || min(packed.x, packed.y) < 0.0 ? 0.0 : prev_history_age + 1.0;
+    float warmed_history_age = max(prev_history_age - REBLUR_TS_HISTORY_WARMUP_FRAMES, 0.0);
+    float history_weight = warmed_history_age / (warmed_history_age + 1.0) * footprintQuality;
+    float3 stabilized_albedo = lerp(current_albedo, history.rgb, saturate(history_weight));
+    outAlbedoMetallic[pixel] = float4(stabilized_albedo, history_age);
 }

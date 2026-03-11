@@ -21,6 +21,7 @@ class ToneMappingPixelShader : public RHIShaderInfo
     struct UniformBufferData
     {
         float exposure;
+        uint32_t bypass;
     };
 };
 
@@ -42,6 +43,11 @@ void ToneMappingPass::UpdateFrameData(const RenderConfig &config, SceneRenderPro
 
     ToneMappingPixelShader::UniformBufferData ubo;
     ubo.exposure = scene->GetCamera()->GetAttribute().exposure;
+    using DP = RenderConfig::ReblurDebugPass;
+    ubo.bypass =
+        config.reblur_debug_pass != DP::Full && config.reblur_debug_pass != DP::Passthrough
+        ? 1u
+        : 0u;
     ps_ub_->Upload(rhi_, &ubo);
 }
 

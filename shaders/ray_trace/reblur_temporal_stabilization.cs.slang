@@ -1,6 +1,7 @@
 #include "reblur_common.h.slang"
 #include "reblur_config.h.slang"
 #include "reblur_data.h.slang"
+#include "reblur_reprojection.h.slang"
 
 [[vk::binding(0, 0)]] cbuffer ubo
 {
@@ -9,6 +10,7 @@
     float fast_history_sigma_scale;
     float antilag_sigma_scale;
     float antilag_sensitivity;
+    float disocclusion_threshold;
     float denoising_range;
     uint frame_index;
     uint max_stabilized_frame_num;
@@ -19,22 +21,25 @@
 // Current denoised output (from PostBlur)
 [[vk::binding(1, 0)]] Texture2D<float4> inDiffuse;
 [[vk::binding(2, 0)]] Texture2D<float4> inSpecular;
-[[vk::binding(3, 0)]] Texture2D<float> inViewZ;
-[[vk::binding(4, 0)]] Texture2D<float2> inInternalData;
+[[vk::binding(3, 0)]] Texture2D<float4> inNormalRoughness;
+[[vk::binding(4, 0)]] Texture2D<float> inViewZ;
+[[vk::binding(5, 0)]] Texture2D<float2> inInternalData;
 
 // Stabilized history (previous frame)
-[[vk::binding(5, 0)]] Texture2D<float4> prevStabilizedDiff;
-[[vk::binding(6, 0)]] Texture2D<float4> prevStabilizedSpec;
+[[vk::binding(6, 0)]] Texture2D<float4> prevStabilizedDiff;
+[[vk::binding(7, 0)]] Texture2D<float4> prevStabilizedSpec;
+[[vk::binding(8, 0)]] Texture2D<float> prevViewZ;
+[[vk::binding(9, 0)]] Texture2D<float4> prevNormalRoughness;
 
 // Outputs
-[[vk::binding(7, 0)]] RWTexture2D<float4> outDiffuse;
-[[vk::binding(8, 0)]] RWTexture2D<float4> outSpecular;
+[[vk::binding(10, 0)]] RWTexture2D<float4> outDiffuse;
+[[vk::binding(11, 0)]] RWTexture2D<float4> outSpecular;
 
 // Accumulation speed writeback (antilag may reduce speeds)
-[[vk::binding(9, 0)]] RWTexture2D<float2> outInternalData;
+[[vk::binding(12, 0)]] RWTexture2D<float2> outInternalData;
 
 // Motion vectors for reprojection
-[[vk::binding(10, 0)]] Texture2D<float2> inMotionVectors;
+[[vk::binding(13, 0)]] Texture2D<float2> inMotionVectors;
 
 // Shared memory for neighborhood luminance computation (5x5 = BORDER=2)
 #define BORDER 2
@@ -100,6 +105,10 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
 
     float4 current_diff = inDiffuse[pixel];
     float4 current_spec = inSpecular[pixel];
+    float4 nr = inNormalRoughness[pixel];
+    float3 center_normal = DecodeNormalOct(nr.xy);
+    float center_roughness = nr.z;
+    float current_material_id = nr.a;
 
     // Compute local mean and variance from shared memory 5x5 neighborhood
     int2 smem_center = int2(GTid.xy) + BORDER;
@@ -138,49 +147,74 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
 
     // Reproject stabilized history via motion vectors
     float2 motionVec = inMotionVectors[pixel];
+    float motion_pixels = length(motionVec * float2(resolution));
     float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
     float2 prevUV = currentUV + motionVec;
 
-    float4 stab_diff, stab_spec;
+    float4 stab_diff = current_diff;
+    float4 stab_spec = current_spec;
     // Per-pixel stabilized frame counter stored in .a of the stabilized textures.
     // Tracks how many consecutive frames this pixel has been stabilized and is
     // allowed to grow independently of TA's accumulation speed.
     float prev_stab_count = 0.0;
+    float stab_footprint_quality = 0.0;
+    bool stab_history_valid = false;
+    bool stab_all_samples_valid = false;
 
-    // Clamp UV to [0,1] instead of falling back to current PostBlur when
-    // out of bounds. This samples the nearest edge pixel's stabilized
-    // value, which is a much better fallback than raw PostBlur noise.
-    // Matches NVIDIA NRD behavior (uses sampler with clamp-to-edge mode).
-    float2 sampleUV = clamp(prevUV, float2(0.0), float2(1.0));
     bool prevInBounds = all(prevUV >= 0.0) && all(prevUV <= 1.0);
 
-    // Bilinear sampling of stabilized history for smoother reprojection.
-    // Manual 4-tap bilinear avoids needing a sampler binding.
+    // Reproject stabilized history with the same surface-valid footprint tests
+    // used by temporal accumulation. TS must not blend history from adjacent
+    // silhouettes just because the motion vector lands on a partial bilinear
+    // footprint.
     {
-        float2 prevPixelF = sampleUV * float2(resolution) - 0.5;
-        int2 p00 = int2(floor(prevPixelF));
-        float2 frac = prevPixelF - float2(p00);
-        p00 = clamp(p00, int2(0, 0), int2(resolution) - int2(1, 1));
-        int2 p10 = clamp(p00 + int2(1, 0), int2(0, 0), int2(resolution) - int2(1, 1));
-        int2 p01 = clamp(p00 + int2(0, 1), int2(0, 0), int2(resolution) - int2(1, 1));
-        int2 p11 = clamp(p00 + int2(1, 1), int2(0, 0), int2(resolution) - int2(1, 1));
+        if (prevInBounds)
+        {
+            int2 prevPixelCenter = int2(prevUV * float2(resolution));
+            prevPixelCenter = clamp(prevPixelCenter, int2(0, 0), int2(resolution) - int2(1, 1));
 
-        float4 d00 = prevStabilizedDiff[p00];
-        float4 d10 = prevStabilizedDiff[p10];
-        float4 d01 = prevStabilizedDiff[p01];
-        float4 d11 = prevStabilizedDiff[p11];
-        stab_diff = lerp(lerp(d00, d10, frac.x), lerp(d01, d11, frac.x), frac.y);
+            float expectedPrevZ = prevViewZ[prevPixelCenter];
+            int2 history_origin = int2(0, 0);
+            float4 history_weights = 0.0;
 
-        float4 s00 = prevStabilizedSpec[p00];
-        float4 s10 = prevStabilizedSpec[p10];
-        float4 s01 = prevStabilizedSpec[p01];
-        float4 s11 = prevStabilizedSpec[p11];
-        stab_spec = lerp(lerp(s00, s10, frac.x), lerp(s01, s11, frac.x), frac.y);
+            stab_diff = BilinearHistorySample(
+                prevStabilizedDiff, prevUV, resolution,
+                prevViewZ, prevNormalRoughness, expectedPrevZ,
+                center_normal, current_material_id,
+                disocclusion_threshold, denoising_range,
+                stab_footprint_quality, stab_history_valid, stab_all_samples_valid,
+                history_origin, history_weights);
 
-        // Use diffuse .a for the shared stabilized frame counter.
-        // For out-of-bounds, use the clamped-edge value but reduce
-        // stab_count to limit ghosting from stale edge history.
-        prev_stab_count = prevInBounds ? stab_diff.a : 0.0;
+            if (stab_history_valid)
+            {
+                stab_spec = SampleBilinearTexture(prevStabilizedSpec, history_origin, resolution, history_weights);
+                prev_stab_count = stab_diff.a;
+
+                if (!stab_all_samples_valid)
+                {
+                    float4 center_prev_nr = prevNormalRoughness[prevPixelCenter];
+                    float center_prev_z = prevViewZ[prevPixelCenter];
+                    bool center_sample_valid = center_prev_z <= denoising_range;
+                    if (center_sample_valid)
+                    {
+                        float3 center_prev_normal = DecodeNormalOct(center_prev_nr.xy);
+                        center_sample_valid =
+                            dot(center_prev_normal, center_normal) >= 0.75 &&
+                            abs(center_prev_nr.a - current_material_id) <= 0.0005;
+                    }
+
+                    if (center_sample_valid)
+                    {
+                        stab_diff = prevStabilizedDiff[prevPixelCenter];
+                        stab_spec = prevStabilizedSpec[prevPixelCenter];
+                        prev_stab_count = stab_diff.a;
+                        // Same rule as TA: center fallback avoids pulling from
+                        // the wrong side of a silhouette, but it should still
+                        // be treated as a partial reprojection footprint.
+                    }
+                }
+            }
+        }
     }
 
     float stab_diff_luma = GetLuminance(stab_diff.rgb);
@@ -200,6 +234,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     // false triggers in dark regions.
     float diff_antilag = 1.0;
     float spec_antilag = 1.0;
+    float spec_antilag_d = 0.0;
+    float spec_history_delta = 0.0;
+    float spec_clamp_band = 0.0;
     {
         if (diff_accum_speed >= 8.0)
         {
@@ -217,7 +254,10 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
             float magic = antilag_sensitivity * framerate_scale * framerate_scale;
             float clamped = clamp(stab_spec_luma, spec_mean - s, spec_mean + s);
             float d = abs(stab_spec_luma - clamped) / (max(stab_spec_luma, clamped) + 1e-6);
+            spec_history_delta = abs(stab_spec_luma - spec_mean) / max(max(stab_spec_luma, spec_mean), 1e-6);
+            spec_antilag_d = d;
             spec_antilag = 1.0 / (1.0 + d * spec_accum_speed / max(magic, 1e-6));
+
             spec_accum_speed = lerp(0.0, spec_accum_speed, spec_antilag);
         }
     }
@@ -239,6 +279,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float diff_hi = diff_mean + diff_sigma_eff * diff_sigma_scale;
     float spec_lo = spec_mean - spec_sigma_eff * spec_sigma_scale;
     float spec_hi = spec_mean + spec_sigma_eff * spec_sigma_scale;
+    spec_clamp_band = (spec_hi - spec_lo) / max(max(spec_mean, stab_spec_luma), 1e-6);
 
     // For freshly disoccluded pixels (incoming accum<=1), the stabilized history
     // at the reprojected position belongs to a different surface (the object that
@@ -251,7 +292,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     bool diff_disoccluded = diff_accum_incoming <= 1.0;
     bool spec_disoccluded = spec_accum_incoming <= 1.0;
 
-    if (diff_disoccluded)
+    if (diff_disoccluded || !stab_history_valid)
     {
         // Freshly disoccluded: stabilized history is from wrong surface
         clamped_diff_color = current_diff.rgb;
@@ -268,7 +309,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
             clamped_diff_color = current_diff.rgb;
     }
 
-    if (spec_disoccluded)
+    if (spec_disoccluded || !stab_history_valid)
     {
         clamped_spec_color = current_spec.rgb;
     }
@@ -285,28 +326,79 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     }
 
     // Per-pixel stabilized frame counter: increments each frame, resets on
-    // disocclusion, caps at max_stabilized_frame_num.
+    // disocclusion or invalid TS reprojection, caps at max_stabilized_frame_num.
     // Antilag reduces the counter proportionally.
-    float min_accum = min(diff_accum_incoming, spec_accum_incoming);
+    bool motion_reset = motion_pixels > REBLUR_TS_MOTION_RESET_THRESHOLD_PX;
     float stab_count;
-    if (min_accum <= 1.0)
+    float min_antilag = min(diff_antilag, spec_antilag);
+    if (motion_reset || !stab_history_valid || min(diff_accum_incoming, spec_accum_incoming) <= 1.0)
     {
-        // Disoccluded: reset stabilization counter
-        stab_count = min_accum;
+        stab_count = 0.0;
     }
     else
     {
-        // Increment previous counter, but don't exceed max or drop below
-        // current TA accum_speed (TA disocclusion detection is authoritative).
-        float min_antilag = min(diff_antilag, spec_antilag);
         stab_count = prev_stab_count * min_antilag + 1.0;
-        stab_count = clamp(stab_count, min_accum, float(max_stabilized_frame_num));
+        stab_count = min(stab_count, float(max_stabilized_frame_num));
     }
 
-    float diff_stab_frames = diff_disoccluded ? 0.0 : stab_count;
-    float spec_stab_frames = spec_disoccluded ? 0.0 : stab_count;
+    float motion_stabilization = 1.0 / (1.0 + max(motion_pixels - 1.0, 0.0));
+    float history_age = motion_reset || !stab_history_valid ? 0.0 : prev_stab_count * min_antilag;
+    float warmed_history_age = max(history_age - REBLUR_TS_HISTORY_WARMUP_FRAMES, 0.0);
+    float diff_stab_frames = diff_disoccluded || !stab_history_valid ? 0.0 :
+        min(warmed_history_age, diff_accum_speed) * stab_footprint_quality * motion_stabilization;
+    float spec_stab_frames = spec_disoccluded || !stab_history_valid ? 0.0 :
+        min(warmed_history_age, spec_accum_speed) * stab_footprint_quality * motion_stabilization;
     float diff_blend = diff_stab_frames / (diff_stab_frames + 1.0) * stabilization_strength;
     float spec_blend = spec_stab_frames / (spec_stab_frames + 1.0) * stabilization_strength;
+
+    float smc = GetSpecMagicCurve(center_roughness);
+    float responsive_factor = smoothstep(0.0, 0.2, max(center_roughness, 1e-3));
+    float spec_acceleration = lerp(smc, 1.0, 0.5 + responsive_factor * 0.5);
+    spec_blend *= spec_acceleration;
+
+    float hit_dist_motion_risk =
+        max(motion_pixels - REBLUR_TS_MOTION_RESET_THRESHOLD_PX, 0.0) *
+        current_spec.a * (1.0 - smc) * REBLUR_TS_SPEC_HITDIST_BLEND_SCALE;
+    float spec_virtual_motion_confidence = 1.0 / (1.0 + hit_dist_motion_risk);
+    spec_blend *= spec_virtual_motion_confidence;
+
+    if (debug_output == 1)
+    {
+        float max_stab = max(float(max_stabilized_frame_num), 1.0);
+        outDiffuse[pixel] = float4(stab_count / max_stab, diff_blend, prev_stab_count / max_stab, 1.0);
+        outSpecular[pixel] = float4(0.0, 0.0, stab_history_valid ? stab_footprint_quality : 0.0, 1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 2)
+    {
+        outDiffuse[pixel] = float4(0.0, 0.0, 0.0, 1.0);
+        outSpecular[pixel] = float4(spec_blend, spec_antilag, stab_history_valid ? stab_footprint_quality : 0.0, 1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 3)
+    {
+        outDiffuse[pixel] = float4(0.0, 0.0, 0.0, 1.0);
+        outSpecular[pixel] = float4(
+            spec_antilag_d,
+            1.0 - GetNonLinearAccumSpeed(spec_accum_incoming),
+            1.0 - GetNonLinearAccumSpeed(spec_accum_speed),
+            1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 4)
+    {
+        outDiffuse[pixel] = float4(0.0, 0.0, 0.0, 1.0);
+        outSpecular[pixel] = float4(
+            saturate(spec_history_delta),
+            saturate(spec_clamp_band),
+            saturate(spec_antilag_d),
+            1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
 
     // Blend current with clamped history
     float3 final_diff = lerp(current_diff.rgb, clamped_diff_color, diff_blend);

@@ -125,7 +125,7 @@ class ReblurCompositeShader : public RHIShaderInfo
     {
         Vector2UInt resolution;
         uint32_t frame_index;
-        uint32_t composite_mode; // 0 = normal, 1 = diagnostic passthrough
+        uint32_t composite_mode; // 0 = normal, 1 = passthrough diffuse, 2 = diffuse, 3 = specular, 4 = albedo, 5 = passthrough specular
     };
 };
 
@@ -593,12 +593,45 @@ void GPURenderer::Update()
         bool is_ta_diagnostic =
             render_config_.reblur_debug_pass == DP::TADisocclusion ||
             render_config_.reblur_debug_pass == DP::TAMotionVector || render_config_.reblur_debug_pass == DP::TADepth ||
-            render_config_.reblur_debug_pass == DP::TAHistory || render_config_.reblur_debug_pass == DP::TAMaterialId;
-        bool is_ts_diagnostic = render_config_.reblur_debug_pass == DP::TSStabCount;
+            render_config_.reblur_debug_pass == DP::TAHistory || render_config_.reblur_debug_pass == DP::TASpecHistory ||
+            render_config_.reblur_debug_pass == DP::TAMaterialId ||
+            render_config_.reblur_debug_pass == DP::TAAccumSpeed ||
+            render_config_.reblur_debug_pass == DP::TASpecAccumSpeed ||
+            render_config_.reblur_debug_pass == DP::TASpecMotionInputs ||
+            render_config_.reblur_debug_pass == DP::TASpecQualityDelta ||
+            render_config_.reblur_debug_pass == DP::TASpecSurfaceInputs ||
+            render_config_.reblur_debug_pass == DP::TAMotionVectorFine;
+        bool is_ts_diagnostic = render_config_.reblur_debug_pass == DP::TSStabCount ||
+                                render_config_.reblur_debug_pass == DP::TSSpecBlend ||
+                                render_config_.reblur_debug_pass == DP::TSSpecAntilagInputs ||
+                                render_config_.reblur_debug_pass == DP::TSSpecClampInputs;
+        uint32_t composite_mode = 0u;
+        if (render_config_.reblur_debug_pass == DP::TASpecHistory ||
+            render_config_.reblur_debug_pass == DP::TASpecAccumSpeed ||
+            render_config_.reblur_debug_pass == DP::TASpecMotionInputs ||
+            render_config_.reblur_debug_pass == DP::TASpecQualityDelta ||
+            render_config_.reblur_debug_pass == DP::TASpecSurfaceInputs ||
+            render_config_.reblur_debug_pass == DP::TemporalAccumSpecular ||
+            render_config_.reblur_debug_pass == DP::HistoryFixSpecular ||
+            render_config_.reblur_debug_pass == DP::BlurSpecular ||
+            render_config_.reblur_debug_pass == DP::PostBlurSpecular ||
+            render_config_.reblur_debug_pass == DP::StabilizedSpecular ||
+            render_config_.reblur_debug_pass == DP::TSSpecBlend ||
+            render_config_.reblur_debug_pass == DP::TSSpecAntilagInputs ||
+            render_config_.reblur_debug_pass == DP::TSSpecClampInputs)
+            composite_mode = 5u;
+        else if (is_ta_diagnostic || is_ts_diagnostic)
+            composite_mode = 1u;
+        else if (render_config_.reblur_debug_pass == DP::CompositeDiffuse)
+            composite_mode = 2u;
+        else if (render_config_.reblur_debug_pass == DP::CompositeSpecular)
+            composite_mode = 3u;
+        else if (render_config_.reblur_debug_pass == DP::StabilizedAlbedo)
+            composite_mode = 4u;
         ReblurCompositeShader::UniformBufferData comp_ubo{
             .resolution = {image_size_.x(), image_size_.y()},
             .frame_index = comp_frame_index,
-            .composite_mode = (is_ta_diagnostic || is_ts_diagnostic) ? 1u : 0u,
+            .composite_mode = composite_mode,
         };
         composite_uniform_buffer_->Upload(rhi_, &comp_ubo);
     }
@@ -1064,7 +1097,10 @@ void GPURenderer::RenderReblurPath()
     auto *comp_resources = composite_pipeline_->GetShaderResource<ReblurCompositeShader>();
     using DP = RenderConfig::ReblurDebugPass;
     RHIImage *composite_albedo =
-        render_config_.reblur_debug_pass == DP::Full ? reblur_->GetCompositeAlbedoMetallic() : albedo_metallic_.get();
+        (render_config_.reblur_debug_pass == DP::Full || render_config_.reblur_debug_pass == DP::CompositeDiffuse ||
+         render_config_.reblur_debug_pass == DP::StabilizedAlbedo)
+            ? reblur_->GetCompositeAlbedoMetallic()
+            : albedo_metallic_.get();
     comp_resources->denoisedDiffuse().BindResource(reblur_->GetDenoisedDiffuse()->GetDefaultView(rhi_));
     comp_resources->denoisedSpecular().BindResource(reblur_->GetDenoisedSpecular()->GetDefaultView(rhi_));
     comp_resources->albedoMetallic().BindResource(composite_albedo->GetDefaultView(rhi_));

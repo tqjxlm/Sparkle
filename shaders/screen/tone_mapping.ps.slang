@@ -3,6 +3,7 @@
 [[vk::binding(0, 1)]] cbuffer ubo
 {
     float exposure;
+    uint bypass;
 }
 
 [[vk::binding(1, 1)]] Texture2D screenTexture;
@@ -24,7 +25,8 @@ float4 main(VSInterpolant input) : SV_Target
 {
     float3 color = screenTexture.Sample(screenTextureSampler, input.uv).xyz;
 
-    color = ACESFilm(color);
+    if (bypass == 0)
+        color = ACESFilm(color);
 
     return float4(color, 1.0f);
 }

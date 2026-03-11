@@ -56,6 +56,10 @@ static ConfigValue<uint32_t> config_gpu_convergence_stability_frames(
 static ConfigValue<bool> config_reblur_no_pt_blend("reblur_no_pt_blend",
                                                    "force composite to use pure denoised output (skip PT blend ramp)",
                                                    "renderer", false);
+static ConfigValue<float> config_reblur_ghosting_yaw_step(
+    "reblur_ghosting_yaw_step",
+    "test-only yaw step in degrees for the repeated REBLUR ghosting testcase",
+    "renderer", 3.0f);
 
 void RenderConfig::Init()
 {
@@ -85,6 +89,7 @@ void RenderConfig::Init()
                                            gpu_convergence_stability_frames);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_debug_pass, reblur_debug_pass);
     ConfigCollectionHelper::RegisterConfig(this, config_reblur_no_pt_blend, reblur_no_pt_blend);
+    ConfigCollectionHelper::RegisterConfig(this, config_reblur_ghosting_yaw_step, reblur_ghosting_yaw_step);
     Validate();
 }
 
@@ -154,6 +159,13 @@ void RenderConfig::Validate()
         Log(Warn, "gpu_convergence_stability_frames must be positive. reset to 16");
         config_gpu_convergence_stability_frames.Set(16u);
         gpu_convergence_stability_frames = 16;
+    }
+
+    if (reblur_ghosting_yaw_step <= 0.f)
+    {
+        Log(Warn, "reblur_ghosting_yaw_step must be positive. reset to 3.0");
+        config_reblur_ghosting_yaw_step.Set(3.0f);
+        reblur_ghosting_yaw_step = 3.0f;
     }
 
     if (use_ssao)

@@ -2,7 +2,7 @@
 {
     uint2 resolution;
     uint frame_index;
-    uint composite_mode; // 0 = normal, 1 = diagnostic passthrough (skip albedo modulation)
+    uint composite_mode; // 0 = normal, 1 = passthrough diffuse, 2 = diffuse, 3 = specular, 4 = albedo, 5 = passthrough specular
 };
 
 [[vk::binding(1, 0)]] Texture2D<float4> denoisedDiffuse;
@@ -30,11 +30,17 @@ void main(uint3 DTid : SV_DispatchThreadID)
         return;
 
     // Diagnostic passthrough: output denoisedDiffuse directly without albedo
-    // modulation. Used for TA diagnostic modes (disocclusion map, motion vectors,
-    // depth test) where the denoised output contains diagnostic data, not radiance.
+    // modulation. Used for TA / TS diagnostics where the denoised output
+    // contains debug data instead of radiance.
     if (composite_mode == 1)
     {
         outputImage[pixel] = denoisedDiffuse[pixel];
+        return;
+    }
+
+    if (composite_mode == 5)
+    {
+        outputImage[pixel] = denoisedSpecular[pixel];
         return;
     }
 
@@ -52,6 +58,24 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 diff = denoisedDiffuse[pixel];
     float4 spec = denoisedSpecular[pixel];
     float4 albedo = albedoMetallic[pixel];
+
+    if (composite_mode == 2)
+    {
+        outputImage[pixel] = float4(diff.rgb * albedo.rgb, 1.0);
+        return;
+    }
+
+    if (composite_mode == 3)
+    {
+        outputImage[pixel] = float4(spec.rgb, 1.0);
+        return;
+    }
+
+    if (composite_mode == 4)
+    {
+        outputImage[pixel] = float4(albedo.rgb, 1.0);
+        return;
+    }
 
 
     float3 denoised_color = diff.rgb * albedo.rgb + spec.rgb;

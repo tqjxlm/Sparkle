@@ -23,6 +23,10 @@ Tests included:
  22. Denoiser history preservation — pure denoiser quality after camera nudge (no PT blend)
  23. Denoised motion luminance — luminance stability during continuous camera motion
  24. TAHistory convergence — TAHistory debug mode shows converging history
+ 27. Repeated-motion contamination — history-valid leading shells stay clean across successive nudges
+ 28. Repeated-motion TA confidence — contaminated leading shells should not retain large TA accumulation
+ 29. Repeated-motion specular TA confidence — contaminated specular leading shells should not retain large TA accumulation
+ 30. Repeated-motion specular contamination — specular leading shells stay clean across successive nudges
 
 Usage:
   python tests/reblur/reblur_test_suite.py --framework glfw [--skip_build]
@@ -369,6 +373,38 @@ def main():
         "26. Semantic Run 1 end-to-end shell regression",
         show_output=True)
     results.append(("Semantic Run 1 end-to-end shell", ok, dur))
+
+    # --- Test 27: Repeated-motion contamination regression ---
+    repeated_motion_py = os.path.join(
+        SCRIPT_DIR, "test_repeated_motion_contamination.py")
+    ok, dur, _ = run_command(
+        [py, repeated_motion_py, "--framework", fw, "--skip_build"] + extra_args,
+        "27. Repeated-motion contamination regression",
+        show_output=True)
+    results.append(("Repeated-motion contamination", ok, dur))
+
+    # --- Test 28: Repeated-motion TA confidence regression ---
+    repeated_motion_ta_py = os.path.join(
+        SCRIPT_DIR, "test_repeated_motion_ta_confidence.py")
+    ok, dur, _ = run_command(
+        [py, repeated_motion_ta_py, "--framework", fw, "--skip_build"] + extra_args,
+        "28. Repeated-motion TA confidence regression",
+        show_output=True)
+    results.append(("Repeated-motion TA confidence", ok, dur))
+
+    ok, dur, _ = run_command(
+        [py, repeated_motion_ta_py, "--framework", fw, "--skip_build",
+         "--eval_debug_pass", "CompositeSpecular", "--ta_channel", "specular"] + extra_args,
+        "29. Repeated-motion specular TA confidence regression",
+        show_output=True)
+    results.append(("Repeated-motion specular TA confidence", ok, dur))
+
+    ok, dur, _ = run_command(
+        [py, repeated_motion_py, "--framework", fw, "--skip_build",
+         "--eval_debug_pass", "CompositeSpecular"] + extra_args,
+        "30. Repeated-motion specular contamination regression",
+        show_output=True)
+    results.append(("Repeated-motion specular contamination", ok, dur))
 
     # --- Summary ---
     total_duration = sum(dur for _, _, dur in results)

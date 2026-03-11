@@ -70,19 +70,23 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 center_diff = inDiffuse[pixel];
     float4 center_spec = inSpecular[pixel];
 
-    // Bilateral reconstruction: only for recently disoccluded pixels (first N frames)
+    // Bilateral reconstruction: diffuse and specular need separate gating.
+    // On repeated camera motion, coupling them through min() lets short diffuse
+    // history pull smooth specular through an unnecessarily wide reconstruction.
+    bool needs_diff_bilateral = diff_accum_speed < history_fix_frame_num;
+    bool needs_spec_bilateral = spec_accum_speed < history_fix_frame_num;
     float min_accum = min(diff_accum_speed, spec_accum_speed);
-    bool needs_bilateral = min_accum < history_fix_frame_num;
 
     float4 result_diff = center_diff;
     float4 result_spec = center_spec;
 
-    if (needs_bilateral)
+    if (needs_diff_bilateral || needs_spec_bilateral)
     {
         float4 nr = inNormalRoughness[pixel];
         float3 center_normal = DecodeNormalOct(nr.xy);
         float center_roughness = nr.z;
         uint center_instance_id = uint(round(nr.a * 1023.0));
+        float smc = GetSpecMagicCurve(center_roughness);
 
         float frustum_size = GetFrustumSize(min_rect_dim_mul_unproject, center_viewZ);
         float3 center_Xv = GetViewSpacePosition(pixel, center_viewZ);
@@ -96,7 +100,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
         float spec_hit_sum = center_spec.a;
         float spec_weight_sum = 1.0;
 
-        float stride = history_fix_stride * (1.0 - min_accum / history_fix_frame_num);
+        float diff_stride = history_fix_stride * (1.0 - diff_accum_speed / history_fix_frame_num);
+        float spec_stride = history_fix_stride * (1.0 - spec_accum_speed / history_fix_frame_num);
+        spec_stride *= lerp(0.25, 1.0, smc);
+        float spec_non_linear_accum_speed = 1.0 / (1.0 + spec_accum_speed);
+        float2 spec_hit_weight_params =
+            GetHitDistanceWeightParams(center_spec.a, spec_non_linear_accum_speed, center_roughness);
 
         int radius = REBLUR_HISTORY_FIX_FILTER_RADIUS;
         for (int dy = -radius; dy <= radius; dy++)
@@ -109,62 +118,108 @@ void main(uint3 DTid : SV_DispatchThreadID)
                 if (abs(dx) + abs(dy) == radius * 2)
                     continue;
 
-                int2 sample_pixel = int2(pixel) + int2(int(round(float(dx) * stride)), int(round(float(dy) * stride)));
-                sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
-
-                float sample_viewZ = inViewZ[sample_pixel];
-                if (sample_viewZ > denoising_range)
-                    continue;
-
-                float4 sample_nr = inNormalRoughness[sample_pixel];
-                float3 sample_normal = DecodeNormalOct(sample_nr.xy);
-                float sample_roughness = sample_nr.z;
-
-                // Instance ID edge-stopping: prevent cross-object reconstruction.
-                // Without this, disoccluded floor pixels pull object radiance from
-                // nearby converged object pixels via the (1+accum) weight preference.
-                uint sample_instance_id = uint(round(sample_nr.a * 1023.0));
-                if (sample_instance_id != center_instance_id)
-                    continue;
-
-                float cos_angle = saturate(dot(center_normal, sample_normal));
-                float angle = acos(cos_angle);
-                float normal_threshold = lobe_angle_fraction * 3.14159265;
-                float w_normal = smoothstep(normal_threshold, 0.0, angle);
-
-                float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
-                float w_geom = smoothstep(1.0, 0.0, abs(dot(center_Nv, sample_Xv - center_Xv)) /
-                                                       max(plane_dist_sensitivity * frustum_size, 1e-6));
-
                 float dist_sq = float(dx * dx + dy * dy) / float((2 * radius + 1) * (2 * radius + 1));
                 float w_gauss = exp(-dist_sq * 2.0);
 
-                float2 sample_packed = inInternalData[sample_pixel];
-                float sample_diff_accum, sample_spec_accum;
-                UnpackInternalData(sample_packed, sample_diff_accum, sample_spec_accum);
+                if (needs_diff_bilateral)
+                {
+                    int2 sample_pixel = int2(pixel) +
+                        int2(int(round(float(dx) * diff_stride)), int(round(float(dy) * diff_stride)));
+                    sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
 
-                float w_diff = w_normal * w_geom * w_gauss * (1.0 + sample_diff_accum);
+                    float sample_viewZ = inViewZ[sample_pixel];
+                    if (sample_viewZ <= denoising_range)
+                    {
+                        float4 sample_nr = inNormalRoughness[sample_pixel];
+                        float3 sample_normal = DecodeNormalOct(sample_nr.xy);
 
-                float4 sample_diff = inDiffuse[sample_pixel];
-                diff_sum += sample_diff.rgb * w_diff;
-                diff_hit_sum += sample_diff.a * w_diff;
-                diff_weight_sum += w_diff;
+                        uint sample_instance_id = uint(round(sample_nr.a * 1023.0));
+                        if (sample_instance_id == center_instance_id)
+                        {
+                            float cos_angle = saturate(dot(center_normal, sample_normal));
+                            float angle = acos(cos_angle);
+                            float normal_threshold = lobe_angle_fraction * 3.14159265;
+                            float w_normal = smoothstep(normal_threshold, 0.0, angle);
 
-                float w_roughness = GetRoughnessWeight(center_roughness, sample_roughness, roughness_fraction);
-                float w_spec = w_normal * w_geom * w_gauss * w_roughness * (1.0 + sample_spec_accum);
+                            float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
+                            float w_geom = smoothstep(
+                                1.0, 0.0,
+                                abs(dot(center_Nv, sample_Xv - center_Xv)) /
+                                max(plane_dist_sensitivity * frustum_size, 1e-6));
 
-                float4 sample_spec = inSpecular[sample_pixel];
-                spec_sum += sample_spec.rgb * w_spec;
-                spec_hit_sum += sample_spec.a * w_spec;
-                spec_weight_sum += w_spec;
+                            float2 sample_packed = inInternalData[sample_pixel];
+                            float sample_diff_accum, sample_spec_accum_unused;
+                            UnpackInternalData(sample_packed, sample_diff_accum, sample_spec_accum_unused);
+
+                            float w_diff = w_normal * w_geom * w_gauss * (1.0 + sample_diff_accum);
+
+                            float4 sample_diff = inDiffuse[sample_pixel];
+                            diff_sum += sample_diff.rgb * w_diff;
+                            diff_hit_sum += sample_diff.a * w_diff;
+                            diff_weight_sum += w_diff;
+                        }
+                    }
+                }
+
+                if (needs_spec_bilateral)
+                {
+                    int2 sample_pixel = int2(pixel) +
+                        int2(int(round(float(dx) * spec_stride)), int(round(float(dy) * spec_stride)));
+                    sample_pixel = clamp(sample_pixel, int2(0, 0), int2(resolution) - int2(1, 1));
+
+                    float sample_viewZ = inViewZ[sample_pixel];
+                    if (sample_viewZ <= denoising_range)
+                    {
+                        float4 sample_nr = inNormalRoughness[sample_pixel];
+                        float3 sample_normal = DecodeNormalOct(sample_nr.xy);
+                        float sample_roughness = sample_nr.z;
+
+                        uint sample_instance_id = uint(round(sample_nr.a * 1023.0));
+                        if (sample_instance_id == center_instance_id)
+                        {
+                            float cos_angle = saturate(dot(center_normal, sample_normal));
+                            float angle = acos(cos_angle);
+                            float normal_threshold = lobe_angle_fraction * 3.14159265;
+                            float w_normal = smoothstep(normal_threshold, 0.0, angle);
+
+                            float3 sample_Xv = GetViewSpacePosition(uint2(sample_pixel), sample_viewZ);
+                            float w_geom = smoothstep(
+                                1.0, 0.0,
+                                abs(dot(center_Nv, sample_Xv - center_Xv)) /
+                                max(plane_dist_sensitivity * frustum_size, 1e-6));
+
+                            float2 sample_packed = inInternalData[sample_pixel];
+                            float sample_diff_accum_unused, sample_spec_accum;
+                            UnpackInternalData(sample_packed, sample_diff_accum_unused, sample_spec_accum);
+
+                            float w_roughness =
+                                GetRoughnessWeight(center_roughness, sample_roughness, roughness_fraction);
+                            float4 sample_spec = inSpecular[sample_pixel];
+                            float w_hit = ComputeWeight(
+                                sample_spec.a, spec_hit_weight_params.x, spec_hit_weight_params.y);
+                            float w_spec =
+                                w_normal * w_geom * w_gauss * w_roughness * w_hit * (1.0 + sample_spec_accum);
+
+                            spec_sum += sample_spec.rgb * w_spec;
+                            spec_hit_sum += sample_spec.a * w_spec;
+                            spec_weight_sum += w_spec;
+                        }
+                    }
+                }
             }
         }
 
-        float inv_diff_w = 1.0 / max(diff_weight_sum, 1e-6);
-        float inv_spec_w = 1.0 / max(spec_weight_sum, 1e-6);
+        if (needs_diff_bilateral)
+        {
+            float inv_diff_w = 1.0 / max(diff_weight_sum, 1e-6);
+            result_diff = float4(diff_sum * inv_diff_w, diff_hit_sum * inv_diff_w);
+        }
 
-        result_diff = float4(diff_sum * inv_diff_w, diff_hit_sum * inv_diff_w);
-        result_spec = float4(spec_sum * inv_spec_w, spec_hit_sum * inv_spec_w);
+        if (needs_spec_bilateral)
+        {
+            float inv_spec_w = 1.0 / max(spec_weight_sum, 1e-6);
+            result_spec = float4(spec_sum * inv_spec_w, spec_hit_sum * inv_spec_w);
+        }
     }
 
     // Anti-firefly clamping: spatial neighborhood mean ± 2σ clamp.

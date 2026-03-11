@@ -320,12 +320,13 @@ tests/reblur/
   MotionLuminanceTrackTest.cpp          # Luminance tracking during motion
 
   # Python test suites
-  reblur_test_suite.py                  # Master suite (26 tests)
+  reblur_test_suite.py                  # Master suite (27 tests)
   reblur_pass_validation.py             # Per-pass spatial validation
   reblur_temporal_validation.py         # Per-pass temporal validation
   reblur_motion_validation.py           # Camera motion quality tests
   test_converged_history.py             # History preservation after camera nudge
   test_motion_side_history.py           # Motion-side shell regression after camera nudge
+  test_repeated_motion_contamination.py # Repeated-motion history-valid shell regression
   test_run1_semantic_e2e.py             # Semantic Run 1 shell regression on e2e output
   test_denoiser_history.py              # Pure denoiser quality after nudge
   test_denoised_motion_luma.py          # Luminance stability during motion
@@ -457,7 +458,7 @@ On first scene load, `GPURenderer` calls `reblur_->Reset()` to clear any history
 - **Disocclusion detection**: depth + normal + instance_id agreement tests
 - **Disocclusion handling**: history initialized to current sample (not zero) to preserve energy
 - Maintains per-pixel accumulation speed counter in `internalData` (RG16Float). Raw accum speeds (0-63) are stored, NOT normalized to [0,1]
-- **Specular parallax rejection**: for smooth surfaces with camera motion (MV > 1.5px), reduces specular accumulation speed proportional to motion magnitude and inversely proportional to roughness. The 1.5px threshold avoids false triggers from sub-pixel TAA jitter (~0.7px)
+- **Specular history confidence**: under camera motion, specular TA uses a continuous virtual-motion proxy built from surface motion, normalized specular hit distance, roughness, and history length. This approximates the missing NRD virtual-motion path and suppresses repeated-motion ghosting on sharp, far-hit reflections even when local surface motion stays subpixel.
 - **Firefly suppression**: only active at `accumSpeed >= 16`, uses 4x relative luminance clamp. At low accumulation, the history reference is too noisy for reliable clamping
 
 #### 4. History Fix
@@ -581,7 +582,7 @@ python3 build.py --framework <FRAMEWORK>  # Build first
 python3 tests/reblur/reblur_test_suite.py --framework <FRAMEWORK>
 ```
 
-The master suite (`reblur_test_suite.py`) runs 25 test cases covering:
+The master suite (`reblur_test_suite.py`) runs 27 test cases covering:
 
 | Category              | Tests | Validates                                                       |
 | --------------------- | ----- | --------------------------------------------------------------- |
@@ -593,10 +594,10 @@ The master suite (`reblur_test_suite.py`) runs 25 test cases covering:
 | Motion infrastructure | 6     | Matrix storage, MV computation, reprojection, static regression |
 | Ghosting              | 1     | Camera nudge cross-object ghosting detection                    |
 | Camera motion quality | 1     | Temporal stability and reconvergence under motion               |
-| History preservation  | 4     | Converged history, motion-side shell regression, denoiser-only quality, motion luminance |
+| History preservation  | 5     | Converged history, motion-side shell regression, repeated-motion contamination, denoiser-only quality, motion luminance |
 | End-to-end            | 1     | Full pipeline FLIP vs ground truth                              |
 
-**Latest results (2026-03-02):** 26 passed, 0 failed (697.5s total).
+**Latest full-suite snapshot:** the repeated-motion contamination regression added on 2026-03-09 is expected to pass on the current moving-camera ghosting fix.
 
 ### Quality Targets
 
@@ -665,7 +666,7 @@ The `--reblur_debug_pass` flag accepts enum names and controls which pipeline st
 
 **Cross-object ghosting**: Objects leaving radiance trails on adjacent surfaces during camera motion. Instance_id edge-stopping in BilinearHistorySample, spatial blur, HistoryFix, and CatmullRom prevents cross-object contamination. Use `--reblur_debug_pass TAMaterialId` to visualize instance_id boundaries.
 
-**Ghosting under camera motion**: Verify that `CameraRenderProxy` correctly stores previous-frame matrices. Check `disocclusion_threshold` -- too large allows stale history, too small causes flickering.
+**Ghosting under camera motion**: Verify that `CameraRenderProxy` correctly stores previous-frame matrices. Check `disocclusion_threshold` -- too large allows stale history, too small causes flickering. For low-roughness reflections, also inspect `TemporalAccumSpecular`, `TASpecMotionInputs`, and `TAMotionVectorFine` to confirm the continuous specular TA confidence path is reacting before surface motion reaches 1 px.
 
 **Edge artifacts at convergence**: The PT blend (`frame_index / 256`) handles this automatically. If artifacts appear before frame 256, the demodulation/remodulation may have issues in `albedo_metallic` buffer values.
 

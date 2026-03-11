@@ -88,7 +88,10 @@ void Logger::LogToScreen(const std::string &tag, const std::string &message)
         auto entry = instance_->screen_logs_.find(tag);
         if (entry == instance_->screen_logs_.end())
         {
-            ASSERT(!message.empty());
+            if (message.empty())
+            {
+                return;
+            }
             instance_->screen_log_tags_.push_back(tag);
             instance_->screen_logs_.emplace(tag, message);
         }

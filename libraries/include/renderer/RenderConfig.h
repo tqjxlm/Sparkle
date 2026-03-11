@@ -51,16 +51,34 @@ struct RenderConfig : public ConfigCollection
         Full,           // run full denoiser pipeline (default)
         PrePass,        // output after PrePass only
         Blur,           // output after Blur
+        BlurSpecular,   // output after Blur, specular term only
         PostBlur,       // output after PostBlur (skip TemporalStabilization)
+        PostBlurSpecular, // output after PostBlur, specular term only
         TemporalAccum,  // output after TemporalAccumulation
+        TemporalAccumSpecular, // output after TemporalAccumulation, specular term only
         HistoryFix,     // output after HistoryFix
+        HistoryFixSpecular, // output after HistoryFix, specular term only
         TADisocclusion, // temporal accum diagnostic: disocclusion
         TAMotionVector, // temporal accum diagnostic: motion vector
         TADepth,        // temporal accum diagnostic: depth
         TAHistory,      // temporal accum diagnostic: raw reprojected history
+        TASpecHistory,  // temporal accum diagnostic: raw reprojected specular history
         TAMaterialId,   // temporal accum diagnostic: material ID mismatch
+        TAAccumSpeed,   // temporal accum diagnostic: current/previous accum speed + footprint quality
+        TASpecAccumSpeed, // temporal accum diagnostic: specular accum speed + footprint quality
+        TASpecMotionInputs, // temporal accum diagnostic: spec accum / spec history quality / full-footprint-valid
+        TASpecQualityDelta, // temporal accum diagnostic: amplified footprint/quality deficits + full-footprint-valid
+        TASpecSurfaceInputs, // temporal accum diagnostic: roughness / normalized hit distance / spec magic curve
+        TAMotionVectorFine, // temporal accum diagnostic: motion vector with finer subpixel scale
         TSStabCount,    // temporal stabilization diagnostic: stab_count, blend, antilag
+        TSSpecBlend,    // temporal stabilization diagnostic: specular blend / antilag / footprint
+        TSSpecAntilagInputs, // temporal stabilization diagnostic: divergence / incoming spec confidence / outgoing spec confidence
+        TSSpecClampInputs, // temporal stabilization diagnostic: history delta / clamp band / divergence
+        StabilizedSpecular, // output after temporal stabilization, specular term only, before final composite
         InputComposite, // raw split input composite: diff * albedo + spec
+        CompositeDiffuse,  // final composite diffuse term only: denoisedDiffuse * stabilized albedo
+        CompositeSpecular, // final composite specular term only: denoisedSpecular
+        StabilizedAlbedo,  // stabilized composite albedo only
         Passthrough,    // no denoising, use raw split PT output
     };
 
@@ -115,6 +133,7 @@ struct RenderConfig : public ConfigCollection
     float target_framerate;
     float gpu_time_budget_ratio;
     bool reblur_no_pt_blend; // force composite to use pure denoised output
+    float reblur_ghosting_yaw_step = 3.0f; // test-only override for repeated camera-nudge size
 
 protected:
     void Validate() override;

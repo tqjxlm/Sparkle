@@ -15,12 +15,14 @@ namespace sparkle
 ///
 /// Phases:
 ///   1. Static warmup: accumulate history for WarmupFrames
-///   2. Nudge loop: for each nudge, rotate yaw by YawStep degrees, accumulate
-///      for AccumFrames, then capture a screenshot. Repeat NudgeCount times.
-///   3. Final settle: hold static for SettleFrames, capture final screenshot.
+///   2. Nudge loop: for each nudge, rotate yaw by the configured yaw step,
+///      capture an
+///      early frame after FastCaptureFrames, then hold still and capture a
+///      same-pose settled reference after SettleFrames. Repeat NudgeCount times.
 ///
 /// Screenshots are named "ghosting_before" (pre-motion baseline),
-/// "ghosting_nudge_N" (after each nudge), and "ghosting_settled" (reconverged).
+/// "ghosting_nudge_N_fast" (few frames after the nudge), and
+/// "ghosting_nudge_N_settled" (same pose after re-convergence).
 ///
 /// Usage: --test_case reblur_ghosting
 class ReblurGhostingTest : public TestCase
@@ -31,7 +33,7 @@ public:
         EnforceConfig("pipeline", std::string("gpu"));
         EnforceConfig("use_reblur", true);
         EnforceConfig("spp", 1u);
-        EnforceConfig("max_spp", 200u);
+        EnforceConfig("max_spp", 400u);
     }
 
     Result OnTick(AppFramework &app) override
@@ -41,6 +43,22 @@ public:
         {
             return Result::Pending;
         }
+
+        const float yaw_step = app.GetRenderConfig().reblur_ghosting_yaw_step;
+
+        if (!sequence_started_)
+        {
+            if (frame_ <= StartupDelayFrames)
+            {
+                return Result::Pending;
+            }
+
+            sequence_started_ = true;
+            sequence_frame_ = 0;
+            Log(Info, "{}: starting ghosting sequence after {} startup frames", GetName(), StartupDelayFrames);
+        }
+
+        sequence_frame_++;
 
         auto *orbit = dynamic_cast<OrbitCameraComponent *>(camera);
 
@@ -59,9 +77,9 @@ public:
         }
 
         // Phase 1: Static warmup
-        if (frame_ <= WarmupFrames)
+        if (sequence_frame_ <= WarmupFrames)
         {
-            if (frame_ == 1 && orbit)
+            if (sequence_frame_ == 1 && orbit)
             {
                 // Record initial pose
                 initial_yaw_ = orbit->GetYaw();
@@ -83,65 +101,76 @@ public:
         // Phase 2: Nudge loop
         if (nudge_index_ < NudgeCount)
         {
-            // Apply camera nudge at start of each nudge cycle
-            if (!nudge_applied_)
+            if (phase_ == Phase::ApplyNudge)
             {
-                current_yaw_ += YawStep;
+                current_yaw_ += yaw_step;
                 if (orbit)
                 {
                     orbit->Setup(orbit->GetCenter(), orbit->GetRadius(), orbit->GetPitch(), current_yaw_);
                 }
-                nudge_frame_ = frame_;
-                nudge_applied_ = true;
-                Log(Info, "{}: nudge {} — yaw {:.1f} at frame {}", GetName(), nudge_index_, current_yaw_, frame_);
-            }
-
-            // Accumulate for AccumFrames before capturing
-            if (frame_ < nudge_frame_ + AccumFrames)
-            {
+                phase_start_frame_ = sequence_frame_;
+                phase_ = Phase::CaptureFast;
+                Log(Info, "{}: nudge {} — yaw {:.1f} at sequence frame {}", GetName(), nudge_index_, current_yaw_,
+                    sequence_frame_);
                 return Result::Pending;
             }
 
-            // Capture screenshot after accumulation
-            auto name = std::format("ghosting_nudge_{}", nudge_index_);
-            active_request_ = app.GetRenderFramework()->RequestTakeScreenshot(name);
-            nudge_index_++;
-            nudge_applied_ = false;
-            return Result::Pending;
+            if (phase_ == Phase::CaptureFast)
+            {
+                if (sequence_frame_ < phase_start_frame_ + FastCaptureFrames)
+                {
+                    return Result::Pending;
+                }
+
+                auto name = std::format("ghosting_nudge_{}_fast", nudge_index_);
+                active_request_ = app.GetRenderFramework()->RequestTakeScreenshot(name);
+                phase_start_frame_ = sequence_frame_;
+                phase_ = Phase::CaptureSettled;
+                return Result::Pending;
+            }
+
+            if (phase_ == Phase::CaptureSettled)
+            {
+                if (sequence_frame_ < phase_start_frame_ + SettleFrames)
+                {
+                    return Result::Pending;
+                }
+
+                auto name = std::format("ghosting_nudge_{}_settled", nudge_index_);
+                active_request_ = app.GetRenderFramework()->RequestTakeScreenshot(name);
+                nudge_index_++;
+                phase_start_frame_ = sequence_frame_;
+                phase_ = Phase::ApplyNudge;
+                return Result::Pending;
+            }
         }
 
-        // Phase 3: Settle (hold camera still, reconverge)
-        if (frame_ < nudge_frame_ + AccumFrames + SettleFrames)
-        {
-            return Result::Pending;
-        }
-
-        // Capture final settled screenshot
-        if (!settled_captured_)
-        {
-            active_request_ = app.GetRenderFramework()->RequestTakeScreenshot("ghosting_settled");
-            settled_captured_ = true;
-            return Result::Pending;
-        }
-
-        Log(Info, "{}: all {} screenshots captured — PASS", GetName(), NudgeCount + 2);
+        Log(Info, "{}: all {} screenshots captured — PASS", GetName(), 1 + NudgeCount * 2);
         return Result::Pass;
     }
 
 private:
+    enum class Phase : uint8_t
+    {
+        ApplyNudge,
+        CaptureFast,
+        CaptureSettled,
+    };
+
     static constexpr uint32_t WarmupFrames = 30;
+    static constexpr uint32_t StartupDelayFrames = 10;
     static constexpr uint32_t NudgeCount = 5;
-    static constexpr float YawStep = 3.0f; // degrees per nudge
-    static constexpr uint32_t AccumFrames = 10;
+    static constexpr uint32_t FastCaptureFrames = 2;
     static constexpr uint32_t SettleFrames = 30;
 
     float initial_yaw_ = 0.0f;
     float current_yaw_ = 0.0f;
     uint32_t nudge_index_ = 0;
-    uint32_t nudge_frame_ = 0;
-    bool nudge_applied_ = false;
+    uint32_t phase_start_frame_ = 0;
+    uint32_t sequence_frame_ = 0;
     bool before_captured_ = false;
-    bool settled_captured_ = false;
+    bool sequence_started_ = false;
+    Phase phase_ = Phase::ApplyNudge;
     std::shared_ptr<ScreenshotRequest> active_request_;
 };
 

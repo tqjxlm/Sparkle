@@ -37,6 +37,37 @@
 [[vk::binding(11, 0)]] RWTexture2D<float4> outSpecular;
 [[vk::binding(12, 0)]] RWTexture2D<float2> outInternalData;
 
+float ComputeSpecularSurfaceHistoryConfidence(float motion_pixels, float center_roughness,
+                                              float current_hit_norm, float history_hit_norm,
+                                              float prev_spec_accum_speed)
+{
+    float spec_magic = saturate(GetSpecMagicCurve(center_roughness));
+    float spec_sharpness = 1.0 - spec_magic;
+    float hit_norm = max(current_hit_norm, history_hit_norm);
+
+    // Surface motion underestimates reflection motion. Approximate the missing
+    // virtual-motion path by amplifying tiny camera motion on far, sharp lobes.
+    float virtual_motion_pixels =
+        motion_pixels * (1.0 + REBLUR_TA_SPEC_VIRTUAL_MOTION_SCALE * hit_norm * spec_sharpness);
+    virtual_motion_pixels *= 1.0 + saturate(prev_spec_accum_speed / 4.0);
+
+    // Sharp, long-hit specular should tolerate much less motion than rough,
+    // near-surface reflections. Normalized hit distance is already scene-scale
+    // aware, so use it directly as the parallax proxy here.
+    float allowable_motion_pixels =
+        lerp(REBLUR_TA_SPEC_MIN_VIRTUAL_LOBE_PX, REBLUR_TA_SPEC_MAX_VIRTUAL_LOBE_PX, spec_magic);
+    allowable_motion_pixels /= 1.0 + hit_norm;
+
+    float motion_ratio = virtual_motion_pixels / max(allowable_motion_pixels, 1e-4);
+    float motion_confidence = 1.0 - smoothstep(0.1, 1.0, motion_ratio);
+
+    float hit_dist_delta = abs(current_hit_norm - history_hit_norm);
+    float hit_dist_confidence =
+        1.0 / (1.0 + hit_dist_delta * REBLUR_TA_SPEC_HITDIST_CONFIDENCE_SCALE * (1.0 + 4.0 * spec_sharpness));
+
+    return saturate(motion_confidence * hit_dist_confidence);
+}
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void main(uint3 DTid : SV_DispatchThreadID)
@@ -60,6 +91,22 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 current_spec = inSpecular[pixel];
     float4 nr = inNormalRoughness[pixel];
     float3 center_normal = DecodeNormalOct(nr.xy);
+    float center_roughness = nr.z;
+    float currentMaterialIdNorm = nr.a;
+
+    bool boundary_band = false;
+    static const int boundary_radius = 2;
+    [unroll]
+    for (int dy = -boundary_radius; dy <= boundary_radius && !boundary_band; dy++)
+    {
+        [unroll]
+        for (int dx = -boundary_radius; dx <= boundary_radius && !boundary_band; dx++)
+        {
+            int2 np = clamp(int2(pixel) + int2(dx, dy), int2(0, 0), int2(resolution) - int2(1, 1));
+            float4 npnr = inNormalRoughness[uint2(np)];
+            boundary_band = abs(npnr.a - currentMaterialIdNorm) > 0.0005;
+        }
+    }
 
     // First frame or reset: output current data with accumSpeed = 0
     if (reset_history != 0)
@@ -72,6 +119,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     // Reprojection via motion vectors
     float2 motionVec = inMotionVectors[pixel];
+    float motion_pixels = length(motionVec * float2(resolution));
     float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
     float2 prevUV = currentUV + motionVec;
 
@@ -81,6 +129,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // Read previous frame data with occlusion-aware bilinear sampling
     float footprintQuality = 0.0;
     bool historyValid = false;
+    bool allSamplesValid = false;
     float4 hist_diff = float4(0, 0, 0, 0);
     float4 hist_spec = float4(0, 0, 0, 0);
     float prev_diff_accum_speed = 0.0;
@@ -91,10 +140,8 @@ void main(uint3 DTid : SV_DispatchThreadID)
         int2 prevPixelCenter = int2(prevUV * float2(resolution));
         prevPixelCenter = clamp(prevPixelCenter, int2(0, 0), int2(resolution) - int2(1, 1));
         float expectedPrevZ = prevViewZ[prevPixelCenter];
-        float currentMaterialIdNorm = nr.a;
         int2 historyOrigin = int2(0, 0);
         float4 historyWeights = 0.0;
-        bool allSamplesValid = false;
 
         hist_diff = BilinearHistorySample(
             prevDiffHistory, prevUV, resolution,
@@ -133,7 +180,9 @@ void main(uint3 DTid : SV_DispatchThreadID)
                     hist_spec = prevSpecHistory[prevPixelCenter];
                     UnpackInternalData(prevInternalData[prevPixelCenter],
                                        prev_diff_accum_speed, prev_spec_accum_speed);
-                    footprintQuality = 1.0;
+                    // Keep the original partial-footprint quality. The center
+                    // fallback avoids cross-silhouette blending, but it does
+                    // not make the reprojection fully trustworthy again.
                 }
             }
 
@@ -163,6 +212,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     // Disocclusion: either out-of-screen or no valid history samples
     bool disoccluded = !inScreen || !historyValid;
+    float spec_history_quality = footprintQuality;
 
     // Compute new accumulation speeds - separate per channel
     float diff_accum_speed, spec_accum_speed;
@@ -188,6 +238,42 @@ void main(uint3 DTid : SV_DispatchThreadID)
         spec_accum_speed *= footprintQuality;
         diff_accum_speed = max(diff_accum_speed, 1.0);
         spec_accum_speed = max(spec_accum_speed, 1.0);
+
+        if (motion_pixels > REBLUR_TA_MOTION_RESET_THRESHOLD_PX && !allSamplesValid)
+        {
+            diff_accum_speed = min(diff_accum_speed, REBLUR_TA_MOTION_MAX_ACCUM);
+            spec_accum_speed = min(spec_accum_speed, REBLUR_TA_MOTION_MAX_ACCUM);
+        }
+
+        if (motion_pixels > REBLUR_TA_MOTION_RESET_THRESHOLD_PX && boundary_band)
+        {
+            diff_accum_speed = min(diff_accum_speed, REBLUR_TA_BOUNDARY_MOTION_MAX_ACCUM);
+            spec_accum_speed = min(spec_accum_speed, REBLUR_TA_BOUNDARY_MOTION_MAX_ACCUM);
+        }
+
+        if (motion_pixels > 0.0)
+        {
+            float spec_surface_history_confidence = ComputeSpecularSurfaceHistoryConfidence(
+                motion_pixels, center_roughness, current_spec.a, hist_spec.a, prev_spec_accum_speed);
+
+            // Keep the old surface-motion path for larger motion, but let the
+            // parallax proxy drive confidence continuously below the 1 px gate.
+            if (motion_pixels > REBLUR_TA_MOTION_RESET_THRESHOLD_PX)
+            {
+                float spec_motion_sensitivity =
+                    lerp(1.0, REBLUR_TA_SPEC_MOTION_MIN_SENSITIVITY, saturate(center_roughness));
+                float motion_gate_confidence =
+                    1.0 / (1.0 + motion_pixels * spec_motion_sensitivity * REBLUR_TA_SPEC_MOTION_CONFIDENCE_SCALE);
+                spec_surface_history_confidence = min(spec_surface_history_confidence, motion_gate_confidence);
+            }
+
+            spec_history_quality = min(spec_history_quality, spec_surface_history_confidence);
+
+            float spec_max_frames = lerp(REBLUR_TA_SPEC_MOTION_MIN_MAX_ACCUM,
+                                         REBLUR_TA_SPEC_MOTION_MAX_ACCUM,
+                                         sqrt(spec_history_quality));
+            spec_accum_speed = min(spec_accum_speed, spec_max_frames);
+        }
     }
 
     // Surface-motion reprojection is the only specular path currently implemented.
@@ -199,6 +285,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // Separate blend weights per channel
     float diff_weight = 1.0 / (1.0 + diff_accum_speed);
     float spec_weight = 1.0 / (1.0 + spec_accum_speed);
+    spec_weight = max(spec_weight, 1.0 - spec_history_quality);
 
     // Firefly suppression is NOT applied here in temporal accumulation.
     // Reason: the TA output feeds back as history (via CopyHistoryData), so any
@@ -273,6 +360,14 @@ void main(uint3 DTid : SV_DispatchThreadID)
     }
     if (debug_output == 5)
     {
+        // Raw specular history diagnostic for spec-only passthrough.
+        outDiffuse[pixel] = hist_diff;
+        outSpecular[pixel] = hist_spec;
+        outInternalData[pixel] = PackInternalData(prev_diff_accum_speed, prev_spec_accum_speed);
+        return;
+    }
+    if (debug_output == 6)
+    {
         // Material ID diagnostic:
         //   R = current material ID (normalized), G = prev material ID at reprojected position,
         //   B = material ID mismatch (1 = mismatch/disoccluded, 0 = match)
@@ -287,6 +382,87 @@ void main(uint3 DTid : SV_DispatchThreadID)
             matMismatch = abs(pnr.a - nr.a) > 0.0005;
         }
         outDiffuse[pixel] = float4(nr.a, prevMatId, matMismatch ? 1.0 : 0.0, 1.0);
+        outSpecular[pixel] = float4(0, 0, 0, 0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 7)
+    {
+        float inv_max_accum = 1.0 / max(max_accumulated_frame_num, 1.0);
+        // Diffuse RGB = current accum, previous accum, footprint quality.
+        // Specular RGB = current accum, previous accum, full-footprint-valid flag.
+        outDiffuse[pixel] = float4(
+            saturate(diff_accum_speed * inv_max_accum),
+            saturate(prev_diff_accum_speed * inv_max_accum),
+            footprintQuality,
+            1.0);
+        outSpecular[pixel] = float4(
+            saturate(spec_accum_speed * inv_max_accum),
+            saturate(prev_spec_accum_speed * inv_max_accum),
+            allSamplesValid ? 1.0 : 0.0,
+            1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 8)
+    {
+        float inv_max_accum = 1.0 / max(max_accumulated_frame_num, 1.0);
+        outDiffuse[pixel] = float4(
+            saturate(diff_accum_speed * inv_max_accum),
+            saturate(prev_diff_accum_speed * inv_max_accum),
+            footprintQuality,
+            1.0);
+        outSpecular[pixel] = float4(
+            saturate(spec_accum_speed * inv_max_accum),
+            saturate(prev_spec_accum_speed * inv_max_accum),
+            spec_history_quality,
+            1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 9)
+    {
+        float inv_max_accum = 1.0 / max(max_accumulated_frame_num, 1.0);
+        outDiffuse[pixel] = float4(0.0, 0.0, 0.0, 1.0);
+        outSpecular[pixel] = float4(
+            saturate(spec_accum_speed * inv_max_accum),
+            spec_history_quality,
+            allSamplesValid ? 1.0 : 0.0,
+            1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 10)
+    {
+        outDiffuse[pixel] = float4(0.0, 0.0, 0.0, 1.0);
+        outSpecular[pixel] = float4(
+            saturate((1.0 - footprintQuality) * 16.0),
+            saturate((1.0 - spec_history_quality) * 16.0),
+            allSamplesValid ? 1.0 : 0.0,
+            1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 11)
+    {
+        outDiffuse[pixel] = float4(0.0, 0.0, 0.0, 1.0);
+        outSpecular[pixel] = float4(
+            center_roughness,
+            current_spec.a,
+            saturate(GetSpecMagicCurve(center_roughness)),
+            1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 12)
+    {
+        // Fine-scale motion visualization for subpixel gate diagnostics.
+        float2 mv_pixels = motionVec * float2(resolution);
+        outDiffuse[pixel] = float4(
+            mv_pixels.x * 0.1 + 0.5,
+            mv_pixels.y * 0.1 + 0.5,
+            length(mv_pixels) * 0.1,
+            1.0);
         outSpecular[pixel] = float4(0, 0, 0, 0);
         outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
