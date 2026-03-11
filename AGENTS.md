@@ -60,3 +60,4 @@ See [docs/Test.md](docs/Test.md) for how to run tests, how to write test, and ho
 * **Shader errors**: Check both SPIRV compilation and Metal conversion logs
 * **RHI resources**: Use deferred deletion pattern for GPU resource cleanup
 * **Cross-platform paths**: Use `FileManager` abstraction, never raw path separators
+* **Debug runs**: Always use build.py to run the project during development for robustness. Do not run binaries directly.
