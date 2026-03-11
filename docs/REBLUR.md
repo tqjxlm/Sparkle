@@ -231,7 +231,7 @@ This eliminates demodulation/remodulation artifacts at silhouette edges that are
 
 The PT accumulation uses a separate `pt_accumulation_` texture (not the scene texture) to avoid contaminating the PT's temporal history with denoiser output. Use `--reblur_no_pt_blend true` to force pure denoised output for diagnostic purposes.
 
-When PT blend is enabled for the `Full` output, `GPURenderer` also keeps a renderer-owned history of the displayed linear color. That history is reprojected with motion vectors plus previous `viewZ` / `normalRoughness`, and blended by the current REBLUR accumulation speed. This preserves converged full-pipeline brightness across small camera nudges even though the vanilla PT accumulation itself must reset on camera motion.
+When PT blend is enabled for the `Full` output, `ReblurRendererPath` also keeps a renderer-owned history of the displayed linear color. That history is reprojected with motion vectors plus previous `viewZ` / `normalRoughness`, and blended by the current REBLUR accumulation speed. This preserves converged full-pipeline brightness across small camera nudges even though the vanilla PT accumulation itself must reset on camera motion.
 
 ### Texture Budget
 
@@ -259,16 +259,19 @@ libraries/
   include/renderer/denoiser/
     ReblurDenoiser.h              # Public API: ReblurSettings, ReblurInputBuffers,
                                   #   ReblurMatrices, ReblurDenoiser class
+    ReblurRendererPath.h          # GPU-only integration wrapper for split PT,
+                                  #   composite, and displayed-color history
   source/renderer/denoiser/
     ReblurDenoiser.cpp            # Implementation: 7-stage pipeline, texture
                                   #   management, uniform buffer updates
+    ReblurRendererPath.cpp        # Split PT dispatch, PT blend composite,
+                                  #   and final displayed-color history
 
   include/renderer/renderer/
-    GPURenderer.h                 # Integration: RenderReblurPath(), reblur_ member,
-                                  #   pt_accumulation_ texture
+    GPURenderer.h                 # Generic GPU renderer orchestration; owns the
+                                  #   optional ReblurRendererPath
   source/renderer/renderer/
-    GPURenderer.cpp               # Render flow: split PT -> denoise -> composite
-                                  #   -> final displayed-color history
+    GPURenderer.cpp               # Render flow selection + generic RT path
 
   include/renderer/
     RenderConfig.h                # CLI args: use_reblur, reblur_debug_pass,
@@ -290,6 +293,7 @@ shaders/ray_trace/
   reblur_temporal_accumulation.cs.slang # Stage 3: Motion-vector reprojection
   reblur_history_fix.cs.slang           # Stage 4: Disocclusion fill
   reblur_temporal_stabilization.cs.slang# Stage 7: Anti-lag + flicker reduction
+  reblur_copy_stabilized.cs.slang       # Helper: copy RGBA32F stabilized history into RGBA16F denoised buffers
   reblur_composite.cs.slang             # Final: remodulation + PT blend
   reblur_final_history.cs.slang         # Renderer-owned displayed-color reprojection
 
@@ -407,18 +411,20 @@ struct ReblurMatrices {
 };
 ```
 
-### GPURenderer Integration
+### Renderer Integration
 
 ```cpp
 // In GPURenderer::Render():
 if (config_.use_reblur) {
-    RenderReblurPath();  // Split PT -> Denoise -> Composite -> Tone map
+    reblur_path_->Render(*camera); // Split PT -> Denoise -> Composite -> Tone map
 } else {
     RenderVanillaPath(); // Combined PT -> Tone map
 }
 ```
 
-The `RenderReblurPath()` method:
+`GPURenderer` now only decides whether the optional `ReblurRendererPath` runs. The REBLUR-specific helper owns the split path tracer, auxiliary textures, PT accumulation buffer, composite shader, and displayed-color history pipeline.
+
+`ReblurRendererPath::Render()`:
 
 1. Dispatches the split path tracer to populate input buffers (including instance_id in `normalRoughness.a`)
 2. Constructs `ReblurMatrices` from `CameraRenderProxy` current and previous frame data
@@ -427,7 +433,7 @@ The `RenderReblurPath()` method:
 5. For `Full` output with PT blend enabled, reprojects the previous displayed linear color and writes a stabilized final-history result
 6. Passes the composited result to tone mapping
 
-On first scene load, `GPURenderer` calls `reblur_->Reset()` to clear any history accumulated during pre-scene-load frames.
+On first scene load, `GPURenderer` calls `reblur_path_->Reset()` to clear any history accumulated during pre-scene-load frames.
 
 ---
 
@@ -504,7 +510,7 @@ On first scene load, `GPURenderer` calls `reblur_->Reset()` to clear any history
 ### Displayed-Color History
 
 - **Shader**: `reblur_final_history.cs.slang`
-- Lives in `GPURenderer`, not `ReblurDenoiser`
+- Lives in `ReblurRendererPath`, not `ReblurDenoiser`
 - Reprojects the previous displayed linear color using current motion vectors plus previous `viewZ` / `normalRoughness`
 - Uses current REBLUR accumulation speed as the displayed-history reuse weight
 - Enabled only for `Full` output when PT blend is active; skipped for debug passes and `--reblur_no_pt_blend true`

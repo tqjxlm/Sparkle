@@ -4,6 +4,7 @@
 
 #include "core/Timer.h"
 #include "renderer/debug/PerformanceMonitor.h"
+#include "renderer/denoiser/ReblurRendererPath.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
@@ -14,7 +15,6 @@
 namespace sparkle
 {
 class SkyRenderProxy;
-class ReblurDenoiser;
 
 class GPURenderer : public Renderer
 {
@@ -45,18 +45,6 @@ private:
 
     void MeasurePerformance();
 
-    void InitReblurResources();
-
-    void RenderReblurPath();
-
-    void ResetFinalHistory();
-
-    [[nodiscard]] bool ShouldStabilizeFinalHistory() const;
-
-    void StabilizeFinalHistory();
-
-    void BindSplitBindlessResources();
-
     RHIResourceRef<RHIShader> compute_shader_;
     RHIResourceRef<RHIComputePass> compute_pass_;
 
@@ -80,41 +68,7 @@ private:
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
-    // REBLUR denoiser (null when disabled)
-    std::unique_ptr<ReblurDenoiser> reblur_;
-
-    // Separate PT accumulation buffer (not shared with composite output)
-    RHIResourceRef<RHIImage> pt_accumulation_;
-    RHIResourceRef<RHIRenderTarget> pt_accumulation_rt_;
-    std::unique_ptr<class ClearTexturePass> pt_clear_pass_;
-
-    // Auxiliary buffers for split path tracer
-    RHIResourceRef<RHIImage> diffuse_signal_;
-    RHIResourceRef<RHIImage> specular_signal_;
-    RHIResourceRef<RHIImage> normal_roughness_;
-    RHIResourceRef<RHIImage> view_z_;
-    RHIResourceRef<RHIImage> motion_vectors_;
-    RHIResourceRef<RHIImage> albedo_metallic_;
-
-    // Split path tracer pipeline
-    RHIResourceRef<RHIShader> split_pt_shader_;
-    RHIResourceRef<RHIPipelineState> split_pt_pipeline_;
-    RHIResourceRef<RHIBuffer> split_pt_uniform_buffer_;
-
-    // Composite pipeline
-    RHIResourceRef<RHIShader> composite_shader_;
-    RHIResourceRef<RHIPipelineState> composite_pipeline_;
-    RHIResourceRef<RHIBuffer> composite_uniform_buffer_;
-    RHIResourceRef<RHIComputePass> reblur_compute_pass_;
-
-    RHIResourceRef<RHIImage> final_history_[2];
-    RHIResourceRef<RHIImage> prev_final_view_z_;
-    RHIResourceRef<RHIImage> prev_final_normal_roughness_;
-    RHIResourceRef<RHIShader> final_history_shader_;
-    RHIResourceRef<RHIPipelineState> final_history_pipeline_;
-    RHIResourceRef<RHIBuffer> final_history_uniform_buffer_;
-    uint32_t final_history_ping_pong_ = 0;
-    bool final_history_valid_ = false;
+    std::unique_ptr<ReblurRendererPath> reblur_path_;
 
     struct ComputePerformanceRecord
     {
