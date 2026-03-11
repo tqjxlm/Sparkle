@@ -4,7 +4,7 @@
 
 #include "core/Timer.h"
 #include "renderer/debug/PerformanceMonitor.h"
-#include "renderer/denoiser/ReblurRendererPath.h"
+#include "renderer/denoiser/ReblurDenoiser.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
@@ -68,7 +68,7 @@ private:
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
-    std::unique_ptr<ReblurRendererPath> reblur_path_;
+    std::unique_ptr<ReblurDenoiser> reblur_denoiser_;
 
     struct ComputePerformanceRecord
     {

@@ -231,7 +231,7 @@ This eliminates demodulation/remodulation artifacts at silhouette edges that are
 
 The PT accumulation uses a separate `pt_accumulation_` texture (not the scene texture) to avoid contaminating the PT's temporal history with denoiser output. Use `--reblur_no_pt_blend true` to force pure denoised output for diagnostic purposes.
 
-When PT blend is enabled for the `Full` output, `ReblurRendererPath` also keeps a renderer-owned history of the displayed linear color. That history is reprojected with motion vectors plus previous `viewZ` / `normalRoughness`, and blended by the current REBLUR accumulation speed. This preserves converged full-pipeline brightness across small camera nudges even though the vanilla PT accumulation itself must reset on camera motion.
+When PT blend is enabled for the `Full` output, the optional REBLUR integration component also keeps a renderer-owned history of the displayed linear color. That history is reprojected with motion vectors plus previous `viewZ` / `normalRoughness`, and blended by the current REBLUR accumulation speed. This preserves converged full-pipeline brightness across small camera nudges even though the vanilla PT accumulation itself must reset on camera motion.
 
 ### Texture Budget
 
@@ -257,21 +257,24 @@ At 1920x1080 resolution, REBLUR allocates approximately **246 MB** of GPU memory
 ```text
 libraries/
   include/renderer/denoiser/
-    ReblurDenoiser.h              # Public API: ReblurSettings, ReblurInputBuffers,
-                                  #   ReblurMatrices, ReblurDenoiser class
-    ReblurRendererPath.h          # GPU-only integration wrapper for split PT,
-                                  #   composite, and displayed-color history
+    ReblurDenoiser.h              # Renderer-facing REBLUR facade used by
+                                  #   GPURenderer
+    ReblurDenoisingPipeline.h     # Internal REBLUR denoising algorithm:
+                                  #   ReblurSettings, ReblurDenoiserInputs,
+                                  #   ReblurMatrices
+    ReblurSignalGenerator.h       # Split PT signal generation for REBLUR inputs
   source/renderer/denoiser/
-    ReblurDenoiser.cpp            # Implementation: 7-stage pipeline, texture
+    ReblurDenoiser.cpp            # Facade implementation: composite,
+                                  #   final-history resolve, orchestration
+    ReblurDenoisingPipeline.cpp   # 7-stage denoising pipeline, texture
                                   #   management, uniform buffer updates
-    ReblurRendererPath.cpp        # Split PT dispatch, PT blend composite,
-                                  #   and final displayed-color history
+    ReblurSignalGenerator.cpp     # Split PT resources and per-frame signal setup
 
   include/renderer/renderer/
     GPURenderer.h                 # Generic GPU renderer orchestration; owns the
-                                  #   optional ReblurRendererPath
+                                  #   optional ReblurDenoiser
   source/renderer/renderer/
-    GPURenderer.cpp               # Render flow selection + generic RT path
+    GPURenderer.cpp               # Shared GPU render flow with optional REBLUR hooks
 
   include/renderer/
     RenderConfig.h                # CLI args: use_reblur, reblur_debug_pass,
@@ -350,43 +353,65 @@ namespace sparkle {
 
 class ReblurDenoiser {
 public:
-    // Construct with RHI context and render resolution.
-    // Allocates all internal textures and creates compute pipelines.
-    ReblurDenoiser(RHIContext* rhi, uint32_t width, uint32_t height);
+    // Renderer-facing REBLUR facade owned by GPURenderer.
+    ReblurDenoiser(
+        const RenderConfig& render_config,
+        RHIContext* rhi,
+        Vector2UInt image_size,
+        RHIImage* scene_texture,
+        RHIImage* performance_sample_stats,
+        RHITLAS* tlas
+    );
     ~ReblurDenoiser();
 
-    // Run the complete REBLUR denoising pipeline for one frame.
-    //   inputs      - path tracer output textures
-    //   settings    - tunable denoiser parameters
-    //   matrices    - current and previous frame camera matrices
-    //   frame_index - monotonically increasing frame counter
-    //   debug_pass  - ReblurDebugPass enum value
+    void BindBindlessResources(const BindlessManager& bindless_manager);
+    void BindSkyLight(const SkyRenderProxy* sky_light);
+    void BindTlas(RHITLAS* tlas, bool force_rebind = false);
+    void ClearPathTracingAccumulation();
+    void PrepareForPathTracing();
+    void UpdateFrameData(
+        const CameraRenderProxy& camera,
+        const SkyRenderProxy* sky_light,
+        const DirectionalLightRenderProxy* dir_light,
+        const ReblurPathTracingParameters& parameters
+    );
+    const RHIResourceRef<RHIPipelineState>& GetPathTracingPipeline() const;
+    void ResolveSceneTexture(const CameraRenderProxy& camera);
+    void Reset();
+    void ResetFinalHistory();
+};
+
+} // namespace sparkle
+```
+
+### ReblurDenoisingPipeline
+
+```cpp
+class ReblurDenoisingPipeline {
+public:
+    // Internal denoising algorithm used by ReblurDenoiser.
+    ReblurDenoisingPipeline(RHIContext* rhi, uint32_t width, uint32_t height);
+
     void Denoise(
-        const ReblurInputBuffers& inputs,
+        const ReblurDenoiserInputs& inputs,
         const ReblurSettings& settings,
         const ReblurMatrices& matrices,
         uint32_t frame_index,
         RenderConfig::ReblurDebugPass debug_pass = RenderConfig::ReblurDebugPass::Full
     );
 
-    // Access denoised output after Denoise() returns.
     RHIImage* GetDenoisedDiffuse() const;
     RHIImage* GetDenoisedSpecular() const;
-
-    // Access internal accumulation data (for debug/composite binding).
     RHIImage* GetInternalData() const;
-
-    // Reset all history buffers (e.g., after scene change or scene load).
+    RHIImage* GetStabilizedAlbedoMetallic() const;
     void Reset();
 };
-
-} // namespace sparkle
 ```
 
-### ReblurInputBuffers
+### ReblurDenoiserInputs
 
 ```cpp
-struct ReblurInputBuffers {
+struct ReblurDenoiserInputs {
     RHIImage* diffuse_radiance_hit_dist;  // RGBA16F: demodulated diffuse + norm hit dist
     RHIImage* specular_radiance_hit_dist; // RGBA16F: specular radiance + norm hit dist
     RHIImage* normal_roughness;           // RGBA16U: octahedral normal (rg) + roughness (b)
@@ -415,25 +440,39 @@ struct ReblurMatrices {
 
 ```cpp
 // In GPURenderer::Render():
-if (config_.use_reblur) {
-    reblur_path_->Render(*camera); // Split PT -> Denoise -> Composite -> Tone map
+scene_texture_->Transition(...StorageWrite...);
+performance_sample_stats_->Transition(...StorageWrite...);
+
+auto primary_pipeline = pipeline_state_;
+if (reblur_denoiser_) {
+    reblur_denoiser_->PrepareForPathTracing();
+    primary_pipeline = reblur_denoiser_->GetPathTracingPipeline();
+}
+
+DispatchCompute(primary_pipeline);
+
+if (reblur_denoiser_) {
+    reblur_denoiser_->ResolveSceneTexture(*camera); // Denoise -> Composite -> Final history
 } else {
-    RenderVanillaPath(); // Combined PT -> Tone map
+    scene_texture_->Transition(...Read...);
 }
 ```
 
-`GPURenderer` now only decides whether the optional `ReblurRendererPath` runs. The REBLUR-specific helper owns the split path tracer, auxiliary textures, PT accumulation buffer, composite shader, and displayed-color history pipeline.
+`GPURenderer` remains the single render orchestrator. The optional `ReblurDenoiser` now behaves as the renderer-facing REBLUR facade and composes:
 
-`ReblurRendererPath::Render()`:
+1. `ReblurSignalGenerator` for split path tracing and G-buffer-like signal generation
+2. `ReblurDenoisingPipeline` for the reusable REBLUR denoising algorithm
+3. Denoiser-local composite and displayed-history resolve passes
 
-1. Dispatches the split path tracer to populate input buffers (including instance_id in `normalRoughness.a`)
-2. Constructs `ReblurMatrices` from `CameraRenderProxy` current and previous frame data
-3. Calls `reblur_->Denoise(inputs, settings, matrices, frame_index, debug_pass)`
-4. Runs the composite shader: `denoised_diff * albedo + denoised_spec`, blending with PT accumulated result
-5. For `Full` output with PT blend enabled, reprojects the previous displayed linear color and writes a stabilized final-history result
-6. Passes the composited result to tone mapping
+`ReblurDenoiser` is responsible for:
 
-On first scene load, `GPURenderer` calls `reblur_path_->Reset()` to clear any history accumulated during pre-scene-load frames.
+1. Delegating split-path-tracing setup to `ReblurSignalGenerator`
+2. Constructing `ReblurDenoiserInputs` and `ReblurMatrices` for `ReblurDenoisingPipeline`
+3. Calling `ReblurDenoisingPipeline::Denoise(...)`
+4. Running the composite shader: `denoised_diff * albedo + denoised_spec`, blending with PT accumulated result
+5. For `Full` output with PT blend enabled, reprojecting the previous displayed linear color and writing a stabilized final-history result
+
+On first scene load, `GPURenderer` calls `reblur_denoiser_->Reset()` to clear any history accumulated during pre-scene-load frames.
 
 ---
 
@@ -510,7 +549,7 @@ On first scene load, `GPURenderer` calls `reblur_path_->Reset()` to clear any hi
 ### Displayed-Color History
 
 - **Shader**: `reblur_final_history.cs.slang`
-- Lives in `ReblurRendererPath`, not `ReblurDenoiser`
+- Lives in the renderer-facing `ReblurDenoiser` facade, not `ReblurDenoisingPipeline`
 - Reprojects the previous displayed linear color using current motion vectors plus previous `viewZ` / `normalRoughness`
 - Uses current REBLUR accumulation speed as the displayed-history reuse weight
 - Enabled only for `Full` output when PT blend is active; skipped for debug passes and `--reblur_no_pt_blend true`

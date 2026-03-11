@@ -52,3 +52,5 @@
 * [ ] event based input handling
 
 ## Known Issues
+
+* [ ] GPURenderer sometimes crashs in `VulkanTLAS::Build()` / `RHIBuffer::UploadImmediate()`. Especially the first run after a new build.

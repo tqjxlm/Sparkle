@@ -2,7 +2,6 @@
 
 #include "core/math/Types.h"
 #include "renderer/RenderConfig.h"
-#include "rhi/RHIComputePass.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
@@ -18,11 +17,10 @@ class BindlessManager;
 class CameraRenderProxy;
 class ClearTexturePass;
 class DirectionalLightRenderProxy;
-class ReblurDenoiser;
 class RHIContext;
 class SkyRenderProxy;
 
-struct ReblurFrameParameters
+struct ReblurPathTracingParameters
 {
     uint32_t time_seed = 0;
     uint32_t total_sample_count = 0;
@@ -32,27 +30,32 @@ struct ReblurFrameParameters
     RenderConfig::DebugMode debug_mode = RenderConfig::DebugMode::Color;
 };
 
-class ReblurRendererPath
+class ReblurSignalGenerator
 {
 public:
-    ReblurRendererPath(const RenderConfig &render_config, RHIContext *rhi, Vector2UInt image_size,
-                       RHIImage *scene_texture, RHIImage *performance_sample_stats, RHITLAS *tlas);
-    ~ReblurRendererPath();
+    ReblurSignalGenerator(const RenderConfig &render_config, RHIContext *rhi, Vector2UInt image_size,
+                          RHIImage *scene_texture, RHIImage *performance_sample_stats, RHITLAS *tlas);
+    ~ReblurSignalGenerator();
 
     void BindBindlessResources(const BindlessManager &bindless_manager);
     void BindSkyLight(const SkyRenderProxy *sky_light);
     void BindTlas(RHITLAS *tlas, bool force_rebind = false);
-    void ClearPathAccumulation();
+    void ClearPathTracingAccumulation();
+    void PrepareForPathTracing();
     void UpdateFrameData(const CameraRenderProxy &camera, const SkyRenderProxy *sky_light,
-                         const DirectionalLightRenderProxy *dir_light, const ReblurFrameParameters &parameters);
-    void Render(const CameraRenderProxy &camera);
-    void Reset();
-    void ResetFinalHistory();
+                         const DirectionalLightRenderProxy *dir_light, const ReblurPathTracingParameters &parameters);
+
+    [[nodiscard]] const RHIResourceRef<RHIPipelineState> &GetPathTracingPipeline() const;
+    [[nodiscard]] RHIImage *GetDiffuseSignal() const;
+    [[nodiscard]] RHIImage *GetSpecularSignal() const;
+    [[nodiscard]] RHIImage *GetNormalRoughness() const;
+    [[nodiscard]] RHIImage *GetViewZ() const;
+    [[nodiscard]] RHIImage *GetMotionVectors() const;
+    [[nodiscard]] RHIImage *GetAlbedoMetallic() const;
+    [[nodiscard]] RHIImage *GetPathTracingAccumulation() const;
 
 private:
     void CreateResources();
-    void StabilizeFinalHistory();
-    [[nodiscard]] bool ShouldStabilizeFinalHistory() const;
 
     const RenderConfig &render_config_;
     RHIContext *rhi_;
@@ -60,9 +63,6 @@ private:
     RHIImage *scene_texture_ = nullptr;
     RHIImage *performance_sample_stats_ = nullptr;
     RHITLAS *tlas_ = nullptr;
-    uint32_t dispatched_sample_count_ = 0;
-
-    std::unique_ptr<ReblurDenoiser> reblur_;
 
     RHIResourceRef<RHIImage> pt_accumulation_;
     RHIResourceRef<RHIRenderTarget> pt_accumulation_rt_;
@@ -78,19 +78,5 @@ private:
     RHIResourceRef<RHIShader> split_pt_shader_;
     RHIResourceRef<RHIPipelineState> split_pt_pipeline_;
     RHIResourceRef<RHIBuffer> split_pt_uniform_buffer_;
-
-    RHIResourceRef<RHIShader> composite_shader_;
-    RHIResourceRef<RHIPipelineState> composite_pipeline_;
-    RHIResourceRef<RHIBuffer> composite_uniform_buffer_;
-    RHIResourceRef<RHIComputePass> compute_pass_;
-
-    RHIResourceRef<RHIImage> final_history_[2];
-    RHIResourceRef<RHIImage> prev_final_view_z_;
-    RHIResourceRef<RHIImage> prev_final_normal_roughness_;
-    RHIResourceRef<RHIShader> final_history_shader_;
-    RHIResourceRef<RHIPipelineState> final_history_pipeline_;
-    RHIResourceRef<RHIBuffer> final_history_uniform_buffer_;
-    uint32_t final_history_ping_pong_ = 0;
-    bool final_history_valid_ = false;
 };
 } // namespace sparkle

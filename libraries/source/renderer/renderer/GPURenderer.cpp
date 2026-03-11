@@ -145,9 +145,9 @@ void GPURenderer::InitRenderResources()
 
     if (render_config_.use_reblur)
     {
-        reblur_path_ = std::make_unique<ReblurRendererPath>(render_config_, rhi_, image_size_, scene_texture_.get(),
+        reblur_denoiser_ = std::make_unique<ReblurDenoiser>(render_config_, rhi_, image_size_, scene_texture_.get(),
                                                             performance_sample_stats_.get(), tlas_.get());
-        reblur_path_->BindBindlessResources(*scene_render_proxy_->GetBindlessManager());
+        reblur_denoiser_->BindBindlessResources(*scene_render_proxy_->GetBindlessManager());
         Log(Info, "GPURenderer: REBLUR denoiser enabled");
     }
     else
@@ -165,40 +165,37 @@ void GPURenderer::Render()
     if (camera->NeedClear())
     {
         clear_pass_->Render();
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->ClearPathAccumulation();
+            reblur_denoiser_->ClearPathTracingAccumulation();
         }
         camera->ClearPixels();
-        // NOTE: Do NOT reset reblur on camera motion. The vanilla accumulation buffer
-        // must restart from scratch on camera movement, but the reblur denoiser
-        // preserves temporal history across camera changes via motion-vector
-        // reprojection. Calling Reset() would set reset_history=1, causing the
-        // temporal accumulation shader to discard all converged history and output
-        // a raw 1-spp sample — exactly the failure mode tested by
-        // test_converged_history.py.
     }
 
-    if (reblur_path_)
+    scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                .after_stage = RHIPipelineStage::Top,
+                                .before_stage = RHIPipelineStage::ComputeShader});
+    performance_sample_stats_->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                           .after_stage = RHIPipelineStage::Top,
+                                           .before_stage = RHIPipelineStage::ComputeShader});
+
+    auto primary_pipeline = pipeline_state_;
+    if (reblur_denoiser_)
     {
-        reblur_path_->Render(*camera);
+        reblur_denoiser_->PrepareForPathTracing();
+        primary_pipeline = reblur_denoiser_->GetPathTracingPipeline();
+    }
+
+    rhi_->BeginComputePass(compute_pass_);
+    rhi_->DispatchCompute(primary_pipeline, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
+    rhi_->EndComputePass(compute_pass_);
+
+    if (reblur_denoiser_)
+    {
+        reblur_denoiser_->ResolveSceneTexture(*camera);
     }
     else
     {
-        // Original path: render to texture
-        scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                    .after_stage = RHIPipelineStage::Top,
-                                    .before_stage = RHIPipelineStage::ComputeShader});
-        performance_sample_stats_->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                               .after_stage = RHIPipelineStage::Top,
-                                               .before_stage = RHIPipelineStage::ComputeShader});
-
-        rhi_->BeginComputePass(compute_pass_);
-
-        rhi_->DispatchCompute(pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
-
-        rhi_->EndComputePass(compute_pass_);
-
         scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::ComputeShader,
                                     .before_stage = RHIPipelineStage::PixelShader});
@@ -269,9 +266,9 @@ void GPURenderer::Update()
         auto *camera = scene_render_proxy_->GetCamera();
         camera->MarkPixelDirty();
         dispatched_sample_count_ = 0;
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->Reset();
+            reblur_denoiser_->Reset();
         }
         performance_monitor_.Reset();
         scene_load_reset_done_ = true;
@@ -280,9 +277,9 @@ void GPURenderer::Update()
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
     {
         BindBindlessResources();
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->BindBindlessResources(*scene_render_proxy_->GetBindlessManager());
+            reblur_denoiser_->BindBindlessResources(*scene_render_proxy_->GetBindlessManager());
         }
     }
 
@@ -295,9 +292,9 @@ void GPURenderer::Update()
         // with a dummy black cubemap don't drag down the running average.
         scene_render_proxy_->GetCamera()->MarkPixelDirty();
         dispatched_sample_count_ = 0;
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->ResetFinalHistory();
+            reblur_denoiser_->ResetFinalHistory();
         }
         performance_monitor_.Reset();
 
@@ -326,9 +323,9 @@ void GPURenderer::Update()
 
         bind_sky_to_pipeline(pipeline_state_->GetShaderResource<RayTracingComputeShader>());
 
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->BindSkyLight(sky_light);
+            reblur_denoiser_->BindSkyLight(sky_light);
         }
     }
 
@@ -373,27 +370,27 @@ void GPURenderer::Update()
     {
         // structural change, rebuild TLAS
         tlas_->Build();
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->ResetFinalHistory();
+            reblur_denoiser_->ResetFinalHistory();
         }
         performance_monitor_.Reset();
 
         auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
         cs_resources->tlas().BindResource(tlas_, true);
 
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->BindTlas(tlas_.get(), true);
+            reblur_denoiser_->BindTlas(tlas_.get(), true);
         }
     }
     else if (!primitives_to_update.empty())
     {
         // non-structural change, update TLAS
         tlas_->Update(primitives_to_update);
-        if (reblur_path_)
+        if (reblur_denoiser_)
         {
-            reblur_path_->ResetFinalHistory();
+            reblur_denoiser_->ResetFinalHistory();
         }
         performance_monitor_.Reset();
     }
@@ -470,17 +467,17 @@ void GPURenderer::Update()
     }
     uniform_buffer_->Upload(rhi_, &ubo);
 
-    if (reblur_path_)
+    if (reblur_denoiser_)
     {
-        reblur_path_->UpdateFrameData(*camera, sky_light, dir_light,
-                                      ReblurFrameParameters{
-                                          .time_seed = time_seed,
-                                          .total_sample_count = camera->GetCumulatedSampleCount(),
-                                          .sample_per_pixel = spp,
-                                          .dispatched_sample_count = dispatched_sample_count_,
-                                          .enable_nee = render_config_.enable_nee,
-                                          .debug_mode = render_config_.debug_mode,
-                                      });
+        reblur_denoiser_->UpdateFrameData(*camera, sky_light, dir_light,
+                                          ReblurPathTracingParameters{
+                                              .time_seed = time_seed,
+                                              .total_sample_count = camera->GetCumulatedSampleCount(),
+                                              .sample_per_pixel = spp,
+                                              .dispatched_sample_count = dispatched_sample_count_,
+                                              .enable_nee = render_config_.enable_nee,
+                                              .debug_mode = render_config_.debug_mode,
+                                          });
     }
 
     screen_quad_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
