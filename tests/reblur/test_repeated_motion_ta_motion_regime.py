@@ -25,6 +25,7 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_erosion, gaussian_filter, label
 from ghosting_harness import run_ghosting_app
+from reblur_settings import get_default_max_accumulated_frame_num
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -39,7 +40,7 @@ MAX_COMPONENT_MATCH_DISTANCE = 24.0
 MIN_ANALYZED_COMPONENTS = 4
 
 MIN_CONTAMINATED_RATIO = 1.10
-MAX_ACCUMULATED_FRAME_NUM = 30.0
+MAX_ACCUMULATED_FRAME_NUM = get_default_max_accumulated_frame_num(PROJECT_ROOT)
 MOTION_DEBUG_SCALE = 10.0
 
 
@@ -388,4 +389,3 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

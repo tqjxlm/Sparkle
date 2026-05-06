@@ -481,7 +481,7 @@ def main():
     if args.analyze_only:
         archived = get_archived_paths(screenshot_dir, artifact_dir)
     else:
-        direct_run = args.skip_build and fw in ("macos", "glfw")
+        direct_run = args.skip_build and fw == "glfw"
 
         print(f"\n{'-' * 70}")
         print("  Run 0: Vanilla baseline")

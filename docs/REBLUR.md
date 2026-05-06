@@ -697,8 +697,17 @@ The `--reblur_debug_pass` flag accepts enum names and controls which pipeline st
 | `TADisocclusion` | Diagnostic: disocclusion map                                     |
 | `TAMotionVector` | Diagnostic: motion vector magnitude heatmap                      |
 | `TADepth`        | Diagnostic: depth visualization                                  |
+| `TAPlaneDistance` | Diagnostic: previous-plane mismatch plus amplified plane / size-quality deficits |
 | `TAHistory`      | Diagnostic: raw reprojected history                              |
 | `TAMaterialId`   | Diagnostic: instance_id mismatch (R=current, G=prev, B=mismatch) |
+| `TSStabCount`    | Diagnostic: stabilized-frame age / diffuse TS blend / prev age   |
+| `TSSpecBlend`    | Diagnostic: specular TS blend / antilag / footprint              |
+| `TSSpecAntilagInputs` | Diagnostic: spec divergence / incoming confidence / outgoing confidence |
+| `TSSpecClampInputs` | Diagnostic: spec history delta / clamp band / divergence      |
+| `TSDiffClampInputs` | Diagnostic: diffuse history delta / clamp band / divergence   |
+| `StabilizedDiffuse` | Post-TS diffuse output before albedo remodulation            |
+| `StabilizedSpecular` | Post-TS specular output before final composite             |
+| `CompositeDiffuseRawAlbedo` | Post-TS diffuse remodulated with current-frame albedo |
 | `Passthrough`    | Raw path tracer output (no denoising)                            |
 
 ### Common Issues

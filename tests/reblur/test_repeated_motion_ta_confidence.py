@@ -23,6 +23,7 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_erosion, gaussian_filter, label
 from ghosting_harness import run_ghosting_app
+from reblur_settings import get_default_max_accumulated_frame_num
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -39,7 +40,7 @@ MIN_ANALYZED_COMPONENTS = 4
 MIN_CONTAMINATED_RATIO = 1.10
 MIN_FOOTPRINT_QUALITY = 0.85
 MAX_TOP3_CONTAMINATED_LEAD_ACCUM = 8.0
-MAX_ACCUMULATED_FRAME_NUM = 30.0
+MAX_ACCUMULATED_FRAME_NUM = get_default_max_accumulated_frame_num(PROJECT_ROOT)
 
 
 def parse_args():
@@ -65,6 +66,16 @@ def get_screenshot_dir(framework):
 
 def load_image(path):
     return np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+
+
+def srgb_to_linear(image):
+    return np.where(image <= 0.04045,
+                    image / 12.92,
+                    ((image + 0.055) / 1.055) ** 2.4)
+
+
+def load_numeric_image(path):
+    return srgb_to_linear(load_image(path))
 
 
 def load_luminance(path):
@@ -169,7 +180,7 @@ def analyze_nudge(index, fast_path, settled_path, disocclusion_path,
     fast_hf = compute_hf_residual(fast_luma)
     settled_hf = compute_hf_residual(settled_luma)
     history_mask = load_history_mask(disocclusion_path)
-    ta_accum = load_image(ta_accum_path)
+    ta_accum = load_numeric_image(ta_accum_path)
 
     labels_prev, prev_components = extract_components(prev_material_path)
     labels_curr, curr_components = extract_components(current_material_path)
@@ -403,4 +414,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

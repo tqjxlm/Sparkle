@@ -37,6 +37,62 @@ float2 SampleBilinearTexture(Texture2D<float2> tex, int2 bilinearOrigin, uint2 r
     return result;
 }
 
+float2 CatmullRomHistorySample(
+    Texture2D<float2> prevTexture,
+    SamplerState linearSampler,
+    float2 prevUV,
+    uint2 resolution)
+{
+    float2 texSize = float2(resolution);
+    float2 samplePos = prevUV * texSize;
+    float2 centerPos = floor(samplePos - 0.5) + 0.5;
+    float2 f = saturate(samplePos - centerPos);
+
+    static const float S = 0.5;
+    float2 w0 = f * (f * (-S * f + 2.0 * S) - S);
+    float2 w1 = f * (f * ((2.0 - S) * f - (3.0 - S))) + 1.0;
+    float2 w2 = f * (f * (-(2.0 - S) * f + (3.0 - 2.0 * S)) + S);
+    float2 w3 = f * (f * (S * f - S));
+
+    float2 w12 = w1 + w2;
+    float2 tc = w2 / w12;
+
+    float2 invTexSize = 1.0 / texSize;
+
+    float2 result = float2(0.0, 0.0);
+    float totalWeight = 0.0;
+
+    float2 uv12 = (centerPos + tc) * invTexSize;
+    float weight12 = w12.x * w12.y;
+    result += prevTexture.SampleLevel(linearSampler, uv12, 0) * weight12;
+    totalWeight += weight12;
+
+    float2 uv0y = (centerPos + float2(-1.0, tc.y)) * invTexSize;
+    float weight0y = w0.x * w12.y;
+    result += prevTexture.SampleLevel(linearSampler, uv0y, 0) * weight0y;
+    totalWeight += weight0y;
+
+    float2 uv3y = (centerPos + float2(2.0, tc.y)) * invTexSize;
+    float weight3y = w3.x * w12.y;
+    result += prevTexture.SampleLevel(linearSampler, uv3y, 0) * weight3y;
+    totalWeight += weight3y;
+
+    float2 uvx0 = (centerPos + float2(tc.x, -1.0)) * invTexSize;
+    float weightx0 = w12.x * w0.y;
+    result += prevTexture.SampleLevel(linearSampler, uvx0, 0) * weightx0;
+    totalWeight += weightx0;
+
+    float2 uvx3 = (centerPos + float2(tc.x, 2.0)) * invTexSize;
+    float weightx3 = w12.x * w3.y;
+    result += prevTexture.SampleLevel(linearSampler, uvx3, 0) * weightx3;
+    totalWeight += weightx3;
+
+    if (totalWeight > 0.0)
+        result /= totalWeight;
+
+    return result;
+}
+
 float4 BilinearHistorySample(
     Texture2D<float4> prevTexture,
     float2 prevUV,
@@ -155,6 +211,108 @@ float4 BilinearHistorySample(
 
     return isValid ? SampleBilinearTexture(prevTexture, bilinearOrigin, resolution, bilinearWeights)
                    : float4(0, 0, 0, 0);
+}
+
+float2 BilinearHistorySample(
+    Texture2D<float2> prevTexture,
+    float2 prevUV,
+    uint2 resolution,
+    Texture2D<float> prevViewZ,
+    Texture2D<float4> prevNormalRough,
+    float expectedPrevZ,
+    float3 currentNormal,
+    float currentMaterialIdNorm,
+    float disocclusionThreshold,
+    float denoisingRange,
+    out float footprintQuality,
+    out bool isValid,
+    out bool allSamplesValid,
+    out int2 bilinearOrigin,
+    out float4 bilinearWeights)
+{
+    float2 prevPixelF = prevUV * float2(resolution) - 0.5;
+    int2 tl = int2(floor(prevPixelF));
+    float2 f = prevPixelF - float2(tl);
+    bilinearOrigin = tl;
+    bilinearWeights = 0.0;
+
+    float4 bw = float4(
+        (1.0 - f.x) * (1.0 - f.y),
+        f.x * (1.0 - f.y),
+        (1.0 - f.x) * f.y,
+        f.x * f.y
+    );
+
+    int2 offsets[4] = { int2(0, 0), int2(1, 0), int2(0, 1), int2(1, 1) };
+
+    float4 occMask = float4(0, 0, 0, 0);
+
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        int2 p = tl + offsets[i];
+
+        if (p.x < 0 || p.y < 0 || p.x >= int(resolution.x) || p.y >= int(resolution.y))
+            continue;
+
+        float pz = prevViewZ[p];
+        if (pz > denoisingRange)
+            continue;
+
+        float zDiff = abs(pz - expectedPrevZ);
+        float zThresh = disocclusionThreshold * max(abs(expectedPrevZ), 1.0);
+        if (zDiff > zThresh)
+            continue;
+
+        float4 pnr = prevNormalRough[p];
+        float3 pn = DecodeNormalOct(pnr.xy);
+        if (dot(pn, currentNormal) < 0.75)
+            continue;
+
+        if (abs(pnr.a - currentMaterialIdNorm) > 0.0005)
+            continue;
+
+        occMask[i] = 1.0;
+    }
+
+    float4 customWeights = bw * occMask;
+    float weightSum = dot(customWeights, float4(1, 1, 1, 1));
+    isValid = weightSum > 1e-6;
+    allSamplesValid = isValid && all(occMask > 0.5);
+
+    if (isValid)
+    {
+        if (allSamplesValid)
+        {
+            bilinearWeights = customWeights / weightSum;
+        }
+        else
+        {
+            int dominantIndex = 0;
+            float dominantWeight = customWeights.x;
+            if (customWeights.y > dominantWeight)
+            {
+                dominantIndex = 1;
+                dominantWeight = customWeights.y;
+            }
+            if (customWeights.z > dominantWeight)
+            {
+                dominantIndex = 2;
+                dominantWeight = customWeights.z;
+            }
+            if (customWeights.w > dominantWeight)
+            {
+                dominantIndex = 3;
+            }
+
+            bilinearWeights[dominantIndex] = 1.0;
+        }
+    }
+
+    footprintQuality = sqrt(saturate(weightSum));
+
+    return isValid ? SampleBilinearTexture(prevTexture, bilinearOrigin, resolution, bilinearWeights)
+                   : float2(0, 0);
 }
 
 // Catmull-Rom (5-tap optimized) history sampling.

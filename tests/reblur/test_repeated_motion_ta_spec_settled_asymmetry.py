@@ -21,6 +21,7 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_erosion, label
 from ghosting_harness import run_ghosting_app
+from reblur_settings import get_default_max_accumulated_frame_num
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -33,7 +34,7 @@ MIN_REGION_PIXELS = 200
 SHELL_EROSION_PX = 6
 MAX_COMPONENT_MATCH_DISTANCE = 24.0
 MIN_ANALYZED_COMPONENTS = 4
-MAX_ACCUMULATED_FRAME_NUM = 30.0
+MAX_ACCUMULATED_FRAME_NUM = get_default_max_accumulated_frame_num(PROJECT_ROOT)
 
 MAX_SETTLED_SPEC_TA_ACCUM_LEAD_TRAIL_ASYMMETRY = 1.08
 MAX_SETTLED_SPEC_TA_HISTORY_QUALITY_LEAD_TRAIL_ASYMMETRY = 1.05
@@ -57,6 +58,16 @@ def get_screenshot_dir(framework):
 
 def load_image(path):
     return np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+
+
+def srgb_to_linear(image):
+    return np.where(image <= 0.04045,
+                    image / 12.92,
+                    ((image + 0.055) / 1.055) ** 2.4)
+
+
+def load_numeric_image(path):
+    return srgb_to_linear(load_image(path))
 
 
 
@@ -146,7 +157,7 @@ def load_history_mask(disocclusion_path):
 
 def analyze_nudge(index, signal_path, disocclusion_path,
                   prev_material_path, current_material_path):
-    signal = load_image(signal_path)
+    signal = load_numeric_image(signal_path)
     current_accum = signal[:, :, 0] * MAX_ACCUMULATED_FRAME_NUM
     prev_accum = signal[:, :, 1] * MAX_ACCUMULATED_FRAME_NUM
     history_quality = signal[:, :, 2]
@@ -391,4 +402,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

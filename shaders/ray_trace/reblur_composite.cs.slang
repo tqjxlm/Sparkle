@@ -92,7 +92,15 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // The internalData read prevents the compiler from optimizing away the binding.
     float2 packed = internalData[pixel];
     float min_accum = min(packed.x, packed.y);
-    float pt_weight = saturate(float(frame_index) / PT_BLEND_RAMP);
+    // Quadratic ramp: at low sample counts the raw PT is extremely noisy
+    // (local_std ~ 1/sqrt(n)). A linear ramp lets 2% of 5-sample noise
+    // through, which doubles the floor local_std. The quadratic curve
+    // keeps the PT contribution negligible until enough samples exist:
+    //   5 samples → 0.04% (invisible)
+    //   64 samples → 6.25%
+    //   256 samples → 100%
+    float t = saturate(float(frame_index) / PT_BLEND_RAMP);
+    float pt_weight = t * t;
 
     // Guard ensures internalData binding is not optimized away
     float3 color = (min_accum >= 0.0)

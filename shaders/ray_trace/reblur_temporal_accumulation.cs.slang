@@ -9,6 +9,18 @@
     float max_accumulated_frame_num;
     float disocclusion_threshold;
     float denoising_range;
+    float4 view_to_view_prev_row0;
+    float4 view_to_view_prev_row1;
+    float4 view_to_view_prev_row2;
+    float4 view_to_view_prev_row3;
+    float4 view_to_world_row0;
+    float4 view_to_world_row1;
+    float4 view_to_world_row2;
+    float4 view_to_world_row3;
+    float4 camera_pos;
+    float4 prev_camera_pos;
+    float unproject_x;
+    float unproject_y;
     uint frame_index;
     uint reset_history;
     uint enable_firefly_suppression;
@@ -68,6 +80,23 @@ float ComputeSpecularSurfaceHistoryConfidence(float motion_pixels, float center_
     return saturate(motion_confidence * hit_dist_confidence);
 }
 
+float3 GetViewSpacePosition(uint2 pixel, float view_z)
+{
+    float2 uv = (float2(pixel) + 0.5) / float2(resolution);
+    float2 ndc = uv * 2.0 - 1.0;
+    return float3(ndc.x * unproject_x * view_z, ndc.y * unproject_y * view_z, view_z);
+}
+
+float3 GetWorldSpacePosition(float3 view_pos)
+{
+    float4 p = float4(
+        dot(view_to_world_row0, float4(view_pos, 1.0)),
+        dot(view_to_world_row1, float4(view_pos, 1.0)),
+        dot(view_to_world_row2, float4(view_pos, 1.0)),
+        dot(view_to_world_row3, float4(view_pos, 1.0)));
+    return p.xyz / max(abs(p.w), 1e-6);
+}
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void main(uint3 DTid : SV_DispatchThreadID)
@@ -108,6 +137,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
         }
     }
 
+    // Reprojection via motion vectors
+    float2 motionVec = inMotionVectors[pixel];
+    float motion_pixels = length(motionVec * float2(resolution));
+    float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
+    float2 prevUV = currentUV + motionVec;
+
     // First frame or reset: output current data with accumSpeed = 0
     if (reset_history != 0)
     {
@@ -116,12 +151,6 @@ void main(uint3 DTid : SV_DispatchThreadID)
         outInternalData[pixel] = PackInternalData(0.0, 0.0);
         return;
     }
-
-    // Reprojection via motion vectors
-    float2 motionVec = inMotionVectors[pixel];
-    float motion_pixels = length(motionVec * float2(resolution));
-    float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
-    float2 prevUV = currentUV + motionVec;
 
     // Check if reprojected position is in screen
     bool inScreen = all(prevUV >= 0.0) && all(prevUV <= 1.0);
@@ -134,6 +163,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float4 hist_spec = float4(0, 0, 0, 0);
     float prev_diff_accum_speed = 0.0;
     float prev_spec_accum_speed = 0.0;
+    bool centerFallbackUsed = false;
 
     if (inScreen)
     {
@@ -180,9 +210,11 @@ void main(uint3 DTid : SV_DispatchThreadID)
                     hist_spec = prevSpecHistory[prevPixelCenter];
                     UnpackInternalData(prevInternalData[prevPixelCenter],
                                        prev_diff_accum_speed, prev_spec_accum_speed);
-                    // Keep the original partial-footprint quality. The center
-                    // fallback avoids cross-silhouette blending, but it does
-                    // not make the reprojection fully trustworthy again.
+                    // Same-surface center fallback avoids the shifted bilinear
+                    // footprint entirely, so keep TA's history-quality path
+                    // consistent with FinalHistory / stabilized albedo.
+                    footprintQuality = 1.0;
+                    centerFallbackUsed = true;
                 }
             }
 
@@ -241,14 +273,20 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
         if (motion_pixels > REBLUR_TA_MOTION_RESET_THRESHOLD_PX && !allSamplesValid)
         {
-            diff_accum_speed = min(diff_accum_speed, REBLUR_TA_MOTION_MAX_ACCUM);
-            spec_accum_speed = min(spec_accum_speed, REBLUR_TA_MOTION_MAX_ACCUM);
+            float partial_motion_cap = centerFallbackUsed
+                ? REBLUR_TA_CENTER_FALLBACK_MOTION_MAX_ACCUM
+                : REBLUR_TA_MOTION_MAX_ACCUM;
+            diff_accum_speed = min(diff_accum_speed, partial_motion_cap);
+            spec_accum_speed = min(spec_accum_speed, partial_motion_cap);
         }
 
-        if (motion_pixels > REBLUR_TA_MOTION_RESET_THRESHOLD_PX && boundary_band)
+        if (motion_pixels > REBLUR_TA_MOTION_RESET_THRESHOLD_PX && boundary_band && !allSamplesValid)
         {
-            diff_accum_speed = min(diff_accum_speed, REBLUR_TA_BOUNDARY_MOTION_MAX_ACCUM);
-            spec_accum_speed = min(spec_accum_speed, REBLUR_TA_BOUNDARY_MOTION_MAX_ACCUM);
+            float boundary_motion_cap = centerFallbackUsed
+                ? REBLUR_TA_CENTER_FALLBACK_MOTION_MAX_ACCUM
+                : REBLUR_TA_BOUNDARY_MOTION_MAX_ACCUM;
+            diff_accum_speed = min(diff_accum_speed, boundary_motion_cap);
+            spec_accum_speed = min(spec_accum_speed, boundary_motion_cap);
         }
 
         if (motion_pixels > 0.0)
@@ -464,6 +502,79 @@ void main(uint3 DTid : SV_DispatchThreadID)
             length(mv_pixels) * 0.1,
             1.0);
         outSpecular[pixel] = float4(0, 0, 0, 0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 13)
+    {
+        float2 plane_weights = 0.0;
+        float plane_weight_sum = 0.0;
+
+        float3 center_view_pos = GetViewSpacePosition(pixel, center_viewZ);
+        float3 center_world_pos = GetWorldSpacePosition(center_view_pos);
+        float4 prev_view_pos_h = float4(
+            dot(view_to_view_prev_row0, float4(center_view_pos, 1.0)),
+            dot(view_to_view_prev_row1, float4(center_view_pos, 1.0)),
+            dot(view_to_view_prev_row2, float4(center_view_pos, 1.0)),
+            dot(view_to_view_prev_row3, float4(center_view_pos, 1.0)));
+        float expected_prev_view_z = prev_view_pos_h.z / max(abs(prev_view_pos_h.w), 1e-6);
+        float plane_thresh = disocclusion_threshold * max(abs(expected_prev_view_z), 1.0);
+        float3 V = normalize(camera_pos.xyz - center_world_pos);
+        float3 Vprev = normalize(prev_camera_pos.xyz - center_world_pos);
+        float NoV = abs(dot(center_normal, V));
+        float NoVprev = abs(dot(center_normal, Vprev));
+        float sizeQuality = (NoVprev + 1e-3) / (NoV + 1e-3);
+        sizeQuality *= sizeQuality;
+        sizeQuality = lerp(0.1, 1.0, saturate(sizeQuality));
+
+        if (inScreen)
+        {
+            float2 prevPixelF = prevUV * float2(resolution) - 0.5;
+            int2 tl = int2(floor(prevPixelF));
+            float2 f = prevPixelF - float2(tl);
+            float4 bw = float4(
+                (1.0 - f.x) * (1.0 - f.y),
+                f.x * (1.0 - f.y),
+                (1.0 - f.x) * f.y,
+                f.x * f.y);
+            int2 offsets[4] = { int2(0,0), int2(1,0), int2(0,1), int2(1,1) };
+
+            for (int i = 0; i < 4; i++)
+            {
+                int2 p = tl + offsets[i];
+                if (p.x < 0 || p.y < 0 || p.x >= int(resolution.x) || p.y >= int(resolution.y))
+                    continue;
+
+                float pz = prevViewZ[p];
+                if (pz > denoising_range)
+                    continue;
+
+                float4 pnr = prevNormalRoughness[p];
+                float3 pn = DecodeNormalOct(pnr.xy);
+                if (dot(pn, center_normal) < 0.75)
+                    continue;
+                if (abs(pnr.a - currentMaterialIdNorm) > 0.0005)
+                    continue;
+
+                float plane_ratio = abs(pz - expected_prev_view_z) / max(plane_thresh, 1e-6);
+                plane_weights.x += bw[i] * saturate(plane_ratio);
+                plane_weights.y += bw[i] * float(plane_ratio <= 1.0);
+                plane_weight_sum += bw[i];
+            }
+        }
+
+        float weighted_plane_ratio = plane_weight_sum > 0.0 ? plane_weights.x / plane_weight_sum : 0.0;
+        float plane_footprint_quality = plane_weight_sum > 0.0 ? sqrt(saturate(plane_weights.y / plane_weight_sum)) : 0.0;
+        outDiffuse[pixel] = float4(
+            saturate(weighted_plane_ratio),
+            saturate((1.0 - plane_footprint_quality) * 16.0),
+            saturate((1.0 - sizeQuality) * 16.0),
+            1.0);
+        outSpecular[pixel] = float4(
+            saturate(abs(expected_prev_view_z - prevViewZ[clamp(int2(prevUV * float2(resolution)), int2(0, 0), int2(resolution) - int2(1, 1))]) / max(plane_thresh, 1e-6)),
+            saturate((1.0 - footprintQuality) * 16.0),
+            0.0,
+            1.0);
         outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
     }

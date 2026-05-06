@@ -70,13 +70,17 @@ struct RenderConfig : public ConfigCollection
         TASpecQualityDelta, // temporal accum diagnostic: amplified footprint/quality deficits + full-footprint-valid
         TASpecSurfaceInputs, // temporal accum diagnostic: roughness / normalized hit distance / spec magic curve
         TAMotionVectorFine, // temporal accum diagnostic: motion vector with finer subpixel scale
+        TAPlaneDistance, // temporal accum diagnostic: NRD-style plane-distance mismatch vs current validity
         TSStabCount,    // temporal stabilization diagnostic: stab_count, blend, antilag
         TSSpecBlend,    // temporal stabilization diagnostic: specular blend / antilag / footprint
         TSSpecAntilagInputs, // temporal stabilization diagnostic: divergence / incoming spec confidence / outgoing spec confidence
         TSSpecClampInputs, // temporal stabilization diagnostic: history delta / clamp band / divergence
+        TSDiffClampInputs, // temporal stabilization diagnostic: diffuse history delta / clamp band / divergence
+        StabilizedDiffuse,  // output after temporal stabilization, diffuse term only, before albedo remodulation
         StabilizedSpecular, // output after temporal stabilization, specular term only, before final composite
         InputComposite, // raw split input composite: diff * albedo + spec
         CompositeDiffuse,  // final composite diffuse term only: denoisedDiffuse * stabilized albedo
+        CompositeDiffuseRawAlbedo, // final composite diffuse term only: denoisedDiffuse * current-frame albedo
         CompositeSpecular, // final composite specular term only: denoisedSpecular
         StabilizedAlbedo,  // stabilized composite albedo only
         Passthrough,    // no denoising, use raw split PT output

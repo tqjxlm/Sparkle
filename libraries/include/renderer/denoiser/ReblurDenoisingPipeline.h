@@ -80,10 +80,14 @@ private:
               uint32_t pass_index, RHIImage *in_diff, RHIImage *in_spec, RHIImage *out_diff, RHIImage *out_spec,
               RHIImage *internal_data, bool has_temporal_data);
     void TemporalAccumulate(const ReblurDenoiserInputs &inputs, const ReblurSettings &settings,
+                            const ReblurMatrices &matrices,
                             uint32_t debug_output = 0, bool use_alt_pipeline = false);
     void HistoryFix(const ReblurDenoiserInputs &inputs, const ReblurSettings &settings, const ReblurMatrices &matrices);
     void TemporalStabilize(const ReblurDenoiserInputs &inputs, const ReblurSettings &settings,
-                           const ReblurMatrices &matrices, uint32_t debug_output = 0);
+                           const ReblurMatrices &matrices, uint32_t debug_output = 0,
+                           bool use_alt_pipeline = false, RHIImage *out_diff = nullptr,
+                           RHIImage *out_spec = nullptr, RHIImage *out_internal_data = nullptr,
+                           bool flip_history = true);
     void StabilizeAlbedoMetallic(const ReblurDenoiserInputs &inputs, const ReblurSettings &settings);
     void CopyToOutput(RHIImage *diff, RHIImage *spec);
     void CopyPreviousFrameData(const ReblurDenoiserInputs &inputs, RHIImage *albedo_history_source = nullptr);
@@ -136,6 +140,9 @@ private:
     RHIResourceRef<RHIShader> temporal_stab_shader_;
     RHIResourceRef<RHIPipelineState> temporal_stab_pipeline_;
     RHIResourceRef<RHIBuffer> temporal_stab_ub_;
+
+    RHIResourceRef<RHIPipelineState> temporal_stab_pipeline_alt_;
+    RHIResourceRef<RHIBuffer> temporal_stab_ub_alt_;
 
     RHIResourceRef<RHIShader> copy_stabilized_shader_;
     RHIResourceRef<RHIPipelineState> copy_stabilized_pipeline_;

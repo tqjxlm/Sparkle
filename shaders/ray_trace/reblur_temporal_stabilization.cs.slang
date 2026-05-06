@@ -40,6 +40,7 @@
 
 // Motion vectors for reprojection
 [[vk::binding(13, 0)]] Texture2D<float2> inMotionVectors;
+[[vk::binding(14, 0)]] SamplerState linearSampler;
 
 // Shared memory for neighborhood luminance computation (5x5 = BORDER=2)
 #define BORDER 2
@@ -145,9 +146,51 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float spec_variance = max(0.0, spec_luma_sq_sum * inv_count - spec_mean * spec_mean);
     float spec_sigma = sqrt(spec_variance);
 
+    float diff_surface_luma_sum = 0.0;
+    float diff_surface_luma_sq_sum = 0.0;
+    float diff_surface_count = 0.0;
+    bool current_boundary = false;
+    for (int dy = -BORDER; dy <= BORDER; dy++)
+    {
+        for (int dx = -BORDER; dx <= BORDER; dx++)
+        {
+            int2 s = smem_center + int2(dx, dy);
+            int2 np = clamp(int2(pixel) + int2(dx, dy), int2(0, 0), int2(resolution) - int2(1, 1));
+            float sample_viewZ = inViewZ[np];
+            float4 sample_nr = inNormalRoughness[np];
+
+            bool same_surface = sample_viewZ <= denoising_range;
+            if (same_surface)
+            {
+                float3 sample_normal = DecodeNormalOct(sample_nr.xy);
+                same_surface =
+                    abs(sample_nr.a - current_material_id) <= 0.0005 &&
+                    dot(sample_normal, center_normal) >= 0.75;
+            }
+
+            current_boundary = current_boundary || !same_surface;
+            if (!same_surface)
+                continue;
+
+            float dl = s_DiffLuma[s.y][s.x];
+            diff_surface_luma_sum += dl;
+            diff_surface_luma_sq_sum += dl * dl;
+            diff_surface_count += 1.0;
+        }
+    }
+
+    if (current_boundary && diff_surface_count >= 6.0)
+    {
+        float diff_surface_inv = 1.0 / diff_surface_count;
+        diff_mean = diff_surface_luma_sum * diff_surface_inv;
+        diff_variance = max(0.0, diff_surface_luma_sq_sum * diff_surface_inv - diff_mean * diff_mean);
+        diff_sigma = sqrt(diff_variance);
+    }
+
     // Reproject stabilized history via motion vectors
     float2 motionVec = inMotionVectors[pixel];
     float motion_pixels = length(motionVec * float2(resolution));
+
     float2 currentUV = (float2(pixel) + 0.5) / float2(resolution);
     float2 prevUV = currentUV + motionVec;
 
@@ -187,7 +230,16 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
 
             if (stab_history_valid)
             {
-                stab_spec = SampleBilinearTexture(prevStabilizedSpec, history_origin, resolution, history_weights);
+                if (stab_all_samples_valid)
+                {
+                    stab_diff = CatmullRomHistorySample(prevStabilizedDiff, linearSampler, prevUV, resolution);
+                    stab_spec = CatmullRomHistorySample(prevStabilizedSpec, linearSampler, prevUV, resolution);
+                }
+                else
+                {
+                    stab_diff = SampleBilinearTexture(prevStabilizedDiff, history_origin, resolution, history_weights);
+                    stab_spec = SampleBilinearTexture(prevStabilizedSpec, history_origin, resolution, history_weights);
+                }
                 prev_stab_count = stab_diff.a;
 
                 if (!stab_all_samples_valid)
@@ -217,6 +269,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
         }
     }
 
+    float current_diff_luma = GetLuminance(current_diff.rgb);
     float stab_diff_luma = GetLuminance(stab_diff.rgb);
     float stab_spec_luma = GetLuminance(stab_spec.rgb);
 
@@ -234,6 +287,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     // false triggers in dark regions.
     float diff_antilag = 1.0;
     float spec_antilag = 1.0;
+    float diff_antilag_d = 0.0;
+    float diff_history_delta = 0.0;
+    float diff_clamp_band = 0.0;
     float spec_antilag_d = 0.0;
     float spec_history_delta = 0.0;
     float spec_clamp_band = 0.0;
@@ -244,6 +300,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
             float magic = antilag_sensitivity * framerate_scale * framerate_scale;
             float clamped = clamp(stab_diff_luma, diff_mean - s, diff_mean + s);
             float d = abs(stab_diff_luma - clamped) / (max(stab_diff_luma, clamped) + 1e-6);
+            diff_history_delta = abs(stab_diff_luma - diff_mean) / max(max(stab_diff_luma, diff_mean), 1e-6);
+            diff_antilag_d = d;
             diff_antilag = 1.0 / (1.0 + d * diff_accum_speed / max(magic, 1e-6));
             diff_accum_speed = lerp(0.0, diff_accum_speed, diff_antilag);
         }
@@ -268,6 +326,17 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float diff_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * framerate_scale * diff_non_linear);
     float spec_sigma_scale = fast_history_sigma_scale * (1.0 + 3.0 * framerate_scale * spec_non_linear);
 
+    bool diff_fully_valid_interior =
+        !current_boundary &&
+        motion_pixels <= REBLUR_TS_MOTION_RESET_THRESHOLD_PX &&
+        stab_history_valid &&
+        stab_all_samples_valid &&
+        stab_footprint_quality >= 0.999 &&
+        diff_accum_incoming >= 8.0;
+
+    if (diff_fully_valid_interior)
+        diff_sigma_scale *= 0.5;
+
     // Clamp stabilized history to local color box.
     // At convergence sigma -> 0, collapsing the range to [mean, mean] and
     // clamping every pixel to the neighborhood average. This acts as an
@@ -279,6 +348,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     float diff_hi = diff_mean + diff_sigma_eff * diff_sigma_scale;
     float spec_lo = spec_mean - spec_sigma_eff * spec_sigma_scale;
     float spec_hi = spec_mean + spec_sigma_eff * spec_sigma_scale;
+    diff_clamp_band = (diff_hi - diff_lo) / max(max(diff_mean, stab_diff_luma), 1e-6);
     spec_clamp_band = (spec_hi - spec_lo) / max(max(spec_mean, stab_spec_luma), 1e-6);
 
     // For freshly disoccluded pixels (incoming accum<=1), the stabilized history
@@ -328,10 +398,42 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     // Per-pixel stabilized frame counter: increments each frame, resets on
     // disocclusion or invalid TS reprojection, caps at max_stabilized_frame_num.
     // Antilag reduces the counter proportionally.
+    //
+    // NRD-like soft preservation: for fully valid interior pixels with mature
+    // TA history, preserve stab_count through motion (modulated by antilag)
+    // instead of hard-resetting to 0. The antilag mechanism already detects
+    // stale history, so the motion reset is redundant for these pixels and
+    // destructive to post-nudge quality. Boundary/shell pixels still get the
+    // hard reset to prevent cross-surface contamination.
     bool motion_reset = motion_pixels > REBLUR_TS_MOTION_RESET_THRESHOLD_PX;
-    float stab_count;
     float min_antilag = min(diff_antilag, spec_antilag);
-    if (motion_reset || !stab_history_valid || min(diff_accum_incoming, spec_accum_incoming) <= 1.0)
+
+    // Use diff_accum_incoming only (not min of diff, spec) because TA's
+    // specular parallax rejection caps spec_accum to 2-3 on any motion,
+    // which would prevent this gate from ever engaging during camera nudges.
+    bool stable_reprojected_interior =
+        !current_boundary &&
+        stab_history_valid &&
+        stab_all_samples_valid &&
+        stab_footprint_quality >= 0.999 &&
+        diff_accum_incoming >= 8.0;
+
+    float stab_count;
+    if (!stab_history_valid || min(diff_accum_incoming, spec_accum_incoming) <= 1.0)
+    {
+        stab_count = 0.0;
+    }
+    else if (motion_reset && stable_reprojected_interior)
+    {
+        // Skip warmup delay and seed a modest head start for valid interiors
+        // during camera motion. Full preservation (prev * antilag) is too
+        // aggressive — 88% blend of stale history causes shell contamination.
+        // A moderate seed gives ~26% blend on the nudge frame and ~72% on
+        // the first settle frame, which is enough to smooth the transition
+        // without over-trusting reprojected history.
+        stab_count = REBLUR_TS_HISTORY_WARMUP_FRAMES + 2.0;
+    }
+    else if (motion_reset)
     {
         stab_count = 0.0;
     }
@@ -342,7 +444,15 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
     }
 
     float motion_stabilization = 1.0 / (1.0 + max(motion_pixels - 1.0, 0.0));
-    float history_age = motion_reset || !stab_history_valid ? 0.0 : prev_stab_count * min_antilag;
+    float history_age;
+    if (!stab_history_valid || min(diff_accum_incoming, spec_accum_incoming) <= 1.0)
+        history_age = 0.0;
+    else if (motion_reset && !stable_reprojected_interior)
+        history_age = 0.0;
+    else if (motion_reset)
+        history_age = stab_count;  // Use the capped seed, not prev_stab_count
+    else
+        history_age = prev_stab_count * min_antilag;
     float warmed_history_age = max(history_age - REBLUR_TS_HISTORY_WARMUP_FRAMES, 0.0);
     float diff_stab_frames = diff_disoccluded || !stab_history_valid ? 0.0 :
         min(warmed_history_age, diff_accum_speed) * stab_footprint_quality * motion_stabilization;
@@ -396,6 +506,17 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3
             saturate(spec_clamp_band),
             saturate(spec_antilag_d),
             1.0);
+        outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
+        return;
+    }
+    if (debug_output == 5)
+    {
+        outDiffuse[pixel] = float4(
+            saturate(diff_history_delta),
+            saturate(diff_clamp_band),
+            saturate(diff_antilag_d),
+            1.0);
+        outSpecular[pixel] = float4(0.0, 0.0, 0.0, 1.0);
         outInternalData[pixel] = PackInternalData(diff_accum_speed, spec_accum_speed);
         return;
     }

@@ -418,7 +418,7 @@ def main():
     print(f"\n{'-' * 70}")
     print("  Run 0: Vanilla baseline")
     print(f"{'-' * 70}")
-    direct_run = args.skip_build and fw in ("macos", "glfw")
+    direct_run = args.skip_build and fw == "glfw"
     ok = run_app(py, build_py, fw, "vanilla_converged_baseline",
                  extra_args, "vanilla", clear_screenshots=True, direct_run=direct_run)
     if not ok:

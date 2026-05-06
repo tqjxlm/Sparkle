@@ -105,6 +105,18 @@ public:
         float max_accumulated_frame_num;
         float disocclusion_threshold;
         float denoising_range;
+        Vector4 view_to_view_prev_row0;
+        Vector4 view_to_view_prev_row1;
+        Vector4 view_to_view_prev_row2;
+        Vector4 view_to_view_prev_row3;
+        Vector4 view_to_world_row0;
+        Vector4 view_to_world_row1;
+        Vector4 view_to_world_row2;
+        Vector4 view_to_world_row3;
+        Vector4 camera_pos;
+        Vector4 prev_camera_pos;
+        float unproject_x;
+        float unproject_y;
         uint32_t frame_index;
         uint32_t reset_history;
         uint32_t enable_firefly_suppression;
@@ -171,6 +183,7 @@ class ReblurTemporalStabShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(outSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(outInternalData, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(inMotionVectors, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(linearSampler, RHIShaderResourceReflection::ResourceType::Sampler)
 
     END_SHADER_RESOURCE_TABLE
 
@@ -418,6 +431,20 @@ void ReblurDenoisingPipeline::CreatePipelines()
     auto *ts_resources = temporal_stab_pipeline_->GetShaderResource<ReblurTemporalStabShader>();
     ts_resources->ubo().BindResource(temporal_stab_ub_);
 
+    temporal_stab_pipeline_alt_ =
+        rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurTemporalStabPipelineAlt");
+    temporal_stab_pipeline_alt_->SetShader<RHIShaderStage::Compute>(temporal_stab_shader_);
+    temporal_stab_pipeline_alt_->Compile();
+
+    temporal_stab_ub_alt_ = rhi_->CreateBuffer({.size = sizeof(ReblurTemporalStabShader::UniformBufferData),
+                                                .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                                .mem_properties = RHIMemoryProperty::None,
+                                                .is_dynamic = true},
+                                               "ReblurTemporalStabUBOAlt");
+
+    auto *ts_alt_resources = temporal_stab_pipeline_alt_->GetShaderResource<ReblurTemporalStabShader>();
+    ts_alt_resources->ubo().BindResource(temporal_stab_ub_alt_);
+
     copy_stabilized_shader_ = rhi_->CreateShader<ReblurCopyStabilizedShader>();
     copy_stabilized_pipeline_ =
         rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "ReblurCopyStabilizedPipeline");
@@ -539,7 +566,8 @@ void ReblurDenoisingPipeline::Denoise(const ReblurDenoiserInputs &inputs, const 
                             debug_pass == DP::TASpecHistory || debug_pass == DP::TAMaterialId ||
                             debug_pass == DP::TAAccumSpeed || debug_pass == DP::TASpecAccumSpeed ||
                             debug_pass == DP::TASpecMotionInputs || debug_pass == DP::TASpecQualityDelta ||
-                            debug_pass == DP::TASpecSurfaceInputs || debug_pass == DP::TAMotionVectorFine;
+                            debug_pass == DP::TASpecSurfaceInputs || debug_pass == DP::TAMotionVectorFine ||
+                            debug_pass == DP::TAPlaneDistance;
     uint32_t ta_debug =
         is_ta_diagnostic ? (static_cast<uint32_t>(debug_pass) - static_cast<uint32_t>(DP::TADisocclusion) + 1) : 0;
 
@@ -554,10 +582,10 @@ void ReblurDenoisingPipeline::Denoise(const ReblurDenoiserInputs &inputs, const 
         // Uses separate pipelines with separate UBOs because the RHI's dynamic UBO
         // Upload is a CPU memcpy — a second Upload would overwrite the first pass's
         // UBO data before the GPU reads it.
-        TemporalAccumulate(inputs, settings, ta_debug);
+        TemporalAccumulate(inputs, settings, matrices, ta_debug);
         CopyToOutput(diff_temp2_.get(), spec_temp2_.get());
         // Pass 2: use alt pipeline (separate UBO) to avoid dynamic buffer overwrite.
-        TemporalAccumulate(inputs, settings, 0, /*use_alt_pipeline=*/true);
+        TemporalAccumulate(inputs, settings, matrices, 0, /*use_alt_pipeline=*/true);
         CopyHistoryData(diff_temp2_.get(), spec_temp2_.get());
         internal_data_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::Transfer,
@@ -568,7 +596,7 @@ void ReblurDenoisingPipeline::Denoise(const ReblurDenoiserInputs &inputs, const 
         return;
     }
 
-    TemporalAccumulate(inputs, settings, ta_debug);
+    TemporalAccumulate(inputs, settings, matrices, ta_debug);
 
     if (debug_pass == DP::TemporalAccum || debug_pass == DP::TemporalAccumSpecular)
     {
@@ -641,6 +669,24 @@ void ReblurDenoisingPipeline::Denoise(const ReblurDenoiserInputs &inputs, const 
             ts_debug = 3u;
         else if (debug_pass == DP::TSSpecClampInputs)
             ts_debug = 4u;
+        else if (debug_pass == DP::TSDiffClampInputs)
+            ts_debug = 5u;
+
+        if (ts_debug != 0u)
+        {
+            // TS diagnostics need a second pass like TA diagnostics; otherwise the
+            // debug visualization feeds back into stabilized history and corrupts
+            // the very state being measured on later frames in the run.
+            TemporalStabilize(inputs, settings, matrices, 0u);
+            TemporalStabilize(inputs, settings, matrices, ts_debug, /*use_alt_pipeline=*/true,
+                              diff_temp1_.get(), spec_temp1_.get(), internal_data_.get(), /*flip_history=*/false);
+            CopyToOutput(diff_temp1_.get(), spec_temp1_.get());
+            CopyPreviousFrameData(inputs);
+            internal_frame_index_++;
+            history_valid_ = true;
+            return;
+        }
+
         TemporalStabilize(inputs, settings, matrices, ts_debug);
 
         // Copy stabilized result into denoised_diffuse_/denoised_specular_ for composite
@@ -766,6 +812,7 @@ void ReblurDenoisingPipeline::Blur(const ReblurDenoiserInputs &inputs, const Reb
 }
 
 void ReblurDenoisingPipeline::TemporalAccumulate(const ReblurDenoiserInputs &inputs, const ReblurSettings &settings,
+                                                 const ReblurMatrices &matrices,
                                                  uint32_t debug_output, bool use_alt_pipeline)
 {
     auto &pipeline = use_alt_pipeline ? temporal_accum_pipeline_alt_ : temporal_accum_pipeline_;
@@ -794,11 +841,29 @@ void ReblurDenoisingPipeline::TemporalAccumulate(const ReblurDenoiserInputs &inp
     resources->outSpecular().BindResource(spec_temp2_->GetDefaultView(rhi_));
     resources->outInternalData().BindResource(internal_data_->GetDefaultView(rhi_));
 
+    Mat4 view_to_view_prev = matrices.world_to_view_prev * matrices.view_to_world;
+    Vector4 current_camera_pos = matrices.view_to_world * Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+    Mat4 view_prev_to_world = matrices.world_to_view_prev.inverse();
+    Vector4 previous_camera_pos = view_prev_to_world * Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+    float unproject_x = 1.0f / matrices.view_to_clip(0, 0);
+    float unproject_y = 1.0f / matrices.view_to_clip(1, 1);
     ReblurTemporalAccumShader::UniformBufferData ubo{
         .resolution = {width_, height_},
         .max_accumulated_frame_num = static_cast<float>(settings.max_accumulated_frame_num),
         .disocclusion_threshold = settings.disocclusion_threshold,
         .denoising_range = 1000.f,
+        .view_to_view_prev_row0 = view_to_view_prev.row(0),
+        .view_to_view_prev_row1 = view_to_view_prev.row(1),
+        .view_to_view_prev_row2 = view_to_view_prev.row(2),
+        .view_to_view_prev_row3 = view_to_view_prev.row(3),
+        .view_to_world_row0 = matrices.view_to_world.row(0),
+        .view_to_world_row1 = matrices.view_to_world.row(1),
+        .view_to_world_row2 = matrices.view_to_world.row(2),
+        .view_to_world_row3 = matrices.view_to_world.row(3),
+        .camera_pos = current_camera_pos,
+        .prev_camera_pos = previous_camera_pos,
+        .unproject_x = unproject_x,
+        .unproject_y = unproject_y,
         .frame_index = internal_frame_index_,
         .reset_history = history_valid_ ? 0u : 1u,
         .enable_firefly_suppression = settings.enable_anti_firefly ? 1u : 0u,
@@ -900,12 +965,19 @@ void ReblurDenoisingPipeline::HistoryFix(const ReblurDenoiserInputs &inputs, con
 }
 
 void ReblurDenoisingPipeline::TemporalStabilize(const ReblurDenoiserInputs &inputs, const ReblurSettings &settings,
-                                                const ReblurMatrices &matrices, uint32_t debug_output)
+                                                const ReblurMatrices &matrices, uint32_t debug_output,
+                                                bool use_alt_pipeline, RHIImage *out_diff, RHIImage *out_spec,
+                                                RHIImage *out_internal_data, bool flip_history)
 {
-    auto *resources = temporal_stab_pipeline_->GetShaderResource<ReblurTemporalStabShader>();
+    auto &pipeline = use_alt_pipeline ? temporal_stab_pipeline_alt_ : temporal_stab_pipeline_;
+    auto &ub = use_alt_pipeline ? temporal_stab_ub_alt_ : temporal_stab_ub_;
+    auto *resources = pipeline->GetShaderResource<ReblurTemporalStabShader>();
 
     uint32_t prev_idx = stab_ping_pong_;
     uint32_t cur_idx = 1 - stab_ping_pong_;
+    RHIImage *diff_out = out_diff != nullptr ? out_diff : diff_stabilized_[cur_idx].get();
+    RHIImage *spec_out = out_spec != nullptr ? out_spec : spec_stabilized_[cur_idx].get();
+    RHIImage *internal_out = out_internal_data != nullptr ? out_internal_data : prev_internal_data_.get();
 
     // Bind inputs (denoised output from PostBlur, currently in denoised_diffuse_/denoised_specular_)
     resources->inDiffuse().BindResource(denoised_diffuse_->GetDefaultView(rhi_));
@@ -921,12 +993,13 @@ void ReblurDenoisingPipeline::TemporalStabilize(const ReblurDenoiserInputs &inpu
     resources->prevNormalRoughness().BindResource(prev_normal_roughness_->GetDefaultView(rhi_));
 
     // Bind outputs (current stabilized + antilag-modified accum speeds)
-    resources->outDiffuse().BindResource(diff_stabilized_[cur_idx]->GetDefaultView(rhi_));
-    resources->outSpecular().BindResource(spec_stabilized_[cur_idx]->GetDefaultView(rhi_));
-    resources->outInternalData().BindResource(prev_internal_data_->GetDefaultView(rhi_));
+    resources->outDiffuse().BindResource(diff_out->GetDefaultView(rhi_));
+    resources->outSpecular().BindResource(spec_out->GetDefaultView(rhi_));
+    resources->outInternalData().BindResource(internal_out->GetDefaultView(rhi_));
 
     // Bind motion vectors for reprojection
     resources->inMotionVectors().BindResource(inputs.motion_vectors->GetDefaultView(rhi_));
+    resources->linearSampler().BindResource(diff_stabilized_[prev_idx]->GetSampler());
 
     ReblurTemporalStabShader::UniformBufferData ubo{
         .resolution = {width_, height_},
@@ -941,7 +1014,7 @@ void ReblurDenoisingPipeline::TemporalStabilize(const ReblurDenoiserInputs &inpu
         .framerate_scale = matrices.framerate_scale,
         .debug_output = debug_output,
     };
-    temporal_stab_ub_->Upload(rhi_, &ubo);
+    ub->Upload(rhi_, &ubo);
 
     // Transition inputs to Read
     denoised_diffuse_->Transition({.target_layout = RHIImageLayout::Read,
@@ -964,29 +1037,28 @@ void ReblurDenoisingPipeline::TemporalStabilize(const ReblurDenoiserInputs &inpu
                                         .before_stage = RHIPipelineStage::ComputeShader});
 
     // Transition outputs to StorageWrite
-    diff_stabilized_[cur_idx]->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                           .after_stage = RHIPipelineStage::Top,
-                                           .before_stage = RHIPipelineStage::ComputeShader});
-    spec_stabilized_[cur_idx]->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                           .after_stage = RHIPipelineStage::Top,
-                                           .before_stage = RHIPipelineStage::ComputeShader});
-    // prev_internal_data_ receives antilag-modified accumulation speeds
-    // CopyHistoryData leaves prev_internal_data_ in Read (available to ComputeShader)
-    prev_internal_data_->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                     .after_stage = RHIPipelineStage::ComputeShader,
-                                     .before_stage = RHIPipelineStage::ComputeShader});
+    diff_out->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                          .after_stage = RHIPipelineStage::Top,
+                          .before_stage = RHIPipelineStage::ComputeShader});
+    spec_out->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                          .after_stage = RHIPipelineStage::Top,
+                          .before_stage = RHIPipelineStage::ComputeShader});
+    internal_out->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                              .after_stage = RHIPipelineStage::ComputeShader,
+                              .before_stage = RHIPipelineStage::ComputeShader});
 
     rhi_->BeginComputePass(compute_pass_);
-    rhi_->DispatchCompute(temporal_stab_pipeline_, {width_, height_, 1u}, {16u, 16u, 1u});
+    rhi_->DispatchCompute(pipeline, {width_, height_, 1u}, {16u, 16u, 1u});
     rhi_->EndComputePass(compute_pass_);
 
-    // Transition prev_internal_data_ to Read for next frame's PrePass and TemporalAccum
-    prev_internal_data_->Transition({.target_layout = RHIImageLayout::Read,
-                                     .after_stage = RHIPipelineStage::ComputeShader,
-                                     .before_stage = RHIPipelineStage::ComputeShader});
+    internal_out->Transition({.target_layout = RHIImageLayout::Read,
+                              .after_stage = RHIPipelineStage::ComputeShader,
+                              .before_stage = RHIPipelineStage::ComputeShader});
 
-    // Flip ping-pong
-    stab_ping_pong_ = cur_idx;
+    if (flip_history)
+    {
+        stab_ping_pong_ = cur_idx;
+    }
 }
 
 void ReblurDenoisingPipeline::CopyStabilizedHistory(RHIImage *diff, RHIImage *spec)

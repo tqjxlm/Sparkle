@@ -85,11 +85,17 @@ class ReblurFinalHistoryShader : public RHIShaderInfo
         debug_pass == DebugPass::TASpecHistory || debug_pass == DebugPass::TAMaterialId ||
         debug_pass == DebugPass::TAAccumSpeed || debug_pass == DebugPass::TASpecAccumSpeed ||
         debug_pass == DebugPass::TASpecMotionInputs || debug_pass == DebugPass::TASpecQualityDelta ||
-        debug_pass == DebugPass::TASpecSurfaceInputs || debug_pass == DebugPass::TAMotionVectorFine;
+        debug_pass == DebugPass::TASpecSurfaceInputs || debug_pass == DebugPass::TAMotionVectorFine ||
+        debug_pass == DebugPass::TAPlaneDistance;
     const bool is_ts_diagnostic = debug_pass == DebugPass::TSStabCount || debug_pass == DebugPass::TSSpecBlend ||
                                   debug_pass == DebugPass::TSSpecAntilagInputs ||
-                                  debug_pass == DebugPass::TSSpecClampInputs;
+                                  debug_pass == DebugPass::TSSpecClampInputs ||
+                                  debug_pass == DebugPass::TSDiffClampInputs;
 
+    if (debug_pass == DebugPass::StabilizedDiffuse)
+    {
+        return 1u;
+    }
     if (debug_pass == DebugPass::TASpecHistory || debug_pass == DebugPass::TASpecAccumSpeed ||
         debug_pass == DebugPass::TASpecMotionInputs || debug_pass == DebugPass::TASpecQualityDelta ||
         debug_pass == DebugPass::TASpecSurfaceInputs || debug_pass == DebugPass::TemporalAccumSpecular ||
@@ -104,7 +110,7 @@ class ReblurFinalHistoryShader : public RHIShaderInfo
     {
         return 1u;
     }
-    if (debug_pass == DebugPass::CompositeDiffuse)
+    if (debug_pass == DebugPass::CompositeDiffuse || debug_pass == DebugPass::CompositeDiffuseRawAlbedo)
     {
         return 2u;
     }
