@@ -18,7 +18,6 @@ namespace sparkle
 class NativeView;
 class Scene;
 class RenderFramework;
-class ScreenshotRequest;
 class CameraComponent;
 class RHIContext;
 class UiManager;
@@ -110,6 +109,11 @@ public:
         return rhi_.get();
     }
 
+    [[nodiscard]] RenderFramework *GetRenderFramework() const
+    {
+        return render_framework_.get();
+    }
+
     void ResetInputEvents();
     void FrameBufferResizeCallback(int width, int height) const;
     void CursorPositionCallback(double xPos, double yPos);
@@ -118,9 +122,6 @@ public:
     void ScrollCallback(double xoffset, double yoffset);
     void KeyboardCallback(int key, KeyAction action, bool shift_on) const;
     void CaptureNextFrames(int count);
-
-    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
-    [[nodiscard]] bool IsReadyForAutoScreenshot() const;
 
 #if ENABLE_TEST_CASES
     [[nodiscard]] int GetExitCode() const
