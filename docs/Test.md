@@ -19,6 +19,7 @@
 ## TestCase System
 
 * A `TestCase` is a C++ class that runs inside the app after the scene finishes loading.
+* Before render and RHI config init, the selected test case may override config values via `OnEnforceConfigs()`.
 * Each frame, `AppFramework` calls `Tick()`. When `Tick()` returns `Pass` or `Fail` the app
 exits with code `0` or `1` respectively.
 
@@ -60,8 +61,12 @@ finish within the given number of frames it is reported as `Fail`. Default is `0
 ## Writing a Test Case
 
 1. Create a `.cpp` file anywhere under `tests/`.
-2. Subclass `sparkle::TestCase` and implement `Tick()`.
-3. Register with `TestCaseRegistrar<T>` using a unique name string.
+2. Subclass `sparkle::TestCase` and implement `OnTick()`.
+3. If the test needs fixed runtime config, optionally override `OnEnforceConfigs()`.
+4. Register with `TestCaseRegistrar<T>` using a unique name string.
+
+The registered name is injected into the test instance and available via
+`TestCase::GetName()`, so log messages do not need to duplicate it manually.
 
 ```cpp
 // tests/my_feature/MyFeatureTest.cpp
@@ -73,19 +78,21 @@ namespace sparkle
 class MyFeatureTest : public TestCase
 {
 public:
-    Result Tick(AppFramework &app) override
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("pipeline", std::string("gpu"));
+    }
+
+    Result OnTick(AppFramework &app) override
     {
         // Inspect app state each frame. Return Pending to keep running.
-        if (frame_++ < 10)
+        if (frame_ < 10)
         {
             return Result::Pending;
         }
         // Evaluate your condition here.
         return Result::Pass;
     }
-
-private:
-    uint32_t frame_ = 0;
 };
 
 static TestCaseRegistrar<MyFeatureTest> my_feature_test_registrar("my_feature");

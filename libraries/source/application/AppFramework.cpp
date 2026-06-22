@@ -26,6 +26,15 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+namespace
+{
+struct VerticalIconTab
+{
+    const char *icon; // Font Awesome icon string
+    std::function<void()> draw;
+};
+} // namespace
+
 namespace sparkle
 {
 constexpr float LogInterval = 1.f;
@@ -81,6 +90,21 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     config_manager.LoadAll();
 
     app_config_.Init();
+
+#if ENABLE_TEST_CASES
+    if (!app_config_.test_case.empty())
+    {
+        test_case_ = TestCaseRegistry::Create(app_config_.test_case);
+        if (!test_case_)
+        {
+            return false;
+        }
+
+        test_case_->EnforceConfigs();
+        Log(Info, "Test case '{}' loaded", test_case_->GetName());
+    }
+#endif
+
     render_config_.Init();
     rhi_config_.Init();
 
@@ -202,26 +226,8 @@ bool AppFramework::Init()
 
     Log(Info, "Init success. Main loop started");
 
-#if ENABLE_TEST_CASES
-    if (!app_config_.test_case.empty())
-    {
-        test_case_ = TestCaseRegistry::Create(app_config_.test_case);
-        if (!test_case_)
-        {
-            return false;
-        }
-        Log(Info, "Test case '{}' loaded", app_config_.test_case);
-    }
-#endif
-
     return true;
 }
-
-struct VerticalIconTab
-{
-    const char *icon; // Font Awesome icon string
-    std::function<void()> draw;
-};
 
 static void DrawVerticalIconTabs(const std::vector<VerticalIconTab> &tabs, unsigned &current_tab)
 {
@@ -403,12 +409,12 @@ bool AppFramework::MainLoop()
         const auto result = test_case_->Tick(*this);
         if (result == TestCase::Result::Pass)
         {
-            Log(Info, "TestCase PASS");
+            Log(Info, "Test case '{}' passed", test_case_->GetName());
             RequestExit();
         }
         else if (result == TestCase::Result::Fail)
         {
-            Log(Error, "TestCase FAIL");
+            Log(Error, "Test case '{}' failed", test_case_->GetName());
             exit_code_ = 1;
             RequestExit();
         }
@@ -825,16 +831,6 @@ void AppFramework::RequestExit()
 void AppFramework::CaptureNextFrames(int count)
 {
     rhi_->CaptureNextFrames(count);
-}
-
-std::shared_ptr<ScreenshotRequest> AppFramework::RequestTakeScreenshot(const std::string &name)
-{
-    return render_framework_->RequestTakeScreenshot(name);
-}
-
-bool AppFramework::IsReadyForAutoScreenshot() const
-{
-    return render_framework_->IsReadyForAutoScreenshot();
 }
 
 CameraComponent *AppFramework::GetMainCamera() const

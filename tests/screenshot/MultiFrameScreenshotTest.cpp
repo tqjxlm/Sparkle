@@ -23,10 +23,10 @@ public:
             return Result::Pass;
         }
 
-        if (!ready_to_capture_ && app.IsReadyForAutoScreenshot())
+        if (!ready_to_capture_ && app.GetRenderFramework()->IsReadyForAutoScreenshot())
         {
             ready_to_capture_ = true;
-            Log(Info, "MultiFrameScreenshotTest: renderer ready at frame {}", frame_);
+            Log(Info, "{}: renderer ready at frame {}", GetName(), frame_);
         }
 
         if (!ready_to_capture_)
@@ -40,14 +40,14 @@ public:
             {
                 active_request_.reset();
                 captured_count_++;
-                Log(Info, "MultiFrameScreenshotTest: captured frame {} of {}", captured_count_, FramesToCapture);
+                Log(Info, "{}: captured frame {} of {}", GetName(), captured_count_, FramesToCapture);
             }
             return captured_count_ >= FramesToCapture ? Result::Pass : Result::Pending;
         }
 
         // Request next screenshot
         auto name = std::format("multi_frame_{}", captured_count_);
-        active_request_ = app.RequestTakeScreenshot(name);
+        active_request_ = app.GetRenderFramework()->RequestTakeScreenshot(name);
         return Result::Pending;
     }
 
