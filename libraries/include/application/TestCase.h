@@ -26,10 +26,44 @@ public:
     /// Calls OnTick(), increments the frame counter, and enforces the timeout.
     Result Tick(AppFramework &app);
 
+    /// Applies any test-specific config overrides before the rest of app init consumes them.
+    void EnforceConfigs();
+
+    [[nodiscard]] const std::string &GetName() const
+    {
+        return name_;
+    }
+
 protected:
+    virtual void OnEnforceConfigs()
+    {
+    }
+
     virtual Result OnTick(AppFramework &app) = 0;
 
+    /// Optional per-test timeout in frames. When the app config does not
+    /// provide --test_timeout, Tick() uses this value instead.
+    [[nodiscard]] virtual uint32_t GetDefaultTimeoutFrames() const
+    {
+        return 0;
+    }
+
+    void EnforceConfig(const std::string &config_name, bool value) const;
+    void EnforceConfig(const std::string &config_name, uint32_t value) const;
+    void EnforceConfig(const std::string &config_name, float value) const;
+    void EnforceConfig(const std::string &config_name, const std::string &value) const;
+
     uint32_t frame_ = 0;
+
+private:
+    friend class TestCaseRegistry;
+
+    void SetName(std::string name)
+    {
+        name_ = std::move(name);
+    }
+
+    std::string name_;
 };
 
 class TestCaseRegistry
