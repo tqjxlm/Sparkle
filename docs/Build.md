@@ -90,15 +90,15 @@ If it fails, it will try to install when possible.
 
 Otherwise, you need to specify them via environment variables. See the table below for details.
 
-| variable     | example                                                     | valid for        | auto-installable                |
-| ------------ | ----------------------------------------------------------- | ---------------- | ------------------------------- |
-| VULKAN_SDK   | /Users/username/VulkanSDK/1.4.313.0                         | all              | yes (requires admin on windows) |
-| CMAKE_PATH   | /opt/homebrew/bin/cmake                                     | all              | yes                             |
-| VCPKG_PATH   | D:/SDKs/vcpkg                                               | all windows      | yes                             |
-| LLVM         | /opt/homebrew/opt/llvm                                      | non-windows glfw | yes                             |
-| ANDROID_HOME | /Users/username/AndroidSDK                                  | android          | no (Android Studio)             |
-| JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home | android          | no (Android Studio)             |
-| VS_PATH      | C:/Program Files/Microsoft Visual Studio/2022/Community     | all windows      | no (vs-installer)               |
+| variable     | example                                                      | valid for        | auto-installable                |
+| ------------ | ------------------------------------------------------------ | ---------------- | ------------------------------- |
+| VULKAN_SDK   | /Users/username/VulkanSDK/1.4.313.0                          | all              | yes (requires admin on windows) |
+| CMAKE_PATH   | /opt/homebrew/bin/cmake                                      | all              | yes                             |
+| VCPKG_PATH   | D:/SDKs/vcpkg                                                | all windows      | yes                             |
+| LLVM         | /opt/homebrew/opt/llvm                                       | non-windows glfw | yes                             |
+| ANDROID_HOME | /Users/username/AndroidSDK                                   | android          | no (Android Studio)             |
+| JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home  | android          | no (Android Studio)             |
+| VS_PATH      | C:/Program Files/Microsoft Visual Studio/[version]/[edition] | all windows      | no (vs-installer)               |
 
 ### Quick Start Examples
 

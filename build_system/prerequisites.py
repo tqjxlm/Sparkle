@@ -1,9 +1,10 @@
-import shutil
+import glob
 import json
-import platform
 import os
-import sys
+import platform
 import subprocess
+import shutil
+import sys
 
 from build_system.utils import download_file, extract_archive, extract_zip
 
@@ -58,7 +59,8 @@ def install_cmake():
             else:
                 print(f"Homebrew installation failed: {result.stderr}")
         except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-            print("Homebrew not available or failed. Falling back to manual installation...")
+            print(
+                "Homebrew not available or failed. Falling back to manual installation...")
 
         # Fallback to manual installation
         print("Downloading CMake for macOS...")
@@ -77,7 +79,8 @@ def install_cmake():
 
     else:
         print("Please install CMake manually: https://cmake.org/download/")
-        raise RuntimeError(f"Unsupported platform '{system}' for automatic CMake installation.")
+        raise RuntimeError(
+            f"Unsupported platform '{system}' for automatic CMake installation.")
 
     download_path = os.path.join(_BUILD_CACHE_DIR, filename)
 
@@ -88,17 +91,21 @@ def install_cmake():
     tmp_dir = os.path.join(_BUILD_CACHE_DIR, "tmp")
     extract_archive(download_path, tmp_dir)
 
-    platform_suffix = {"darwin": "macos-universal", "windows": "windows-x86_64", "linux": "linux-x86_64"}
-    extracted_dir = os.path.join(tmp_dir, f"cmake-{cmake_version}-{platform_suffix[system]}")
+    platform_suffix = {"darwin": "macos-universal",
+                       "windows": "windows-x86_64", "linux": "linux-x86_64"}
+    extracted_dir = os.path.join(
+        tmp_dir, f"cmake-{cmake_version}-{platform_suffix[system]}")
 
     if not os.path.exists(extracted_dir):
-        raise RuntimeError(f"Expected directory not found after extraction: {extracted_dir}")
+        raise RuntimeError(
+            f"Expected directory not found after extraction: {extracted_dir}")
 
     shutil.move(extracted_dir, cmake_dir)
     os.remove(download_path)
 
     if not os.path.exists(cmake_executable):
-        raise RuntimeError(f"CMake executable not found after installation: {cmake_executable}")
+        raise RuntimeError(
+            f"CMake executable not found after installation: {cmake_executable}")
 
     print(f"CMake {cmake_version} installed successfully!")
     return cmake_executable
@@ -136,7 +143,8 @@ def validate_vulkan_sdk(vulkan_sdk_path):
 
 def set_vulkan_layer_path(vulkan_sdk_path):
     """Set VK_LAYER_PATH environment variable for validation layers."""
-    layer_path = os.path.join(vulkan_sdk_path, "share", "vulkan", "explicit_layer.d")
+    layer_path = os.path.join(vulkan_sdk_path, "share",
+                              "vulkan", "explicit_layer.d")
 
     if os.path.exists(layer_path):
         existing = os.environ.get("VK_LAYER_PATH")
@@ -156,7 +164,8 @@ def set_vulkan_icd_filenames(vulkan_sdk_path):
     if not is_macos:
         return
 
-    icd_path = os.path.join(vulkan_sdk_path, "share", "vulkan", "icd.d", "MoltenVK_icd.json")
+    icd_path = os.path.join(vulkan_sdk_path, "share",
+                            "vulkan", "icd.d", "MoltenVK_icd.json")
 
     if os.path.exists(icd_path):
         existing = os.environ.get("VK_ICD_FILENAMES")
@@ -210,7 +219,8 @@ def install_vulkan_sdk(build_cache_dir):
     system = platform.system().lower()
     platform_map = {"darwin": "mac", "windows": "windows", "linux": "linux"}
     if system not in platform_map:
-        raise RuntimeError(f"Unsupported platform '{system}' for automatic Vulkan SDK installation.")
+        raise RuntimeError(
+            f"Unsupported platform '{system}' for automatic Vulkan SDK installation.")
     platform_name = platform_map[system]
 
     tmp_dir = os.path.join(build_cache_dir, "tmp")
@@ -219,17 +229,21 @@ def install_vulkan_sdk(build_cache_dir):
     latest_version = prerequisites.get("VulkanSDK", "1.4.313.0")
     print(f"Use Vulkan SDK version: {latest_version}")
 
-    vulkan_sdk_path = os.path.join(build_cache_dir, "VulkanSDK", latest_version)
+    vulkan_sdk_path = os.path.join(
+        build_cache_dir, "VulkanSDK", latest_version)
 
     if os.path.exists(vulkan_sdk_path):
         if validate_vulkan_sdk(vulkan_sdk_path):
-            print(f"Vulkan SDK {latest_version} already installed in build_cache.")
+            print(
+                f"Vulkan SDK {latest_version} already installed in build_cache.")
             return vulkan_sdk_path
         elif is_macos and validate_vulkan_sdk(os.path.join(vulkan_sdk_path, "macOS")):
-            print(f"Vulkan SDK {latest_version} already installed in build_cache.")
+            print(
+                f"Vulkan SDK {latest_version} already installed in build_cache.")
             return os.path.join(vulkan_sdk_path, "macOS")
         else:
-            print(f"Incomplete Vulkan SDK installation found. Removing {vulkan_sdk_path}")
+            print(
+                f"Incomplete Vulkan SDK installation found. Removing {vulkan_sdk_path}")
             shutil.rmtree(vulkan_sdk_path)
 
     if platform_name == "mac":
@@ -259,15 +273,19 @@ def install_vulkan_sdk(build_cache_dir):
         extracted_dir = os.path.join(tmp_dir, latest_version)
         x86_64_dir = os.path.join(extracted_dir, "x86_64")
         if not os.path.exists(x86_64_dir):
-            raise RuntimeError(f"Expected x86_64 directory not found in {extracted_dir}")
+            raise RuntimeError(
+                f"Expected x86_64 directory not found in {extracted_dir}")
 
         os.makedirs(vulkan_sdk_path, exist_ok=True)
         for item in os.listdir(x86_64_dir):
-            shutil.copytree(os.path.join(x86_64_dir, item), os.path.join(vulkan_sdk_path, item))
+            shutil.copytree(os.path.join(x86_64_dir, item),
+                            os.path.join(vulkan_sdk_path, item))
 
-        vulkan_include = os.path.join(vulkan_sdk_path, "include", "vulkan", "vulkan.h")
+        vulkan_include = os.path.join(
+            vulkan_sdk_path, "include", "vulkan", "vulkan.h")
         if not os.path.exists(vulkan_include):
-            raise RuntimeError(f"Vulkan SDK verification failed: {vulkan_include} not found")
+            raise RuntimeError(
+                f"Vulkan SDK verification failed: {vulkan_include} not found")
 
     elif platform_name == "mac":
         print("Extracting Vulkan SDK...")
@@ -289,7 +307,8 @@ def install_vulkan_sdk(build_cache_dir):
         print(f"Running installer command: {' '.join(install_cmd)}")
         result = subprocess.run(install_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"Vulkan SDK installation failed: {result.stderr}")
+            raise RuntimeError(
+                f"Vulkan SDK installation failed: {result.stderr}")
 
     elif platform_name == "windows":
         print("Installing Vulkan SDK core...")
@@ -346,11 +365,14 @@ def install_slangc(build_cache_dir):
     elif machine in ("arm64", "aarch64"):
         arch = "aarch64"
     else:
-        raise RuntimeError(f"Unsupported architecture '{machine}' for slangc installation.")
+        raise RuntimeError(
+            f"Unsupported architecture '{machine}' for slangc installation.")
 
-    platform_name_map = {"windows": "windows", "darwin": "macos", "linux": "linux"}
+    platform_name_map = {"windows": "windows",
+                         "darwin": "macos", "linux": "linux"}
     if system not in platform_name_map:
-        raise RuntimeError(f"Unsupported platform '{system}' for slangc installation.")
+        raise RuntimeError(
+            f"Unsupported platform '{system}' for slangc installation.")
     platform_name = platform_name_map[system]
 
     filename = f"slang-{slang_version}-{platform_name}-{arch}.zip"
@@ -371,7 +393,8 @@ def install_slangc(build_cache_dir):
     os.remove(download_path)
 
     if not os.path.exists(slangc_executable):
-        raise RuntimeError(f"slangc executable not found after installation: {slangc_executable}")
+        raise RuntimeError(
+            f"slangc executable not found after installation: {slangc_executable}")
 
     print(f"slangc {slang_version} installed successfully!")
     return slangc_executable
@@ -439,7 +462,8 @@ def find_llvm_path():
             else:
                 raise RuntimeError(result.stderr)
         except Exception as e:
-            print(f"Failed to install LLVM via Homebrew. Please install manually. Error: {e}")
+            print(
+                f"Failed to install LLVM via Homebrew. Please install manually. Error: {e}")
 
         return None
 
@@ -472,17 +496,36 @@ def find_visual_studio_path():
     if not is_windows:
         return None
 
+    def has_vcvars(vs_path):
+        return os.path.exists(os.path.join(
+            vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat"))
+
+    def display_version(vswhere_path, vs_path):
+        try:
+            version_result = subprocess.run([
+                vswhere_path, "-path", vs_path,
+                "-property", "catalog_productDisplayVersion", "-format", "value"
+            ], capture_output=True, text=True, timeout=10)
+            if version_result.returncode == 0 and version_result.stdout.strip():
+                return version_result.stdout.strip()
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+            pass
+        return "unknown version"
+
     vs_path_override = os.environ.get("VS_PATH")
     if vs_path_override:
-        if os.path.exists(vs_path_override):
+        if os.path.exists(vs_path_override) and has_vcvars(vs_path_override):
             return vs_path_override
         print(
-            f"Warning: VS_PATH environment variable set to '{vs_path_override}' but path does not exist.")
+            f"Warning: VS_PATH environment variable set to '{vs_path_override}' "
+            "but Visual Studio C++ tools were not found.")
         print("Falling back to automatic detection...")
 
     vswhere_paths = [
-        r"C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
-        r"C:\\Program Files\\Microsoft Visual Studio\\Installer\\vswhere.exe"
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                     "Microsoft Visual Studio", "Installer", "vswhere.exe"),
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
+                     "Microsoft Visual Studio", "Installer", "vswhere.exe"),
     ]
 
     for vswhere_path in vswhere_paths:
@@ -491,37 +534,24 @@ def find_visual_studio_path():
                 result = subprocess.run([
                     vswhere_path, "-latest", "-products", "*",
                     "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                    "-version", "[17.0,18.0)",  # VS 2022 version range
                     "-property", "installationPath", "-format", "value"
                 ], capture_output=True, text=True, timeout=10)
 
                 if result.returncode == 0 and result.stdout.strip():
                     vs_path = result.stdout.strip()
 
-                    version_result = subprocess.run([
-                        vswhere_path, "-path", vs_path,
-                        "-property", "catalog_productDisplayVersion", "-format", "value"
-                    ], capture_output=True, text=True, timeout=10)
-
-                    if version_result.returncode == 0 and version_result.stdout.strip():
-                        version = version_result.stdout.strip()
-                        if not version.startswith("17."):
-                            print(f"Found Visual Studio {version} but VS 2022 (17.x) is required.")
-                            continue
-
-                    vcvars_path = os.path.join(vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
-                    if os.path.exists(vcvars_path):
-                        print(f"Found Visual Studio 2022 at: {vs_path}")
+                    if has_vcvars(vs_path):
+                        version = display_version(vswhere_path, vs_path)
+                        print(f"Found Visual Studio {version} at: {vs_path}")
                         return vs_path
             except (subprocess.TimeoutExpired, subprocess.SubprocessError):
                 continue
 
-    for path in (
-        r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional",
-        r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community",
-        r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise",
-    ):
-        if os.path.exists(path):
+    fallback_pattern = os.path.join(
+        os.environ.get("ProgramFiles", r"C:\Program Files"), "Microsoft Visual Studio", "*", "*")
+    for path in sorted(glob.glob(fallback_pattern), reverse=True):
+        if has_vcvars(path):
+            print(f"Found Visual Studio at: {path}")
             return path
 
     return None
@@ -531,7 +561,8 @@ def install_vcpkg(build_cache_dir):
     """Install vcpkg to build_cache directory and return the path."""
 
     vcpkg_dir = os.path.join(build_cache_dir, "vcpkg")
-    vcpkg_exe_path = os.path.join(vcpkg_dir, "vcpkg.exe" if is_windows else "vcpkg")
+    vcpkg_exe_path = os.path.join(
+        vcpkg_dir, "vcpkg.exe" if is_windows else "vcpkg")
 
     if os.path.exists(vcpkg_exe_path):
         print("vcpkg already installed in build_cache.")
@@ -551,12 +582,14 @@ def install_vcpkg(build_cache_dir):
         bootstrap_script = os.path.join(vcpkg_dir, "bootstrap-vcpkg.sh")
         os.chmod(bootstrap_script, 0o755)
 
-    result = subprocess.run([bootstrap_script], cwd=vcpkg_dir, capture_output=True, text=True)
+    result = subprocess.run(
+        [bootstrap_script], cwd=vcpkg_dir, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Failed to build vcpkg: {result.stderr}")
 
     if not os.path.exists(vcpkg_exe_path):
-        raise RuntimeError(f"vcpkg executable not found after build: {vcpkg_exe_path}")
+        raise RuntimeError(
+            f"vcpkg executable not found after build: {vcpkg_exe_path}")
 
     print(f"vcpkg installed successfully to: {vcpkg_dir}")
     return vcpkg_dir
@@ -572,7 +605,8 @@ def find_vcpkg():
     if vcpkg_dir:
         if os.path.exists(os.path.join(vcpkg_dir, vcpkg_executable)):
             return vcpkg_dir
-        print(f"VCPKG_PATH is set to '{vcpkg_dir}' but path does not exist. try auto-detecting...")
+        print(
+            f"VCPKG_PATH is set to '{vcpkg_dir}' but path does not exist. try auto-detecting...")
 
     vcpkg_dir = os.path.join(_BUILD_CACHE_DIR, "vcpkg")
     if os.path.exists(os.path.join(vcpkg_dir, vcpkg_executable)):
@@ -612,8 +646,10 @@ def find_or_install_ninja():
     system = platform.system().lower()
     platform_suffix = {"windows": "win", "darwin": "mac", "linux": "linux"}
     if system not in platform_suffix:
-        print("Please install Ninja manually: https://github.com/ninja-build/ninja/releases")
-        raise RuntimeError(f"Unsupported platform '{system}' for automatic Ninja installation.")
+        print(
+            "Please install Ninja manually: https://github.com/ninja-build/ninja/releases")
+        raise RuntimeError(
+            f"Unsupported platform '{system}' for automatic Ninja installation.")
 
     filename = f"ninja-{platform_suffix[system]}.zip"
     download_url = f"https://github.com/ninja-build/ninja/releases/download/v{ninja_version}/{filename}"
@@ -631,7 +667,8 @@ def find_or_install_ninja():
     os.remove(download_path)
 
     if not os.path.exists(ninja_exe_path):
-        raise RuntimeError(f"Ninja executable not found after installation: {ninja_exe_path}")
+        raise RuntimeError(
+            f"Ninja executable not found after installation: {ninja_exe_path}")
 
     print(f"Ninja {ninja_version} installed successfully!")
     return ninja_exe_path
@@ -646,10 +683,12 @@ def install_glfw():
             result = subprocess.run(
                 [vcpkg_exe_path, "install", "glfw3:x64-windows"], capture_output=True, text=True)
             if result.returncode != 0:
-                raise RuntimeError(f"Failed to install GLFW via vcpkg: {result.stderr}")
+                raise RuntimeError(
+                    f"Failed to install GLFW via vcpkg: {result.stderr}")
             print("GLFW installed successfully via vcpkg!")
         else:
-            raise RuntimeError("Failed to install GLFW via vcpkg. vcpkg not found.")
+            raise RuntimeError(
+                "Failed to install GLFW via vcpkg. vcpkg not found.")
     elif is_macos:
         print("Installing GLFW via Homebrew...")
         try:
@@ -681,7 +720,8 @@ def setup_android_validation(script_dir):
         print("Android validation binaries are up-to-date, skipping setup.")
         return
 
-    print(f"Setting up Android validation binaries for Vulkan SDK {vulkan_version}...")
+    print(
+        f"Setting up Android validation binaries for Vulkan SDK {vulkan_version}...")
 
     download_file(url, zip_path)
 
