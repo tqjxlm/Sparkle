@@ -31,7 +31,8 @@ def get_toolchain_args():
 
 
 def get_cmd_with_vcvars(vs_path, cmake_cmd):
-    vcvars_path = os.path.join(vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
+    vcvars_path = os.path.join(
+        vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
     guarded_cmake_cmd = " ".join([f'"{cmd}"' for cmd in cmake_cmd])
     return f'CALL "{vcvars_path}" && ' + guarded_cmake_cmd
 
@@ -47,8 +48,8 @@ def _require_vs_path():
     vs_path = find_visual_studio_path()
     if not vs_path:
         raise RuntimeError(
-            "Could not find Visual Studio 2022 installation. "
-            "Please ensure Visual Studio 2022 is installed with C++ tools.")
+            "Could not find Visual Studio installation. "
+            "Please ensure Visual Studio is installed with C++ tools.")
     return vs_path
 
 
@@ -73,13 +74,15 @@ def configure(args, is_generate_sln):
         ninja_path = find_or_install_ninja()
         vs_path = _require_vs_path()
 
-        clang_cl_path = os.path.join(vs_path, "VC", "Tools", "Llvm", "x64", "bin", "clang-cl.exe")
+        clang_cl_path = os.path.join(
+            vs_path, "VC", "Tools", "Llvm", "x64", "bin", "clang-cl.exe")
         if not os.path.exists(clang_cl_path):
             raise RuntimeError(
                 "clang-cl.exe not found in Visual Studio installation. "
                 "Please install 'C++ Clang Compiler for Windows' component in Visual Studio Installer.")
 
-        compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl", "-DCMAKE_C_COMPILER=clang-cl"]
+        compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl",
+                         "-DCMAKE_C_COMPILER=clang-cl"]
         generator_args = [
             "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
     else:
@@ -142,7 +145,8 @@ class GlfwBuilder(FrameworkBuilder):
         configure(args, True)
 
         output_dir = get_output_dir(True)
-        print(f"Visual Studio sln is generated at {output_dir}. Open with command:")
+        print(
+            f"Visual Studio sln is generated at {output_dir}. Open with command:")
         print(f"start {output_dir}/sparkle.sln")
 
     def build(self, args):
@@ -176,7 +180,9 @@ class GlfwBuilder(FrameworkBuilder):
         """Run the built project."""
         exe_name = "sparkle.exe" if is_windows else "sparkle"
         output_dir = get_output_dir(False)
-        run_cmd = [os.path.join(output_dir, "build", exe_name)] + args["unknown_args"]
+        run_cmd = [os.path.join(output_dir, "build",
+                                exe_name)] + args["unknown_args"]
         print(f"Running executable: {run_cmd}")
-        result = subprocess.run(args=run_cmd, cwd=os.path.join(output_dir, "build"), env=os.environ.copy())
+        result = subprocess.run(args=run_cmd, cwd=os.path.join(
+            output_dir, "build"), env=os.environ.copy())
         return result.returncode
