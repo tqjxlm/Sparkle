@@ -5,7 +5,10 @@
 namespace sparkle
 {
 static ConfigValue<uint32_t> config_max_thread("thread", "maximum threads to use", "app", 64);
-static ConfigValue<std::string> config_scene("scene", "the scene to render", "app", "");
+// Empty (the default) => the built-in TestScene, which is also the scene the CI ground-truth images
+// are rendered from. A non-empty value is a model/scene file path (under resources/), not a scene name.
+static ConfigValue<std::string> config_scene("scene", "scene file path to render; empty = built-in TestScene",
+                                             "app", "");
 static ConfigValue<bool> config_screen_log("screen_log", "show screen log", "app", true, true);
 static ConfigValue<bool> config_rebuild_cache("rebuild_cache", "rebuild all cache", "app", false);
 static ConfigValue<bool> config_default_skybox("default_sky", "use a default sky box", "app", false, true);
