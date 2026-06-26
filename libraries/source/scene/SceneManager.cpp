@@ -225,12 +225,16 @@ std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Pa
     std::shared_ptr<TaskFuture<>> load_task;
     if (!asset_path.IsValid() || asset_path.path.empty())
     {
+        // No scene path given (the `scene` cvar defaults to empty) => load the built-in TestScene.
+        // This is the default scene and is exactly what the CI ground-truth images are rendered from.
         load_task = LoadTestScene(scene);
         need_default_sky = true;
         scene->GetRootNode()->SetName("TestScene");
     }
     else
     {
+        // A non-empty `scene` is a model/scene file PATH (e.g. "models/foo.gltf"), NOT a scene name:
+        // "TestScene" here would be treated as a file and fail to load.
         load_task = LoadSceneFromFile(scene, asset_path);
         scene->GetRootNode()->SetName(asset_path.path.parent_path().string());
     }

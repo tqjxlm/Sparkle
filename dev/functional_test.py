@@ -12,6 +12,11 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 GROUND_TRUTH_URL_BASE = "https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle"
 
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
+# Name of the app's built-in default scene (loaded when no --scene is passed). It is NOT passed to the
+# app: the harness deliberately omits --scene so the app loads this scene by default -- exactly how the
+# ground-truth images were generated. Used here ONLY to form the ground-truth filename (see
+# download_ground_truth). NB: passing `--scene TestScene` would make the app load a model FILE named
+# "TestScene", which fails -> a bare default-sky render. --scene takes a file path, not a scene name.
 DEFAULT_SCENE = "TestScene"
 
 FLIP_THRESHOLD = 0.1
@@ -50,6 +55,8 @@ def build_and_run(framework, pipeline, scene, other_args, headless=False, env=No
     if headless:
         run_cmd += ["--headless", "true"]
 
+    # Omit --scene to let the app load its built-in default scene (TestScene); --scene expects a
+    # model/scene file path, not a scene name. Callers pass scene=None for the default TestScene runs.
     if scene:
         run_cmd += ["--scene", scene]
 
