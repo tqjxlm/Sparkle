@@ -8,6 +8,17 @@
 * Screenshots are saved to [external-storage-path]/screenshots/. For `--test_case screenshot`, the file is named `screenshot.png`. For `--test_case multi_frame_screenshot`, files are named `multi_frame_N.png` where `N` is the frame index. The UI "Save Screenshot" button names files with the scene name, pipeline, and timestamp. For [external-storage-path], refer to [Run.md](Run.md).
 * Ground truth images can be found in [CI.md](CI.md). But if you are working on a feature that is meant to change the final image output, you should not rely on the ground truth images.
 
+### Confirm you are looking at the right output first
+
+* With **no `--scene`**, the app loads the built-in **TestScene** (a floor, several spheres, and glTF models against a sky map) — the scene the CI ground truth is rendered from. `--scene <path>` loads a model/scene **file path** instead. A name that is not a real path (e.g. `--scene TestScene`) silently logs an error, renders an **empty default-sky scene**, and still exits `0`. Before analysing anything, **verify the expected geometry is actually in the frame** — it is easy to spend a long time analysing a blank or wrong render.
+* Likewise confirm the intended pipeline / debug view / cvars actually took effect (check the image, not just the command line).
+
+### Comparing and diffing renders
+
+* Diff against the **ground truth**, not only A/B between two configs. Only the ground truth tells you which side is correct and whether an artifact is feature-specific (e.g. present in `svgf=on` but absent from the raw render).
+* Inspect a **per-pixel signed difference** (where one image is brighter vs darker), **zoom to 1:1** on suspect regions, and for edges take **scanline profiles** across the boundary. Thin, high-frequency artifacts — silhouette halos, fringes, ringing, fireflies — are only 1–3 px wide and **average to ≈zero under any whole-image/region mean or low-pass-blurred diff** (an edge band cancels because it straddles the bright overshoot and the adjacent dark side). Never use a blurred or region-averaged diff as the **detector**; use averages only to **quantify** what the eye has already found.
+* A passing aggregate metric (FLIP, mean error) does **not** mean the images match — it is a low-pass over the error map and hides spatially concentrated / structural errors. Inspect the worst tiles and the silhouettes explicitly before declaring a match.
+
 ## Python Test Scripts
 
 * When possible, always use python scripts to perform tests.
