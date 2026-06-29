@@ -136,7 +136,13 @@ void GPURenderer::Render()
         dispatched_sample_count_ = 0;
     }
 
+    // Once the target sample count is reached the image has converged; stop accumulating so the
+    // result is stable and deterministic (e.g. for screenshots) instead of drifting on fresh noise.
+    const bool accumulation_complete =
+        !camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
+
     // base pass: render to texture
+    if (!accumulation_complete)
     {
         scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                     .after_stage = RHIPipelineStage::Top,
