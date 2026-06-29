@@ -87,6 +87,8 @@ private:
     id<MTLCommandBuffer> current_command_buffer_;
     id<MTLCommandBuffer> last_command_buffer_;
 
+    dispatch_semaphore_t frame_throttle_semaphore_ = nullptr;
+
     // TODO(tqjxlm): remove the reference here
     RHIResourceRef<MetalImage> back_buffer_color_;
 

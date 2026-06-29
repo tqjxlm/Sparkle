@@ -53,6 +53,7 @@ MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headl
 
         command_queue_ = [device_ newCommandQueue];
         rhi_->SetMaxFramesInFlight(HeadlessFramesInFlight);
+        frame_throttle_semaphore_ = dispatch_semaphore_create(HeadlessFramesInFlight);
         return;
     }
 
@@ -65,7 +66,12 @@ MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headl
 
 void MetalContext::BeginFrame()
 {
-    if (!headless_)
+    // cpu-gpu frame sync
+    if (headless_)
+    {
+        dispatch_semaphore_wait(frame_throttle_semaphore_, DISPATCH_TIME_FOREVER);
+    }
+    else
     {
         current_drawable_ = [view_ getNextDrawable];
         SwapBuffer();
@@ -81,7 +87,14 @@ void MetalContext::BeginFrame()
 
 void MetalContext::EndFrame()
 {
-    if (!headless_)
+    if (headless_)
+    {
+        dispatch_semaphore_t throttle = frame_throttle_semaphore_;
+        [current_command_buffer_ addCompletedHandler:^(id<MTLCommandBuffer>) {
+          dispatch_semaphore_signal(throttle);
+        }];
+    }
+    else
     {
         [current_command_buffer_ presentDrawable:current_drawable_];
 
