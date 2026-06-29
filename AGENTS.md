@@ -20,11 +20,10 @@ See [docs/Test.md](docs/Test.md) for how to run tests, how to write test, and ho
 
 ## Visual Debugging Methodology
 
-* Refer to [docs/Test.md](docs/Test.md) about how to use screenshots to get visual output headlessly.
-* By outputting different textures to render target (e.g. via "--debug_mode"), you can test any intermediate textures or render targets in the pipeline.
-* When debugging visual results, you should analyze screenshot images both semantically and statistically.
-* When tackling a complex behavioural issue, do not just investigate on end-to-end result. Refer to each intermediate passes and output their input/output.
-* To debug a non-texture variable in shader, modify the shader to write it to full screen and check the screenshot for its value. You may need to disable tonemapping to get the raw value.
+* Semantic analysis is the primary way of visual debugging: always read the screenshot like a human first and evaluate its overall quality and correctness. Use statistical metrics only to back a semantic judgement and to solve the problem, never as a target in themselves — metrics are easily limited or misleading.
+* Rank errors by perceptual salience, not by screen area or mean magnitude. A sharp high-frequency artifact (silhouette halo/contour, firefly, edge fringe) the eye locks onto can cover <1% of pixels yet be the most objectionable error on screen, while a smooth low-frequency shift over half the frame reads as acceptable. **An error is never too small just because of its percentage on screen** — never use pixel-count or a mean/total deviation to down-rank a localized error.
+* Debug artifacts evidence-gated, never "guess a fix then ask if it looks better": **(1)** show the defect cleanly and directly (per-pixel overlay/diff at the failure's resolution, simplest reproducing setting) and get the user to confirm it's the right artifact; **(2)** **the gate is that agreed visualization** — the fix succeeds only when its highlighted defect pixels are **eliminated** (regenerate the same overlay after the fix), agreed before implementing. **Quantitative metrics are NOT the gate for rendering artifacts — they give false confidence** (a metric can show a big "% win" while the agreed image still shows the artifact); a number only *supports* the semantic verdict, never replaces it, and the image wins on disagreement. **Push back if asked for a purely quantitative criterion** — it conflicts with semantic-first. See [docs/RenderingValidation.md](docs/RenderingValidation.md) "Evidence-gated debugging".
+* Full methodology and debugging techniques — how to validate a rendering feature ("a proxy is not ground truth", failure-mode-driven acceptance, signed-diff-vs-ground-truth, inspecting intermediate passes, reading raw shader values) with a worked post-mortem — are in [docs/RenderingValidation.md](docs/RenderingValidation.md). Read it before adding a rendering feature or chasing an image artifact. Screenshot / debug-view / diffing mechanics are in [docs/Test.md](docs/Test.md).
 
 ## Code Style Guidelines
 
