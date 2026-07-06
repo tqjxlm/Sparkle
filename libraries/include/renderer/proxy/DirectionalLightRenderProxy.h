@@ -59,7 +59,6 @@ public:
 private:
     Mat4 shadow_projection_matrix_;
     Mat4 shadow_view_matrix_;
-    Mat4 shadow_view_projection_matrix_;
 
     UniformBufferData ubo_;
 

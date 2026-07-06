@@ -29,8 +29,6 @@ public:
         Vector3 w_o = -ray.Direction();
         const Vector3 &local_w_o = utilities::TransformBasisToLocal(w_o, normal, tangent);
 
-        Vector3 local_w_i;
-
         auto sample = DieletricBxDF::Sample(local_w_o, surface);
 
         // back to world space

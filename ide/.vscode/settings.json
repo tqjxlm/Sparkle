@@ -39,5 +39,5 @@
     ],
     "slang.format.clangFormatLocation": "/usr/bin/clang-format",
     //"slang.format.clangFormatLocation": "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin/clang-format.exe",
-    "slang.slangdLocation": "D:/SDKs/VulkanSDK/1.4.313.0/Bin/slangd.exe"
+    "slang.slangdLocation": "D:/SDKs/VulkanSDK/1.4.350.0/Bin/slangd.exe"
 }
