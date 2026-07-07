@@ -30,6 +30,26 @@ public:
         center_ = center;
     }
 
+    [[nodiscard]] float GetYaw() const
+    {
+        return yaw_;
+    }
+
+    [[nodiscard]] float GetPitch() const
+    {
+        return pitch_;
+    }
+
+    [[nodiscard]] float GetRadius() const
+    {
+        return radius_;
+    }
+
+    [[nodiscard]] const Vector3 &GetCenter() const
+    {
+        return center_;
+    }
+
     void SetupFromTransform();
 
     void OnAttach() override

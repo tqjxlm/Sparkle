@@ -6,6 +6,7 @@
 #include "MetalComputePass.h"
 #include "MetalContext.h"
 #include "MetalImage.h"
+#include "MetalNrdBackend.h"
 #include "MetalPipelineState.h"
 #include "MetalRayTracing.h"
 #include "MetalRenderPass.h"
@@ -266,6 +267,11 @@ RHIResourceRef<RHITLAS> MetalRHI::CreateTLAS(const std::string &name)
 RHIResourceRef<RHISampler> MetalRHI::CreateSampler(RHISampler::SamplerAttribute attribute, const std::string &name)
 {
     return CreateResource<MetalSampler>(attribute, name);
+}
+
+std::unique_ptr<RHINrdBackend> MetalRHI::CreateNrdBackend()
+{
+    return std::make_unique<MetalNrdBackend>(context->GetDevice());
 }
 
 void MetalRHI::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)

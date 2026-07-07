@@ -79,6 +79,8 @@ For how to build the project, please refer to [docs/Build.md](docs/Build.md).
 
 For project architecture, please refer to [docs/Architecture.md](docs/Architecture.md).
 
+For the NRD denoiser integration, please refer to [docs/Nrd.md](docs/Nrd.md).
+
 ## Todo List & Known Issues
 
 For todo list and known issues, please refer to [docs/TODO.md](docs/TODO.md).

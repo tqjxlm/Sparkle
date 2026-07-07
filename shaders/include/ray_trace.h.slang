@@ -103,7 +103,8 @@ SampleResult BxdfLambertian(float3 local_w_o, MaterialParameters mat_param)
     return result;
 }
 
-float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, MaterialParameters mat_param, Intersection intersection)
+float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, out bool is_specular_lobe,
+                 MaterialParameters mat_param, Intersection intersection)
 {
     // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
@@ -112,6 +113,7 @@ float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, MaterialParamete
     // 1. all metal reflection
     // 2. part of non-metal reflection (governed by frenel)
     SampleResult result = BxdfSpecular(local_w_o, mat_param);
+    is_specular_lobe = result.is_valid;
 
     // if this light does not go specular, it must be diffuse.
     if (!result.is_valid)
@@ -126,8 +128,12 @@ float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, MaterialParamete
     return result.throughput;
 }
 
-float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, MaterialParameters mat_param, Intersection intersection)
+float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, out bool is_specular_lobe,
+                     MaterialParameters mat_param, Intersection intersection)
 {
+    // dielectric reflection and refraction are both sharp view-dependent paths -> specular channel.
+    is_specular_lobe = true;
+
     // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
     float3 local_w_i;

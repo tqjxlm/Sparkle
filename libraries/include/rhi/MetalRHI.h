@@ -66,6 +66,8 @@ public:
 
     RHIResourceRef<RHIComputePass> CreateComputePass(const std::string &name, bool need_timestamp) override;
 
+    std::unique_ptr<RHINrdBackend> CreateNrdBackend() override;
+
 protected:
     void BeginFrameInternal() override;
     void EndFrameInternal() override;

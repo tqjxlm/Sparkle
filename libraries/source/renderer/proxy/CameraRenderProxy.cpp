@@ -11,6 +11,13 @@ void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera,
 {
     RenderProxy::Update(rhi, camera, config);
 
+    // Capture last frame's view-projection for motion vectors before any recomputation below.
+    // view_projection_matrix_ still holds the previous frame's value until OnTransformDirty runs.
+    if (vp_initialized_)
+    {
+        prev_view_projection_matrix_ = view_projection_matrix_;
+    }
+
     if (attribute_dirty_)
     {
         aspect_ratio_ = static_cast<float>(config.image_width) / static_cast<float>(config.image_height);
@@ -36,6 +43,13 @@ void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera,
     {
         pixels_dirty_ = true;
         last_debug_rendering_mode = config.debug_mode;
+    }
+
+    // On the first frame there is no previous view, so seed it with the current one (zero motion).
+    if (!vp_initialized_)
+    {
+        prev_view_projection_matrix_ = view_projection_matrix_;
+        vp_initialized_ = 1;
     }
 
     // view matrix is usually dirty

@@ -57,6 +57,19 @@ public:
         return pass_;
     }
 
+    // Re-point the pass at a different source image and re-bind (e.g. switching the tone-mapping input
+    // between the raw scene texture and the denoised output when the denoiser is toggled at runtime).
+    // Must be called after InitRenderResources, on the render thread.
+    void SetInput(const RHIResourceRef<RHIImage> &input)
+    {
+        if (source_texture_.get() == input.get())
+        {
+            return;
+        }
+        source_texture_ = input;
+        BindPixelShaderResources();
+    }
+
 protected:
     virtual void SetupRenderPass();
     virtual void SetupPipeline();

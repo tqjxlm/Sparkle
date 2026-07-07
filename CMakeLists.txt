@@ -90,6 +90,10 @@ FILE(GLOB_RECURSE SOURCES
 if(ENABLE_TEST_CASES)
     target_compile_definitions(sparkle PRIVATE ENABLE_TEST_CASES=1)
     FILE(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
+    if(MACOS OR IOS)
+        FILE(GLOB_RECURSE TEST_SOURCES_MM "tests/*.mm")
+        list(APPEND TEST_SOURCES ${TEST_SOURCES_MM})
+    endif()
     target_sources(sparkle PRIVATE ${TEST_SOURCES})
     target_include_directories(sparkle PRIVATE "tests/")
 else()
@@ -350,6 +354,18 @@ elseif(MACOS)
         "-framework GameController"
         "-framework MetalPerformanceShaders"
     )
+
+    # SPIRV-Cross (from the Vulkan SDK): runtime SPIR-V->MSL for NRD's shaders (its SPIR-V comes from
+    # GetInstanceDesc; the Metal RHI compiles MSL source at runtime). Link order: msl -> glsl -> core.
+    if(DEFINED ENV{VULKAN_SDK})
+        set(INCLUDES ${INCLUDES} $ENV{VULKAN_SDK}/include)
+        set(LIBRARIES ${LIBRARIES}
+            $ENV{VULKAN_SDK}/lib/libspirv-cross-msl.a
+            $ENV{VULKAN_SDK}/lib/libspirv-cross-glsl.a
+            $ENV{VULKAN_SDK}/lib/libspirv-cross-core.a
+        )
+    endif()
+
     set_target_properties(sparkle PROPERTIES
         MACOSX_BUNDLE TRUE
         RESOURCE "${RESOURCES}"

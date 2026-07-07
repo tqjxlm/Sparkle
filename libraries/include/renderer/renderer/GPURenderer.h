@@ -35,6 +35,8 @@ private:
 
     void InitSceneRenderResources();
 
+    void BindNrdGBuffer();
+
     void BindBindlessResources();
 
     void MeasurePerformance();
@@ -47,6 +49,7 @@ private:
 
     RHIResourceRef<RHIImage> scene_texture_;
     RHIResourceRef<RHIRenderTarget> scene_rt_;
+    std::unique_ptr<class NrdDenoiser> nrd_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
 
     RHIResourceRef<RHIImage> tone_mapping_output_;
@@ -60,6 +63,19 @@ private:
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
+    // Tracks the denoiser enable state to detect a runtime toggle (control panel): on change, lazily
+    // allocate NRD resources.
+    bool nrd_enabled_last_ = false;
+
+    // Enable state sampled once per frame (in Update): the control panel may flip the config at any
+    // time, and the G-buffer write flag, the denoiser passes, and the tone-mapping source must agree
+    // within a frame.
+    bool nrd_frame_active_ = false;
+
+    bool gbuffer_write_this_frame_ = false;
+
+    bool scene_ready_last_ = false;
+
     struct ComputePerformanceRecord
     {
         uint32_t spp = 0;
@@ -69,7 +85,7 @@ private:
     float running_time_per_spp_ = 0.f;
 
     uint32_t last_second_total_spp_ = 0;
-    uint32_t dispatched_sample_count_ = 0;
+    uint32_t seed_counter_ = 0;
 
     TimerCaller spp_logger_;
 };

@@ -121,6 +121,19 @@ if (MACOS OR IOS)
     )
 
     add_dependencies(cook-resources compile-metal-shaders)
+
+    # NRD's cooked MSL (committed outputs of --test_case nrd_cook; see docs/Nrd.md). The source dir is
+    # created first so a fresh checkout that has not cooked yet still configures and builds.
+    if (IOS)
+        set(NRD_COOKED_PLATFORM ios)
+    else()
+        set(NRD_COOKED_PLATFORM macos)
+    endif()
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/nrd/cooked/${NRD_COOKED_PLATFORM}")
+    add_custom_target(copy-nrd-cooked
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cooked/${NRD_COOKED_PLATFORM} ${OUTPUT_SHADER_DIRECTORY}/nrd/cooked/${NRD_COOKED_PLATFORM}
+    )
+    add_dependencies(cook-resources copy-nrd-cooked)
 else()
     add_custom_target(
         compile-shaders ALL

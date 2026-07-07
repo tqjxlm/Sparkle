@@ -163,6 +163,27 @@ else()
     target_compile_definitions(sparkle PRIVATE ENABLE_PROFILER=0)
 endif()
 
+# ------------------ NRD (NVIDIA Real-time Denoiser) ------------------
+
+# Real-time GI denoiser. Native-API path: its SPIR-V shaders are cross-compiled to Metal by our shader
+# pipeline; NRI (D3D/VK-only, unusable on Metal) stays off. Static lib so there is no dylib to bundle.
+# DXC (HLSL->SPIR-V) comes from the Vulkan SDK already in our build deps. See docs/Nrd.md.
+set(NRD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+set(NRD_NRI OFF CACHE BOOL "" FORCE)
+# RGBA16_SNORM: IN_NORMAL_ROUGHNESS packing is then a raw float4(N, roughness) write (no 101010
+# bit-packing to replicate in our pack shader), stored losslessly in a float texture.
+set(NRD_NORMAL_ENCODING "4" CACHE STRING "" FORCE)
+set(NRD_EMBEDS_DXIL_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_DXBC_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_SPIRV_SHADERS ON CACHE BOOL "" FORCE)
+if(DEFINED ENV{VULKAN_SDK})
+    set(SHADERMAKE_DXC_VK_PATH "$ENV{VULKAN_SDK}/bin/dxc" CACHE FILEPATH "" FORCE)
+endif()
+add_subdirectory(NRD)
+suppress_warnings(NRD)
+target_link_libraries(sparkle_thirdparty PUBLIC NRD)
+target_include_directories(sparkle_thirdparty SYSTEM PUBLIC NRD/Include)
+
 # ------------------ finalize ------------------
 
 target_include_directories(sparkle_thirdparty SYSTEM PUBLIC

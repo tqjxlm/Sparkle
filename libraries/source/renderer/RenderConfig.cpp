@@ -19,6 +19,9 @@ static ConfigValue<uint32_t> config_spp("spp", "num rays per sample per frame", 
 static ConfigValue<bool> config_dynamic_spp("dynamic_spp", "use dynamic spp depending on framerate", "renderer", false,
                                             true);
 static ConfigValue<uint32_t> config_max_spp("max_spp", "maximum num rays per sample accumulated", "renderer", 2048);
+static ConfigValue<uint32_t> config_random_seed_offset(
+    "random_seed_offset", "offset added to the per-frame RNG seed (0=deterministic; for MC noise filtering)",
+    "renderer", 0);
 static ConfigValue<uint32_t> config_width("width", "image width", "renderer", 1280);
 static ConfigValue<uint32_t> config_height("height", "image height", "renderer", 720);
 static ConfigValue<uint32_t> config_bounce("bounce", "num intersections allowed per ray", "renderer", 8);
@@ -45,6 +48,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_spp, sample_per_pixel);
     ConfigCollectionHelper::RegisterConfig(this, config_bounce, max_bounce);
     ConfigCollectionHelper::RegisterConfig(this, config_max_spp, max_sample_per_pixel);
+    ConfigCollectionHelper::RegisterConfig(this, config_random_seed_offset, random_seed_offset);
     ConfigCollectionHelper::RegisterConfig(this, config_ssao, use_ssao);
     ConfigCollectionHelper::RegisterConfig(this, config_diffuse_ibl, use_diffuse_ibl);
     ConfigCollectionHelper::RegisterConfig(this, config_specular_ibl, use_specular_ibl);
@@ -83,6 +87,11 @@ void RenderConfig::Validate()
             pipeline = GetFallbackRenderMode(pipeline);
             config_pipeline.Set(Enum2Str<Pipeline>(pipeline));
         }
+    }
+
+    if (rhi_ != nullptr)
+    {
+        Log(Info, "effective pipeline: {}", Enum2Str<Pipeline>(pipeline));
     }
 
     if (pipeline == Pipeline::cpu || pipeline == Pipeline::gpu)
