@@ -2,9 +2,9 @@
 
 #include "debug.h.slang"
 #include "directional_light.h.slang"
+#include "pbr.h.slang"
 #include "random.h.slang"
 #include "sky_light.h.slang"
-#include "pbr.h.slang"
 
 struct Camera
 {
@@ -75,7 +75,8 @@ float3 SampleEmissive(inout Intersection intersection, MaterialParameters mat_pa
     return emissive_color_sampled * mat_param.emissive_color;
 }
 
-float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i, out float out_pdf)
+float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 w_i,
+                     out float out_pdf)
 {
     if (mat_param.eta > 0)
     {
@@ -160,7 +161,6 @@ float GetMISWeight(float current_pdf, float compensation_pdf)
     float compensation_pdf_sqr = compensation_pdf * compensation_pdf;
     return current_pdf_sqr / (compensation_pdf_sqr + current_pdf_sqr + Eps);
 }
-
 
 MaterialParameters GetMaterial(inout Intersection intersection)
 {
@@ -257,7 +257,7 @@ float3 SamplePixel(RayDesc ray_desc)
     float3 pixel_color = float3(0, 0, 0);
     float3 throughput = float3(1, 1, 1);
     int bounce;
-    
+
     // When we introduce NEE, non-NEE paths should be weighted down
     float bsdf_mis_weight = 1.f;
 
@@ -389,9 +389,7 @@ float3 SamplePixel(RayDesc ray_desc)
     return pixel_color;
 }
 
-[shader("compute")]
-[numthreads(16, 16, 1)] void main(uint3 DTid
-                                  : SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = uint2(DTid.xy);
 
     // bound check

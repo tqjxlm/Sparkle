@@ -159,12 +159,15 @@ void CPURenderer::Render()
     camera_->AccumulateSample(actual_sample_per_pixel_);
 }
 
-struct SampleResult
+namespace
+{
+struct PixelSampleResult
 {
     Vector3 color = Zeros;
     Vector3 world_normal = Zeros;
     float valid_flag = 1.f;
 };
+} // namespace
 
 static void SetupViewRay(CameraRenderProxy *camera, Ray &ray, float u, float v)
 {
@@ -186,8 +189,8 @@ static void SetupViewRay(CameraRenderProxy *camera, Ray &ray, float u, float v)
     ray.Reset(ray_origin, ray_direction);
 }
 
-static SampleResult SamplePixel(const SceneRenderProxy &scene, const RenderConfig &config, CameraRenderProxy *camera,
-                                float u, float v, bool debug)
+static PixelSampleResult SamplePixel(const SceneRenderProxy &scene, const RenderConfig &config,
+                                     CameraRenderProxy *camera, float u, float v, bool debug)
 {
     Ray ray(debug);
     SetupViewRay(camera, ray, u, v);
@@ -195,7 +198,7 @@ static SampleResult SamplePixel(const SceneRenderProxy &scene, const RenderConfi
     Vector3 throughput = Ones;
     Intersection intersection;
 
-    SampleResult result;
+    PixelSampleResult result;
 
     const auto *sky_light = scene.GetSkyLight();
 

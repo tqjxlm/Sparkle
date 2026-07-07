@@ -11,7 +11,7 @@ namespace sparkle
 {
 class ScreenQuadVertexShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(ScreenQuadVertexShader, RHIShaderStage::Vertex, "shaders/screen/screen.vs.slang", "main")
+    REGISTGER_SHADER(ScreenQuadVertexShader, RHIShaderStage::Vertex, "shaders/screen/screen.vs.slang", "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

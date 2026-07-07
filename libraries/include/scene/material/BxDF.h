@@ -62,7 +62,6 @@ public:
         Vector3 local_w_i = utilities::Reflect(local_w_o, local_w_m);
 
         Vector3 fresnel_color;
-        Vector3 throughput;
 
         auto cos_o = utilities::SaturatedCosTheta(local_w_o);
         auto cos_i = utilities::SaturatedCosTheta(local_w_i);

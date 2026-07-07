@@ -9,7 +9,7 @@ namespace sparkle
 {
 class DepthOnlyPixelShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(DepthOnlyPixelShader, RHIShaderStage::Pixel, "shaders/standard/depth_only.ps.slang", "main")
+    REGISTGER_SHADER(DepthOnlyPixelShader, RHIShaderStage::Pixel, "shaders/standard/depth_only.ps.slang", "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

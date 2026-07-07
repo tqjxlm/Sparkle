@@ -11,9 +11,7 @@ struct VS_INPUT
     [[vk::location(0)]] float3 position : POSITION;
 };
 
-[shader("vertex")]
-VSInterpolant main(VS_INPUT input)
-{
+[shader("vertex")] VSInterpolant shader_main(VS_INPUT input) {
     VSInterpolant output;
     const float unit_box_scale = 1.0f;
 

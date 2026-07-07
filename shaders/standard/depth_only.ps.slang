@@ -1,5 +1,3 @@
-[shader("fragment")]
-void main()
-{
+[shader("fragment")] void shader_main() {
     // noop!
 }

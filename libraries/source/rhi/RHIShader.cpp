@@ -26,6 +26,11 @@ void RHIShaderResourceTable::Initialize()
 
         auto set = decl->set;
         auto slot = decl->slot;
+        if (slot == UINT_MAX)
+        {
+            // reflection could not locate this resource in the compiled shader (e.g. optimized out)
+            continue;
+        }
         if (resource_sets_.size() < set + 1)
         {
             resource_sets_.resize(set + 1);

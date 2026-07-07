@@ -8,7 +8,8 @@ namespace sparkle
 {
 class ToneMappingPixelShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(ToneMappingPixelShader, RHIShaderStage::Pixel, "shaders/screen/tone_mapping.ps.slang", "main")
+    REGISTGER_SHADER(ToneMappingPixelShader, RHIShaderStage::Pixel, "shaders/screen/tone_mapping.ps.slang",
+                     "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

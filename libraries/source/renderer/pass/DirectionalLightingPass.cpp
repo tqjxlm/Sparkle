@@ -15,7 +15,7 @@ namespace sparkle
 class DirectionalLightingPassPixelShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(DirectionalLightingPassPixelShader, RHIShaderStage::Pixel,
-                     "shaders/screen/directional_lighting.ps.slang", "main")
+                     "shaders/screen/directional_lighting.ps.slang", "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

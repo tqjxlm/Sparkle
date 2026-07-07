@@ -18,7 +18,8 @@ namespace sparkle
 {
 class RayTracingComputeShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(RayTracingComputeShader, RHIShaderStage::Compute, "shaders/ray_trace/ray_trace.cs.slang", "main")
+    REGISTGER_SHADER(RayTracingComputeShader, RHIShaderStage::Compute, "shaders/ray_trace/ray_trace.cs.slang",
+                     "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
@@ -191,8 +192,9 @@ void GPURenderer::Render()
             final_after_stage = RHIPipelineStage::Transfer;
         }
 
-        tone_mapping_output_->Transition(
-            {.target_layout = RHIImageLayout::Read, .after_stage = final_after_stage, .before_stage = RHIPipelineStage::PixelShader});
+        tone_mapping_output_->Transition({.target_layout = RHIImageLayout::Read,
+                                          .after_stage = final_after_stage,
+                                          .before_stage = RHIPipelineStage::PixelShader});
     }
 
     // screen pass: render texture on a screen quad

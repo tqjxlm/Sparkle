@@ -57,15 +57,17 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
 
     add_custom_command(
         OUTPUT ${SPIRV}
-        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3
-        COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3"
+        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3
+        COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3"
         DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
     )
     list(APPEND ALL_SPIRV_OUTPUTS ${SPIRV})
 endforeach(SLANG)
 
-# TODO: use slang to compile metal directly when it is ready
-# stage 2 (metal only): spirv->metal
+# stage 2 (metal only): slang->metal directly.
+# ray_trace shaders still go slang->spirv->spirv-cross->metal: slang cannot emit valid MSL
+# for multiple unsized bindless arrays yet. its MSL also does not bake a vertex y-flip,
+# so the metal RHI flips the viewport instead (see MetalRenderPass).
 if (MACOS OR IOS)
     set(ALL_MTL_OUTPUTS)
 
@@ -80,22 +82,36 @@ if (MACOS OR IOS)
         set(SPIRV "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}.spv")
         set(MSL "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}.metal")
 
+        string(REPLACE "." ";" PARTS ${SHADER_NAME})
+        list(GET PARTS 1 SHADER_TYPE)
+        if (SHADER_TYPE STREQUAL "vs")
+            set(STAGE "vertex")
+        elseif (SHADER_TYPE STREQUAL "ps")
+            set(STAGE "fragment")
+        else()
+            set(STAGE "compute")
+        endif()
+
         cmake_path(GET SLANG PARENT_PATH PATH_NAME)
         cmake_path(GET PATH_NAME FILENAME SUB_PATH_NAME)
         if (SUB_PATH_NAME STREQUAL "ray_trace")
             # ray trace shaders need bindless
             set(SPIRV_CROSS_FLAGS ${SPIRV_CROSS_FLAGS} --msl-argument-buffer-tier 2 --msl-texture-buffer-native)
+
+            add_custom_command(
+                OUTPUT ${MSL}
+                COMMAND ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}
+                COMMENT "Compiling ${SHADER_NAME} to Metal: ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}"
+                DEPENDS ${SPIRV}
+            )
+        else()
+            add_custom_command(
+                OUTPUT ${MSL}
+                COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include
+                COMMENT "Compiling ${SHADER_NAME} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include"
+                DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
+            )
         endif()
-
-        # not used for now due to spirv-cross limitation
-        # set(ARGUMENT_BUFFER_ARGS "--msl-argument-buffers --msl-decoration-binding --msl-force-active-argument-buffer-resources")
-
-        add_custom_command(
-            OUTPUT ${MSL}
-            COMMAND ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}
-            COMMENT "Compiling ${SHADER_NAME} to Metal: ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}"
-            DEPENDS ${SPIRV}
-        )
         list(APPEND ALL_MTL_OUTPUTS ${MSL})
     endforeach(SLANG)
 

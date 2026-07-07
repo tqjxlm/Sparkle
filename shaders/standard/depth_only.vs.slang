@@ -19,9 +19,7 @@ struct VS_OUTPUT
     float4 gl_Position : SV_Position;
 };
 
-[shader("vertex")]
-VS_OUTPUT main(VS_INPUT input)
-{
+[shader("vertex")] VS_OUTPUT shader_main(VS_INPUT input) {
     VS_OUTPUT output;
 
     float4 world_pos = mul(ModelMatrix, float4(input.position.xyz, 1.0f));

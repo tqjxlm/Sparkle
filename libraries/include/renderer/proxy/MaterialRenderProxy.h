@@ -31,17 +31,18 @@ public:
 
 #pragma region Graphics Render
 
+    // must match MaterialParameters in shaders/include/standard.h.slang
     struct alignas(16) MaterialRenderData
     {
-        Vector3 baseColor;
         uint32_t baseColorTextureId = UINT_MAX;
-        Vector3 emissiveColor;
         uint32_t emissiveTextureId = UINT_MAX;
-        float metallic;
-        float roughness;
         uint32_t metallicRoughnessTextureId = UINT_MAX;
         uint32_t normalTextureId = UINT_MAX;
+        float metallic;
+        float roughness;
         float eta;
+        alignas(16) Vector3 baseColor;
+        alignas(16) Vector3 emissiveColor;
 
         explicit MaterialRenderData(const MaterialResource &material);
     };

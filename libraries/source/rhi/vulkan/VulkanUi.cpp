@@ -49,17 +49,14 @@ void VulkanUiHandler::Init()
     init_info.Queue = context->GetGraphicsQueue();
     init_info.PipelineCache = VK_NULL_HANDLE;
     init_info.DescriptorPool = descriptor_pool_;
-    init_info.RenderPass = RHICast<VulkanRenderPass>(render_pass_)->GetRenderPass();
-    init_info.Subpass = 0;
+    init_info.PipelineInfoMain.RenderPass = RHICast<VulkanRenderPass>(render_pass_)->GetRenderPass();
+    init_info.PipelineInfoMain.Subpass = 0;
+    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(context->GetRHI()->GetConfig().msaa_samples);
     init_info.MinImageCount = 2;
     init_info.ImageCount = context->GetRHI()->GetMaxFramesInFlight();
-    init_info.MSAASamples = GetVkMsaaSampleBit(context->GetRHI()->GetConfig().msaa_samples);
     init_info.Allocator = VK_NULL_HANDLE;
     init_info.CheckVkResultFn = CheckVkResult;
     ImGui_ImplVulkan_Init(&init_info);
-
-    // manually touch resources
-    ImGui_ImplVulkan_CreateFontsTexture();
 
     initialized_ = true;
 }
@@ -89,11 +86,6 @@ void VulkanUiHandler::Render()
         return;
     }
 
-    if (draw_data->CmdLists[0]->CmdBuffer[0].TextureId != io.Fonts->TexID)
-    {
-        return;
-    }
-
     ImGui_ImplVulkan_RenderDrawData(draw_data, context->GetCurrentCommandBuffer());
 }
 
@@ -109,14 +101,16 @@ void VulkanUiHandler::CreateDescriptorPool()
     ASSERT(!descriptor_pool_);
 
     std::vector<VkDescriptorPoolSize> pool_sizes = {
-        {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1},
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+         .descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE},
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE},
     };
 
     VkDescriptorPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.poolSizeCount = static_cast<unsigned>(pool_sizes.size());
     pool_info.pPoolSizes = pool_sizes.data();
-    pool_info.maxSets = static_cast<unsigned>(pool_sizes.size());
+    pool_info.maxSets = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE;
 
     pool_info.flags |= VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 

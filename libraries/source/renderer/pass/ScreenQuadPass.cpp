@@ -8,7 +8,7 @@ namespace sparkle
 {
 class ScreenQuadPixelShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(ScreenQuadPixelShader, RHIShaderStage::Pixel, "shaders/screen/screen.ps.slang", "main")
+    REGISTGER_SHADER(ScreenQuadPixelShader, RHIShaderStage::Pixel, "shaders/screen/screen.ps.slang", "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

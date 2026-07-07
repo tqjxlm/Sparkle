@@ -12,7 +12,8 @@ namespace sparkle
 {
 class GBufferPassPixelShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(GBufferPassPixelShader, RHIShaderStage::Pixel, "shaders/standard/gbuffer_pass.ps.slang", "main")
+    REGISTGER_SHADER(GBufferPassPixelShader, RHIShaderStage::Pixel, "shaders/standard/gbuffer_pass.ps.slang",
+                     "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

@@ -226,7 +226,7 @@ def install_vulkan_sdk(build_cache_dir):
     tmp_dir = os.path.join(build_cache_dir, "tmp")
 
     prerequisites = load_prerequisites_versions()
-    latest_version = prerequisites.get("VulkanSDK", "1.4.313.0")
+    latest_version = prerequisites.get("VulkanSDK", "1.4.350.0")
     print(f"Use Vulkan SDK version: {latest_version}")
 
     vulkan_sdk_path = os.path.join(
@@ -709,7 +709,7 @@ def install_glfw():
 def setup_android_validation(script_dir):
     """Setup Android Vulkan validation layer binaries with version from prerequisites.json."""
     prerequisites = load_prerequisites_versions()
-    vulkan_version = prerequisites.get("VulkanSDK", "1.4.313.0")
+    vulkan_version = prerequisites.get("VulkanSDK", "1.4.350.0")
 
     android_dir = script_dir
     app_jni_dir = os.path.join(android_dir, "app", "src", "main", "jniLibs")

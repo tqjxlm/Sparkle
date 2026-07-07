@@ -8,9 +8,7 @@
     uint element_count;
 };
 
-[shader("compute")]
-[numthreads(64, 1, 1)] void main(uint3 DTid
-                                 : SV_DispatchThreadID) {
+[shader("compute")][numthreads(64, 1, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint thread_index = DTid.x;
     if (thread_index >= element_count)
     {

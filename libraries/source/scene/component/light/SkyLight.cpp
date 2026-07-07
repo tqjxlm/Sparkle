@@ -159,7 +159,7 @@ void SkyLight::Cook()
 
     Eigen::Quaternion<Scalar> q = Eigen::Quaternion<Scalar>::FromTwoVectors(Front, max_brightness_dir);
 
-    sun_direction_ = q.toRotationMatrix().eulerAngles(0, 1, 2);
+    sun_direction_ = q.toRotationMatrix().canonicalEulerAngles(0, 1, 2);
 
     Log(Info, "sky map cook ok. took time {}s. max brightness {}. max brightness direction {}. sun brightness {}",
         timer.ElapsedSecond(), max_brightness, utilities::VectorToString(utilities::ToDegree(sun_direction_)),

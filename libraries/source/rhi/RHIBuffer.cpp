@@ -7,7 +7,7 @@ namespace sparkle
 class BufferUpdateComputeShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(BufferUpdateComputeShader, RHIShaderStage::Compute, "shaders/utilities/buffer_update.cs.slang",
-                     "main")
+                     "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

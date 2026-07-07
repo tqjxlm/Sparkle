@@ -79,8 +79,8 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
     const auto &prim = ctx.stage.GetPrimAtPath(tinyusdz::Path(node.abs_path, ""));
     const auto *render_camera = prim.value()->as<tinyusdz::GeomCamera>();
 
-    tinyusdz::GeomCamera::Projection projection;
-    render_camera->projection.get_value().get(0, &projection);
+    auto projection = tinyusdz::GeomCamera::Projection::Perspective;
+    render_camera->projection.get_value().get_scalar(&projection);
     if (projection != tinyusdz::GeomCamera::Projection::Perspective)
     {
         ASSERT_F(false, "USDLoader: only perspective camera is supported for now. node: {}.", node.display_name);
@@ -231,45 +231,49 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
     MaterialResource material_resource;
 
-    if (render_material.surfaceShader.diffuseColor.is_texture())
+    if (render_material.hasUsdPreviewSurface())
     {
-        material_resource.base_color_texture =
-            CreateTexture(ctx, static_cast<size_t>(render_material.surfaceShader.diffuseColor.texture_id));
-    }
-    else
-    {
-        material_resource.base_color = MatrixCast(render_material.surfaceShader.diffuseColor.value);
-    }
+        const auto &surface_shader = *render_material.surfaceShader;
 
-    if (render_material.surfaceShader.emissiveColor.is_texture())
-    {
-        material_resource.emissive_texture =
-            CreateTexture(ctx, static_cast<size_t>(render_material.surfaceShader.emissiveColor.texture_id));
-    }
-    else
-    {
-        material_resource.emissive_color = MatrixCast(render_material.surfaceShader.emissiveColor.value);
-    }
+        if (surface_shader.diffuseColor.is_texture())
+        {
+            material_resource.base_color_texture =
+                CreateTexture(ctx, static_cast<size_t>(surface_shader.diffuseColor.texture_id));
+        }
+        else
+        {
+            material_resource.base_color = MatrixCast(surface_shader.diffuseColor.value);
+        }
 
-    if (render_material.surfaceShader.normal.is_texture())
-    {
-        material_resource.normal_texture =
-            CreateTexture(ctx, static_cast<size_t>(render_material.surfaceShader.normal.texture_id));
-    }
+        if (surface_shader.emissiveColor.is_texture())
+        {
+            material_resource.emissive_texture =
+                CreateTexture(ctx, static_cast<size_t>(surface_shader.emissiveColor.texture_id));
+        }
+        else
+        {
+            material_resource.emissive_color = MatrixCast(surface_shader.emissiveColor.value);
+        }
 
-    if (render_material.surfaceShader.metallic.is_texture())
-    {
-        // Curretly we assume metallic and roughness are packed into a single texture.
-        ASSERT_EQUAL(render_material.surfaceShader.metallic.texture_id,
-                     render_material.surfaceShader.roughness.texture_id);
+        if (surface_shader.normal.is_texture())
+        {
+            material_resource.normal_texture =
+                CreateTexture(ctx, static_cast<size_t>(surface_shader.normal.texture_id));
+        }
 
-        material_resource.metallic_roughness_texture =
-            CreateTexture(ctx, static_cast<size_t>(render_material.surfaceShader.metallic.texture_id));
-    }
-    else
-    {
-        material_resource.metallic = render_material.surfaceShader.metallic.value;
-        material_resource.roughness = render_material.surfaceShader.roughness.value;
+        if (surface_shader.metallic.is_texture())
+        {
+            // Curretly we assume metallic and roughness are packed into a single texture.
+            ASSERT_EQUAL(surface_shader.metallic.texture_id, surface_shader.roughness.texture_id);
+
+            material_resource.metallic_roughness_texture =
+                CreateTexture(ctx, static_cast<size_t>(surface_shader.metallic.texture_id));
+        }
+        else
+        {
+            material_resource.metallic = surface_shader.metallic.value;
+            material_resource.roughness = surface_shader.roughness.value;
+        }
     }
 
     // TODO(tqjxlm): support dieletric materials
