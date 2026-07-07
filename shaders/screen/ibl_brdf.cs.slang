@@ -13,8 +13,7 @@
 
 [[vk::binding(1, 0)]] RWTexture2D<float4> out_texture;
 
-[shader("compute")]
-[numthreads(16, 16, 1)] void main(uint3 DTid : SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = DTid.xy;
 
     if (pixel.x >= resolution.x || pixel.y >= resolution.y)

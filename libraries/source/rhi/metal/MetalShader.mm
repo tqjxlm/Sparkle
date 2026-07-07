@@ -37,18 +37,35 @@ void MetalShader::Load()
     ASSERT_F(library_, "Failed to load and compile shader library {}. error: {}", path,
              [error.localizedDescription UTF8String]);
 
-    // slang names the entry point "main_0", spirv-cross names it "main0"
-    auto actual_entry_point = shader_info_->GetEntryPoint() + "_0";
-    function_ = [library_ newFunctionWithName:[NSString stringWithUTF8String:actual_entry_point.c_str()]];
+    auto find_function = [&](const std::string &entry_point) -> bool {
+        function_ = [library_ newFunctionWithName:[NSString stringWithUTF8String:entry_point.c_str()]];
+        return function_ != nil;
+    };
+
+    // Slang emits exact non-reserved entry names. spirv-cross currently emits main0
+    // for the ray-tracing SPIR-V path. Older Slang-generated Metal used main_0
+    // after Apple's compiler renamed a reserved main entry.
+    const auto &entry_point = shader_info_->GetEntryPoint();
+    if (!find_function(entry_point))
+    {
+        find_function(entry_point + "_0");
+    }
     if (!function_)
     {
-        actual_entry_point = shader_info_->GetEntryPoint() + "0";
-        function_ = [library_ newFunctionWithName:[NSString stringWithUTF8String:actual_entry_point.c_str()]];
+        find_function(entry_point + "0");
+    }
+    if (!function_ && entry_point != "main")
+    {
+        find_function("main_0");
+    }
+    if (!function_ && entry_point != "main")
+    {
+        find_function("main0");
     }
 
-    SetDebugInfo(function_, GetName());
-
     ASSERT_F(function_, "Failed to load shader function {}", path);
+
+    SetDebugInfo(function_, GetName());
 
     loaded_ = true;
 }

@@ -8,8 +8,7 @@
 [[vk::binding(1, 1)]] Texture2D inputTexture;
 [[vk::binding(2, 1)]] SamplerState inputTextureSampler;
 
-[shader("fragment")]
-float4 main(VSInterpolant input) : SV_Target
+[shader("fragment")] float4 shader_main(VSInterpolant input) : SV_Target
 {
     const int KernelSize = 3;
     float3 color = float3(0, 0, 0);

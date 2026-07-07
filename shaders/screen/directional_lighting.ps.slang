@@ -38,8 +38,7 @@
 [[vk::binding(1, 2)]] Texture2D<float> depth_texture;
 [[vk::binding(2, 2)]] SamplerState depth_sampler;
 
-[shader("fragment")]
-float4 main(VSInterpolant vs_in) : SV_Target
+[shader("fragment")] float4 shader_main(VSInterpolant vs_in) : SV_Target
 {
     uint2 gbuffer_size;
     gbuffer_texture.GetDimensions(gbuffer_size.x, gbuffer_size.y);

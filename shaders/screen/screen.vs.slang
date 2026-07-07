@@ -12,9 +12,7 @@ struct VSInput
     [[vk::location(1)]] float2 uv : TEXCOORD0;
 };
 
-[shader("vertex")]
-VSInterpolant main(VSInput input)
-{
+[shader("vertex")] VSInterpolant shader_main(VSInput input) {
     VSInterpolant output;
 
     float2 rotatedPosition = pre_rotation_col[0].xy * input.position.x + pre_rotation_col[1].xy * input.position.y;

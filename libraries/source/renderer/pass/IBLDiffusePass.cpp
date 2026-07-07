@@ -10,7 +10,8 @@ namespace sparkle
 {
 class IBLDiffuseMapComputeShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(IBLDiffuseMapComputeShader, RHIShaderStage::Compute, "shaders/screen/ibl_diffuse.cs.slang", "main")
+    REGISTGER_SHADER(IBLDiffuseMapComputeShader, RHIShaderStage::Compute, "shaders/screen/ibl_diffuse.cs.slang",
+                     "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 

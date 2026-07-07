@@ -57,8 +57,8 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
 
     add_custom_command(
         OUTPUT ${SPIRV}
-        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3
-        COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3"
+        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3
+        COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3"
         DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
     )
     list(APPEND ALL_SPIRV_OUTPUTS ${SPIRV})
@@ -107,8 +107,8 @@ if (MACOS OR IOS)
         else()
             add_custom_command(
                 OUTPUT ${MSL}
-                COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include
-                COMMENT "Compiling ${SHADER_NAME} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include"
+                COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include
+                COMMENT "Compiling ${SHADER_NAME} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include"
                 DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
             )
         endif()

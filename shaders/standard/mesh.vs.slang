@@ -21,9 +21,7 @@ struct VS_INPUT
     matrix ModelMatrixInvTranspose;
 }
 
-[shader("vertex")]
-MeshPassVSInterpolant main(VS_INPUT input)
-{
+[shader("vertex")] MeshPassVSInterpolant shader_main(VS_INPUT input) {
     MeshPassVSInterpolant output;
 
     float4 world_pos = mul(ModelMatrix, float4(input.position.xyz, 1.0f));

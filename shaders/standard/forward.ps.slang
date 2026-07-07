@@ -97,8 +97,7 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
     return surface;
 }
 
-[shader("fragment")]
-float4 main(MeshPassVSInterpolant vs_in) : SV_Target
+[shader("fragment")] float4 shader_main(MeshPassVSInterpolant vs_in) : SV_Target
 {
     SurfaceAttributes surface = LoadSurface(vs_in);
 
