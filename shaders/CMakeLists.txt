@@ -133,7 +133,10 @@ if (MACOS OR IOS)
     set(NRD_COOK_TOOL ${CMAKE_CURRENT_BINARY_DIR}/nrd_msl_cook)
     add_custom_command(
         OUTPUT ${NRD_COOK_TOOL}
-        COMMAND xcrun clang++ -std=c++17 -O1 ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/nrd_msl_cook.cpp
+        # explicit sdk and target: xcode script phases export SDKROOT and IPHONEOS_DEPLOYMENT_TARGET
+        # (when targeting ios), either of which silently retargets this host tool to ios
+        COMMAND xcrun -sdk macosx clang++ -target ${CMAKE_HOST_SYSTEM_PROCESSOR}-apple-macosx
+            -std=c++17 -O1 ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/nrd_msl_cook.cpp
             -I $ENV{VULKAN_SDK}/include
             $ENV{VULKAN_SDK}/lib/libspirv-cross-msl.a
             $ENV{VULKAN_SDK}/lib/libspirv-cross-glsl.a

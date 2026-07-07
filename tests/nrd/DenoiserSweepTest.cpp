@@ -132,6 +132,9 @@ public:
             }
             request_ = rf->RequestTakeScreenshot("denoiser_sweep_converged");
             return Result::Pending;
+
+        default:
+            return Result::Pending;
         }
         return Result::Pending;
     }
@@ -180,8 +183,7 @@ private:
             return;
         }
         auto *orbit = dynamic_cast<OrbitCameraComponent *>(app.GetMainCamera());
-        orbit->Setup(base_center_, base_radius_,
-                     base_pitch_ + static_cast<float>(step) * config_sweep_pitch_step.Get(),
+        orbit->Setup(base_center_, base_radius_, base_pitch_ + static_cast<float>(step) * config_sweep_pitch_step.Get(),
                      base_yaw_ + static_cast<float>(step) * config_sweep_step.Get());
     }
 
