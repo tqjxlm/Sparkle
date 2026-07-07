@@ -46,6 +46,12 @@ public:
         return shader_module_;
     }
 
+    [[nodiscard]] const char *GetEntryPointName() const
+    {
+        ASSERT(IsValid());
+        return reflection_module_.entry_point_name;
+    }
+
     void SetupShaderReflection(RHIShaderResourceTable *shader_resource_table) const;
 
 private:

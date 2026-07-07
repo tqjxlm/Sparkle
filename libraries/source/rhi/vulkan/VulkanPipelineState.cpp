@@ -86,7 +86,7 @@ void VulkanPipelineState::SetupShaderStageInfo()
 
             info.stage = GetShaderStage(static_cast<RHIShaderStage>(i));
             info.module = shader->GetShaderModule();
-            info.pName = shader->GetInfo()->GetEntryPoint().c_str();
+            info.pName = shader->GetEntryPointName();
 
             shader_stages_.push_back(info);
         }
