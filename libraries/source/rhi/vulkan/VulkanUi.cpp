@@ -49,17 +49,14 @@ void VulkanUiHandler::Init()
     init_info.Queue = context->GetGraphicsQueue();
     init_info.PipelineCache = VK_NULL_HANDLE;
     init_info.DescriptorPool = descriptor_pool_;
-    init_info.RenderPass = RHICast<VulkanRenderPass>(render_pass_)->GetRenderPass();
-    init_info.Subpass = 0;
+    init_info.PipelineInfoMain.RenderPass = RHICast<VulkanRenderPass>(render_pass_)->GetRenderPass();
+    init_info.PipelineInfoMain.Subpass = 0;
+    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(context->GetRHI()->GetConfig().msaa_samples);
     init_info.MinImageCount = 2;
     init_info.ImageCount = context->GetRHI()->GetMaxFramesInFlight();
-    init_info.MSAASamples = GetVkMsaaSampleBit(context->GetRHI()->GetConfig().msaa_samples);
     init_info.Allocator = VK_NULL_HANDLE;
     init_info.CheckVkResultFn = CheckVkResult;
     ImGui_ImplVulkan_Init(&init_info);
-
-    // manually touch resources
-    ImGui_ImplVulkan_CreateFontsTexture();
 
     initialized_ = true;
 }
@@ -89,7 +86,7 @@ void VulkanUiHandler::Render()
         return;
     }
 
-    if (draw_data->CmdLists[0]->CmdBuffer[0].TextureId != io.Fonts->TexID)
+    if (draw_data->CmdLists[0]->CmdBuffer[0].GetTexID() != io.Fonts->TexRef.GetTexID())
     {
         return;
     }
