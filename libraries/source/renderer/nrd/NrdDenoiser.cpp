@@ -49,7 +49,7 @@ void CopyMatrix(float (&dst)[16], const Mat4 &src)
 
 class NrdPackShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(NrdPackShader, RHIShaderStage::Compute, "shaders/nrd/nrd_pack.cs.slang", "main")
+    REGISTGER_SHADER(NrdPackShader, RHIShaderStage::Compute, "shaders/nrd/nrd_pack.cs.slang", "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
@@ -82,7 +82,7 @@ public:
 
 class NrdResolveShader : public RHIShaderInfo
 {
-    REGISTGER_SHADER(NrdResolveShader, RHIShaderStage::Compute, "shaders/nrd/nrd_resolve.cs.slang", "main")
+    REGISTGER_SHADER(NrdResolveShader, RHIShaderStage::Compute, "shaders/nrd/nrd_resolve.cs.slang", "shader_main")
 
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
