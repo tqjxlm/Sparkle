@@ -62,10 +62,9 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
     return surface;
 }
 
-[shader("fragment")]
-void main(MeshPassVSInterpolant vs_in, out uint4 gbuffer : SV_Target0)
+[shader("fragment")] uint4 shader_main(MeshPassVSInterpolant vs_in) : SV_Target0
 {
     SurfaceAttributes surface = LoadSurface(vs_in);
 
-    gbuffer = EncodeSurfaceToGBuffer(surface);
+    return EncodeSurfaceToGBuffer(surface);
 }

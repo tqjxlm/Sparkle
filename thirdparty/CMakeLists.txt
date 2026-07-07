@@ -68,6 +68,10 @@ if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
     set(TINYUSDZ_NO_WERROR ON)
 endif()
 
+# the tinyexr v3 C implementation does not compile with clang-cl (__cpuid arity mismatch),
+# and tinyusdz's image loader only uses the v1 API anyway
+set(TINYUSDZ_USE_TINYEXR_V3 OFF CACHE BOOL "Use TinyEXR v3 API" FORCE)
+
 add_subdirectory(tinyusdz tinyusdz)
 
 target_include_directories(sparkle_thirdparty SYSTEM PUBLIC "tinyusdz/src")

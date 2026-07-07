@@ -19,8 +19,7 @@ float3 ACESFilm(float3 x)
     return clamp((x * (x * a + b)) / (x * (x * c + d) + e), 0.0f, 1.0f);
 }
 
-[shader("fragment")]
-float4 main(VSInterpolant input) : SV_Target
+[shader("fragment")] float4 shader_main(VSInterpolant input) : SV_Target
 {
     float3 color = screenTexture.Sample(screenTextureSampler, input.uv).xyz;
 

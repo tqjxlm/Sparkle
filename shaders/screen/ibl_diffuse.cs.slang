@@ -16,8 +16,7 @@
 
 [[vk::binding(3, 0)]] RWTexture2DArray<float4> out_cube_map;
 
-[shader("compute")]
-[numthreads(16, 16, 1)] void main(uint3 DTid : SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = DTid.xy;
     uint face_id = DTid.z;
 

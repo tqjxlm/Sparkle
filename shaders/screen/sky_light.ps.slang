@@ -7,8 +7,7 @@
     SkyLight ubo_sky_light;
 }
 
-[shader("fragment")]
-float4 main(VSInterpolant input) : SV_Target
+[shader("fragment")] float4 shader_main(VSInterpolant input) : SV_Target
 {
     const float t = 1.0 - input.uv.y;
     const float3 sky_light = lerp(float3(1, 1, 1), ubo_sky_light.color, t);

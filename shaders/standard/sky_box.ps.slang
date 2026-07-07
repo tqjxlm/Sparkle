@@ -6,8 +6,7 @@
 
 [[vk::binding(1, 1)]] SamplerState sky_map_sampler;
 
-[shader("fragment")]
-float4 main(VSInterpolant input) : SV_Target
+[shader("fragment")] float4 shader_main(VSInterpolant input) : SV_Target
 {
     float3 sky_light = sky_map.Sample(sky_map_sampler, normalize(input.local_pos)).rgb;
 

@@ -11,36 +11,33 @@
 
 namespace sparkle
 {
+// the atlas bakes glyphs lazily, so it must own the font data (copied here) beyond this call
+static ImFont *AddFontFromResource(ImFontAtlas *fonts, const char *path, float size, const ImFontConfig &config,
+                                   const ImWchar *ranges = nullptr)
+{
+    auto data = FileManager::GetNativeFileManager()->Read(Path::Resource(path));
+    ASSERT(!data.empty());
+
+    void *data_copy = IM_ALLOC(data.size());
+    memcpy(data_copy, data.data(), data.size());
+    return fonts->AddFontFromMemoryTTF(data_copy, static_cast<int>(data.size()), size, &config, ranges);
+}
+
 static void SetupStyle()
 {
     auto &io = ImGui::GetIO();
 
     {
-        auto *file_manager = FileManager::GetNativeFileManager();
-
-        // Load main font
-        auto font_data = file_manager->Read(Path::Resource("fonts/Roboto-Medium.ttf"));
-        ASSERT(!font_data.empty());
-
         ImFontConfig font_config;
-        font_config.FontDataOwnedByAtlas = false;
-        io.FontDefault =
-            io.Fonts->AddFontFromMemoryTTF(font_data.data(), static_cast<int>(font_data.size()), 20, &font_config);
+        io.FontDefault = AddFontFromResource(io.Fonts, "fonts/Roboto-Medium.ttf", 20, font_config);
 
         // Merge Font Awesome icons into the main font
-        auto icon_font_data = file_manager->Read(Path::Resource("fonts/FontAwesome7-Solid.otf"));
-        ASSERT(!icon_font_data.empty());
-
         ImFontConfig icon_config;
-        icon_config.FontDataOwnedByAtlas = false;
         icon_config.MergeMode = true;
         icon_config.GlyphMinAdvanceX = 20.0f; // Make icons monospaced to match main font size
         icon_config.PixelSnapH = true;
         static const ImWchar IconRanges[] = {ICON_MIN_FA, ICON_MAX_FA, 0};
-        io.Fonts->AddFontFromMemoryTTF(icon_font_data.data(), static_cast<int>(icon_font_data.size()), 20, &icon_config,
-                                       IconRanges);
-
-        io.Fonts->Build();
+        AddFontFromResource(io.Fonts, "fonts/FontAwesome7-Solid.otf", 20, icon_config, IconRanges);
     }
 
     auto &style = ImGui::GetStyle();
