@@ -39,7 +39,11 @@
 * [ ] standalone cooker
 * [ ] standalone shader compiler
 * [ ] texture compression
-* [ ] slang support for metal
+* [ ] compile ray_trace shaders slang->metal directly and drop the spirv-cross stage.
+      Blocked on slang emitting invalid MSL for bindless resource arrays
+      (<https://github.com/shader-slang/slang/issues/11970>) and the entry-point
+      out-parameter ICE (<https://github.com/shader-slang/slang/issues/11969>).
+      All other shaders already compile slang->metal directly.
 
 ## Build
 
