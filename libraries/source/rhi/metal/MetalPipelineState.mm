@@ -8,8 +8,13 @@
 #include "MetalRayTracing.h"
 #include "MetalResourceArray.h"
 
+#include "core/FileManager.h"
+
+#include <spirv_reflect.h>
+
 #include <algorithm>
 #include <cctype>
+#include <optional>
 
 namespace sparkle
 {
@@ -111,6 +116,44 @@ void MetalPipelineState::SetupShaderResources(RHIShaderStage stage)
     shader->SetupArgumentBuffers(context->GetDevice(), argument_buffers_[static_cast<int>(stage)], resource_table);
 }
 #else
+// spirv-cross emits runtime-sized resource arrays as opaque pointers named after their
+// descriptor slot (e.g. "spvDescriptorSet2Binding0") instead of the variable name, so map
+// variable names to those aliases through SPIR-V reflection
+static std::unordered_map<std::string, std::string> LoadSpirvBindingAliases(const RHIShaderInfo *shader_info)
+{
+    std::unordered_map<std::string, std::string> aliases;
+
+    auto spv_code = FileManager::GetNativeFileManager()->Read(Path::Resource(shader_info->GetPath() + ".spv"));
+    if (spv_code.empty())
+    {
+        return aliases;
+    }
+
+    SpvReflectShaderModule module;
+    if (spvReflectCreateShaderModule(spv_code.size(), spv_code.data(), &module) != SPV_REFLECT_RESULT_SUCCESS)
+    {
+        return aliases;
+    }
+
+    uint32_t num_bindings = 0;
+    spvReflectEnumerateDescriptorBindings(&module, &num_bindings, nullptr);
+    std::vector<SpvReflectDescriptorBinding *> bindings(num_bindings);
+    spvReflectEnumerateDescriptorBindings(&module, &num_bindings, bindings.data());
+
+    for (const auto *binding : bindings)
+    {
+        if (binding->name != nullptr && binding->name[0] != '\0')
+        {
+            aliases.emplace(binding->name, "spvDescriptorSet" + std::to_string(binding->set) + "Binding" +
+                                               std::to_string(binding->binding));
+        }
+    }
+
+    spvReflectDestroyShaderModule(&module);
+
+    return aliases;
+}
+
 void MetalPipelineState::SetupShaderResources(MTLAutoreleasedRenderPipelineReflection render_reflection,
                                               MTLAutoreleasedComputePipelineReflection compute_reflection,
                                               RHIShaderStage stage)
@@ -155,6 +198,7 @@ void MetalPipelineState::SetupShaderResources(MTLAutoreleasedRenderPipelineRefle
 
     // remap all resources into one descriptor set with set id as 0 and binding id as argument index from reflection
     auto *resource_table = GetResourceTable(stage);
+    std::optional<std::unordered_map<std::string, std::string>> spirv_aliases;
     unsigned long max_binding_point = 0;
     for (const auto &[name, resource] : resource_table->GetBindingMap())
     {
@@ -162,6 +206,20 @@ void MetalPipelineState::SetupShaderResources(MTLAutoreleasedRenderPipelineRefle
         const auto &resource_name = std::string(name) + (is_bindless ? "_" : "");
 
         auto found = reflection_table.find(resource_name);
+        if (found == reflection_table.end())
+        {
+            if (!spirv_aliases)
+            {
+                spirv_aliases = LoadSpirvBindingAliases(shaders_[static_cast<int>(stage)]->GetInfo());
+            }
+
+            auto alias = spirv_aliases->find(std::string(name));
+            if (alias != spirv_aliases->end())
+            {
+                found = reflection_table.find(alias->second);
+            }
+        }
+
         if (found == reflection_table.end())
         {
             Log(Warn, "failed to find a variable reflection {}", resource_name);
