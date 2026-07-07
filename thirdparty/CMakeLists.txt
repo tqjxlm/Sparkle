@@ -179,6 +179,44 @@ set(NRD_EMBEDS_SPIRV_SHADERS ON CACHE BOOL "" FORCE)
 if(DEFINED ENV{VULKAN_SDK})
     set(SHADERMAKE_DXC_VK_PATH "$ENV{VULKAN_SDK}/bin/dxc" CACHE FILEPATH "" FORCE)
 endif()
+
+if(IOS)
+    # the ShaderMake executable runs on the build host during the shader cook. it must not be
+    # built inside the iOS project: an iOS binary cannot run on the host, and iOS tool targets
+    # demand code signing. keep only ShaderMakeBlob (static lib) in the target build and compile
+    # the executable for the host at configure time.
+    set(SHADERMAKE_TOOL OFF CACHE BOOL "" FORCE)
+    include(FetchContent)
+    fetchcontent_declare(
+        shadermake
+        DOWNLOAD_EXTRACT_TIMESTAMP 1
+        DOWNLOAD_NO_PROGRESS 1
+        URL https://github.com/NVIDIA-RTX/ShaderMake/archive/18f5a344e7ca8fa65daaf079d07bc8ce38453e05.zip
+    )
+    fetchcontent_makeavailable(shadermake)
+
+    set(SHADERMAKE_HOST_BUILD_DIR ${CMAKE_BINARY_DIR}/shadermake_host)
+    # ShaderMake forces its output into <build dir>/build regardless of CMAKE_RUNTIME_OUTPUT_DIRECTORY
+    set(SHADERMAKE_HOST_BINARY ${SHADERMAKE_HOST_BUILD_DIR}/build/ShaderMake)
+    if(NOT EXISTS ${SHADERMAKE_HOST_BINARY})
+        message(STATUS "Building ShaderMake for the build host")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -S ${shadermake_SOURCE_DIR} -B ${SHADERMAKE_HOST_BUILD_DIR}
+                    -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DSHADERMAKE_TOOL=ON
+            RESULT_VARIABLE SHADERMAKE_HOST_CONFIGURE_RESULT)
+        if(SHADERMAKE_HOST_CONFIGURE_RESULT)
+            message(FATAL_ERROR "Failed to configure host ShaderMake")
+        endif()
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} --build ${SHADERMAKE_HOST_BUILD_DIR} -j
+            RESULT_VARIABLE SHADERMAKE_HOST_BUILD_RESULT)
+        if(SHADERMAKE_HOST_BUILD_RESULT)
+            message(FATAL_ERROR "Failed to build host ShaderMake")
+        endif()
+    endif()
+    set(SHADERMAKE_PATH ${SHADERMAKE_HOST_BINARY} CACHE FILEPATH "" FORCE)
+endif()
+
 add_subdirectory(NRD)
 suppress_warnings(NRD)
 target_link_libraries(sparkle_thirdparty PUBLIC NRD)
