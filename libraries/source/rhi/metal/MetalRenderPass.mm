@@ -50,12 +50,11 @@ void MetalRenderPass::Begin()
 
     ASSERT_F(render_encoder_, "Failed to create render encoder for pass {}", GetName());
 
-    MTLViewport viewport = {0.0,
-                            0.0,
-                            (float)(rt_attribute.width >> rt_attribute.mip_level),
-                            (float)(rt_attribute.height >> rt_attribute.mip_level),
-                            0.0,
-                            1.0};
+    // flip the viewport to map vulkan-convention NDC (y down) to metal (y up).
+    // shaders are compiled from vulkan-style slang without a baked-in y-flip.
+    auto width = (double)(rt_attribute.width >> rt_attribute.mip_level);
+    auto height = (double)(rt_attribute.height >> rt_attribute.mip_level);
+    MTLViewport viewport = {0.0, height, width, -height, 0.0, 1.0};
 
     [render_encoder_ setViewport:viewport];
 }

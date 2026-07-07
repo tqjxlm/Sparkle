@@ -98,7 +98,7 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
 }
 
 [shader("fragment")]
-void main(MeshPassVSInterpolant vs_in, out float4 color_out : SV_Target)
+float4 main(MeshPassVSInterpolant vs_in) : SV_Target
 {
     SurfaceAttributes surface = LoadSurface(vs_in);
 
@@ -128,40 +128,29 @@ void main(MeshPassVSInterpolant vs_in, out float4 color_out : SV_Target)
     switch (config.mode)
     {
     case 1:
-        color_out = debug_color;
-        return;
+        return debug_color;
     case 2:
-        color_out = float4(0, 0, 0, 1.0);
-        return;
+        return float4(0, 0, 0, 1.0);
     case 3:
-        color_out = float4(VisualizeVector(surface.normal), 1.0);
-        return;
+        return float4(VisualizeVector(surface.normal), 1.0);
     case 4: {
         float3 specular_direction = reflect(-V, surface.normal);
-        color_out = float4(VisualizeVector(specular_direction), 1.0);
-        return;
+        return float4(VisualizeVector(specular_direction), 1.0);
     }
     case 5:
-        color_out = float4(ambient, 1.0);
-        return;
+        return float4(ambient, 1.0);
     case 6:
-        color_out = float4(directional, 1.0);
-        return;
+        return float4(directional, 1.0);
     case 7:
-        color_out = float4(surface.metallic, surface.metallic, surface.metallic, 1.0);
-        return;
+        return float4(surface.metallic, surface.metallic, surface.metallic, 1.0);
     case 8:
-        color_out = float4(surface.roughness, surface.roughness, surface.roughness, 1.0);
-        return;
+        return float4(surface.roughness, surface.roughness, surface.roughness, 1.0);
     case 9:
-        color_out = float4(surface.albedo, 1.0);
-        return;
+        return float4(surface.albedo, 1.0);
     case 10:
-        color_out = float4(surface.emissive, 1.0);
-        return;
+        return float4(surface.emissive, 1.0);
     case 11:
-        color_out = float4(VisualizeDepth(vs_in.gl_Position.z, view), 1.0);
-        return;
+        return float4(VisualizeDepth(vs_in.gl_Position.z, view), 1.0);
     default:
         break;
     }
@@ -169,5 +158,5 @@ void main(MeshPassVSInterpolant vs_in, out float4 color_out : SV_Target)
     float3 result = ambient + directional + surface.emissive;
     if (any(isnan(result) || isinf(result)))
         result = (float3)0;
-    color_out = float4(result, 1.0f);
+    return float4(result, 1.0f);
 }

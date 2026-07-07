@@ -11,12 +11,13 @@ class DirectionalLightRenderProxy : public LightRenderProxy
 public:
     DirectionalLightRenderProxy();
 
+    // must match DirectionalLight in shaders/include/directional_light.h.slang
     struct UniformBufferData
     {
-        alignas(16) Vector3 color = Ones;
         float shadow_depth_bias = 1e-6f;
-        alignas(16) Vector3 direction = {0, std::cos(utilities::ToRadian(20.f)), std::sin(utilities::ToRadian(45.f))};
         float shadow_normal_bias = 0.001f;
+        alignas(16) Vector3 color = Ones;
+        alignas(16) Vector3 direction = {0, std::cos(utilities::ToRadian(20.f)), std::sin(utilities::ToRadian(45.f))};
         Mat4 shadow_matrix;
     };
 

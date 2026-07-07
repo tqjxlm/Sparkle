@@ -14,10 +14,11 @@ public:
     static constexpr Scalar MaxBrightness = 100.0f;
     static constexpr Scalar MaxIBLBrightness = 10.f;
 
+    // must match SkyLight in shaders/include/sky_light.h.slang
     struct UniformBufferData
     {
-        alignas(16) Vector3 color = Zeros;
         uint32_t has_sky_map = 0;
+        alignas(16) Vector3 color = Zeros;
     };
 
     explicit SkyRenderProxy(const Image2DCube *sky_map);

@@ -37,8 +37,14 @@ void MetalShader::Load()
     ASSERT_F(library_, "Failed to load and compile shader library {}. error: {}", path,
              [error.localizedDescription UTF8String]);
 
-    auto actual_entry_point = shader_info_->GetEntryPoint() + "0";
+    // slang names the entry point "main_0", spirv-cross names it "main0"
+    auto actual_entry_point = shader_info_->GetEntryPoint() + "_0";
     function_ = [library_ newFunctionWithName:[NSString stringWithUTF8String:actual_entry_point.c_str()]];
+    if (!function_)
+    {
+        actual_entry_point = shader_info_->GetEntryPoint() + "0";
+        function_ = [library_ newFunctionWithName:[NSString stringWithUTF8String:actual_entry_point.c_str()]];
+    }
 
     SetDebugInfo(function_, GetName());
 

@@ -39,7 +39,7 @@
 [[vk::binding(2, 2)]] SamplerState depth_sampler;
 
 [shader("fragment")]
-void main(VSInterpolant vs_in, out float4 color_out : SV_Target)
+float4 main(VSInterpolant vs_in) : SV_Target
 {
     uint2 gbuffer_size;
     gbuffer_texture.GetDimensions(gbuffer_size.x, gbuffer_size.y);
@@ -72,43 +72,32 @@ void main(VSInterpolant vs_in, out float4 color_out : SV_Target)
     switch (config.mode)
     {
     case 1:
-        color_out = debug_color;
-        return;
+        return debug_color;
     case 2:
-        color_out = float4(0, 0, 0, 1.0);
-        return;
+        return float4(0, 0, 0, 1.0);
     case 3:
-        color_out = float4(VisualizeVector(surface.normal), 1.0);
-        return;
+        return float4(VisualizeVector(surface.normal), 1.0);
     case 4: {
         float3 specular_direction = reflect(-V, surface.normal);
-        color_out = float4(VisualizeVector(specular_direction), 1.0);
-        return;
+        return float4(VisualizeVector(specular_direction), 1.0);
     }
     case 5:
-        color_out = float4(ambient, 1.0);
-        return;
+        return float4(ambient, 1.0);
     case 6:
-        color_out = float4(directional, 1.0);
-        return;
+        return float4(directional, 1.0);
     case 7:
-        color_out = float4(surface.metallic, surface.metallic, surface.metallic, 1.0);
-        return;
+        return float4(surface.metallic, surface.metallic, surface.metallic, 1.0);
     case 8:
-        color_out = float4(surface.roughness, surface.roughness, surface.roughness, 1.0);
-        return;
+        return float4(surface.roughness, surface.roughness, surface.roughness, 1.0);
     case 9:
-        color_out = float4(surface.albedo, 1.0);
-        return;
+        return float4(surface.albedo, 1.0);
     case 10:
-        color_out = float4(surface.emissive, 1.0);
-        return;
+        return float4(surface.emissive, 1.0);
     case 11:
-        color_out = float4(VisualizeDepth(depth, view), 1.0);
-        return;
+        return float4(VisualizeDepth(depth, view), 1.0);
     default:
         break;
     }
 
-    color_out = float4(ambient + directional + surface.emissive, 1.0f);
+    return float4(ambient + directional + surface.emissive, 1.0f);
 }

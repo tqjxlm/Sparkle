@@ -8,6 +8,9 @@
 #include "MetalRayTracing.h"
 #include "MetalResourceArray.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace sparkle
 {
 static MTLCompareFunction GetMetalCompareFunction(RHIPipelineState::DepthTestState test_op)
@@ -135,9 +138,19 @@ void MetalPipelineState::SetupShaderResources(MTLAutoreleasedRenderPipelineRefle
     {
         id<MTLBinding> argument = [bindings objectAtIndex:i];
 
-        reflection_table.insert_or_assign(
-            [argument.name cStringUsingEncoding : NSUTF8StringEncoding],
-            ArgumentReflection { .binding_point = argument.index, .type = argument.type });
+        std::string argument_name = [argument.name cStringUsingEncoding:NSUTF8StringEncoding];
+        ArgumentReflection reflection{.binding_point = argument.index, .type = argument.type};
+
+        reflection_table.insert_or_assign(argument_name, reflection);
+
+        // slang-generated MSL mangles parameter names with a numeric suffix (e.g. "view_2")
+        auto suffix_pos = argument_name.find_last_of('_');
+        if (suffix_pos != std::string::npos && suffix_pos + 1 < argument_name.size() &&
+            std::all_of(argument_name.begin() + static_cast<long>(suffix_pos) + 1, argument_name.end(),
+                        [](char c) { return std::isdigit(c) != 0; }))
+        {
+            reflection_table.insert_or_assign(argument_name.substr(0, suffix_pos), reflection);
+        }
     }
 
     // remap all resources into one descriptor set with set id as 0 and binding id as argument index from reflection
