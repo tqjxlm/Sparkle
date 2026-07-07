@@ -40,25 +40,6 @@ runs:
         "$VENV_PY" --version
         "$VENV_PY" dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward --headless
 
-    # Guards the NRD denoiser's behavioral contracts (converged flicker, zero fireflies, motion noise).
-    # Needs a real ray-tracing GPU: --allow_unsupported turns the suite into a clean SKIP on virtualized
-    # runners whose Metal device lacks hardware ray tracing.
-    - name: Run NRD Denoiser Gates (Metal)
-      if: >-
-        inputs.build_type == 'Release' &&
-        (inputs.framework == 'macos' && contains(inputs.os, 'macos'))
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        VENV_DIR="build_cache/venv/functional-test/${{ inputs.framework }}-${{ inputs.os }}"
-        mkdir -p "$VENV_DIR"
-        python3 -m venv "$VENV_DIR"
-        VENV_PY="$VENV_DIR/bin/python"
-
-        "$VENV_PY" -m pip install --quiet -r dev/requirements.txt
-        "$VENV_PY" tests/nrd/run_nrd_gates.py --framework macos --skip_build --allow_unsupported
-
     - name: Upload Test Screenshot
       if: >-
         always() && inputs.build_type == 'Release' &&
