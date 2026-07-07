@@ -86,11 +86,6 @@ void VulkanUiHandler::Render()
         return;
     }
 
-    if (draw_data->CmdLists[0]->CmdBuffer[0].GetTexID() != io.Fonts->TexRef.GetTexID())
-    {
-        return;
-    }
-
     ImGui_ImplVulkan_RenderDrawData(draw_data, context->GetCurrentCommandBuffer());
 }
 
@@ -106,14 +101,16 @@ void VulkanUiHandler::CreateDescriptorPool()
     ASSERT(!descriptor_pool_);
 
     std::vector<VkDescriptorPoolSize> pool_sizes = {
-        {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1},
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+         .descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE},
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE},
     };
 
     VkDescriptorPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.poolSizeCount = static_cast<unsigned>(pool_sizes.size());
     pool_info.pPoolSizes = pool_sizes.data();
-    pool_info.maxSets = static_cast<unsigned>(pool_sizes.size());
+    pool_info.maxSets = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE;
 
     pool_info.flags |= VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
