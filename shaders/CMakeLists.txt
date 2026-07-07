@@ -122,18 +122,43 @@ if (MACOS OR IOS)
 
     add_dependencies(cook-resources compile-metal-shaders)
 
-    # NRD's cooked MSL (committed outputs of --test_case nrd_cook; see docs/Nrd.md). The source dir is
-    # created first so a fresh checkout that has not cooked yet still configures and builds.
+    # NRD's shaders are cooked SPIR-V->MSL at build time into the intermediate shader directory (see
+    # docs/Nrd.md). The cook tool runs on the build HOST even when targeting iOS; its ordering on
+    # NRDShaders is declared at root scope because thirdparty is added after this subdirectory.
     if (IOS)
         set(NRD_COOKED_PLATFORM ios)
     else()
         set(NRD_COOKED_PLATFORM macos)
     endif()
-    file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/nrd/cooked/${NRD_COOKED_PLATFORM}")
-    add_custom_target(copy-nrd-cooked
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cooked/${NRD_COOKED_PLATFORM} ${OUTPUT_SHADER_DIRECTORY}/nrd/cooked/${NRD_COOKED_PLATFORM}
+    set(NRD_COOK_TOOL ${CMAKE_CURRENT_BINARY_DIR}/nrd_msl_cook)
+    add_custom_command(
+        OUTPUT ${NRD_COOK_TOOL}
+        COMMAND xcrun clang++ -std=c++17 -O1 ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/nrd_msl_cook.cpp
+            -I $ENV{VULKAN_SDK}/include
+            $ENV{VULKAN_SDK}/lib/libspirv-cross-msl.a
+            $ENV{VULKAN_SDK}/lib/libspirv-cross-glsl.a
+            $ENV{VULKAN_SDK}/lib/libspirv-cross-core.a
+            -o ${NRD_COOK_TOOL}
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/nrd_msl_cook.cpp
+        COMMENT "Building nrd_msl_cook (host tool)"
     )
-    add_dependencies(cook-resources copy-nrd-cooked)
+    file(GLOB NRD_SPIRV_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/thirdparty/NRD/_Shaders/*.cs.spirv.h")
+    set(NRD_COOK_STAMP ${CMAKE_CURRENT_BINARY_DIR}/nrd_cook_${NRD_COOKED_PLATFORM}.stamp)
+    add_custom_command(
+        OUTPUT ${NRD_COOK_STAMP}
+        COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/cook_nrd_shaders.py
+            --shaders-dir ${CMAKE_SOURCE_DIR}/thirdparty/NRD/_Shaders
+            --tool ${NRD_COOK_TOOL}
+            --platform ${NRD_COOKED_PLATFORM}
+            --nrd-header ${CMAKE_SOURCE_DIR}/thirdparty/NRD/Include/NRD.h
+            --output ${OUTPUT_SHADER_DIRECTORY}/nrd/cooked
+            --blob-prefix REBLUR_ --blob-prefix Clear
+        COMMAND ${CMAKE_COMMAND} -E touch ${NRD_COOK_STAMP}
+        DEPENDS ${NRD_COOK_TOOL} ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/cook_nrd_shaders.py ${NRD_SPIRV_HEADERS}
+        COMMENT "Cooking NRD shaders (${NRD_COOKED_PLATFORM})"
+    )
+    add_custom_target(cook-nrd-shaders DEPENDS ${NRD_COOK_STAMP})
+    add_dependencies(cook-resources cook-nrd-shaders)
 else()
     add_custom_target(
         compile-shaders ALL

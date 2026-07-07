@@ -29,14 +29,23 @@ The encoding replicas in `shaders/include/nrd.h.slang` are pinned to the NRD ver
 
 ## Cooked shaders
 
-NRD's ReBLUR shaders ship as SPIR-V; the engine consumes them as MSL text, cross-compiled at COOK
-time (not at runtime, and not on device): `dev/cook_nrd_shaders.py` runs `--test_case nrd_cook`
-(macOS, the only platform that links spirv-cross), which writes `shaders/nrd/cooked/{macos,ios}/`
-— MSL per pipeline plus a manifest with entry point, workgroup size, register->MSL index maps, and
-the NRD version. These files are COMMITTED and packed into app resources per platform; the runtime
-(`NrdCookedShaders` loader + `MetalNrdBackend`) compiles the MSL like any other engine shader and
-needs no reflection. After bumping the NRD submodule, re-run the cook and commit the result —
-`NrdDenoiser` hard-fails on a version or pipeline-list mismatch.
+NRD ships its shaders as SPIR-V; the engine consumes them as MSL text, cross-compiled at BUILD
+time into the intermediate shader directory alongside the engine's own shaders (nothing on device,
+nothing committed). The cook lives in `shaders/nrd/cook/` and is wired into `shaders/CMakeLists.txt`:
+
+1. NRD's build (`NRDShaders`) generates ShaderMake blob headers with every shader permutation.
+2. `cook_nrd_shaders.py` unpacks them, filters to the permutations the engine uses (REBLUR +
+   Clear, `NRD_SIGNAL=BOTH`), and drives `nrd_msl_cook` — a small build-host tool (compiled with
+   the Vulkan SDK's spirv-cross static libs, host-run even when targeting iOS) that emits MSL for
+   the target platform plus the reflection metadata (entry, workgroup size, binding->MSL index
+   maps) into a manifest.
+3. The cooked set is packed into app resources; the runtime (`NrdCookedShaders` loader +
+   `MetalNrdBackend`) looks pipelines up by a canonical form of `PipelineDesc::shaderIdentifier`
+   and compiles the MSL like any other engine shader — no spirv-cross and no reflection on device.
+
+The manifest carries the NRD version; `NrdDenoiser` hard-fails on a mismatch or a missing
+permutation (extend the filters in `shaders/CMakeLists.txt` if NRD ever needs one the cook skips).
+The cook re-runs automatically when NRD's generated shaders change.
 
 ## Conventions that must hold
 

@@ -355,17 +355,6 @@ elseif(MACOS)
         "-framework MetalPerformanceShaders"
     )
 
-    # SPIRV-Cross (from the Vulkan SDK): runtime SPIR-V->MSL for NRD's shaders (its SPIR-V comes from
-    # GetInstanceDesc; the Metal RHI compiles MSL source at runtime). Link order: msl -> glsl -> core.
-    if(DEFINED ENV{VULKAN_SDK})
-        set(INCLUDES ${INCLUDES} $ENV{VULKAN_SDK}/include)
-        set(LIBRARIES ${LIBRARIES}
-            $ENV{VULKAN_SDK}/lib/libspirv-cross-msl.a
-            $ENV{VULKAN_SDK}/lib/libspirv-cross-glsl.a
-            $ENV{VULKAN_SDK}/lib/libspirv-cross-core.a
-        )
-    endif()
-
     set_target_properties(sparkle PROPERTIES
         MACOSX_BUNDLE TRUE
         RESOURCE "${RESOURCES}"
@@ -444,6 +433,11 @@ endif()
 # ------------------ third party libraries ------------------
 
 add_subdirectory(thirdparty)
+
+if (MACOS OR IOS)
+    # declared here because the shaders subdirectory is added before thirdparty defines NRDShaders
+    add_dependencies(cook-nrd-shaders NRDShaders)
+endif()
 
 # ------------------ IDE config ------------------
 

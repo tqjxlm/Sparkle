@@ -240,19 +240,17 @@ void NrdDenoiser::EnsureEnabledResources()
     const nrd::LibraryDesc &lib = *nrd::GetLibraryDesc();
 
     NrdCookedShaders cooked;
-    if (!LoadNrdCookedShaders(cooked))
+    if (!cooked.Load())
     {
         enabled_resources_failed_ = true;
         return;
     }
-    if (cooked.version_major != lib.versionMajor || cooked.version_minor != lib.versionMinor ||
-        cooked.version_build != lib.versionBuild || cooked.pipelines.size() != desc.pipelinesNum)
+    if (cooked.VersionMajor() != lib.versionMajor || cooked.VersionMinor() != lib.versionMinor ||
+        cooked.VersionBuild() != lib.versionBuild)
     {
-        Log(Error,
-            "NRD: cooked shaders are stale (cooked {}.{}.{}, {} pipelines; NRD {}.{}.{}, {} pipelines). "
-            "run dev/cook_nrd_shaders.py",
-            cooked.version_major, cooked.version_minor, cooked.version_build, cooked.pipelines.size(),
-            lib.versionMajor, lib.versionMinor, lib.versionBuild, desc.pipelinesNum);
+        Log(Error, "NRD: cooked shaders are stale ({}.{}.{} vs NRD {}.{}.{}); rebuild to re-run the shader cook",
+            cooked.VersionMajor(), cooked.VersionMinor(), cooked.VersionBuild(), lib.versionMajor,
+            lib.versionMinor, lib.versionBuild);
         enabled_resources_failed_ = true;
         return;
     }
@@ -260,13 +258,8 @@ void NrdDenoiser::EnsureEnabledResources()
     uint32_t ok = 0;
     for (uint32_t i = 0; i < desc.pipelinesNum; i++)
     {
-        if (cooked.identifiers[i] != desc.pipelines[i].shaderIdentifier)
-        {
-            Log(Error, "NRD: cooked pipeline [{}] is '{}', NRD expects '{}'. run dev/cook_nrd_shaders.py", i,
-                cooked.identifiers[i], desc.pipelines[i].shaderIdentifier);
-            break;
-        }
-        if (backend_->AddPipeline(cooked.pipelines[i]))
+        RHINrdBackend::CookedPipeline pipeline;
+        if (cooked.BuildPipeline(desc.pipelines[i].shaderIdentifier, pipeline) && backend_->AddPipeline(pipeline))
         {
             ok++;
         }

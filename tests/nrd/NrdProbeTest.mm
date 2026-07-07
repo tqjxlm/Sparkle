@@ -37,26 +37,44 @@ public:
             lib.spirvBindingOffsets.textureOffset);
 
         NrdCookedShaders cooked;
-        if (!LoadNrdCookedShaders(cooked))
+        if (!cooked.Load())
         {
             Log(Error, "{}: failed to load cooked shaders", GetName());
             return Result::Fail;
         }
-        Log(Info, "{}: cooked shaders v{}.{}.{}, {} pipelines", GetName(), cooked.version_major,
-            cooked.version_minor, cooked.version_build, cooked.pipelines.size());
+        Log(Info, "{}: cooked shaders v{}.{}.{}", GetName(), cooked.VersionMajor(), cooked.VersionMinor(),
+            cooked.VersionBuild());
+
+        nrd::DenoiserDesc denoiser{};
+        denoiser.identifier = 0;
+        denoiser.denoiser = nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
+        nrd::InstanceCreationDesc creation{};
+        creation.denoisers = &denoiser;
+        creation.denoisersNum = 1;
+        nrd::Instance *instance = nullptr;
+        if (nrd::CreateInstance(creation, instance) != nrd::Result::SUCCESS)
+        {
+            Log(Error, "{}: nrd::CreateInstance failed", GetName());
+            return Result::Fail;
+        }
+        const nrd::InstanceDesc &desc = *nrd::GetInstanceDesc(*instance);
 
         MetalNrdBackend backend(device);
-        for (uint32_t i = 0; i < cooked.pipelines.size(); i++)
+        for (uint32_t i = 0; i < desc.pipelinesNum; i++)
         {
-            if (!backend.AddPipeline(cooked.pipelines[i]))
+            RHINrdBackend::CookedPipeline pipeline;
+            if (!cooked.BuildPipeline(desc.pipelines[i].shaderIdentifier, pipeline) ||
+                !backend.AddPipeline(pipeline))
             {
-                Log(Error, "{}: [{:2}] {} failed", GetName(), i, cooked.identifiers[i]);
+                Log(Error, "{}: [{:2}] {} failed", GetName(), i, desc.pipelines[i].shaderIdentifier);
             }
         }
         const uint32_t created = backend.GetPipelineCount();
 
-        Log(Info, "{}: pipelines created {}/{}", GetName(), created, cooked.pipelines.size());
-        return created == cooked.pipelines.size() ? Result::Pass : Result::Fail;
+        nrd::DestroyInstance(*instance);
+
+        Log(Info, "{}: pipelines created {}/{}", GetName(), created, desc.pipelinesNum);
+        return created == desc.pipelinesNum ? Result::Pass : Result::Fail;
     }
 };
 
