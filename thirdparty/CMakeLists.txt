@@ -163,6 +163,74 @@ else()
     target_compile_definitions(sparkle PRIVATE ENABLE_PROFILER=0)
 endif()
 
+# ------------------ NRD (NVIDIA Real-time Denoiser) ------------------
+
+# Real-time GI denoiser. Native-API path: its SPIR-V shaders are cross-compiled to Metal by our shader
+# pipeline; NRI (D3D/VK-only, unusable on Metal) stays off. Static lib so there is no dylib to bundle.
+# DXC (HLSL->SPIR-V) comes from the Vulkan SDK already in our build deps. See docs/Nrd.md.
+set(NRD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+set(NRD_NRI OFF CACHE BOOL "" FORCE)
+# RGBA16_SNORM: IN_NORMAL_ROUGHNESS packing is then a raw float4(N, roughness) write (no 101010
+# bit-packing to replicate in our pack shader), stored losslessly in a float texture.
+set(NRD_NORMAL_ENCODING "4" CACHE STRING "" FORCE)
+set(NRD_EMBEDS_DXIL_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_DXBC_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_SPIRV_SHADERS ON CACHE BOOL "" FORCE)
+if(DEFINED ENV{VULKAN_SDK})
+    if(WIN32)
+        set(SHADERMAKE_DXC_VK_PATH "$ENV{VULKAN_SDK}/Bin/dxc.exe" CACHE FILEPATH "" FORCE)
+    else()
+        set(SHADERMAKE_DXC_VK_PATH "$ENV{VULKAN_SDK}/bin/dxc" CACHE FILEPATH "" FORCE)
+    endif()
+endif()
+
+if(IOS)
+    # the ShaderMake executable runs on the build host during the shader cook. it must not be
+    # built by the iOS project in any form: an iOS binary cannot run on the host, and the Xcode
+    # generator demands code signing for executable targets (both in-project and via
+    # ExternalProject). provide everything NRD expects up front so ShaderMake's own CMake never
+    # runs: the ShaderMake target (cook dependency), the ShaderMakeBlob library, and
+    # SHADERMAKE_PATH pointing at a host binary built at configure time.
+    include(FetchContent)
+    FetchContent_Populate(
+        shadermake
+        DOWNLOAD_EXTRACT_TIMESTAMP 1
+        DOWNLOAD_NO_PROGRESS 1
+        URL https://github.com/NVIDIA-RTX/ShaderMake/archive/18f5a344e7ca8fa65daaf079d07bc8ce38453e05.zip
+    )
+
+    set(SHADERMAKE_HOST_BUILD_DIR ${CMAKE_BINARY_DIR}/shadermake_host)
+    set(SHADERMAKE_HOST_BINARY ${SHADERMAKE_HOST_BUILD_DIR}/ShaderMake)
+    if(NOT EXISTS ${SHADERMAKE_HOST_BINARY})
+        message(STATUS "Building ShaderMake for the build host")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -S ${shadermake_SOURCE_DIR}/ShaderMake -B ${SHADERMAKE_HOST_BUILD_DIR}
+                    -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+            RESULT_VARIABLE SHADERMAKE_HOST_CONFIGURE_RESULT)
+        if(SHADERMAKE_HOST_CONFIGURE_RESULT)
+            message(FATAL_ERROR "Failed to configure host ShaderMake")
+        endif()
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} --build ${SHADERMAKE_HOST_BUILD_DIR} -j
+            RESULT_VARIABLE SHADERMAKE_HOST_BUILD_RESULT)
+        if(SHADERMAKE_HOST_BUILD_RESULT OR NOT EXISTS ${SHADERMAKE_HOST_BINARY})
+            message(FATAL_ERROR "Failed to build host ShaderMake")
+        endif()
+    endif()
+
+    add_library(ShaderMakeBlob STATIC ${shadermake_SOURCE_DIR}/ShaderMake/ShaderBlob.cpp)
+    target_include_directories(ShaderMakeBlob SYSTEM PUBLIC ${shadermake_SOURCE_DIR})
+    set_target_properties(ShaderMakeBlob PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    add_custom_target(ShaderMake)
+
+    set(SHADERMAKE_PATH ${SHADERMAKE_HOST_BINARY} CACHE INTERNAL "" FORCE)
+endif()
+
+add_subdirectory(NRD)
+suppress_warnings(NRD)
+target_link_libraries(sparkle_thirdparty PUBLIC NRD)
+target_include_directories(sparkle_thirdparty SYSTEM PUBLIC NRD/Include)
+
 # ------------------ finalize ------------------
 
 target_include_directories(sparkle_thirdparty SYSTEM PUBLIC

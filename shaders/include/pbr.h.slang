@@ -43,8 +43,22 @@ float3 SampleSpecularIBL(RenderConfig config, float3 dir, float roughness, IBLCo
     }
 }
 
-float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttributes surface)
+// F0: the base reflectance when light hits a surface straight on. 0.04 for dielectrics is empirical
+// and widely adopted; metals reflect their base color. The NRD specular demodulation derives its
+// factor from this too, so every F0 in the codebase must come from here.
+float3 ComputeF0(float3 albedo, float metallic)
 {
+    return lerp((float3)0.04, albedo, metallic);
+}
+
+// Direct lighting split into its diffuse and specular lobes (the denoiser demodulates them on separate
+// channels). The sum equals the combined CalculateDirectLighting result.
+float3 CalculateDirectLightingSplit(float3 V, float3 L, float3 radiance, SurfaceAttributes surface,
+                                    out float3 diffuse_out, out float3 specular_out)
+{
+    diffuse_out = (float3)0;
+    specular_out = (float3)0;
+
     float3 N = surface.normal;
     float NdotL = SaturateDot(N, L);
     float NdotV = max(SaturateDot(N, V), Eps);
@@ -59,10 +73,7 @@ float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttri
     float NDF = DistributionGGX::Evaluate(N, H, surface.roughness);
     float G = SmithGGX(NdotV, NdotL, surface.roughness);
 
-    // F0: the base reflectance when light hits a surface straight on
-    // this value is empirical and widely adopted.
-    float3 F0 = (float3)0.04;
-    F0 = lerp(F0, surface.albedo, surface.metallic);
+    float3 F0 = ComputeF0(surface.albedo, surface.metallic);
 
     // fresnel
     float3 F = FresnelSchlick(HdotV, F0);
@@ -83,7 +94,17 @@ float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttri
     // diffuse
     float3 diffuse = surface.albedo * InvPi;
 
-    return (kD * diffuse + kS * specular) * radiance * NdotL;
+    float3 common = radiance * NdotL;
+    diffuse_out = kD * diffuse * common;
+    specular_out = kS * specular * common;
+    return diffuse_out + specular_out;
+}
+
+float3 CalculateDirectLighting(float3 V, float3 L, float3 radiance, SurfaceAttributes surface)
+{
+    float3 diffuse_unused;
+    float3 specular_unused;
+    return CalculateDirectLightingSplit(V, L, radiance, surface, diffuse_unused, specular_unused);
 }
 
 float3 CalculateAmbientLighting(RenderConfig config, float3 V, SkyLight sky_light, SurfaceAttributes surface,
@@ -98,8 +119,7 @@ float3 CalculateAmbientLighting(RenderConfig config, float3 V, SkyLight sky_ligh
     if (config.has_specular_ibl == 1 || config.has_diffuse_ibl == 1)
     {
         // metallic workflow
-        float3 F0 = (float3)0.04;
-        F0 = lerp(F0, surface.albedo, surface.metallic);
+        float3 F0 = ComputeF0(surface.albedo, surface.metallic);
 
         float3 F = FresnelSchlickRoughness(NdotV, F0, surface.roughness);
         float3 kS = F;

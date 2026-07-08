@@ -127,6 +127,13 @@ public:
         return view_projection_matrix_;
     }
 
+    // The view-projection matrix from the previous frame. Used for screen-space motion vectors
+    // (reprojection) by the denoiser. Equals the current matrix when the camera is static.
+    [[nodiscard]] Mat4 GetPrevViewProjectionMatrix() const
+    {
+        return prev_view_projection_matrix_;
+    }
+
     [[nodiscard]] float GetNear() const
     {
         return near_;
@@ -159,6 +166,7 @@ private:
     TransformMatrix view_matrix_;
     Mat4 projection_matrix_;
     Mat4 view_projection_matrix_;
+    Mat4 prev_view_projection_matrix_;
 
     float aspect_ratio_;
     float near_ = 0.1f;
@@ -172,5 +180,6 @@ private:
     uint32_t pixels_dirty_ : 1 = 1;
     uint32_t attribute_dirty_ : 1 = 1;
     uint32_t need_cpu_frame_buffer_ : 1 = 0;
+    uint32_t vp_initialized_ : 1 = 0;
 };
 } // namespace sparkle

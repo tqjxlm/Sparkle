@@ -72,6 +72,24 @@ struct ConfigCollectionHelper
             ImGui::PopStyleVar();
         }
         break;
+        case ConfigValueBase::Float: {
+            float value = config.GetValueAs<float>();
+            if (ImGui::DragFloat(gui_helper::LabelPrefix(config.GetName()).c_str(), &value, 0.01f))
+            {
+                config.SetValueAs(value);
+            }
+        }
+        break;
+        case ConfigValueBase::Int: {
+            auto value = static_cast<int>(config.GetValueAs<uint32_t>());
+            // AlwaysClamp: CTRL+click keyboard entry ignores the drag bounds otherwise
+            if (ImGui::DragInt(gui_helper::LabelPrefix(config.GetName()).c_str(), &value, 0.1f, 0, 1 << 16, "%d",
+                               ImGuiSliderFlags_AlwaysClamp))
+            {
+                config.SetValueAs(static_cast<uint32_t>(value));
+            }
+        }
+        break;
         default:
             break;
         }

@@ -12,6 +12,7 @@
 #include "core/Path.h"
 #include "core/Profiler.h"
 #include "core/task/TaskManager.h"
+#include "renderer/nrd/NrdConfig.h"
 #include "rhi/RHI.h"
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
@@ -310,6 +311,7 @@ void AppFramework::DrawUi()
                 {"App", &app_config_},
                 {"Render", &render_config_},
                 {"RHI", &rhi_config_},
+                {"NRD", &NrdConfig::Get()},
             };
 
             float font_size = ImGui::GetFontSize();

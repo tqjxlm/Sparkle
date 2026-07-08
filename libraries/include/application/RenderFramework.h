@@ -78,9 +78,11 @@ public:
     // Thread-safe. Returns true when the renderer has accumulated enough samples for a screenshot.
     [[nodiscard]] bool IsReadyForAutoScreenshot() const;
 
-private:
+    // Thread-safe. Scene assets loaded (but not necessarily converged) — for tests that need to act
+    // before the accumulator caps (e.g. toggling a mode mid-convergence).
     [[nodiscard]] bool IsSceneFullyLoaded() const;
 
+private:
     void ProcessScreenshotRequest();
     void RenderThreadMain();
 

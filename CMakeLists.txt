@@ -90,6 +90,10 @@ FILE(GLOB_RECURSE SOURCES
 if(ENABLE_TEST_CASES)
     target_compile_definitions(sparkle PRIVATE ENABLE_TEST_CASES=1)
     FILE(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
+    if(MACOS OR IOS)
+        FILE(GLOB_RECURSE TEST_SOURCES_MM "tests/*.mm")
+        list(APPEND TEST_SOURCES ${TEST_SOURCES_MM})
+    endif()
     target_sources(sparkle PRIVATE ${TEST_SOURCES})
     target_include_directories(sparkle PRIVATE "tests/")
 else()
@@ -350,6 +354,7 @@ elseif(MACOS)
         "-framework GameController"
         "-framework MetalPerformanceShaders"
     )
+
     set_target_properties(sparkle PROPERTIES
         MACOSX_BUNDLE TRUE
         RESOURCE "${RESOURCES}"
@@ -428,6 +433,11 @@ endif()
 # ------------------ third party libraries ------------------
 
 add_subdirectory(thirdparty)
+
+if (MACOS OR IOS)
+    # declared here because the shaders subdirectory is added before thirdparty defines NRDShaders
+    add_dependencies(cook-nrd-shaders NRDShaders)
+endif()
 
 # ------------------ IDE config ------------------
 

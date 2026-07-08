@@ -43,7 +43,8 @@ runs:
     - name: Upload Test Screenshot
       if: >-
         always() && inputs.build_type == 'Release' &&
-        (inputs.framework == 'glfw' && contains(inputs.os, 'windows'))
+        ((inputs.framework == 'glfw' && contains(inputs.os, 'windows')) ||
+         (inputs.framework == 'macos' && contains(inputs.os, 'macos')))
       uses: actions/upload-artifact@v4
       with:
         name: functional-test-screenshot-${{ inputs.framework }}-${{ inputs.os }}

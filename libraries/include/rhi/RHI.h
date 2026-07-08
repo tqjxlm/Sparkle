@@ -7,6 +7,7 @@
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIConfig.h"
 #include "rhi/RHIImage.h"
+#include "rhi/RHINrdBackend.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
 #include "rhi/RHIRenderPass.h"
@@ -193,6 +194,13 @@ public:
     virtual RHIResourceRef<RHITimer> CreateTimer(const std::string &name) = 0;
 
     virtual RHIResourceRef<RHIComputePass> CreateComputePass(const std::string &name, bool need_timestamp) = 0;
+
+    // NVIDIA NRD backend (Metal only): compiles NRD's SPIR-V shaders and drives its dispatches. Null on
+    // backends without an NRD path.
+    virtual std::unique_ptr<RHINrdBackend> CreateNrdBackend()
+    {
+        return nullptr;
+    }
 
     [[nodiscard]] RHIResourceRef<RHIRenderPass> GetCurrentRenderPass() const
     {
