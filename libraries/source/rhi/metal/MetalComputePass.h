@@ -6,6 +6,10 @@
 
 #include "MetalRHIInternal.h"
 
+#include "rhi/RHITimer.h"
+
+#include <vector>
+
 namespace sparkle
 {
 class MetalComputePass : public RHIComputePass
@@ -27,7 +31,7 @@ public:
 private:
     id<MTLComputeCommandEncoder> compute_encoder_;
 
-    id<MTLCounterSampleBuffer> counter_sample_buffer_;
+    std::vector<RHIResourceRef<RHITimer>> timers_;
 
     MTLComputePassDescriptor *descriptor_;
 };

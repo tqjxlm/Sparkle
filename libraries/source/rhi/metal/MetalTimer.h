@@ -6,15 +6,17 @@
 
 #include "MetalRHIInternal.h"
 
+#include <atomic>
+
 namespace sparkle
 {
-// Use MTLCounterSampleBuffer for GPU timing (macOS 10.15+, iOS 13.0+)
+// MTLCounterSampleBuffer timing. Apple GPUs only sample timestamps at encoder boundaries, so a
+// Metal timer measures one whole pass: AttachTo the pass descriptor before creating its encoder,
+// then bracket with Begin/End; the samples themselves are taken by the GPU at encoder start/end.
 class MetalTimer : public RHITimer
 {
 public:
     explicit MetalTimer(const std::string &name);
-
-    ~MetalTimer() override;
 
     void Begin() override;
 
@@ -22,9 +24,12 @@ public:
 
     void TryGetResult() override;
 
+    void AttachTo(MTLComputePassDescriptor *descriptor) const;
+
 private:
     id<MTLCounterSampleBuffer> counter_sample_buffer_ = nil;
-    id<MTLCounterSet> timestamp_counter_set_ = nil;
+    std::atomic<bool> resolved_ = false;
+    std::atomic<float> resolved_time_ms_ = 0.f;
 };
 } // namespace sparkle
 
