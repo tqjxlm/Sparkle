@@ -2,6 +2,7 @@
 
 #include "core/Profiler.h"
 #include "renderer/BindlessManager.h"
+#include "renderer/nrd/NrdDenoiser.h"
 #include "renderer/pass/ClearTexturePass.h"
 #include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/ToneMappingPass.h"
@@ -32,6 +33,13 @@ class RayTracingComputeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(skyMapSampler, RHIShaderResourceReflection::ResourceType::Sampler)
     USE_SHADER_RESOURCE(materialTextureSampler, RHIShaderResourceReflection::ResourceType::Sampler)
 
+    USE_SHADER_RESOURCE(gRadiance, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(gNormalDepth, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(gAlbedoObj, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(gMotion, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(gRadianceSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    USE_SHADER_RESOURCE(gSpecAlbedo, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
     USE_SHADER_RESOURCE_BINDLESS(textures, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE_BINDLESS(indexBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
     USE_SHADER_RESOURCE_BINDLESS(vertexBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
@@ -44,11 +52,14 @@ class RayTracingComputeShader : public RHIShaderInfo
         CameraRenderProxy::UniformBufferData camera;
         SkyRenderProxy::UniformBufferData sky_light = {};
         DirectionalLightRenderProxy::UniformBufferData dir_light = {};
+        Mat4 view_projection;
+        Mat4 prev_view_projection;
         uint32_t time_seed;
         float output_limit = CameraRenderProxy::OutputLimit;
         uint32_t total_sample_count;
         uint32_t spp;
         uint32_t enable_nee;
+        uint32_t write_gbuffer;
     };
 };
 
@@ -101,9 +112,17 @@ void GPURenderer::InitRenderResources()
 
     tone_mapping_rt_ = rhi_->CreateRenderTarget({}, tone_mapping_output_, nullptr, "ToneMappingRT");
 
+    // Create the denoiser before the path-tracer pipeline so its G-buffer targets exist and can
+    // be bound into the compute shader in InitSceneRenderResources().
+    nrd_ = PipelinePass::Create<NrdDenoiser>(render_config_, rhi_, scene_texture_);
+
     InitSceneRenderResources();
 
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_texture_, tone_mapping_rt_);
+    nrd_enabled_last_ = nrd_->IsActive() && nrd_->GetOutput();
+    auto tone_mapping_input = nrd_enabled_last_ ? nrd_->GetOutput() : scene_texture_;
+
+    tone_mapping_pass_ =
+        PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, tone_mapping_input, tone_mapping_rt_);
 
     clear_pass_ = PipelinePass::Create<ClearTexturePass>(render_config_, rhi_, Vector4::Zero(),
                                                          RHIImageLayout::StorageWrite, scene_rt_);
@@ -130,17 +149,46 @@ void GPURenderer::Render()
 
     auto *camera = scene_render_proxy_->GetCamera();
 
+    bool nrd_on = nrd_frame_active_;
+    if (nrd_on != nrd_enabled_last_)
+    {
+        if (nrd_on)
+        {
+            nrd_->EnsureEnabledResources();
+            BindNrdGBuffer();
+            nrd_->RequestReset(); // freshly-allocated history is garbage; start clean
+            // enabling after the render freeze: no pass would ever write the NRD output, so restart
+            // accumulation (it re-converges through the handoff)
+            if (!camera->NeedClear() &&
+                camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel)
+            {
+                camera->MarkPixelDirty();
+            }
+        }
+        nrd_on = nrd_on && nrd_->GetOutput();
+        tone_mapping_pass_->SetInput(nrd_on ? nrd_->GetOutput() : scene_texture_);
+        nrd_enabled_last_ = nrd_on;
+    }
+    nrd_on = nrd_enabled_last_;
+
     if (camera->NeedClear())
     {
         clear_pass_->Render();
         camera->ClearPixels();
-        dispatched_sample_count_ = 0;
     }
 
     // Once the target sample count is reached the image has converged; stop accumulating so the
     // result is stable and deterministic (e.g. for screenshots) instead of drifting on fresh noise.
     const bool accumulation_complete =
         !camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
+
+    // Frames rendered before the scene is fully loaded are dark/incomplete; keep resetting denoiser
+    // history until then so they never enter the temporal accumulation. Once ready, NRD accumulates
+    // (and reprojects under camera motion) normally — camera movement does not force a history reset.
+    if (!Renderer::IsReadyForAutoScreenshot())
+    {
+        nrd_->RequestReset();
+    }
 
     // base pass: render to texture
     if (!accumulation_complete)
@@ -149,15 +197,27 @@ void GPURenderer::Render()
                                     .after_stage = RHIPipelineStage::Top,
                                     .before_stage = RHIPipelineStage::ComputeShader});
 
+        if (gbuffer_write_this_frame_)
+        {
+            nrd_->BeginGBufferWrite();
+        }
+
         rhi_->BeginComputePass(compute_pass_);
 
         rhi_->DispatchCompute(pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
 
         rhi_->EndComputePass(compute_pass_);
 
+        const auto scene_consumer_stage = nrd_on ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
+
         scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::ComputeShader,
-                                    .before_stage = RHIPipelineStage::PixelShader});
+                                    .before_stage = scene_consumer_stage});
+
+        if (nrd_on)
+        {
+            nrd_->Render();
+        }
     }
 
     // screen space passes (post processing)
@@ -213,6 +273,8 @@ void GPURenderer::Update()
 {
     PROFILE_SCOPE("GPURenderer::Update");
 
+    nrd_frame_active_ = nrd_->IsActive();
+
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
     {
         BindBindlessResources();
@@ -227,7 +289,6 @@ void GPURenderer::Update()
         // Reset accumulation when sky light changes so early frames rendered
         // with a dummy black cubemap don't drag down the running average.
         scene_render_proxy_->GetCamera()->MarkPixelDirty();
-        dispatched_sample_count_ = 0;
 
         if ((sky_light != nullptr) && sky_light->GetSkyMap())
         {
@@ -305,10 +366,23 @@ void GPURenderer::Update()
 
     auto *camera = scene_render_proxy_->GetCamera();
 
-    // Use a per-frame seed that advances every dispatch so fresh samples are generated
-    // even after cumulated_sample_count is capped. Stays identical to GetCumulatedSampleCount()
-    // before the cap, preserving determinism for functional tests.
-    auto time_seed = dispatched_sample_count_;
+    // Restart accumulation from seed 0 when the scene finishes loading: the warm-up frame count is
+    // I/O-timing dependent, and converged captures must be bit-reproducible run-to-run.
+    const bool scene_ready = Renderer::IsReadyForAutoScreenshot();
+    if (scene_ready && !scene_ready_last_)
+    {
+        seed_counter_ = 0;
+        camera->MarkPixelDirty();
+    }
+    scene_ready_last_ = scene_ready;
+
+    // The seed advances every dispatch and must NOT reset on accumulator clears: deriving it from a
+    // per-clear counter replays the SAME noise every frame under camera motion (clear per frame ->
+    // seed pinned), and temporal denoisers cannot average correlated noise.
+    auto time_seed = seed_counter_ + render_config_.random_seed_offset;
+
+    nrd_->UpdateFrameData(render_config_, scene_render_proxy_);
+    gbuffer_write_this_frame_ = nrd_frame_active_ && nrd_->NeedsGBuffer();
 
     uint32_t spp;
 
@@ -349,13 +423,16 @@ void GPURenderer::Update()
 
     RayTracingComputeShader::UniformBufferData ubo{
         .camera = camera->GetUniformBufferData(render_config_),
+        .view_projection = camera->GetViewProjectionMatrix(),
+        .prev_view_projection = camera->GetPrevViewProjectionMatrix(),
         .time_seed = time_seed,
         .total_sample_count = camera->GetCumulatedSampleCount(),
         .spp = spp,
         .enable_nee = render_config_.enable_nee ? 1u : 0,
+        .write_gbuffer = gbuffer_write_this_frame_ ? 1u : 0u,
     };
 
-    dispatched_sample_count_ += spp;
+    seed_counter_ += spp;
     camera->AccumulateSample(spp);
 
     if (sky_light)
@@ -421,6 +498,8 @@ void GPURenderer::InitSceneRenderResources()
     cs_resources->imageData().BindResource(scene_texture_->GetDefaultView(rhi_));
     cs_resources->tlas().BindResource(tlas_);
 
+    BindNrdGBuffer();
+
     auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::R8G8B8A8_SRGB,
         .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
@@ -446,6 +525,17 @@ void GPURenderer::InitSceneRenderResources()
     cs_resources->materialTextureSampler().BindResource(dummy_texture_2d->GetSampler());
 
     BindBindlessResources();
+}
+
+void GPURenderer::BindNrdGBuffer()
+{
+    auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
+    cs_resources->gRadiance().BindResource(nrd_->GetRadiance()->GetDefaultView(rhi_));
+    cs_resources->gNormalDepth().BindResource(nrd_->GetNormalDepth()->GetDefaultView(rhi_));
+    cs_resources->gAlbedoObj().BindResource(nrd_->GetAlbedoObj()->GetDefaultView(rhi_));
+    cs_resources->gMotion().BindResource(nrd_->GetMotion()->GetDefaultView(rhi_));
+    cs_resources->gRadianceSpecular().BindResource(nrd_->GetRadianceSpecular()->GetDefaultView(rhi_));
+    cs_resources->gSpecAlbedo().BindResource(nrd_->GetSpecAlbedo()->GetDefaultView(rhi_));
 }
 
 void GPURenderer::BindBindlessResources()

@@ -15,7 +15,7 @@
 
 ### Comparing and diffing renders
 
-* Diff against the **ground truth**, not only A/B between two configs. Only the ground truth tells you which side is correct and whether an artifact is feature-specific (e.g. present in `svgf=on` but absent from the raw render).
+* Diff against the **ground truth**, not only A/B between two configs. Only the ground truth tells you which side is correct and whether an artifact is feature-specific (e.g. present in `nrd=on` but absent from the raw render).
 * Inspect a **per-pixel signed difference** (where one image is brighter vs darker), **zoom to 1:1** on suspect regions, and for edges take **scanline profiles** across the boundary. Thin, high-frequency artifacts — silhouette halos, fringes, ringing, fireflies — are only 1–3 px wide and **average to ≈zero under any whole-image/region mean or low-pass-blurred diff** (an edge band cancels because it straddles the bright overshoot and the adjacent dark side). Never use a blurred or region-averaged diff as the **detector**; use averages only to **quantify** what the eye has already found.
 * A passing aggregate metric (FLIP, mean error) does **not** mean the images match — it is a low-pass over the error map and hides spatially concentrated / structural errors. Inspect the worst tiles and the silhouettes explicitly before declaring a match.
 

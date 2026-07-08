@@ -54,3 +54,7 @@ __pycache__/
 build_cache/
 
 imgui.ini
+
+cooked/
+
+tmp/

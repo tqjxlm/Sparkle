@@ -55,4 +55,6 @@ protected:
     static const std::filesystem::path ResourceRoot;
     static const std::filesystem::path GeneratedRoot;
 };
+
+template <> std::string FileManager::ReadAsType(const Path &file);
 } // namespace sparkle

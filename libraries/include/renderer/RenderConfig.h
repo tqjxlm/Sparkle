@@ -72,6 +72,10 @@ struct RenderConfig : public ConfigCollection
     DebugMode debug_mode;
     uint32_t sample_per_pixel;
     uint32_t max_sample_per_pixel;
+    // Added to the per-frame RNG seed. 0 = deterministic (default; functional tests rely on it). A test
+    // harness varies it across runs to draw independent stochastic realizations of the same render state,
+    // so their average filters the stochastic noise (used by the per-pixel-vs-GT fidelity criterion).
+    uint32_t random_seed_offset;
     uint32_t max_bounce;
     uint32_t image_width;
     uint32_t image_height;
