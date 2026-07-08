@@ -136,7 +136,6 @@ public:
         default:
             return Result::Pending;
         }
-        return Result::Pending;
     }
 
     [[nodiscard]] uint32_t GetDefaultTimeoutFrames() const override
