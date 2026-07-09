@@ -385,16 +385,21 @@ void GPURenderer::Update()
     nrd_->UpdateFrameData(render_config_, scene_render_proxy_);
     gbuffer_write_this_frame_ = nrd_frame_active_ && nrd_->NeedsGBuffer();
 
-    uint32_t spp;
+    const auto frame_index = rhi_->GetFrameIndex();
+
+    // must match Render()'s accumulation_complete: frozen frames skip the trace dispatch
+    const bool will_dispatch =
+        camera->NeedClear() || camera->GetCumulatedSampleCount() < render_config_.max_sample_per_pixel;
+
+    uint32_t spp = render_config_.sample_per_pixel;
 
     if (render_config_.use_dynamic_spp)
     {
-        auto frame_index = rhi_->GetFrameIndex();
-
         auto gpu_time = compute_pass_->GetExecutionTime(frame_index);
 
-        bool has_valid_history = gpu_time > 0;
-        if (has_valid_history)
+        // the estimate is only updatable when the slot's timestamp and spp come from the same real
+        // dispatch; spp == 0 marks "no dispatch used this slot" (startup or frozen frames)
+        if (gpu_time > 0 && performance_history_[frame_index].spp > 0)
         {
             float average_time_per_spp = gpu_time / static_cast<float>(performance_history_[frame_index].spp);
             running_time_per_spp_ = utilities::Lerp(running_time_per_spp_, average_time_per_spp, 0.5f);
@@ -410,17 +415,10 @@ void GPURenderer::Update()
 
             spp = utilities::Clamp(optimal_spp, 1u, render_config_.max_sample_per_pixel);
         }
-        else
-        {
-            spp = render_config_.sample_per_pixel;
-        }
+    }
 
-        performance_history_[frame_index].spp = spp;
-    }
-    else
-    {
-        spp = render_config_.sample_per_pixel;
-    }
+    // recorded regardless of mode so toggling dynamic_spp never pairs a timestamp with the wrong spp
+    performance_history_[frame_index].spp = will_dispatch ? spp : 0;
 
     RayTracingComputeShader::UniformBufferData ubo{
         .camera = camera->GetUniformBufferData(render_config_),
@@ -433,8 +431,11 @@ void GPURenderer::Update()
         .write_gbuffer = gbuffer_write_this_frame_ ? 1u : 0u,
     };
 
-    seed_counter_ += spp;
-    camera->AccumulateSample(spp);
+    if (will_dispatch)
+    {
+        seed_counter_ += spp;
+        camera->AccumulateSample(spp);
+    }
 
     if (sky_light)
     {
@@ -459,6 +460,9 @@ void GPURenderer::Update()
     last_second_total_spp_ += spp;
 
     spp_logger_.Tick();
+
+    Logger::LogToScreen("Accumulation",
+                        fmt::format("Accumulated samples: {}", camera->GetCumulatedSampleCount()));
 }
 
 void GPURenderer::MeasurePerformance()
