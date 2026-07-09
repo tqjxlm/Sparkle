@@ -46,6 +46,8 @@ def parse_args(args=None):
                         help="Enable shader debug")
     parser.add_argument("--generate_only", action="store_true",
                         help="Generate native project (vs sln, xcode project, etc..) without building or running")
+    parser.add_argument("--configure_only", action="store_true",
+                        help="Run the build's configure step (fetches dependencies) without building")
     parser.add_argument("--clangd", action="store_true",
                         help="Generate compile_commands.json for clangd")
     parser.add_argument("--run", action="store_true",
@@ -73,6 +75,7 @@ def parse_args(args=None):
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
         "generate_only": parsed_args.generate_only,
+        "configure_only": parsed_args.configure_only,
         "skip_build": parsed_args.skip_build,
         "clangd": parsed_args.clangd,
         "clean": parsed_args.clean,
@@ -158,6 +161,9 @@ def build_project(args):
     elif args["generate_only"]:
         print("Generating project...")
         builder.generate_project(args)
+    elif args["configure_only"]:
+        print("Configuring...")
+        builder.configure_only(args)
     else:
         if args["skip_build"]:
             print("Skipping build.")

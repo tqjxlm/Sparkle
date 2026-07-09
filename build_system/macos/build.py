@@ -147,6 +147,10 @@ class MacosBuilder(FrameworkBuilder):
             f"Xcode project is generated at {output_dir}. Open with command:")
         print(f"open {output_dir}/sparkle.xcodeproj")
 
+    def configure_only(self, args):
+        """The Xcode build configures through project generation."""
+        self.generate_project(args)
+
     def build(self, args):
         """Build the project."""
         self.generate_project(args)
