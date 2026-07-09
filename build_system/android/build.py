@@ -203,6 +203,10 @@ class AndroidBuilder(FrameworkBuilder):
         """Generate IDE project files (via Gradle sync)."""
         sync_only(args)
 
+    def configure_only(self, args):
+        """Gradle sync; the CMake configure itself only runs inside the gradle build."""
+        sync_only(args)
+
     def build(self, args):
         """Build the project."""
         setup_android_validation(SCRIPTPATH)
