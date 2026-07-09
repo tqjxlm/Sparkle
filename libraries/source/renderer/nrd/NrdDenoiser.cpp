@@ -447,6 +447,12 @@ void NrdDenoiser::Render()
     // still displays at only ~3*spp/N of its amplitude. Under motion N resets to ~spp, driving beta to 0.
     const float stabilization_rate = 3.f * samples_this_frame / static_cast<float>(std::max(cumulated_samples_, 1u));
 
+    // The EMA must also die out with the ReBLUR contribution it smooths: its lag otherwise keeps the
+    // display on an older, more-ReBLUR-flavored mix than handoff_weight says, and the final resolve
+    // (beta pinned to 0) would release that lag as a visible pop right at the freeze.
+    const float stabilization_beta =
+        std::clamp(1.f - stabilization_rate, 0.f, 0.99f) * (1.f - handoff_weight);
+
     // fully handed off to the accumulator: the ReBLUR result is weighted by zero, so skip its ~1.7 ms of
     // dispatches and run only the resolve (composite + stabilization). ReBLUR's history stays valid — the
     // camera is static for as long as this branch holds, and any motion resets cumulated_samples_ -> w < 1.
@@ -480,8 +486,7 @@ void NrdDenoiser::Render()
         .view_z_scale = far_plane_ * 0.05f,
         .motion_scale = MotionDisplayScale,
         .handoff_weight = handoff_weight,
-        .stabilization_beta =
-            (reset_history_ || final_resolve) ? 0.f : std::clamp(1.f - stabilization_rate, 0.f, 0.99f),
+        .stabilization_beta = (reset_history_ || final_resolve) ? 0.f : stabilization_beta,
     };
     resolve_ubo_->Upload(rhi_, &resolve_ubo);
 
