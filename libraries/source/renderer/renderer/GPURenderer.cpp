@@ -273,6 +273,7 @@ void GPURenderer::Update()
 {
     PROFILE_SCOPE("GPURenderer::Update");
 
+    nrd_->SampleConfig();
     nrd_frame_active_ = nrd_->IsActive();
 
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())

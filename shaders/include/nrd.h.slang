@@ -3,8 +3,41 @@
 
 // Exact replicas of the NRD v4.17.3 front/back-end encoding math (thirdparty/NRD/Shaders/NRD.hlsli).
 // Must stay in sync with the pinned NRD submodule: the packed values are decoded by NRD's own shaders.
-// Normal encoding is RGBA16_SNORM (NRD_NORMAL_ENCODING=4 in thirdparty/CMakeLists.txt), i.e. raw
-// float4(N, linear_roughness) — nothing to encode here.
+// Normal encoding is R10G10B10A2_UNORM (NRD_NORMAL_ENCODING=2 in thirdparty/CMakeLists.txt):
+// oct-packed normal + linear roughness, see NrdPackNormalRoughness below.
+
+// _NRD_EncodeNormalRoughness101010 ("improved oct-packing"): xy = oct-encoded normal, z = linear
+// roughness carrying the n.z sign (floored to 1.5/512 so roughness 0 cannot erase that sign bit),
+// w = materialID in [0, 3] (ReBLUR compares it when ReblurSettings::minMaterialFor* < 3).
+float4 NrdPackNormalRoughness(float3 n, float roughness, float material_id)
+{
+    n /= abs(n.x) + abs(n.y) + abs(n.z);
+
+    float3 r;
+    r.y = n.y * 0.5 + 0.5;
+    r.x = n.x * 0.5 + r.y;
+    r.y -= n.x * 0.5;
+
+    roughness = max(roughness, 1.5 / 512.0);
+    float s = n.z < 0.f ? -roughness : roughness;
+    r.z = s * 0.5 + 0.5;
+
+    return float4(r, saturate(material_id / 3.0));
+}
+
+// _NRD_DecodeNormalRoughness101010 + _NRD_SafeNormalize; returns float4(N, linear_roughness)
+float4 NrdUnpackNormalRoughness(float4 p)
+{
+    float t = p.z * 2.0 - 1.0;
+
+    float3 n;
+    n.x = p.x - p.y;
+    n.y = p.x + p.y - 1.0;
+    n.z = (t < 0.f ? -1.0 : 1.0) * (1.0 - abs(n.x) - abs(n.y));
+    n *= rsqrt(dot(n, n) + 1e-9);
+
+    return float4(n, abs(t));
+}
 
 float3 NrdLinearToYCoCg(float3 color)
 {

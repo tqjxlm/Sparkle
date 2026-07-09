@@ -47,6 +47,10 @@ public:
         reset_history_ = true;
     }
 
+    // Copy the cross-thread NrdConfig into the per-frame snapshot all denoiser logic reads. Call once
+    // at the top of the renderer's Update so a control-panel write cannot tear a frame.
+    void SampleConfig();
+
     [[nodiscard]] bool IsActive() const
     {
         return config_.enabled && !enabled_resources_failed_;
@@ -116,7 +120,27 @@ private:
 
     void RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &group);
 
-    NrdConfig &config_ = NrdConfig::Get();
+    struct StageTiming
+    {
+        double sum_ms = 0.0;
+        uint32_t count = 0;
+    };
+
+    // a frame slot's GPU time belongs to the previous submission that used that slot, so each frame
+    // harvests the slot's pending times before recording which stages it dispatches into the slot
+    void SampleGpuTimings(bool will_run_reblur);
+
+    void LogGpuTimings(const char *tag) const;
+
+    struct ConfigSnapshot
+    {
+        bool enabled;
+        bool stabilization;
+        bool radiance_fp16;
+        NrdDebugMode debug_mode;
+    };
+
+    ConfigSnapshot config_;
     nrd::Instance *instance_ = nullptr;
     std::unique_ptr<RHINrdBackend> backend_;
 
@@ -166,9 +190,19 @@ private:
     RHIResourceRef<RHIComputePass> resolve_pass_;
     RHIResourceRef<RHIBuffer> resolve_ubo_;
 
+    // wraps the backend's RunDispatches so the ReBLUR block is timed like any engine pass
+    RHIResourceRef<RHIComputePass> reblur_pass_;
+
     // refilled in place every ReBLUR frame; the dispatch layout is frame-invariant, so steady state
     // allocates nothing
     std::vector<RHINrdBackend::Dispatch> seam_dispatches_;
     std::vector<RHINrdBackend::DispatchResource> seam_resources_;
+
+    StageTiming pack_timing_;
+    StageTiming reblur_timing_;
+    StageTiming resolve_timing_;
+    uint32_t last_timing_log_count_ = 0;
+    std::vector<uint8_t> slot_ran_reblur_;
+    std::vector<uint8_t> slot_ran_resolve_;
 };
 } // namespace sparkle
