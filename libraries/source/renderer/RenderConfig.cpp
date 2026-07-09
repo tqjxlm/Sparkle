@@ -39,6 +39,9 @@ static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU 
 static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
 static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear all existing screenshots", "renderer",
                                                   false);
+static ConfigValue<bool> config_manual_accumulation(
+    "manual_accumulation", "debug: accumulate samples only while the accumulate key (space) or panel button is held",
+    "renderer", false, true);
 
 void RenderConfig::Init()
 {
@@ -62,6 +65,18 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_gpu_budget_ratio, gpu_time_budget_ratio);
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
+    ConfigCollectionHelper::RegisterConfig(this, config_manual_accumulation, manual_accumulation);
+
+    AddUiGenerator([this] {
+        if (!manual_accumulation)
+        {
+            accumulate_button_held = false;
+            return;
+        }
+        ImGui::Button("accumulate (hold)");
+        accumulate_button_held = ImGui::IsItemActive();
+    });
+
     Validate();
 }
 

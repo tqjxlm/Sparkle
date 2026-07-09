@@ -90,8 +90,14 @@ struct RenderConfig : public ConfigCollection
     bool use_dynamic_spp;
     bool enable_nee;
     bool clear_screenshots;
+    bool manual_accumulation;
     float target_framerate;
     float gpu_time_budget_ratio;
+
+    // manual-accumulation hold states. Not ConfigValues: the app layer rewrites them every frame
+    // (space key / the panel button) and the per-frame snapshot carries them to the render thread.
+    bool accumulate_key_held = false;
+    bool accumulate_button_held = false;
 
 protected:
     void Validate() override;

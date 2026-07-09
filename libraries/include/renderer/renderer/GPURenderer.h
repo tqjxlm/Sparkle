@@ -41,6 +41,12 @@ private:
 
     void MeasurePerformance();
 
+    [[nodiscard]] bool AccumulationPaused() const
+    {
+        return render_config_.manual_accumulation &&
+               !(render_config_.accumulate_key_held || render_config_.accumulate_button_held);
+    }
+
     RHIResourceRef<RHIShader> compute_shader_;
     RHIResourceRef<RHIComputePass> compute_pass_;
 
