@@ -20,7 +20,7 @@
 [[vk::binding(2, 0)]] Texture2D<float4> gRadianceSpecular; // rgb: specular radiance, w: specular hit dist
 [[vk::binding(3, 0)]] Texture2D<float4> gNormalDepth;      // xyz: world normal, w: view-space linear z
 [[vk::binding(4, 0)]] Texture2D<float4> gAlbedoObj;        // rgb: base color
-[[vk::binding(5, 0)]] Texture2D<float4> gMotion;           // xy: uv motion (prev - cur), z: is-hit
+[[vk::binding(5, 0)]] Texture2D<float4> gMotion;           // xy: uv motion (prev - cur), z: is-hit, w: metallic
 [[vk::binding(6, 0)]] Texture2D<float4> gSpecAlbedo;       // rgb: specular demod factor, w: roughness
 
 [[vk::binding(7, 0)]] RWTexture2D<float4> outMv;
@@ -59,8 +59,13 @@ float Luma(float3 c)
     // neighbor normals without range-gating, so a NaN here corrupts adjacent geometry pixels.
     float3 normal = is_hit ? normalize(normal_depth.xyz) : float3(0.f, 0.f, 1.f);
 
+    // metal vs dielectric buckets: demodulated diffuse (and spec) is discontinuous across that
+    // boundary (metal diffuse ~0 vs dielectric ~illumination), and ReBLUR only stops blurring
+    // across it when material IDs differ.
+    float material_id = motion_hit.w > 0.5f ? 1.f : 0.f;
+
     outMv[pixel] = float4(motion_hit.xy, 0.f, 0.f);
-    outNormalRoughness[pixel] = float4(normal, roughness);
+    outNormalRoughness[pixel] = NrdPackNormalRoughness(normal, roughness, material_id);
     outViewZ[pixel] = float4(view_z, 0.f, 0.f, 0.f);
 
     // sky keeps demodulation factor 1 so pack/resolve round-trips exactly.

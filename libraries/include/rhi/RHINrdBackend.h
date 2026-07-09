@@ -78,8 +78,9 @@ public:
         uint32_t resource_count;
     };
 
-    // Record the frame's NRD dispatch sequence. Must run between engine compute passes (the backend opens
-    // its own serial encoder on the current command buffer, which implicitly barriers between dispatches).
+    // Record the frame's NRD dispatch sequence into the caller's active compute pass (bracket with
+    // RHIContext::Begin/EndComputePass): the pass's serial encoder implicitly barriers between
+    // dispatches, and pass-level GPU timing covers the whole block.
     virtual void RunDispatches(const Dispatch *dispatches, uint32_t count) = 0;
 };
 } // namespace sparkle
