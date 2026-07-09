@@ -120,7 +120,7 @@ public:
     void MouseButtonCallback(ClickButton button, KeyAction action, uint32_t mods);
     void ClickCallback();
     void ScrollCallback(double xoffset, double yoffset);
-    void KeyboardCallback(int key, KeyAction action, bool shift_on) const;
+    void KeyboardCallback(int key, KeyAction action, bool shift_on);
     void CaptureNextFrames(int count);
 
 #if ENABLE_TEST_CASES

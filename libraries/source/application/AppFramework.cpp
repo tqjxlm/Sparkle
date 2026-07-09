@@ -747,7 +747,7 @@ void AppFramework::ClickCallback()
     double_click_timer_.Reset();
 }
 
-void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on) const
+void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on)
 {
     if (ui_manager_ && ui_manager_->IsHanldingKeyboradEvent())
     {
@@ -767,6 +767,10 @@ void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on) co
         {
             RequestExit();
         }
+        break;
+    }
+    case NativeKeyboard::KEY_SPACE: {
+        render_config_.accumulate_key_held = (action == KeyAction::Press);
         break;
     }
     case NativeKeyboard::KEY_UP: {
