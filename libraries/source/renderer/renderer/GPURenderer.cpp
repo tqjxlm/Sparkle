@@ -191,7 +191,7 @@ void GPURenderer::Render()
     }
 
     // base pass: render to texture
-    if (!accumulation_complete)
+    if (!accumulation_complete && !AccumulationPaused())
     {
         scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                     .after_stage = RHIPipelineStage::Top,
@@ -387,9 +387,10 @@ void GPURenderer::Update()
 
     const auto frame_index = rhi_->GetFrameIndex();
 
-    // must match Render()'s accumulation_complete: frozen frames skip the trace dispatch
+    // must match Render()'s dispatch gate: frozen and manually-paused frames skip the trace dispatch
     const bool will_dispatch =
-        camera->NeedClear() || camera->GetCumulatedSampleCount() < render_config_.max_sample_per_pixel;
+        !AccumulationPaused() &&
+        (camera->NeedClear() || camera->GetCumulatedSampleCount() < render_config_.max_sample_per_pixel);
 
     uint32_t spp = render_config_.sample_per_pixel;
 
