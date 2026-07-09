@@ -28,13 +28,15 @@ struct NrdConfig : public ConfigCollection
 {
     void Init();
 
-    // App-lifetime singleton shared by the denoiser (render thread) and the control panel (main thread);
-    // stable lifetime avoids a dangling pointer across renderer recreation. Unlike RenderConfig (which the
-    // render thread receives as a per-frame snapshot), writes here are unsynchronized: consumers must
-    // sample each flag once per frame (see GPURenderer::Update).
+    // App-lifetime singleton written by the control panel (main thread); stable lifetime avoids a
+    // dangling pointer across renderer recreation. Writes are unsynchronized: the denoiser copies a
+    // per-frame snapshot (NrdDenoiser::SampleConfig, top of GPURenderer::Update) and all frame logic
+    // reads only that snapshot.
     static NrdConfig &Get();
 
     bool enabled = false;
+    bool stabilization = true;
+    bool radiance_fp16 = true;
     NrdDebugMode debug_mode = NrdDebugMode::None;
 
 protected:

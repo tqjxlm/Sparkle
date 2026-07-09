@@ -170,9 +170,11 @@ endif()
 # DXC (HLSL->SPIR-V) comes from the Vulkan SDK already in our build deps. See docs/Nrd.md.
 set(NRD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
 set(NRD_NRI OFF CACHE BOOL "" FORCE)
-# RGBA16_SNORM: IN_NORMAL_ROUGHNESS packing is then a raw float4(N, roughness) write (no 101010
-# bit-packing to replicate in our pack shader), stored losslessly in a float texture.
-set(NRD_NORMAL_ENCODING "4" CACHE STRING "" FORCE)
+# R10G10B10A2_UNORM (NRD's default): halves the bandwidth of the most-sampled ReBLUR texture vs
+# RGBA16_SNORM; the oct encode/decode is replicated in shaders/include/nrd.h.slang. Set "4"
+# (RGBA16_SNORM, raw float4 writes, no packing) to rule the packing out when debugging
+# normal-related artifacts.
+set(NRD_NORMAL_ENCODING "2" CACHE STRING "" FORCE)
 set(NRD_EMBEDS_DXIL_SHADERS OFF CACHE BOOL "" FORCE)
 set(NRD_EMBEDS_DXBC_SHADERS OFF CACHE BOOL "" FORCE)
 set(NRD_EMBEDS_SPIRV_SHADERS ON CACHE BOOL "" FORCE)

@@ -49,7 +49,7 @@ struct Camera
 [[vk::binding(7, 1)]] RWTexture2D<float4> gRadiance;    // rgb: this-frame mean radiance
 [[vk::binding(8, 1)]] RWTexture2D<float4> gNormalDepth; // xyz: world normal, w: view-space linear z
 [[vk::binding(9, 1)]] RWTexture2D<float4> gAlbedoObj;   // rgb: base color, w: object id
-[[vk::binding(10, 1)]] RWTexture2D<float4> gMotion;     // xy: screen motion vector, z: is-hit
+[[vk::binding(10, 1)]] RWTexture2D<float4> gMotion;     // xy: screen motion vector, z: is-hit, w: metallic
 [[vk::binding(11, 1)]] RWTexture2D<float4> gRadianceSpecular; // rgb: this-frame specular-lobe radiance
 [[vk::binding(12, 1)]] RWTexture2D<float4> gSpecAlbedo;       // rgb: pre-integrated specular BRDF (demod factor)
 
@@ -311,6 +311,7 @@ void WritePrimaryHitGBuffer(uint2 pixel)
     float object_id = 0.f;
     float2 motion = float2(0, 0);
     float is_hit = 0.f;
+    float metallic = 0.f;
 
     if (ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
@@ -328,6 +329,7 @@ void WritePrimaryHitGBuffer(uint2 pixel)
         float2 env_brdf = EnvBRDFApprox(n_dot_v, mat_param.roughness);
         spec_albedo = f0 * env_brdf.x + env_brdf.y;
         spec_roughness = mat_param.roughness;
+        metallic = mat_param.metallic;
 
         // view-space linear depth: distance along the camera forward axis
         float3 front = normalize(cross(camera.max_v, camera.max_u));
@@ -347,7 +349,7 @@ void WritePrimaryHitGBuffer(uint2 pixel)
 
     gNormalDepth[pixel] = float4(normal, linear_z);
     gAlbedoObj[pixel] = float4(albedo, object_id);
-    gMotion[pixel] = float4(motion, is_hit, 0.f);
+    gMotion[pixel] = float4(motion, is_hit, metallic);
     gSpecAlbedo[pixel] = float4(spec_albedo, spec_roughness);
 }
 

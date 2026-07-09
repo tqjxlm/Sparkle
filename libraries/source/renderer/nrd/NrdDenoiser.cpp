@@ -35,6 +35,8 @@ constexpr float HitDistA = 3.0f;
 constexpr float HitDistB = 0.1f;
 constexpr float HitDistC = 20.0f;
 
+constexpr uint32_t TimingLogFrameInterval = 300;
+
 void ToLayout(const RHIResourceRef<RHIImage> &image, RHIImageLayout layout, RHIPipelineStage after,
               RHIPipelineStage before)
 {
@@ -121,10 +123,27 @@ public:
 NrdDenoiser::NrdDenoiser(RHIContext *ctx, RHIResourceRef<RHIImage> input)
     : PipelinePass(ctx), input_(std::move(input))
 {
+    SampleConfig();
+    slot_ran_reblur_.resize(rhi_->GetMaxFramesInFlight(), 0);
+    slot_ran_resolve_.resize(rhi_->GetMaxFramesInFlight(), 0);
+}
+
+void NrdDenoiser::SampleConfig()
+{
+    const NrdConfig &live = NrdConfig::Get();
+    config_ = {.enabled = live.enabled,
+               .stabilization = live.stabilization,
+               .radiance_fp16 = live.radiance_fp16,
+               .debug_mode = live.debug_mode};
 }
 
 NrdDenoiser::~NrdDenoiser()
 {
+    if (resolve_timing_.count > 0)
+    {
+        LogGpuTimings("final");
+    }
+
     if (instance_)
     {
         nrd::DestroyInstance(*instance_);
@@ -187,10 +206,14 @@ void NrdDenoiser::InitRenderResources(const RenderConfig &)
 
 void NrdDenoiser::AllocateGBuffer()
 {
-    g_radiance_ = CreateFullScreenTexture(PixelFormat::RGBAFloat, "GBufferRadiance");
+    // radiance carries HDR + raw hitT: fp16 covers both (values clamped upstream, hitT only steers
+    // blur radii and keeps the exact-0 skipped-lobe sentinel); normal+viewZ and albedo+objID stay
+    // fp32 for disocclusion-plane precision and objID exactness
+    const PixelFormat radiance_format = config_.radiance_fp16 ? PixelFormat::RGBAFloat16 : PixelFormat::RGBAFloat;
+    g_radiance_ = CreateFullScreenTexture(radiance_format, "GBufferRadiance");
     g_normal_depth_ = CreateFullScreenTexture(PixelFormat::RGBAFloat, "GBufferNormalDepth");
     g_albedo_obj_ = CreateFullScreenTexture(PixelFormat::RGBAFloat, "GBufferAlbedoObj");
-    g_radiance_specular_ = CreateFullScreenTexture(PixelFormat::RGBAFloat, "GBufferRadianceSpecular");
+    g_radiance_specular_ = CreateFullScreenTexture(radiance_format, "GBufferRadianceSpecular");
     g_motion_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "GBufferMotion");
     g_spec_albedo_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "GBufferSpecAlbedo");
 }
@@ -291,12 +314,14 @@ void NrdDenoiser::EnsureEnabledResources()
                                 transient.data(), desc.transientPoolSize,
                                 reinterpret_cast<const uint32_t *>(desc.samplers), desc.samplersNum,
                                 desc.constantBufferMaxDataSize);
+    reblur_pass_ = rhi_->CreateComputePass("NrdReblurPass", true);
 
-    // half precision per NRD's own format recommendations (radiance/normals/MV); viewZ stays a full
-    // 32-bit float (plane-distance disocclusion precision). output_ and output_history_ must keep the
-    // accumulator's format: the final resolve copies it through bit-exact.
+    // half precision per NRD's own format recommendations (radiance/MV); normal+roughness matches
+    // NRD_NORMAL_ENCODING=2 (oct-packed R10G10B10A2); viewZ stays a full 32-bit float (plane-distance
+    // disocclusion precision). output_ and output_history_ must keep the accumulator's format: the
+    // final resolve copies it through bit-exact.
     in_mv_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdInMv");
-    in_normal_roughness_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdInNormalRoughness");
+    in_normal_roughness_ = CreateFullScreenTexture(PixelFormat::R10G10B10A2_UNORM, "NrdInNormalRoughness");
     in_viewz_ = CreateFullScreenTexture(PixelFormat::R32_FLOAT, "NrdInViewZ");
     in_diff_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdInDiff");
     in_spec_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdInSpec");
@@ -330,7 +355,7 @@ void NrdDenoiser::EnsureEnabledResources()
         r->outDiff().BindResource(in_diff_->GetDefaultView(rhi_));
         r->outSpec().BindResource(in_spec_->GetDefaultView(rhi_));
     }
-    pack_pass_ = rhi_->CreateComputePass("NrdPackPass", false);
+    pack_pass_ = rhi_->CreateComputePass("NrdPackPass", true);
 
     resolve_ubo_ = rhi_->CreateBuffer({.size = sizeof(NrdResolveShader::UniformBufferData),
                                        .usages = RHIBuffer::BufferUsage::UniformBuffer,
@@ -360,7 +385,7 @@ void NrdDenoiser::EnsureEnabledResources()
         r->sceneAccum().BindResource(input_->GetDefaultView(rhi_));
         r->outputHistory().BindResource(output_history_->GetDefaultView(rhi_));
     }
-    resolve_pass_ = rhi_->CreateComputePass("NrdResolvePass", false);
+    resolve_pass_ = rhi_->CreateComputePass("NrdResolvePass", true);
 
     enabled_resources_ready_ = true;
 }
@@ -427,6 +452,8 @@ void NrdDenoiser::Render()
     // camera is static for as long as this branch holds, and any motion resets cumulated_samples_ -> w < 1.
     const bool run_reblur = handoff_weight < 1.f || config_.debug_mode != NrdDebugMode::None;
 
+    SampleGpuTimings(run_reblur);
+
     if (reset_history_)
     {
         prev_view_matrix_ = view_matrix_;
@@ -467,6 +494,45 @@ void NrdDenoiser::Render()
     prev_view_matrix_ = view_matrix_;
     prev_projection_matrix_ = projection_matrix_;
     reset_history_ = false;
+}
+
+void NrdDenoiser::SampleGpuTimings(bool will_run_reblur)
+{
+    const auto slot = rhi_->GetFrameIndex();
+
+    auto accumulate = [](StageTiming &timing, float time_ms) {
+        if (time_ms >= 0.f)
+        {
+            timing.sum_ms += static_cast<double>(time_ms);
+            timing.count++;
+        }
+    };
+
+    if (slot_ran_reblur_[slot])
+    {
+        accumulate(pack_timing_, pack_pass_->GetExecutionTime(slot));
+        accumulate(reblur_timing_, reblur_pass_->GetExecutionTime(slot));
+    }
+    if (slot_ran_resolve_[slot])
+    {
+        accumulate(resolve_timing_, resolve_pass_->GetExecutionTime(slot));
+    }
+    slot_ran_reblur_[slot] = will_run_reblur ? 1 : 0;
+    slot_ran_resolve_[slot] = 1;
+
+    if (reblur_timing_.count != last_timing_log_count_ && reblur_timing_.count % TimingLogFrameInterval == 0)
+    {
+        last_timing_log_count_ = reblur_timing_.count;
+        LogGpuTimings("running");
+    }
+}
+
+void NrdDenoiser::LogGpuTimings(const char *tag) const
+{
+    auto mean = [](const StageTiming &timing) { return timing.count > 0 ? timing.sum_ms / timing.count : -1.0; };
+    Log(Info, "[NrdPerf] {} pack {:.3f} ms (n={}) reblur {:.3f} ms (n={}) resolve {:.3f} ms (n={})", tag,
+        mean(pack_timing_), pack_timing_.count, mean(reblur_timing_), reblur_timing_.count, mean(resolve_timing_),
+        resolve_timing_.count);
 }
 
 void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &group)
@@ -552,6 +618,14 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
     // the pack marks skipped-lobe frames with hitT = 0 (probabilistic primary-lobe selection); NRD requires
     // reconstruction to fill those from neighbors
     rs.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3;
+    // strict metal/dielectric comparison (IDs 0/1 from nrd_pack): demodulated signals are
+    // discontinuous across that boundary, and unrestricted blur paints halos around material edges
+    rs.minMaterialForDiffuse = 0.f;
+    rs.minMaterialForSpecular = 0.f;
+    if (!config_.stabilization)
+    {
+        rs.maxStabilizedFrameNum = 0;
+    }
     nrd::SetDenoiserSettings(*instance_, 0, &rs);
 
     const nrd::DispatchDesc *dispatches = nullptr;
@@ -640,6 +714,8 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
         };
     }
 
+    rhi_->BeginComputePass(reblur_pass_);
     backend_->RunDispatches(seam_dispatches_.data(), dispatch_count);
+    rhi_->EndComputePass(reblur_pass_);
 }
 } // namespace sparkle

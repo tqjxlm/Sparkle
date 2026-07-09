@@ -55,10 +55,10 @@
         color = ((float3)1) * saturate(abs(inViewZ.Load(int3(pixel, 0)).x) / viewZScale);
         break;
     case 2: // NormalRoughness (N remapped to color)
-        color = inNormalRoughness.Load(int3(pixel, 0)).xyz * 0.5f + 0.5f;
+        color = NrdUnpackNormalRoughness(inNormalRoughness.Load(int3(pixel, 0))).xyz * 0.5f + 0.5f;
         break;
     case 3: // Roughness (grayscale)
-        color = ((float3)1) * inNormalRoughness.Load(int3(pixel, 0)).w;
+        color = ((float3)1) * NrdUnpackNormalRoughness(inNormalRoughness.Load(int3(pixel, 0))).w;
         break;
     case 4: // MotionVector (|mv| amplified; static camera => black)
         color = float3(abs(inMv.Load(int3(pixel, 0)).xy) * motionScale, 0.f);

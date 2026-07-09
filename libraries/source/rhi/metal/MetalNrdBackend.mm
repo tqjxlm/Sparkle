@@ -2,6 +2,7 @@
 
 #include "MetalNrdBackend.h"
 
+#include "MetalComputePass.h"
 #include "MetalContext.h"
 #include "MetalImage.h"
 
@@ -177,11 +178,9 @@ void MetalNrdBackend::AllocateResources(uint32_t width, uint32_t height, const P
 
 void MetalNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
 {
-    id<MTLCommandBuffer> command_buffer = context->GetCurrentCommandBuffer();
-    ASSERT_F(command_buffer, "MetalNrdBackend: no active command buffer");
-
-    id<MTLComputeCommandEncoder> encoder = [command_buffer computeCommandEncoder];
-    SetDebugInfo(encoder, "NrdDispatches");
+    auto pass = context->GetRHI()->GetCurrentComputePass();
+    ASSERT_F(pass, "MetalNrdBackend: RunDispatches must run inside an active compute pass");
+    id<MTLComputeCommandEncoder> encoder = RHICast<MetalComputePass>(pass)->GetEncoder();
 
     for (uint32_t d = 0; d < count; d++)
     {
@@ -238,8 +237,6 @@ void MetalNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
         [encoder dispatchThreadgroups:MTLSizeMake(dispatch.grid_width, dispatch.grid_height, 1)
                 threadsPerThreadgroup:pipeline.threads_per_group];
     }
-
-    [encoder endEncoding];
 }
 } // namespace sparkle
 
