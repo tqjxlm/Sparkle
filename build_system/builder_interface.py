@@ -28,6 +28,11 @@ class FrameworkBuilder(ABC):
         pass
 
     @abstractmethod
+    def configure_only(self, args: Dict[str, Any]) -> None:
+        """Run the same configure the build would run (fetching dependencies), without building."""
+        pass
+
+    @abstractmethod
     def build(self, args: Dict[str, Any]) -> None:
         """Build the project. Returns path to build products."""
         pass

@@ -149,6 +149,10 @@ class GlfwBuilder(FrameworkBuilder):
             f"Visual Studio sln is generated at {output_dir}. Open with command:")
         print(f"start {output_dir}/sparkle.sln")
 
+    def configure_only(self, args):
+        """Run the build's Ninja configure (fetching dependencies) without building."""
+        configure(args, False)
+
     def build(self, args):
         """Build the project."""
         configure(args, False)

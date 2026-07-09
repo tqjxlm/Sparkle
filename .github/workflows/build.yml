@@ -39,6 +39,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # the android build (SDK/NDK + gradle + two CMake variants) can exhaust the ~14 GB free on
+      # hosted ubuntu runners; drop preinstalled toolchains this project never uses (~45 GB)
+      - name: Free Disk Space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /opt/ghc /usr/share/swift /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Setup Environment
         id: setup-environment
         uses: ./.github/actions/setup-environment
@@ -56,6 +64,21 @@ jobs:
           appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
           appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
           appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+      # dependency downloads (CMake FetchContent) happen during the configure and are the one phase
+      # that fails on transient network errors (e.g. GitHub 504s); retry it cheaply so the full
+      # build step never pays for a flaky download. android's CMake configure only runs inside the
+      # gradle build, so there is nothing to prefetch there.
+      - name: Configure
+        if: matrix.framework != 'android'
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --configure_only ${{ steps.setup-environment.outputs.build-args }} && exit 0
+            echo "configure attempt ${attempt} failed"
+            sleep 20
+          done
+          exit 1
 
       - name: Build
         run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --archive ${{ steps.setup-environment.outputs.build-args }}
