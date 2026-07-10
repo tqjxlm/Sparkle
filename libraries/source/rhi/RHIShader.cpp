@@ -47,8 +47,10 @@ void RHIShaderResourceSet::UpdateResourceHash() const
 {
     resource_hash_ = 0;
 
-    for (const auto *binding : bindings_)
+    for (auto slot = 0u; slot < bindings_.size(); slot++)
     {
+        const auto *binding = bindings_[slot];
+        ASSERT_F(binding, "hole at binding slot {}: shader bindings must be dense per set", slot);
         HashCombine(resource_hash_, binding->GetResource()->GetId());
     }
 
@@ -75,8 +77,10 @@ void RHIShaderResourceSet::UpdateLayoutHash()
 
     ASSERT(!bindings_.empty());
 
-    for (auto *binding : bindings_)
+    for (auto slot = 0u; slot < bindings_.size(); slot++)
     {
+        auto *binding = bindings_[slot];
+        ASSERT_F(binding, "hole at binding slot {}: shader bindings must be dense per set", slot);
         HashCombine(hasher, binding->GetReflection()->GetHash());
     }
 

@@ -84,6 +84,11 @@ public:
         return min_buffer_offset_alignment_;
     }
 
+    [[nodiscard]] bool SupportsSubgroupQuadOps() const
+    {
+        return supports_subgroup_quad_ops_;
+    }
+
     bool Init();
 
     void BeginCommandBuffer();
@@ -112,6 +117,7 @@ private:
     bool CreateInstance();
     bool CreateLogicalDevice();
     bool PickPhysicalDevice();
+    void QuerySubgroupQuadSupport();
     bool CheckValidationLayerSupport();
     static bool CheckInstanceExtensionSupport();
     void GetRequiredInstanceExtensions();
@@ -174,6 +180,8 @@ private:
     uint32_t msaa_samples_;
 
     uint32_t min_buffer_offset_alignment_ = 64;
+
+    bool supports_subgroup_quad_ops_ = false;
 
     VkDebugUtilsMessengerEXT debug_messenger_;
 

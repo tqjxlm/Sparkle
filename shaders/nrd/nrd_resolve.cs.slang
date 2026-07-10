@@ -36,9 +36,9 @@
 [[vk::binding(10, 0)]] Texture2D<float4> gMotion; // z: is-hit
 [[vk::binding(11, 0)]] Texture2D<float4> gSpecAlbedo;
 [[vk::binding(12, 0)]] RWTexture2D<float4> outputImage;
-[[vk::binding(14, 0)]] Texture2D<float4> validation;      // NRD OUT_VALIDATION overlay (.w: transparency)
-[[vk::binding(15, 0)]] Texture2D<float4> sceneAccum;      // progressive accumulator (converged reference)
-[[vk::binding(16, 0)]] RWTexture2D<float4> outputHistory; // previous stabilized output (read-modify-write)
+[[vk::binding(13, 0)]] Texture2D<float4> validation;      // NRD OUT_VALIDATION overlay (.w: transparency)
+[[vk::binding(14, 0)]] Texture2D<float4> sceneAccum;      // progressive accumulator (converged reference)
+[[vk::binding(15, 0)]] RWTexture2D<float4> outputHistory; // previous stabilized output (read-modify-write)
 
 [shader("compute")][numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = DTid.xy;
