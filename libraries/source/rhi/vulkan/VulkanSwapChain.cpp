@@ -211,7 +211,7 @@ void VulkanSwapChain::Recreate()
     }
 }
 
-void VulkanSwapChain::SwapBuffers(VkSemaphore semaphore)
+bool VulkanSwapChain::AcquireImage(VkSemaphore semaphore)
 {
     // Get the next image index from the swap chain
     // Note: this is an async request, the image is not available until the semaphore is ready
@@ -220,23 +220,17 @@ void VulkanSwapChain::SwapBuffers(VkSemaphore semaphore)
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR)
     {
-        Log(Info, "recreate swapchain because of VK_ERROR_OUT_OF_DATE_KHR");
-
-        Recreate();
-        for (auto *rt : regitsered_rt_)
-        {
-            rt->Recreate();
-        }
-    }
-    else
-    {
-        for (auto *rt : regitsered_rt_)
-        {
-            rt->SyncWithSwapChain();
-        }
+        return false;
     }
 
     ASSERT_F(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR, "failed to acquire swap chain image!");
+
+    for (auto *rt : regitsered_rt_)
+    {
+        rt->SyncWithSwapChain();
+    }
+
+    return true;
 }
 } // namespace sparkle
 

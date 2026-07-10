@@ -406,14 +406,26 @@ void VulkanContext::BeginFrame()
     // the per-image fence waits below are not enough when the swap chain holds more images than frames in flight
     CHECK_VK_ERROR(vkWaitForFences(device_, 1, &queue_finish_fences_[frame_index], VK_TRUE, UINT64_MAX));
 
-    // Find an available acquire semaphore (not currently in use)
-    VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
-    next_acquire_semaphore_index_ = (next_acquire_semaphore_index_ + 1) % image_acquire_semaphores_per_image_.size();
+    while (true)
+    {
+        // Find an available acquire semaphore (not currently in use)
+        VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
+        next_acquire_semaphore_index_ =
+            (next_acquire_semaphore_index_ + 1) % image_acquire_semaphores_per_image_.size();
 
-    // Store which semaphore we're using for this frame
-    acquire_semaphores_in_use_[frame_index] = acquire_semaphore;
+        if (swap_chain_->AcquireImage(acquire_semaphore))
+        {
+            // Store which semaphore we're using for this frame
+            acquire_semaphores_in_use_[frame_index] = acquire_semaphore;
+            break;
+        }
 
-    swap_chain_->SwapBuffers(acquire_semaphore);
+        Log(Info, "swap chain out of date on image acquisition. recreating...");
+
+        // nothing is recorded for this frame yet, so this is a safe point for a full recreation.
+        // it also replaces the semaphore pool we are drawing from, hence the retry loop.
+        rhi_->RecreateSwapChain();
+    }
 
     auto image_index = swap_chain_->GetCurrentImageIndex();
 
@@ -1022,14 +1034,10 @@ void VulkanContext::RecreateSwapChain()
         return;
     }
 
-    if (swap_chain_)
-    {
-        swap_chain_->Recreate();
-    }
-    else
-    {
-        swap_chain_ = std::make_unique<VulkanSwapChain>();
-    }
+    // a surface can back only one swap chain at a time; the caller must destroy the old one first
+    ASSERT(!swap_chain_);
+
+    swap_chain_ = std::make_unique<VulkanSwapChain>();
 }
 } // namespace sparkle
 
