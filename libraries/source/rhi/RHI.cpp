@@ -406,7 +406,10 @@ RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute
     }
 
     auto texture = CreateImage(attribute, std::format("DummyTexture_{}", hash));
-    texture->Transition({.target_layout = RHIImageLayout::Read,
+    // a dummy never gets per-use transitions, so it rests in the one layout that satisfies all
+    // bindings it can appear in: General when it can be bound as storage, Read otherwise
+    const bool has_uav_usage = attribute.usages & RHIImage::ImageUsage::UAV;
+    texture->Transition({.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
                          .after_stage = RHIPipelineStage::Top,
                          .before_stage = RHIPipelineStage::Bottom});
     dummy_textures_.emplace(hash, texture);
