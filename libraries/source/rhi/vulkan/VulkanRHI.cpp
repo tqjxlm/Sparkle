@@ -145,6 +145,11 @@ bool VulkanRHI::SupportsHardwareRayTracing()
     return context->SupportsHardwareRayTracing();
 }
 
+uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const
+{
+    return context->GetMinBufferOffsetAlignment();
+}
+
 void VulkanRHI::RecreateSwapChain()
 {
     if (IsHeadless())
