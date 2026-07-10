@@ -83,6 +83,7 @@ void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::v
 void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribute)
 {
     frames_in_flight_ = rhi->GetMaxFramesInFlight();
+    offset_alignment_ = rhi->GetMinBufferOffsetAlignment();
     RHIBuffer::Attribute dynamic_attribute{
         .size = RHIBufferSubAllocation::DynamicBufferCapacity * frames_in_flight_,
         .usages = attribute.usages,
@@ -101,7 +102,7 @@ RHIBufferSubAllocation RHIDynamicBuffer::Allocate(unsigned size)
 
     RHIBufferSubAllocation sub_allocation(frames_in_flight_, allocated_size_, this);
 
-    allocated_size_ = utilities::AlignAddress(allocated_size_ + size, MemoryAddressAlignment);
+    allocated_size_ = utilities::AlignAddress(allocated_size_ + size, offset_alignment_);
 
     return sub_allocation;
 }
