@@ -438,8 +438,6 @@ VulkanImageView::~VulkanImageView()
 void VulkanImageView::WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
                                       std::vector<VkWriteDescriptorSet> &out_set_write)
 {
-    auto *vulkan_image = RHICast<VulkanImage>(image_);
-
     auto &set_write = out_set_write.emplace_back(VkWriteDescriptorSet{});
     InitDescriptorWrite(set_write, slot, descriptor_set, 0, descriptor_type);
 
@@ -447,7 +445,10 @@ void VulkanImageView::WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_
 
     info = {};
     info.imageView = GetView();
-    info.imageLayout = vulkan_image->GetVkLayout(0);
+    // descriptor sets are cached, so bake the layout the image will hold when the descriptor is
+    // consumed (see GetVulkanImageLayout), not whatever layout it happens to be in right now
+    info.imageLayout = descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ? VK_IMAGE_LAYOUT_GENERAL
+                                                                           : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     set_write.pImageInfo = &info;
 }
