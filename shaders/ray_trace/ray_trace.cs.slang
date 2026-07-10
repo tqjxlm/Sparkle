@@ -56,8 +56,7 @@ struct Camera
 // set 2: bindless resources, shared by the whole scene
 [[vk::binding(0, 2)]] Texture2D textures[];
 [[vk::binding(1, 2)]] StructuredBuffer<uint> indexBuffers[];
-[[vk::binding(2, 2)]] StructuredBuffer<float> vertexBuffers[];
-[[vk::binding(3, 2)]] StructuredBuffer<VertexAttribute> vertexAttributeBuffers[];
+[[vk::binding(2, 2)]] StructuredBuffer<VertexAttribute> vertexAttributeBuffers[];
 
 float3 SampleNormal(uint texture_id, float2 tex_coord)
 {
@@ -233,18 +232,11 @@ VertexAttribute GetVertexAttribute(uint instance_id, uint index)
     return vertexAttributeBuffers[instance_id][index];
 }
 
-float3 GetVertex(uint instance_id, uint index)
-{
-    return float3(vertexBuffers[instance_id][index * 3], vertexBuffers[instance_id][index * 3 + 1],
-                  vertexBuffers[instance_id][index * 3 + 2]);
-}
-
 void GetIntersection(RayDesc ray_desc, RayQuery<RAY_FLAG_NONE> ray_query, out Intersection intersection)
 {
     const float2 intersection_uv = ray_query.CommittedTriangleBarycentrics();
     const uint instance_id = ray_query.CommittedInstanceIndex();
     const uint triangle_id = ray_query.CommittedPrimitiveIndex();
-    const float4x3 transform = ray_query.CommittedObjectToWorld4x3();
     const float4x3 inv_transform = ray_query.CommittedWorldToObject4x3();
 
     uint index0 = AccessFaceAttribute(triangle_id, indexBuffers[instance_id], 0);
@@ -255,11 +247,8 @@ void GetIntersection(RayDesc ray_desc, RayQuery<RAY_FLAG_NONE> ray_query, out In
     const VertexAttribute va1 = GetVertexAttribute(instance_id, index1);
     const VertexAttribute va2 = GetVertexAttribute(instance_id, index2);
 
-    const float3 v0 = TransformPoint(GetVertex(instance_id, index0), transform);
-    const float3 v1 = TransformPoint(GetVertex(instance_id, index1), transform);
-    const float3 v2 = TransformPoint(GetVertex(instance_id, index2), transform);
-
-    intersection.position = BaryLerp(v0, v1, v2, intersection_uv);
+    // parametric hit position: CommittedObjectToWorld4x3 is unreliable on some drivers (Adreno)
+    intersection.position = ray_desc.Origin + ray_desc.Direction * ray_query.CommittedRayT();
     intersection.inv_transform = inv_transform;
     intersection.normal = BaryLerp(va0.normal, va1.normal, va2.normal, intersection_uv);
     intersection.tangent = BaryLerp(va0.tangent, va1.tangent, va2.tangent, intersection_uv);

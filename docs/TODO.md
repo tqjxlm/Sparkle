@@ -58,3 +58,8 @@
 * [ ] event based input handling
 
 ## Known Issues
+
+* [ ] a shader resource declared in a C++ `USE_SHADER_RESOURCE` table but absent from the
+      compiled shader (e.g. dead-code-eliminated by slang) crashes with a null dereference in
+      `RHIShaderResourceSet::UpdateLayoutHash` during pipeline setup instead of failing with a
+      clear error.
