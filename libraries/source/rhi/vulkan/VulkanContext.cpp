@@ -357,6 +357,13 @@ bool VulkanContext::RecreateSurface()
         return true;
     }
 
+    // the swap chain must not outlive the surface it was created on
+    if (swap_chain_)
+    {
+        CHECK_VK_ERROR(vkDeviceWaitIdle(device_));
+        swap_chain_ = nullptr;
+    }
+
     DestroySurface();
     auto success = rhi_->GetHardwareInterface()->CreateVulkanSurface(instance_, static_cast<void *>(&surface_));
     ASSERT(surface_);
