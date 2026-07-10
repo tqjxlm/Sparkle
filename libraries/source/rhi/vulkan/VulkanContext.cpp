@@ -698,6 +698,8 @@ bool VulkanContext::PickPhysicalDevice()
                           static_cast<uint32_t>(device_properties.limits.minUniformBufferOffsetAlignment),
                           static_cast<uint32_t>(device_properties.limits.minStorageBufferOffsetAlignment)});
 
+            QuerySubgroupQuadSupport();
+
             auto max_msaa_count = GetMaxUsableSampleCount();
 
             msaa_samples_ = std::min(rhi_->GetConfig().msaa_samples, max_msaa_count);
@@ -790,6 +792,19 @@ bool VulkanContext::CreateInstance()
         VulkanFunctionLoader::LoadInstance(instance_);
     }
     return success;
+}
+
+void VulkanContext::QuerySubgroupQuadSupport()
+{
+    VkPhysicalDeviceSubgroupProperties subgroup_properties{};
+    subgroup_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    VkPhysicalDeviceProperties2 properties2{};
+    properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties2.pNext = &subgroup_properties;
+    vkGetPhysicalDeviceProperties2(physical_device_, &properties2);
+
+    supports_subgroup_quad_ops_ = (subgroup_properties.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT) != 0u &&
+                                  (subgroup_properties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0u;
 }
 
 bool VulkanContext::CreateLogicalDevice()

@@ -85,9 +85,10 @@ MetalNrdBackend::MetalNrdBackend(id<MTLDevice> device) : device_(device)
 bool MetalNrdBackend::AddPipeline(const CookedPipeline &pipeline)
 {
     NSError *error = nil;
-    id<MTLLibrary> library = [device_ newLibraryWithSource:[NSString stringWithUTF8String:pipeline.msl_source.c_str()]
-                                                   options:compile_options_
-                                                     error:&error];
+    id<MTLLibrary> library =
+        [device_ newLibraryWithSource:[NSString stringWithUTF8String:pipeline.shader_source.c_str()]
+                              options:compile_options_
+                                error:&error];
     if (!library)
     {
         Log(Error, "MetalNrdBackend: MSL compile failed: {}",

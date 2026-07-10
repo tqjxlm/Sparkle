@@ -17,7 +17,7 @@ class NrdCookedShaders
 public:
     bool Load();
 
-    // Resolves a pipeline's shaderIdentifier to a runnable pipeline (reads the cooked MSL source).
+    // Resolves a pipeline's shaderIdentifier to a runnable pipeline (reads the cooked shader file).
     // False if the permutation was not cooked or its file is missing.
     bool BuildPipeline(const char *shader_identifier, RHINrdBackend::CookedPipeline &out) const;
 

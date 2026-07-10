@@ -434,7 +434,7 @@ endif()
 
 add_subdirectory(thirdparty)
 
-if (MACOS OR IOS)
+if (MACOS OR IOS OR ANDROID)
     # declared here because the shaders subdirectory is added before thirdparty defines NRDShaders
     add_dependencies(cook-nrd-shaders NRDShaders)
 endif()

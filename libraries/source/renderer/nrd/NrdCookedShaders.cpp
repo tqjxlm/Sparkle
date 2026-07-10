@@ -14,6 +14,8 @@ namespace
 {
 #if FRAMEWORK_IOS
 constexpr const char *CookedDir = "shaders/nrd/cooked/ios";
+#elif FRAMEWORK_ANDROID
+constexpr const char *CookedDir = "shaders/nrd/cooked/android";
 #else
 constexpr const char *CookedDir = "shaders/nrd/cooked/macos";
 #endif
@@ -151,11 +153,11 @@ bool NrdCookedShaders::BuildPipeline(const char *shader_identifier, RHINrdBacken
     }
     const Entry &entry = found->second;
 
-    const std::string msl_path = std::string(CookedDir) + "/" + entry.file_name;
-    out.msl_source = FileManager::GetNativeFileManager()->ReadAsType<std::string>(Path::Resource(msl_path));
-    if (out.msl_source.empty())
+    const std::string shader_path = std::string(CookedDir) + "/" + entry.file_name;
+    out.shader_source = FileManager::GetNativeFileManager()->ReadAsType<std::string>(Path::Resource(shader_path));
+    if (out.shader_source.empty())
     {
-        Log(Error, "NRD: missing cooked shader file {}", msl_path);
+        Log(Error, "NRD: missing cooked shader file {}", shader_path);
         return false;
     }
 

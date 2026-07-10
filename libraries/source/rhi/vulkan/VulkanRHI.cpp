@@ -7,6 +7,7 @@
 #include "VulkanComputePass.h"
 #include "VulkanContext.h"
 #include "VulkanImage.h"
+#include "VulkanNrdBackend.h"
 #include "VulkanPipelineState.h"
 #include "VulkanRayTracing.h"
 #include "VulkanRenderPass.h"
@@ -148,6 +149,18 @@ bool VulkanRHI::SupportsHardwareRayTracing()
 uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const
 {
     return context->GetMinBufferOffsetAlignment();
+}
+
+std::unique_ptr<RHINrdBackend> VulkanRHI::CreateNrdBackend()
+{
+    // ReBLUR's HistoryFix uses subgroup quad swaps in compute
+    if (!context->SupportsSubgroupQuadOps())
+    {
+        Log(Error, "VulkanNrdBackend: device lacks subgroup quad operations in compute");
+        return nullptr;
+    }
+
+    return std::make_unique<VulkanNrdBackend>();
 }
 
 void VulkanRHI::RecreateSwapChain()

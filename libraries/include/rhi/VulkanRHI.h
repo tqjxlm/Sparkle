@@ -105,6 +105,8 @@ public:
 
     RHIResourceRef<RHIComputePass> CreateComputePass(const std::string &name, bool need_timestamp) override;
 
+    std::unique_ptr<RHINrdBackend> CreateNrdBackend() override;
+
     void WaitForDeviceIdle() override;
 
 protected:
