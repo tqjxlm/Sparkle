@@ -189,7 +189,8 @@ void VulkanRenderPass::CreateFramebuffers()
 {
     auto *rhi_rt = RHICast<VulkanRenderTarget>(GetRenderTarget());
 
-    auto frame_buffer_num = RequireBackBuffer() ? context->GetRHI()->GetMaxFramesInFlight() : 1;
+    // indexed by swap chain image index in Begin(), which is decoupled from frames in flight
+    auto frame_buffer_num = RequireBackBuffer() ? context->GetSwapChain()->GetSwapChainImageCount() : 1u;
 
     frame_buffers_.resize(frame_buffer_num);
 

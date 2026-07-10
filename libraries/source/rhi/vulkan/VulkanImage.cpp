@@ -376,6 +376,11 @@ VulkanSampler::~VulkanSampler()
 
 VulkanImage::~VulkanImage()
 {
+    for (auto &[view_attribute, view] : image_views_)
+    {
+        RHICast<VulkanImageView>(view.get())->DestroyHandle();
+    }
+
     if (!external_)
     {
         // if we own this resource, destroy it
@@ -432,7 +437,16 @@ VulkanImageView::VulkanImageView(Attribute attribute, RHIImage *image) : RHIImag
 
 VulkanImageView::~VulkanImageView()
 {
-    vkDestroyImageView(context->GetDevice(), image_view_, nullptr);
+    DestroyHandle();
+}
+
+void VulkanImageView::DestroyHandle()
+{
+    if (image_view_ != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(context->GetDevice(), image_view_, nullptr);
+        image_view_ = VK_NULL_HANDLE;
+    }
 }
 
 void VulkanImageView::WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,

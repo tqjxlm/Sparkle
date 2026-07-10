@@ -55,6 +55,9 @@ void RHIContext::Cleanup()
 {
     ReleaseRenderResources();
 
+    samplers_.clear();
+    dummy_textures_.clear();
+
     // discard unfinished tasks, we won't need them any way
     end_of_render_tasks_.clear();
 
@@ -349,6 +352,18 @@ RHIContext::DeferredDeletion::DeferredDeletion(DeferredDeletion &&other) noexcep
 
 void RHIContext::SetMaxFramesInFlight(unsigned max_frames_in_flight)
 {
+    // frozen after first init: dynamic buffer sub-allocations bake the count into their size and
+    // mapped addresses. a later swap chain recreation may report a different image count (e.g. on
+    // device rotation) — per-image resources track the swap chain independently.
+    if (max_frames_in_flight_ != 0)
+    {
+        if (max_frames_in_flight != max_frames_in_flight_)
+        {
+            Log(Info, "Keeping frames in flight at {} (requested {})", max_frames_in_flight_, max_frames_in_flight);
+        }
+        return;
+    }
+
     max_frames_in_flight_ = max_frames_in_flight;
     end_of_render_tasks_.resize(max_frames_in_flight_);
     deferred_deletion_.resize(max_frames_in_flight_);
@@ -387,8 +402,10 @@ void RHIContext::ReleaseRenderResources()
     ui_handler_instance_ = nullptr;
 
     render_target_pool_.Clear();
-    samplers_.clear();
-    dummy_textures_.clear();
+
+    // deliberately NOT the sampler/dummy-texture caches: this also runs mid-session (swap chain
+    // recreation on rotation, surface loss), where live pipelines still bind those resources
+    // through raw pointers. they are released in Cleanup only.
 }
 
 RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute attribute)

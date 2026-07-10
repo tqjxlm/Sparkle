@@ -360,6 +360,9 @@ public:
         return image_view_;
     }
 
+    // lets the image destructor kill the handle early: deferred deletion may keep the view object alive longer
+    void DestroyHandle();
+
     void WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
                          std::vector<VkWriteDescriptorSet> &out_set_write);
 
