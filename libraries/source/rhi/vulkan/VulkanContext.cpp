@@ -343,6 +343,7 @@ void VulkanContext::ReleaseRenderResources()
     queue_finish_fences_.clear();
     queue_finish_fences_for_image_.clear();
     acquire_semaphores_in_use_.clear();
+    next_acquire_semaphore_index_ = 0;
 
     swap_chain_ = nullptr;
 }
@@ -401,6 +402,9 @@ void VulkanContext::BeginFrame()
         current_command_buffer_ = command_buffers_[frame_index];
         return;
     }
+
+    // the per-image fence waits below are not enough when the swap chain holds more images than frames in flight
+    CHECK_VK_ERROR(vkWaitForFences(device_, 1, &queue_finish_fences_[frame_index], VK_TRUE, UINT64_MAX));
 
     // Find an available acquire semaphore (not currently in use)
     VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
@@ -527,8 +531,7 @@ void VulkanContext::InitRenderResources()
 
     CHECK_VK_ERROR(vkAllocateCommandBuffers(device_, &alloc_info, command_buffers_.data()));
 
-    const uint32_t swapchain_image_count = rhi_->GetMaxFramesInFlight();
-    queue_finish_fences_.resize(swapchain_image_count);
+    queue_finish_fences_.resize(rhi_->GetMaxFramesInFlight());
 
     VkFenceCreateInfo fence_info{};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -544,11 +547,15 @@ void VulkanContext::InitRenderResources()
         return;
     }
 
+    // the swap chain image count can differ from the (frozen) frames-in-flight count after a
+    // swap chain recreation, e.g. on device rotation
+    const uint32_t swapchain_image_count = swap_chain_->GetSwapChainImageCount();
+
     // Create more acquire semaphores than swapchain images to avoid reuse conflicts
     const uint32_t acquire_semaphore_count = swapchain_image_count * 2;
     image_acquire_semaphores_per_image_.resize(acquire_semaphore_count);
 
-    acquire_semaphores_in_use_.resize(swapchain_image_count, VK_NULL_HANDLE);
+    acquire_semaphores_in_use_.resize(rhi_->GetMaxFramesInFlight(), VK_NULL_HANDLE);
     commands_finish_semaphores_per_image_.resize(swapchain_image_count);
     queue_finish_fences_for_image_.resize(swapchain_image_count);
 
