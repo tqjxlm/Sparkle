@@ -79,6 +79,11 @@ public:
         return enable_ray_tracing_;
     }
 
+    [[nodiscard]] uint32_t GetMinBufferOffsetAlignment() const
+    {
+        return min_buffer_offset_alignment_;
+    }
+
     bool Init();
 
     void BeginCommandBuffer();
@@ -167,6 +172,8 @@ private:
 
     // config
     uint32_t msaa_samples_;
+
+    uint32_t min_buffer_offset_alignment_ = 64;
 
     VkDebugUtilsMessengerEXT debug_messenger_;
 

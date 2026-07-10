@@ -160,10 +160,6 @@ RegisterEnumAsFlag(RHIBuffer::BufferUsage);
 // a persistently mapped buffer that is safe to update on the CPU side
 class RHIDynamicBuffer
 {
-    // hardware requirement for address alignment
-    // TODO(tqjxlm): make it dynamic
-    constexpr static uint32_t MemoryAddressAlignment = 64;
-
 public:
     void Init(RHIContext *rhi, const RHIBuffer::Attribute &attribute);
 
@@ -185,6 +181,7 @@ private:
     unsigned allocated_size_;
     RHIResourceRef<RHIBuffer> buffer_;
     unsigned frames_in_flight_;
+    uint32_t offset_alignment_;
 };
 
 class RHIBufferManager

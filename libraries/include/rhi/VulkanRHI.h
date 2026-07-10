@@ -53,6 +53,8 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
+    [[nodiscard]] uint32_t GetMinBufferOffsetAlignment() const override;
+
     void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 

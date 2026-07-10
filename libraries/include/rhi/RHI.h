@@ -124,6 +124,11 @@ public:
     virtual void InitRenderResources() = 0;
     virtual bool SupportsHardwareRayTracing() = 0;
 
+    [[nodiscard]] virtual uint32_t GetMinBufferOffsetAlignment() const
+    {
+        return 64;
+    }
+
     virtual void BeginCommandBuffer() = 0;
     virtual void SubmitCommandBuffer() = 0;
 

@@ -683,6 +683,14 @@ bool VulkanContext::PickPhysicalDevice()
         {
             physical_device_ = device;
             enable_ray_tracing_ = can_enable_ray_tracing;
+
+            VkPhysicalDeviceProperties device_properties;
+            vkGetPhysicalDeviceProperties(physical_device_, &device_properties);
+            min_buffer_offset_alignment_ =
+                std::max({min_buffer_offset_alignment_,
+                          static_cast<uint32_t>(device_properties.limits.minUniformBufferOffsetAlignment),
+                          static_cast<uint32_t>(device_properties.limits.minStorageBufferOffsetAlignment)});
+
             auto max_msaa_count = GetMaxUsableSampleCount();
 
             msaa_samples_ = std::min(rhi_->GetConfig().msaa_samples, max_msaa_count);
