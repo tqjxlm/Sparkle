@@ -56,7 +56,7 @@ The base storage path varies by platform:
 | `target_framerate`  | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                                   |
 | `load_last_session` | bool   | false      | all               | Restore last session (camera, config) on startup                                                             |
 | `clear_screenshots` | bool   | false      | all               | Clear old screenshots in the screenshots directory before taking a new screenshot                            |
-| `headless`          | bool   | false      | all               | Run without creating a window and without input (desktop GLFW and macOS frameworks; not supported on mobile) |
+| `headless`          | bool   | false      | all               | Run without creating a window and without input (GLFW, macOS and Android frameworks; not supported on iOS) |
 
 Search across the project for keyword "ConfigValue" for more available configs.
 

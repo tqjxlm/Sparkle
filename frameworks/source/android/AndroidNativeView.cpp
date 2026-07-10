@@ -181,13 +181,24 @@ void AndroidNativeView::Cleanup()
 void AndroidNativeView::InitGUI(AppFramework *app)
 {
     app_ = app;
+
+    headless_ = app->GetAppConfig().headless;
+    if (headless_)
+    {
+        Log(Info, "Headless mode enabled: render without a window.");
+        is_valid_ = true;
+        can_render_ = true;
+    }
 }
 
 void AndroidNativeView::Tick()
 {
-    const auto &render_config = app_->GetRenderConfig();
-    gui_scale_.x() = render_config.image_width / static_cast<float>(window_width_);
-    gui_scale_.y() = render_config.image_height / static_cast<float>(window_height_);
+    if (window_width_ > 0 && window_height_ > 0)
+    {
+        const auto &render_config = app_->GetRenderConfig();
+        gui_scale_.x() = render_config.image_width / static_cast<float>(window_width_);
+        gui_scale_.y() = render_config.image_height / static_cast<float>(window_height_);
+    }
 
     int ident;
     int events;
@@ -208,6 +219,21 @@ void AndroidNativeView::Tick()
     }
 
     HandleInputEvents();
+}
+
+void AndroidNativeView::GetFrameBufferSize(int &width, int &height)
+{
+    if (headless_)
+    {
+        const auto &render_config = app_->GetRenderConfig();
+        width = static_cast<int>(render_config.image_width);
+        height = static_cast<int>(render_config.image_height);
+        return;
+    }
+
+    ASSERT(is_valid_);
+    width = window_width_;
+    height = window_height_;
 }
 
 void AndroidNativeView::GetVulkanRequiredExtensions(std::vector<const char *> &required_extensions)
@@ -294,6 +320,11 @@ void AndroidNativeView::OnAppCmd(android_app *app_state, int32_t cmd)
 
         native_view->Reset(app_state);
 
+        if (native_view->IsHeadless())
+        {
+            break;
+        }
+
         if (rhi && rhi->IsInitialized())
         {
             TaskManager::RunInRenderThread([rhi]() {
@@ -310,7 +341,10 @@ void AndroidNativeView::OnAppCmd(android_app *app_state, int32_t cmd)
 
         main_app->ResetInputEvents();
 
-        native_view->can_render_ = false;
+        if (!native_view->IsHeadless())
+        {
+            native_view->can_render_ = false;
+        }
 
         break;
     case APP_CMD_DESTROY:
@@ -441,7 +475,7 @@ void AndroidNativeView::Reset(android_app *app_state)
 
     view_.reset(app_state_->window);
 
-    is_valid_ = view_ != nullptr;
+    is_valid_ = headless_ || view_ != nullptr;
 
     if (is_valid_)
     {

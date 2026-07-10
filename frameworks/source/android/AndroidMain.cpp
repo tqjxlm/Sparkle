@@ -17,15 +17,15 @@ void android_main(android_app *app_state) // NOLINT
     app.SetNativeView(&view);
     view.SetApp(&app);
 
+    // early init of core functionalities (logger, threading, config)
+    app.InitCore(0, nullptr);
+
     // poll the first event so we get window cmd callback
-    while (!view.IsValid())
+    while (!app.GetAppConfig().headless && !view.IsValid())
     {
         view.Tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-
-    // early init of core functionalities (logger, threading, config)
-    app.InitCore(0, nullptr);
 
     // now we have a native view for presenting, fully init the app
     if (!app.Init())

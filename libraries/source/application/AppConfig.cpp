@@ -17,7 +17,8 @@ static ConfigValue<bool> config_load_last_session("load_last_session",
                                                   "load last session on startup, including all configs and camera "
                                                   "state. this will override current command line arguments.",
                                                   "app", false);
-static ConfigValue<bool> config_headless("headless", "run without creating a window (desktop only)", "app", false);
+static ConfigValue<bool> config_headless("headless", "run without creating a window (not supported on iOS)", "app",
+                                         false);
 
 #if ENABLE_TEST_CASES
 static ConfigValue<std::string> config_test_case("test_case", "name of test case to run on scene load", "app", "");

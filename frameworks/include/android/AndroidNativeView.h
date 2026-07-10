@@ -41,6 +41,11 @@ public:
         return should_close_;
     }
 
+    [[nodiscard]] bool IsHeadless() const override
+    {
+        return headless_;
+    }
+
     void Tick() override;
 
     void SetTitle(const char *) override
@@ -51,12 +56,7 @@ public:
 
     void GetVulkanRequiredExtensions(std::vector<const char *> &required_extensions) override;
 
-    void GetFrameBufferSize(int &width, int &height) override
-    {
-        ASSERT(is_valid_);
-        width = window_width_;
-        height = window_height_;
-    }
+    void GetFrameBufferSize(int &width, int &height) override;
 
     void InitUiSystem() override;
     void ShutdownUiSystem() override;
@@ -80,6 +80,7 @@ private:
 
     bool should_close_ = false;
     bool ui_enabled_ = false;
+    bool headless_ = false;
 
     PinchDetector pinch_detector_;
     DragDetector drag_detector_;
