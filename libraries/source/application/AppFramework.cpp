@@ -145,14 +145,13 @@ bool AppFramework::Init()
 
     if (app_config_.headless)
     {
-        if (app_config_.platform == AppConfig::NativePlatform::iOS ||
-            app_config_.platform == AppConfig::NativePlatform::Android)
+        if (app_config_.platform == AppConfig::NativePlatform::iOS)
         {
-            Log(Error, "Headless mode is not supported on mobile platforms.");
+            Log(Error, "Headless mode is not supported on iOS.");
             return false;
         }
-#if !FRAMEWORK_GLFW && !FRAMEWORK_MACOS
-        Log(Error, "Headless mode is currently supported only on GLFW and macOS frameworks.");
+#if !FRAMEWORK_GLFW && !FRAMEWORK_MACOS && !FRAMEWORK_ANDROID
+        Log(Error, "Headless mode is currently supported only on GLFW, macOS and Android frameworks.");
         return false;
 #endif
     }
