@@ -301,10 +301,11 @@ protected:
 
     RHIResourceRef<RHISampler> sampler_;
 
+    std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
+
 private:
     std::array<RHIImageLayout, 16> current_layout_;
     uint32_t bindless_id_ = UINT32_MAX;
-    std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
 };
 
 RegisterEnumAsFlag(RHIImage::ImageUsage);

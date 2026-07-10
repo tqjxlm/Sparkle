@@ -10,6 +10,7 @@
 #include "core/task/TaskDispatcher.h"
 #include "core/task/TaskManager.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/renderer/Renderer.h"
 #include "rhi/RHI.h"
 #include "scene/Scene.h"
@@ -261,6 +262,13 @@ void RenderFramework::RecreateRendererIfNecessary()
         return;
     }
 
+    // the camera proxy arrives via a queued render-thread task after scene setup; a renderer
+    // created before that would initialize against a camera-less scene proxy
+    if (!scene_->GetRenderProxy()->GetCamera())
+    {
+        return;
+    }
+
     PROFILE_SCOPE_LOG("RecreateRenderer");
 
     Log(Info, "Recreating renderer, render mode: {}", Enum2Str(render_config_.pipeline));
@@ -310,6 +318,11 @@ bool RenderFramework::BeginFrame()
     }
 
     RecreateRendererIfNecessary();
+
+    if (!renderer_)
+    {
+        return false;
+    }
 
     rhi_->BeginFrame();
 
