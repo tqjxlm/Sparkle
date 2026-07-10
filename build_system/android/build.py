@@ -164,7 +164,8 @@ def run_on_device(args):
     except KeyboardInterrupt:
         print("\nStopping log monitoring...")
 
-    print("Pulling application output log...")
+    log_destination = os.path.join(os.getcwd(), "output.log")
+    print(f"Pulling application output log to {log_destination}...")
     subprocess.run(["adb", "pull",
                     f"/sdcard/Android/data/{package_name}/files/logs/output.log", "."])
 
