@@ -4,7 +4,7 @@
 
 namespace sparkle
 {
-static ConfigValue<bool> config_nrd("nrd", "enable NVIDIA NRD denoiser (gpu pipeline, Metal only)", "nrd", false, true);
+static ConfigValue<bool> config_nrd("nrd", "enable NVIDIA NRD denoiser (gpu pipeline)", "nrd", false, true);
 static ConfigValue<bool> config_nrd_stabilization(
     "nrd_stabilization", "ReBLUR temporal stabilization pass (off saves one full-res pass; the resolve EMA remains)",
     "nrd", true, true);

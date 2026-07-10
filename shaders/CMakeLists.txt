@@ -169,4 +169,24 @@ else()
     )
 
     add_dependencies(cook-resources compile-shaders)
+
+    if (ANDROID)
+        # NRD's SPIR-V is packed as-is for the Vulkan backend; no host cross-compile tool needed
+        file(GLOB NRD_SPIRV_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/thirdparty/NRD/_Shaders/*.cs.spirv.h")
+        set(NRD_COOK_STAMP ${CMAKE_CURRENT_BINARY_DIR}/nrd_cook_android.stamp)
+        add_custom_command(
+            OUTPUT ${NRD_COOK_STAMP}
+            COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/cook_nrd_shaders.py
+                --shaders-dir ${CMAKE_SOURCE_DIR}/thirdparty/NRD/_Shaders
+                --platform android
+                --nrd-header ${CMAKE_SOURCE_DIR}/thirdparty/NRD/Include/NRD.h
+                --output ${OUTPUT_SHADER_DIRECTORY}/nrd/cooked
+                --blob-prefix REBLUR_ --blob-prefix Clear
+            COMMAND ${CMAKE_COMMAND} -E touch ${NRD_COOK_STAMP}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/nrd/cook/cook_nrd_shaders.py ${NRD_SPIRV_HEADERS}
+            COMMENT "Cooking NRD shaders (android)"
+        )
+        add_custom_target(cook-nrd-shaders DEPENDS ${NRD_COOK_STAMP})
+        add_dependencies(cook-resources cook-nrd-shaders)
+    endif()
 endif()

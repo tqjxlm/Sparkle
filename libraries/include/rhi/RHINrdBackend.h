@@ -8,19 +8,19 @@ namespace sparkle
 {
 class RHIImage;
 
-// Keeps NRD's Metal detail out of the renderer: the renderer owns the nrd::Instance and hands cooked
-// shaders + inputs across this seam. Obtain one via RHIContext::CreateNrdBackend().
+// Keeps NRD's backend detail out of the renderer: the renderer owns the nrd::Instance and hands
+// cooked shaders + inputs across this seam. Obtain one via RHIContext::CreateNrdBackend().
 class RHINrdBackend
 {
 public:
     virtual ~RHINrdBackend() = default;
 
-    // One NRD pipeline pre-cross-compiled by the nrd_cook test case (see shaders/nrd/cooked): MSL
-    // source plus the reflection data the runtime would otherwise need spirv-cross for. The index
-    // vectors map NRD register order (t0.., u0.., s0..) to MSL indices; ~0u = stripped as unused.
+    // One NRD pipeline cooked at build time (see shaders/nrd/cook): MSL text on Apple, raw SPIR-V
+    // bytes on Vulkan. The index vectors map NRD register order (t0.., u0.., s0..) to MSL indices
+    // (~0u = stripped as unused); they are empty on Vulkan, which reflects bindings on device.
     struct CookedPipeline
     {
-        std::string msl_source;
+        std::string shader_source;
         std::string entry_point;
         uint32_t threads_per_group[3];
         uint32_t constant_buffer_index; // ~0u if the pipeline has no constant buffer

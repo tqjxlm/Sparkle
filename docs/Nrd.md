@@ -1,6 +1,6 @@
 # NRD denoiser integration
 
-NVIDIA NRD (ReBLUR_DIFFUSE_SPECULAR) denoises the gpu path tracer: `--pipeline gpu --nrd true`. Apple platforms (macOS + iOS) — see [Platform support](#platform-support).
+NVIDIA NRD (ReBLUR_DIFFUSE_SPECULAR) denoises the gpu path tracer: `--pipeline gpu --nrd true`. Apple platforms (macOS + iOS) and Android — see [Platform support](#platform-support).
 
 ## Architecture
 
@@ -14,8 +14,9 @@ nrd_pack.cs.slang         demodulate diffuse (albedo) / specular (pre-integrated
 NrdDenoiser               owns the GPU-agnostic nrd::Instance; per frame feeds CommonSettings
  (renderer)               (matrices, frame index, reset) and translates GetComputeDispatches into
         |                 RHINrdBackend dispatches
-MetalNrdBackend           loads NRD's pre-cooked MSL (see below), binds resources by NRD register
- (rhi/metal)              order, runs all dispatches on one encoder
+MetalNrdBackend /         Metal loads NRD's pre-cooked MSL (see below) and binds resources by NRD
+VulkanNrdBackend          register order on one encoder; Vulkan consumes NRD's SPIR-V directly,
+        |                 reflecting bindings on device with spirv_reflect
         |
 nrd_resolve.cs.slang      re-modulate, composite, convergence handoff to the accumulator, output
                           stabilization EMA; also renders the --nrd_debug views
@@ -25,11 +26,11 @@ NRD has no Metal backend of its own (NRI supports D3D/Vulkan only), so the integ
 
 ## Cooked shaders
 
-NRD ships its shaders as SPIR-V; the engine consumes them as MSL text, cross-compiled at BUILD time into the intermediate shader directory alongside the engine's own shaders (nothing on device, nothing committed). The cook lives in `shaders/nrd/cook/` and is wired into `shaders/CMakeLists.txt`:
+NRD ships its shaders as SPIR-V; the cook filters and repacks them at BUILD time into the intermediate shader directory alongside the engine's own shaders (nothing committed). The cook lives in `shaders/nrd/cook/` and is wired into `shaders/CMakeLists.txt`:
 
 1. NRD's build (`NRDShaders`) generates ShaderMake blob headers with every shader permutation.
-2. `cook_nrd_shaders.py` unpacks them, filters to the permutations the engine uses (REBLUR + Clear, `NRD_SIGNAL=BOTH`), and drives `nrd_msl_cook` — a small build-host tool (compiled with the Vulkan SDK's spirv-cross static libs, host-run even when targeting iOS) that emits MSL for the target platform plus the reflection metadata (entry, workgroup size, binding->MSL index maps) into a manifest.
-3. The cooked set is packed into app resources; the runtime (`NrdCookedShaders` loader + `MetalNrdBackend`) looks pipelines up by a canonical form of `PipelineDesc::shaderIdentifier` and compiles the MSL like any other engine shader — no spirv-cross and no reflection on device.
+2. `cook_nrd_shaders.py` unpacks them and filters to the permutations the engine uses (REBLUR + Clear, `NRD_SIGNAL=BOTH`). On macos/ios it drives `nrd_msl_cook` — a small build-host tool (compiled with the Vulkan SDK's spirv-cross static libs, host-run even when targeting iOS) that emits MSL plus the reflection metadata (entry, workgroup size, binding->MSL index maps) into a manifest. On android it repacks the SPIR-V; only the entry point and workgroup size go into the manifest, and `VulkanNrdBackend` reflects bindings on device with spirv_reflect (already linked for engine shaders). Two byte-level rewrites make NRD's DXC output (vulkan1.2 target) legal on the engine's Vulkan 1.1 instance, each proven per module with spirv-val at cook time: the version word drops from SPIR-V 1.5 to 1.4, and the `SPV_KHR_compute_shader_derivatives` declarations are stripped — DXC adds them only to pin `QuadReadAcross*` in compute to 2x2 quads, and the resulting linear quad mapping is the semantics the Metal backend already ships with (simd-group quads).
+3. The cooked set is packed into app resources; the runtime (`NrdCookedShaders` loader + backend) looks pipelines up by a canonical form of `PipelineDesc::shaderIdentifier` and builds the pipeline like any other engine shader.
 
 The manifest carries the NRD version; `NrdDenoiser` hard-fails on a mismatch or a missing permutation (extend the filters in `shaders/CMakeLists.txt` if NRD ever needs one the cook skips). The cook re-runs automatically when NRD's generated shaders change.
 
@@ -62,4 +63,8 @@ ReBLUR's capped history re-blends fresh noise forever, so a static view would sh
 
 ## Platform support
 
-`MetalNrdBackend` runs on macOS and iOS (`FRAMEWORK_APPLE`): the runtime consumes cooked MSL, so spirv-cross is linked only on macOS for the `nrd_cook` test case. ReBLUR needs SIMD-group ops (Apple A13+/M1+ GPUs) and the gpu pipeline needs the device's ray-tracing support — the existing capability gates and `--test_case nrd_probe` cover both per device. Non-Metal RHIs return no backend (`RHI::CreateNrdBackend` defaults to nullptr), which `NrdDenoiser` latches as a permanent init failure.
+`MetalNrdBackend` runs on macOS and iOS (`FRAMEWORK_APPLE`): the runtime consumes cooked MSL, so spirv-cross is linked only on macOS for the `nrd_cook` test case. ReBLUR needs SIMD-group ops (Apple A13+/M1+ GPUs) and the gpu pipeline needs the device's ray-tracing support — the existing capability gates and `--test_case nrd_probe` cover both per device.
+
+`VulkanNrdBackend` runs on Android: it consumes NRD's SPIR-V directly, keeps NRD's pool textures in `VK_IMAGE_LAYOUT_GENERAL` for their whole life (inter-dispatch hazards become plain compute-to-compute memory barriers, matching Metal's serial-encoder semantics), and transitions user-facing IN_*/OUT_* images through the engine's layout tracker. It requires subgroup quad operations in compute (ReBLUR HistoryFix) and the gpu pipeline requires `VK_KHR_ray_query`; a device missing either gets no backend.
+
+RHIs without a backend return nullptr from `RHI::CreateNrdBackend`, which `NrdDenoiser` latches as a permanent init failure.

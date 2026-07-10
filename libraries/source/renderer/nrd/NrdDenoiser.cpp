@@ -235,12 +235,10 @@ void NrdDenoiser::EnsureEnabledResources()
         return;
     }
 
-    AllocateGBuffer();
-
     backend_ = rhi_->CreateNrdBackend();
     if (!backend_)
     {
-        Log(Error, "NRD: this RHI has no NRD backend (Metal only); denoiser stays disabled");
+        Log(Error, "NRD: this RHI has no NRD backend; denoiser stays disabled");
         enabled_resources_failed_ = true;
         return;
     }
@@ -294,6 +292,10 @@ void NrdDenoiser::EnsureEnabledResources()
         enabled_resources_failed_ = true;
         return;
     }
+
+    // the last latching failure is behind us: the ray tracer's G-buffer bindings may now switch
+    // from the resting dummies to real targets
+    AllocateGBuffer();
 
     std::vector<RHINrdBackend::PoolTexture> permanent(desc.permanentPoolSize);
     for (uint32_t i = 0; i < desc.permanentPoolSize; i++)
@@ -469,7 +471,10 @@ void NrdDenoiser::Render()
         RenderReblur(dispatch, group);
     }
 
-    for (const auto &image : {out_diff_, out_spec_, validation_})
+    // every sampled input, not just the ReBLUR outputs: on handoff frames the ReBLUR block (and its
+    // layout epilogues) is skipped entirely while the resolve still binds in_*/g_*
+    for (const auto &image : {out_diff_, out_spec_, validation_, in_mv_, in_normal_roughness_, in_viewz_, in_diff_,
+                              in_spec_, g_radiance_, g_albedo_obj_, g_motion_, g_spec_albedo_})
     {
         ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
     }
