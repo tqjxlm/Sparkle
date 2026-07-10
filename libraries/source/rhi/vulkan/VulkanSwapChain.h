@@ -111,9 +111,8 @@ public:
 
     ~VulkanSwapChain();
 
-    void Recreate();
-
-    void SwapBuffers(VkSemaphore semaphore);
+    // returns false if the swap chain is out of date; only a full recreation can recover from that
+    [[nodiscard]] bool AcquireImage(VkSemaphore semaphore);
 
     void RegisterRenderTarget(VulkanRenderTarget *rt)
     {
@@ -159,6 +158,8 @@ public:
     }
 
 private:
+    void Recreate();
+
     VkSwapchainKHR swap_chain_;
     uint32_t swap_chain_index_ = 0;
     std::vector<RHIResourceRef<VulkanImage>> swap_chain_images_;
