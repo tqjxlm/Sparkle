@@ -42,7 +42,6 @@ class RayTracingComputeShader : public RHIShaderInfo
 
     USE_SHADER_RESOURCE_BINDLESS(textures, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE_BINDLESS(indexBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
-    USE_SHADER_RESOURCE_BINDLESS(vertexBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
     USE_SHADER_RESOURCE_BINDLESS(vertexAttributeBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
 
     END_SHADER_RESOURCE_TABLE
@@ -557,7 +556,6 @@ void GPURenderer::BindBindlessResources()
 
     cs_resources->textures().BindResource(bindless_manager->GetBindlessBuffer(BindlessResourceType::Texture));
     cs_resources->indexBuffers().BindResource(bindless_manager->GetBindlessBuffer(BindlessResourceType::IndexBuffer));
-    cs_resources->vertexBuffers().BindResource(bindless_manager->GetBindlessBuffer(BindlessResourceType::VertexBuffer));
     cs_resources->vertexAttributeBuffers().BindResource(
         bindless_manager->GetBindlessBuffer(BindlessResourceType::VertexAttributeBuffer));
 }
