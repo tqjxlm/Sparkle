@@ -13,19 +13,16 @@ class RHIContext;
 // the pool keeps a reference to every target it hands out. a target becomes available for reuse
 // once all external references to it and its images are dropped and the GPU can no longer be
 // reading it: either max-frames-in-flight frames after its last use, or immediately after a
-// device-idle flush. free targets that stay unused for RetireAfterFrames frames are released.
-// like all RHI resource creation, it must only be used from the render thread.
+// device-idle flush. the pool never releases free targets on its own; call ReleaseUnused to
+// reclaim their memory. like all RHI resource creation, it must only be used from the render thread.
 class RHIRenderTargetPool
 {
 public:
-    // number of frames a reusable target may stay in the pool before it is released
-    static constexpr uint64_t RetireAfterFrames = 60;
-
     struct Stats
     {
         uint64_t num_created = 0;
         uint64_t num_reused = 0;
-        uint64_t num_retired = 0;
+        uint64_t num_released = 0;
     };
 
     explicit RHIRenderTargetPool(RHIContext *rhi) : rhi_(rhi)
@@ -36,12 +33,17 @@ public:
     // format gets a pool-owned image. back buffer render targets cannot be pooled.
     RHIResourceRef<RHIRenderTarget> Acquire(const RHIRenderTarget::Attribute &attribute, const std::string &name);
 
-    // ages pooled targets: marks GPU-safe ones reusable and releases long-unused ones.
+    // ages pooled targets: marks ones the GPU can no longer reference as reusable.
     // called once per frame by RHIContext.
     void Tick(uint64_t frame);
 
     // all previously submitted GPU work has finished: free targets become reusable immediately.
     void NotifyDeviceIdle();
+
+    // releases every target not currently held by a user, returning how many were released.
+    // actual GPU resource destruction still goes through the regular deferred-deletion path,
+    // so it is safe to call while frames are in flight.
+    size_t ReleaseUnused();
 
     // drops all pooled targets regardless of use. callers must guarantee the GPU is idle.
     void Clear()

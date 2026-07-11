@@ -12,7 +12,7 @@ namespace sparkle
 // exercises RHIRenderTargetPool end to end on the render thread:
 // 1. two acquires with the same attributes return distinct targets while both are held.
 // 2. a dropped target is reused for a matching request once the GPU can no longer reference it.
-// 3. free targets are retired after RHIRenderTargetPool::RetireAfterFrames frames.
+// 3. ReleaseUnused releases every free target; the pool never releases them on its own.
 class RenderTargetPoolTest : public TestCase
 {
 public:
@@ -71,23 +71,19 @@ public:
                 Expect(reused.get() == second_raw_, "freed target is reused for a matching request");
                 Expect(pool.GetStats().num_reused == baseline_stats_.num_reused + 1, "reuse is counted");
 
-                // drop everything so both targets become candidates for retirement
+                // drop everything so both targets become free
                 first_ = nullptr;
             });
 
-            stage_ = Stage::CheckRetirement;
-            wait_until_frame_ = frame_ + RHIRenderTargetPool::RetireAfterFrames + rhi->GetMaxFramesInFlight() + 5;
+            stage_ = Stage::ManualRelease;
             return Result::Pending;
 
-        case Stage::CheckRetirement:
-            if (frame_ < wait_until_frame_)
-            {
-                return Result::Pending;
-            }
-
+        case Stage::ManualRelease:
             RunOnRenderThread([this, rhi] {
-                Expect(rhi->GetRenderTargetPool().GetStats().num_retired >= baseline_stats_.num_retired + 2,
-                       "free targets are retired after RetireAfterFrames");
+                auto &pool = rhi->GetRenderTargetPool();
+
+                Expect(pool.ReleaseUnused() >= 2, "ReleaseUnused releases both free targets");
+                Expect(pool.GetStats().num_released >= baseline_stats_.num_released + 2, "release is counted");
             });
 
             stage_ = Stage::Done;
@@ -111,7 +107,7 @@ private:
     {
         AcquireTargets,
         ReuseFreedTarget,
-        CheckRetirement,
+        ManualRelease,
         Done,
     };
 

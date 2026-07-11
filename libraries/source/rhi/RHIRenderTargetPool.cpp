@@ -79,41 +79,38 @@ void RHIRenderTargetPool::Tick(uint64_t frame)
 {
     current_frame_ = frame;
 
-    for (auto it = entries_.begin(); it != entries_.end();)
+    for (auto &entry : entries_)
     {
-        auto &entry = *it;
-
         if (!IsFree(entry))
         {
             entry.last_used_frame = frame;
             entry.gpu_safe = false;
-            ++it;
-            continue;
         }
-
-        if (!entry.gpu_safe)
+        else if (!entry.gpu_safe && frame > entry.last_used_frame + rhi_->GetMaxFramesInFlight())
         {
-            // frames in flight may still reference the target
-            if (frame > entry.last_used_frame + rhi_->GetMaxFramesInFlight())
-            {
-                entry.gpu_safe = true;
-            }
-            ++it;
-            continue;
-        }
-
-        if (frame - entry.last_used_frame >= RetireAfterFrames)
-        {
-            Log(Debug, "Render target pool: retire {}", entry.target->GetName());
-
-            stats_.num_retired++;
-            it = entries_.erase(it);
-        }
-        else
-        {
-            ++it;
+            // frames in flight can no longer reference the target
+            entry.gpu_safe = true;
         }
     }
+}
+
+size_t RHIRenderTargetPool::ReleaseUnused()
+{
+    ASSERT(ThreadManager::IsInRenderThread());
+
+    const auto released = std::erase_if(entries_, [](const Entry &entry) {
+        if (!IsFree(entry))
+        {
+            return false;
+        }
+
+        Log(Debug, "Render target pool: release {}", entry.target->GetName());
+        return true;
+    });
+
+    stats_.num_released += released;
+
+    return released;
 }
 
 void RHIRenderTargetPool::NotifyDeviceIdle()
