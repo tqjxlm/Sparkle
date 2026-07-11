@@ -100,8 +100,8 @@ std::string ExportTexture(ExportContext &ctx, const Image2D &image)
 
     const bool is_float = image.GetFormat() == PixelFormat::RGBAFloat || image.GetFormat() == PixelFormat::RGBAFloat16;
 
-    // Image2D::WriteToFile picks the encoding from the extension. unique index prefix avoids
-    // name collisions between textures that share a name.
+    // the extension must match what Image2D::WriteToFile encodes for this pixel format.
+    // the index prefix avoids name collisions between textures that share a name.
     std::string file_name =
         std::format("{}_{}{}", ctx.num_textures, MakeValidPrimName(image.GetName()), is_float ? ".hdr" : ".png");
     ctx.num_textures++;
@@ -109,7 +109,7 @@ std::string ExportTexture(ExportContext &ctx, const Image2D &image)
     std::string relative_path = std::string(TextureDirName) + "/" + file_name;
 
     Path file_path(ctx.output_dir.path / relative_path, ctx.output_dir.type);
-    if (!image.WriteToFile(file_path.Resolved().string()))
+    if (!image.WriteToFile(file_path))
     {
         Log(Error, "USDExporter: failed to write texture {}", file_path.path.string());
         ctx.success = false;

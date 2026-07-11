@@ -87,22 +87,6 @@ Image2D Image2D::CreateFromRawPixels(const uint8_t *data, unsigned width, unsign
     return image;
 }
 
-static void WriteImageFile(void *context, void *data, int size)
-{
-    const auto &path = *static_cast<std::string *>(context);
-    auto *file_manager = FileManager::GetNativeFileManager();
-    auto saved_path =
-        file_manager->Write(Path::External(path), reinterpret_cast<const char *>(data), static_cast<uint64_t>(size));
-    if (saved_path.empty())
-    {
-        Log(Error, "Failed to save image {}", path);
-    }
-    else
-    {
-        Log(Info, "Image saved to {}", saved_path);
-    }
-}
-
 static void WriteImageData(void *context, void *data, int size)
 {
     auto &buffer = *reinterpret_cast<std::vector<char> *>(context);
@@ -211,21 +195,21 @@ bool Image2D::LoadFromFile(const std::string &file_path)
     return true;
 }
 
-bool Image2D::WriteToFile(const std::string &file_path) const
+bool Image2D::WriteToFile(const Path &file_path) const
 {
-    int save_success = 0;
+    // TODO(tqjxlm): async file saving
+    std::vector<char> buffer;
+    auto *custom_data = static_cast<void *>(&buffer);
+
+    int encode_success = 0;
     if (IsHDRFormat(pixel_format_))
     {
-        // TODO(tqjxlm): async file saving
-        std::vector<char> buffer;
-        auto *custom_data = static_cast<void *>(&buffer);
-
         if (pixel_format_ == PixelFormat::RGBAFloat16)
         {
             Image2D full_precision_image(width_, height_, PixelFormat::RGBAFloat);
             if (full_precision_image.CopyFrom(*this))
             {
-                save_success =
+                encode_success =
                     stbi_write_hdr_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
                                            static_cast<int>(height_), static_cast<int>(channel_count_),
                                            reinterpret_cast<const float *>(full_precision_image.pixels_.data()));
@@ -233,24 +217,33 @@ bool Image2D::WriteToFile(const std::string &file_path) const
         }
         else
         {
-            save_success = stbi_write_hdr_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
-                                                  static_cast<int>(height_), static_cast<int>(channel_count_),
-                                                  reinterpret_cast<const float *>(pixels_.data()));
+            encode_success = stbi_write_hdr_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
+                                                    static_cast<int>(height_), static_cast<int>(channel_count_),
+                                                    reinterpret_cast<const float *>(pixels_.data()));
         }
-
-        auto *file_manager = FileManager::GetNativeFileManager();
-        file_manager->Write(Path::External(file_path), buffer);
     }
     else
     {
-        // stbi API needs a non-const pointer, but we know we don't modify it any way
-        auto *custom_data = const_cast<void *>(static_cast<const void *>(&file_path));
-        save_success = stbi_write_png_to_func(&WriteImageFile, custom_data, static_cast<int>(width_),
-                                              static_cast<int>(height_), static_cast<int>(channel_count_),
-                                              pixels_.data(), static_cast<int>(GetPixelSize(pixel_format_) * width_));
+        encode_success = stbi_write_png_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
+                                                static_cast<int>(height_), static_cast<int>(channel_count_),
+                                                pixels_.data(), static_cast<int>(GetPixelSize(pixel_format_) * width_));
     }
 
-    return save_success != 0;
+    if (encode_success == 0)
+    {
+        Log(Error, "Failed to encode image {}", file_path.path.string());
+        return false;
+    }
+
+    auto saved_path = FileManager::GetNativeFileManager()->Write(file_path, buffer);
+    if (saved_path.empty())
+    {
+        Log(Error, "Failed to save image {}", file_path.path.string());
+        return false;
+    }
+
+    Log(Info, "Image saved to {}", saved_path);
+    return true;
 }
 
 bool Image2D::CopyFrom(const Image2D &other)
