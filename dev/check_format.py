@@ -19,7 +19,7 @@ import sys
 
 # majors verified to produce identical results on this codebase
 CLANG_FORMAT_SUPPORTED_MAJORS = range(18, 23)
-CLANG_FORMAT_PIP_SPEC = "clang-format==19.1.7"
+CLANG_FORMAT_PIP_SPEC = "clang-format==22.1.5"
 MARKDOWNLINT_NPX_SPEC = "markdownlint-cli@0.45.0"
 
 # keep command lines short enough for Windows

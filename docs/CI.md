@@ -21,7 +21,7 @@ python3 dev/check_format.py          # check only
 python3 dev/check_format.py --fix    # rewrite files in place
 ```
 
-* Requirements: `pip install clang-format==19.1.7 autopep8` and Node.js (markdownlint runs via npx). clang-format majors 18-22 all produce identical results on this codebase; CI pins 19.1.7.
+* Requirements: `pip install clang-format==22.1.5 autopep8` and Node.js (markdownlint runs via npx). clang-format majors 18-22 all produce identical results on this codebase; CI pins 22.1.5.
 
 ## Build Test
 

@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install formatters
-        run: pip install clang-format==19.1.7 autopep8==2.3.2
+        run: pip install clang-format==22.1.5 autopep8==2.3.2
       - name: Check formatting
         run: python3 dev/check_format.py
 
