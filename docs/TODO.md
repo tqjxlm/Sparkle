@@ -24,7 +24,7 @@
 ## RHI
 
 * [ ] msaa
-* [ ] render target pooling
+* [x] render target pooling
 * [ ] render graph
 * [ ] subpass
 

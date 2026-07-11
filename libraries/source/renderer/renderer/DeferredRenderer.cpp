@@ -32,7 +32,8 @@ void DeferredRenderer::InitRenderResources()
 
     gbuffer_.InitRenderResources(rhi_, image_size_);
 
-    scene_color_ = rhi_->CreateImage(
+    RHIRenderTarget::Attribute lighting_rt_attribute;
+    lighting_rt_attribute.SetColorAttribute(
         RHIImage::Attribute{
             .format = PixelFormat::RGBAFloat16,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
@@ -44,7 +45,10 @@ void DeferredRenderer::InitRenderResources()
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment,
             .msaa_samples = 1,
         },
-        "SceneColor");
+        0);
+
+    lighting_rt_ = rhi_->GetRenderTargetPool().Acquire(lighting_rt_attribute, "SceneColorRT");
+    scene_color_ = lighting_rt_->GetColorImage(0);
 
     scene_depth_ = rhi_->CreateImage(
         RHIImage::Attribute{
@@ -61,9 +65,8 @@ void DeferredRenderer::InitRenderResources()
         },
         "SceneDepth");
 
-    lighting_rt_ = rhi_->CreateRenderTarget({}, scene_color_, nullptr, "SceneColorRT");
-
-    screen_color_ = rhi_->CreateImage(
+    RHIRenderTarget::Attribute screen_color_rt_attribute;
+    screen_color_rt_attribute.SetColorAttribute(
         RHIImage::Attribute{
             .format = PixelFormat::B8G8R8A8_SRGB,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
@@ -77,9 +80,10 @@ void DeferredRenderer::InitRenderResources()
 
             .msaa_samples = 1,
         },
-        "ScreenColor");
+        0);
 
-    screen_color_rt_ = rhi_->CreateRenderTarget({}, screen_color_, nullptr, "ToneMappingRT");
+    screen_color_rt_ = rhi_->GetRenderTargetPool().Acquire(screen_color_rt_attribute, "ToneMappingRT");
+    screen_color_ = screen_color_rt_->GetColorImage(0);
 
     gbuffer_pass_ =
         PipelinePass::Create<GBufferPass>(render_config_, rhi_, scene_render_proxy_, gbuffer_.images, scene_depth_);

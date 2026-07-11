@@ -210,6 +210,8 @@ void RHIContext::EndFrame()
     frame_index_ = (frame_index_ + 1) % max_frames_in_flight_;
 
     total_frame_++;
+
+    render_target_pool_.Tick(total_frame_);
 }
 
 void RHIContext::EndRenderPass()
@@ -364,6 +366,10 @@ void RHIContext::FlushDeferredDeletions()
 
     is_deleting_deferred_resources_ = false;
 
+    // a flush is always preceded by WaitForDeviceIdle, so free pooled render targets can be
+    // reused right away instead of waiting out the frames-in-flight delay
+    render_target_pool_.NotifyDeviceIdle();
+
 #ifndef NDEBUG
     // After flushing all deferred deletions (always preceded by WaitForDeviceIdle),
     // no valid code should reference old resources. Clear the set to prevent
@@ -380,6 +386,7 @@ void RHIContext::ReleaseRenderResources()
     current_render_pass_ = nullptr;
     ui_handler_instance_ = nullptr;
 
+    render_target_pool_.Clear();
     samplers_.clear();
     dummy_textures_.clear();
 }

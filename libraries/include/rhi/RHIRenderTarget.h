@@ -27,6 +27,8 @@ public:
         std::array<RHIImage::Attribute, MaxNumColorImage> color_attributes_ = {};
         RHIImage::Attribute depth_attribute_ = {};
 
+        bool operator==(const Attribute &) const = default;
+
         [[nodiscard]] RHIImage::Attribute GetColorAttribute(size_t index = 0) const
         {
             return color_attributes_[index];
@@ -93,7 +95,7 @@ public:
         return color_images_;
     }
 
-    RHIResourceRef<RHIImage> GetDepthImage()
+    [[nodiscard]] const RHIResourceRef<RHIImage> &GetDepthImage() const
     {
         return depth_image_;
     }
