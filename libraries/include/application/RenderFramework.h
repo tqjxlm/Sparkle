@@ -5,6 +5,7 @@
 #include "renderer/RenderConfig.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <queue>

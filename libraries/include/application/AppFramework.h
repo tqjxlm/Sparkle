@@ -68,6 +68,11 @@ public:
 
     [[nodiscard]] CameraComponent *GetMainCamera() const;
 
+    [[nodiscard]] Scene *GetScene() const
+    {
+        return main_scene_.get();
+    }
+
     [[nodiscard]] Vector2 GetLastClickPoint() const
     {
         return {last_x_, last_y_};

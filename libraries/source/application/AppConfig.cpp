@@ -36,6 +36,8 @@ void AppConfig::Init()
     platform = NativePlatform::Android;
 #elif PLATFORM_WINDOWS
     platform = NativePlatform::Windows;
+#elif PLATFORM_LINUX
+    platform = NativePlatform::Linux;
 #else
     static_assert(false, "No valid platform is provided.");
 #endif
