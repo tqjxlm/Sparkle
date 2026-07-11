@@ -39,9 +39,19 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
 
+  # runs unconditionally: it is cheap and also covers files outside the code filter (e.g. docs)
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install formatters
+        run: pip install clang-format==19.1.7 autopep8==2.3.2
+      - name: Check formatting
+        run: python3 dev/check_format.py
+
   ci:
     if: always()
-    needs: [changes, build]
+    needs: [changes, build, format]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

@@ -25,8 +25,11 @@ Always use formatters in the environment or IDE to format code and documents aft
 
 * c++/objc/slang: `.clang-format` (clang-format)
 * markdown: `.markdownlint.json` (markdownlint)
-* python: PEP8 (autopep8)
+* python: PEP8 (autopep8, configured in `pyproject.toml`)
 * All code must pass clang-tidy with the project's [.clang-tidy](../.clang-tidy) configuration. All warnings are treated as errors (`WarningsAsErrors: "*"`).
+
+CI enforces formatting on every push and PR. Check or fix everything locally with
+`python3 dev/check_format.py [--fix]`. See [CI.md](CI.md) for details.
 
 ### Naming Conventions
 
