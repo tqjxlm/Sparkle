@@ -135,8 +135,8 @@ private:
     template <typename Task> void RunOnRenderThread(Task &&task)
     {
         task_pending_.store(true, std::memory_order_release);
-        TaskManager::RunInRenderThread([this, task = std::forward<Task>(task)] {
-            task();
+        TaskManager::RunInRenderThread([this, render_task = std::forward<Task>(task)] {
+            render_task();
             if (failed_.load(std::memory_order_acquire))
             {
                 // drop held references so shutdown does not report them as leaks
