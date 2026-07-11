@@ -346,7 +346,12 @@ static std::shared_ptr<SkyLight> LoadSkyLight(const tinyusdz::tydra::Node &node,
 {
     // tydra does not convert dome lights for now. we have to retrieve info from the stage.
     const auto &prim = ctx.stage.GetPrimAtPath(tinyusdz::Path(node.abs_path, ""));
-    const auto *light_prim = prim.value()->as<tinyusdz::DomeLight>();
+    const auto *light_prim = prim ? prim.value()->as<tinyusdz::DomeLight>() : nullptr;
+    if (!light_prim)
+    {
+        Log(Warn, "USDLoader: Skipped EnvmapLight that is not a DomeLight. node: {}", node.abs_path);
+        return nullptr;
+    }
 
     tinyusdz::value::AssetPath asset_path;
     if (auto file_attribute = light_prim->file.get_value())

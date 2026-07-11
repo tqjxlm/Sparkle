@@ -1,8 +1,10 @@
 """USD round-trip functional test.
 
 Runs the app with --test_case usd_round_trip, which renders the loaded scene (TestScene by
-default), exports it to USD, loads the exported file back and renders it again. Then compares
-the two screenshots with FLIP: the reimported scene must look like the original.
+default), exports it to USD, loads the exported file back and renders it again. The original
+render must match the dev/functional_test.py ground truth (a self-comparison alone would pass
+if both renders broke the same way, e.g. all black), and the reimported render must match the
+original.
 """
 
 import argparse
@@ -83,21 +85,24 @@ def main():
 
     original, reimported = find_screenshots(args.framework)
 
-    original_img = functional_test.load_image(original)
-    reimported_img = functional_test.load_image(reimported)
-    if original_img.shape != reimported_img.shape:
-        print(f"Image size mismatch: {original_img.shape} vs {reimported_img.shape}", flush=True)
-        return 1
+    if args.scene:
+        print(f"No ground truth for custom scene {args.scene}, skipping ground truth check.", flush=True)
+    else:
+        print("Downloading ground truth...", flush=True)
+        ground_truth = functional_test.download_ground_truth(
+            args.framework, functional_test.DEFAULT_SCENE, args.pipeline)
+        gt_flip = functional_test.compare_images(ground_truth, original)
+        if gt_flip > functional_test.FLIP_THRESHOLD:
+            print(f"FAIL: original render vs ground truth mean FLIP error "
+                  f"{gt_flip:.4f} > {functional_test.FLIP_THRESHOLD}")
+            return 1
 
-    from flip_evaluator import nbflip
-    _, mean_flip, _ = nbflip.evaluate(original_img, reimported_img, False, True, False, True, {})
-    print(f"Mean FLIP error (original vs reimported): {mean_flip:.4f}", flush=True)
-
-    if mean_flip <= FLIP_THRESHOLD:
+    round_trip_flip = functional_test.compare_images(original, reimported)
+    if round_trip_flip <= FLIP_THRESHOLD:
         print("PASS", flush=True)
         return 0
 
-    print(f"FAIL: mean FLIP error {mean_flip:.4f} > {FLIP_THRESHOLD}")
+    print(f"FAIL: original vs reimported mean FLIP error {round_trip_flip:.4f} > {FLIP_THRESHOLD}")
     return 1
 
 

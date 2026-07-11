@@ -325,6 +325,7 @@ std::optional<tinyusdz::Prim> ExportMesh(ExportContext &ctx, const MeshPrimitive
 
     std::string err;
 
+    if (!mesh->uvs.empty())
     {
         tinyusdz::GeomPrimvar st;
         st.set_name("st");
@@ -344,6 +345,7 @@ std::optional<tinyusdz::Prim> ExportMesh(ExportContext &ctx, const MeshPrimitive
         }
     }
 
+    if (!mesh->tangents.empty())
     {
         tinyusdz::GeomPrimvar tangents;
         tangents.set_name("tangents");

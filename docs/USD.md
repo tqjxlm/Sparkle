@@ -42,6 +42,12 @@ Notes:
 * Only one camera per scene is supported (the main camera).
 * Animated attributes, skeletons and point/area lights are not supported in either direction.
 * Export output is `.usda` only. tinyusdz's binary (`.usdc`) writer is still experimental.
+* On import, any `UsdPreviewSurface` with a constant `opacity < 1` becomes a `DieletricMaterial`
+  (glass) with `eta = ior`. Alpha-blended materials are not supported.
+* Exported materials are only guaranteed to round-trip through Sparkle. The `UsdPreviewSurface`
+  `normal` input is connected without the conventional `scale`/`bias` of (2, -1), and dielectrics
+  are encoded as `opacity = 0`, so external viewers may misread normal maps and render glass as
+  invisible.
 
 ## Export API
 
