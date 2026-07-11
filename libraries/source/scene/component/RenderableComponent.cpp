@@ -5,7 +5,6 @@
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "scene/Scene.h"
 
-
 namespace sparkle
 {
 RenderableComponent::RenderableComponent()

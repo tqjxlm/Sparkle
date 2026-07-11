@@ -18,6 +18,7 @@ public:
     bool ShouldClose() override;
     void Tick() override;
     void SetTitle(const char *title) override;
+
     [[nodiscard]] bool IsHeadless() const override
     {
         return headless_;

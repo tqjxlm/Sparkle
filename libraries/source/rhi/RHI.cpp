@@ -1,9 +1,9 @@
 #include "rhi/RHI.h"
 
+#include "application/NativeView.h"
 #include "core/Exception.h"
 #include "core/Profiler.h"
 #include "io/Image.h"
-#include "application/NativeView.h"
 
 #if FRAMEWORK_APPLE
 #include "rhi/MetalRHI.h"

@@ -34,8 +34,7 @@ float Luma(float3 c)
     return dot(c, float3(0.2126f, 0.7152f, 0.0722f));
 }
 
-[shader("compute")]
-[numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = DTid.xy;
     if (pixel.x >= resolution.x || pixel.y >= resolution.y)
     {
@@ -109,8 +108,7 @@ float Luma(float3 c)
 
     float3 hit_dist_params = float3(hitDistA, hitDistB, hitDistC);
     float diff_norm_hd = saturate(radiance_hd.w / NrdHitDistanceNormalization(view_z, hit_dist_params, 1.f));
-    float spec_norm_hd =
-        saturate(spec_radiance_hd.w / NrdHitDistanceNormalization(view_z, hit_dist_params, roughness));
+    float spec_norm_hd = saturate(spec_radiance_hd.w / NrdHitDistanceNormalization(view_z, hit_dist_params, roughness));
 
     // raw hit distance 0 = that lobe was not sampled this frame (probabilistic primary-lobe selection).
     // NRD requires EXACTLY 0 there (HitDistanceReconstructionMode fills from neighbors); any positive

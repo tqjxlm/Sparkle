@@ -45,9 +45,8 @@ public:
     // Allocate NRD's internal texture pool (each texture sized = render resolution / its downsample), the
     // samplers (nrd::Sampler values), and the per-dispatch constant buffer. Call once after AddPipeline().
     virtual void AllocateResources(uint32_t width, uint32_t height, const PoolTexture *permanent,
-                                   uint32_t permanent_count, const PoolTexture *transient,
-                                   uint32_t transient_count, const uint32_t *samplers, uint32_t sampler_count,
-                                   uint32_t constant_buffer_size) = 0;
+                                   uint32_t permanent_count, const PoolTexture *transient, uint32_t transient_count,
+                                   const uint32_t *samplers, uint32_t sampler_count, uint32_t constant_buffer_size) = 0;
 
     // One resource of one NRD dispatch, pre-resolved by the renderer from nrd::ResourceDesc: pool textures
     // live backend-side (referenced by index), user-facing IN_*/OUT_* textures come as engine images.

@@ -12,8 +12,8 @@
     uint2 resolution;
     uint mode;
     float demodEps;
-    float viewZScale;   // debug display: view_z / viewZScale
-    float motionScale;  // debug display: uv motion * motionScale
+    float viewZScale;  // debug display: view_z / viewZScale
+    float motionScale; // debug display: uv motion * motionScale
     // Convergence handoff: ReBLUR's capped history has a permanent noise floor (it re-blends fresh 1-spp
     // noise every frame), so a static view would shimmer forever. Cross-fade to the progressive
     // accumulator as it converges; under motion the accumulator resets, so the weight is 0 there.
@@ -31,17 +31,16 @@
 [[vk::binding(5, 0)]] Texture2D<float4> inViewZ;
 [[vk::binding(6, 0)]] Texture2D<float4> inDiff;
 [[vk::binding(7, 0)]] Texture2D<float4> inSpec;
-[[vk::binding(8, 0)]] Texture2D<float4> gRadiance;   // raw per-frame radiance (sky fallback)
+[[vk::binding(8, 0)]] Texture2D<float4> gRadiance; // raw per-frame radiance (sky fallback)
 [[vk::binding(9, 0)]] Texture2D<float4> gAlbedoObj;
-[[vk::binding(10, 0)]] Texture2D<float4> gMotion;    // z: is-hit
+[[vk::binding(10, 0)]] Texture2D<float4> gMotion; // z: is-hit
 [[vk::binding(11, 0)]] Texture2D<float4> gSpecAlbedo;
 [[vk::binding(12, 0)]] RWTexture2D<float4> outputImage;
-[[vk::binding(14, 0)]] Texture2D<float4> validation; // NRD OUT_VALIDATION overlay (.w: transparency)
-[[vk::binding(15, 0)]] Texture2D<float4> sceneAccum;  // progressive accumulator (converged reference)
+[[vk::binding(14, 0)]] Texture2D<float4> validation;      // NRD OUT_VALIDATION overlay (.w: transparency)
+[[vk::binding(15, 0)]] Texture2D<float4> sceneAccum;      // progressive accumulator (converged reference)
 [[vk::binding(16, 0)]] RWTexture2D<float4> outputHistory; // previous stabilized output (read-modify-write)
 
-[shader("compute")]
-[numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = DTid.xy;
     if (pixel.x >= resolution.x || pixel.y >= resolution.y)
     {

@@ -4,8 +4,8 @@
 #include "debug.h.slang"
 #include "random.h.slang"
 #include "sampler.h.slang"
-#include "tangent_space.h.slang"
 #include "standard.h.slang"
+#include "tangent_space.h.slang"
 
 struct Ray
 {
@@ -44,7 +44,7 @@ SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
     SampleResult result;
     result.is_valid = false;
     result.pdf = 0.0f;
-    
+
     float3 local_w_m = SampleMicroFacetNormal(local_w_o, mat_param.roughness);
     float3 local_w_i = reflect(-local_w_o, local_w_m);
 
@@ -103,8 +103,8 @@ SampleResult BxdfLambertian(float3 local_w_o, MaterialParameters mat_param)
     return result;
 }
 
-float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, out bool is_specular_lobe,
-                 MaterialParameters mat_param, Intersection intersection)
+float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, out bool is_specular_lobe, MaterialParameters mat_param,
+                 Intersection intersection)
 {
     // enter tangent space
     float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
@@ -149,7 +149,7 @@ float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, out bool is_
     {
         // Reflection
         local_w_i = Reflect(local_w_o);
-        out_pdf = fresnel;  // Probability of reflection
+        out_pdf = fresnel; // Probability of reflection
     }
     else
     {
@@ -157,7 +157,7 @@ float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, out bool is_
         bool is_entering = CosTheta(local_w_o) > 0;
         float eta_i_over_eta_t = is_entering ? eta_i_ / eta_t_ : eta_t_ / eta_i_;
         local_w_i = Refract(local_w_o, eta_i_over_eta_t);
-        out_pdf = 1.0f - fresnel;  // Probability of refraction
+        out_pdf = 1.0f - fresnel; // Probability of refraction
     }
 
     // back to world space

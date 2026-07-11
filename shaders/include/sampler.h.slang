@@ -110,7 +110,7 @@ float Pdf(float3 normal, float3 w_i)
 {
     return SaturateDot(normal, w_i) * InvPi;
 }
-}
+} // namespace CosineWeightedHemisphere
 
 float SmithGGX(float cos_o, float cos_i, float roughness)
 {
