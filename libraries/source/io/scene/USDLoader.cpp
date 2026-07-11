@@ -126,8 +126,21 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
 
 static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id)
 {
-    auto image_id = static_cast<size_t>(ctx.render_scene.textures[texture_id].texture_image_id);
-    const auto &image = ctx.render_scene.images[image_id];
+    // tydra keeps the texture entry but leaves these ids at -1 when it fails to load the image
+    auto image_id = ctx.render_scene.textures[texture_id].texture_image_id;
+    if (image_id < 0)
+    {
+        Log(Error, "USDLoader: texture has no image. texture id: {}", texture_id);
+        return nullptr;
+    }
+
+    const auto &image = ctx.render_scene.images[static_cast<size_t>(image_id)];
+    if (image.buffer_id < 0)
+    {
+        Log(Error, "USDLoader: texture image has no data: {}", image.asset_identifier);
+        return nullptr;
+    }
+
     const auto &image_data = ctx.render_scene.buffers[static_cast<size_t>(image.buffer_id)];
 
     // TODO(tqjxlm): support 3 channels and 1 channel textures
@@ -274,6 +287,9 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
         {
             material_resource.emissive_texture =
                 CreateTexture(ctx, static_cast<size_t>(surface_shader.emissiveColor.texture_id));
+
+            // the texture is multiplied by emissive_color, whose default of Zeros would erase it
+            material_resource.emissive_color = Ones;
         }
         else
         {
@@ -441,6 +457,22 @@ struct TinyusdzAssetUserData
     PathType path_type;
 };
 
+static int TinyusdzAssetSizeFun(const char *resolved_asset_name, uint64_t *nbytes, std::string *err, void *userdata)
+{
+    const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
+
+    auto size = user_data->file_manager->GetSize(Path(resolved_asset_name, user_data->path_type));
+    if (size == 0)
+    {
+        *err = std::format("TinyUSDZ: failed to get asset size. asset {}", resolved_asset_name);
+        return -1;
+    }
+
+    *nbytes = size;
+
+    return 0;
+}
+
 static int TinyusdzAssetReadFun(const char *resolved_asset_name, uint64_t req_nbytes, uint8_t *out_buf,
                                 uint64_t *nbytes, std::string *err, void *userdata)
 {
@@ -499,10 +531,15 @@ static std::shared_ptr<SceneNode> LoadScene(const Path &asset_root, const tinyus
 
     tinyusdz::AssetResolutionHandler asset_handler;
     asset_handler.userdata = &asset_user_data;
+    asset_handler.size_fun = &TinyusdzAssetSizeFun;
     asset_handler.read_fun = &TinyusdzAssetReadFun;
     asset_handler.resolve_fun = &TinyusdzAssetResolveFun;
 
-    env.asset_resolver.register_asset_resolution_handler("", asset_handler);
+    // tinyusdz dispatches handlers by file extension, so one registration does not cover all assets
+    for (const auto *extension : {"", "png", "jpg", "jpeg", "hdr", "exr"})
+    {
+        env.asset_resolver.register_asset_resolution_handler(extension, asset_handler);
+    }
 
     // we assume all dependencies are under the same directory as the main file.
     env.asset_resolver.set_search_paths({file_path.parent_path().string()});
