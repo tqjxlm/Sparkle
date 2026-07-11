@@ -21,11 +21,24 @@ struct ThreadTaskQueue;
 class ScreenshotRequest
 {
 public:
-    explicit ScreenshotRequest(std::string name) : name_(std::move(name)) {}
+    explicit ScreenshotRequest(std::string name) : name_(std::move(name))
+    {
+    }
 
-    [[nodiscard]] const std::string &GetName() const { return name_; }
-    [[nodiscard]] bool IsCompleted() const { return completed_.load(std::memory_order_acquire); }
-    void MarkCompleted() { completed_.store(true, std::memory_order_release); }
+    [[nodiscard]] const std::string &GetName() const
+    {
+        return name_;
+    }
+
+    [[nodiscard]] bool IsCompleted() const
+    {
+        return completed_.load(std::memory_order_acquire);
+    }
+
+    void MarkCompleted()
+    {
+        completed_.store(true, std::memory_order_release);
+    }
 
 private:
     std::string name_;

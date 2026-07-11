@@ -5,7 +5,23 @@
 * A CI pipeline is setup in github [actions](https://github.com/tqjxlm/Sparkle/actions) at .github/workflows/ci.yml
 * Pushing tags will generate releases on github. The release process is defined in .github/workflows/release.yml.
 * All PRs are required to pass CI before merging.
-* For now, there are a building test and a very basic functional test. Unit test, performance test and style check are coming soon.
+* For now, there are a format check, a building test and a very basic functional test. Unit test and performance test are coming soon.
+
+## Format Check
+
+* Format check is run on every push and PR, regardless of which files changed.
+* It verifies that all tracked source files (thirdparty excluded) match the output of the project formatters:
+  * c++/objc/slang: clang-format with [.clang-format](../.clang-format)
+  * python: autopep8, configured in [pyproject.toml](../pyproject.toml)
+  * markdown: markdownlint with [.markdownlint.json](../.markdownlint.json)
+* Run it locally before pushing:
+
+```bash
+python3 dev/check_format.py          # check only
+python3 dev/check_format.py --fix    # rewrite files in place
+```
+
+* Requirements: `pip install clang-format==22.1.5 autopep8` and Node.js (markdownlint runs via npx). clang-format majors 18-22 all produce identical results on this codebase; CI pins 22.1.5.
 
 ## Build Test
 

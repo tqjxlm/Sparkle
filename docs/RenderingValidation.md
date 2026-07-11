@@ -26,6 +26,7 @@ Debugging a visual artifact is a two-gate, evidence-driven loop — **never "gue
 2. **Gate 2 — Agree the gate, then hold the fix to it. The gate is the agreed VISUALIZATION, not a number.** The gate is the Gate-1 overlay/diff/highlight the user confirmed shows the defect: the fix succeeds only when the **highlighted defect pixels are eliminated in that same image, regenerated after the fix.** Decide this *before* implementing. **Quantitative metrics are NOT the gate for rendering artifacts — they routinely give false confidence:** a metric can report a large "% improvement" while the agreed image still plainly shows the artifact. A number may *support* a semantic verdict, never replace or override it — when the number and the agreed image disagree, the image wins. **If asked for a purely quantitative criterion, push back**: it conflicts with semantic-first (checklist #4/#6, AGENTS.md) — gate on the agreed visualization instead.
 
 If you do compute a *supporting* number, design it to match the artifact's nature (from Gate 1) — but treat it as support only:
+
 * If the artifact is **per-frame / stochastic** (e.g. noise the filter spreads), measure per-frame; a naive M-average **cancels** it (and can read ~0 on a plainly-visible artifact).
 * If it is **localized**, restrict to a band derived from the **geometry G-buffer** (depth/normal discontinuity), *not* luma edges (luma "edges" leak surface texture and flood the mask).
 * Always compare against an **independent ground truth**.

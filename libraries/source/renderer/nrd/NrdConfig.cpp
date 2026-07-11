@@ -8,8 +8,9 @@ static ConfigValue<bool> config_nrd("nrd", "enable NVIDIA NRD denoiser (gpu pipe
 static ConfigValue<bool> config_nrd_stabilization(
     "nrd_stabilization", "ReBLUR temporal stabilization pass (off saves one full-res pass; the resolve EMA remains)",
     "nrd", true, true);
-static ConfigValue<bool> config_nrd_radiance_fp16(
-    "nrd_radiance_fp16", "RGBA16F radiance G-buffers (half the bandwidth; init-time)", "nrd", true);
+static ConfigValue<bool> config_nrd_radiance_fp16("nrd_radiance_fp16",
+                                                  "RGBA16F radiance G-buffers (half the bandwidth; init-time)", "nrd",
+                                                  true);
 static ConfigValue<std::string> config_nrd_debug("nrd_debug", "NRD channel to visualize", "nrd",
                                                  Enum2Str<NrdDebugMode::None>(), true);
 

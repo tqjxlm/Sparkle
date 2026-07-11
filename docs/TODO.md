@@ -2,7 +2,7 @@
 
 ## CI/CD
 
-* [ ] format and style check pipeline
+* [x] format and style check pipeline
 * [ ] unit test pipeline
 * [ ] functional test pipeline
 * [ ] performance test pipeline

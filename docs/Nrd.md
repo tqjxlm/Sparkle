@@ -4,7 +4,7 @@ NVIDIA NRD (ReBLUR_DIFFUSE_SPECULAR) denoises the gpu path tracer: `--pipeline g
 
 ## Architecture
 
-```
+```text
 ray_trace.cs.slang        WritePrimaryHitGBuffer: noise-free primary-hit G-buffer
                           (radiance+hitT, normal+viewZ, albedo+objID, motion+isHit, specAlbedo+roughness)
         |

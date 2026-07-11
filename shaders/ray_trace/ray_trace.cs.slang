@@ -46,10 +46,10 @@ struct Camera
 
 // Denoiser G-buffer outputs (written only when write_gbuffer != 0). The path tracer carries no denoiser
 // math here: it just emits generic primary-hit attributes + the current frame's raw radiance.
-[[vk::binding(7, 1)]] RWTexture2D<float4> gRadiance;    // rgb: this-frame mean radiance
-[[vk::binding(8, 1)]] RWTexture2D<float4> gNormalDepth; // xyz: world normal, w: view-space linear z
-[[vk::binding(9, 1)]] RWTexture2D<float4> gAlbedoObj;   // rgb: base color, w: object id
-[[vk::binding(10, 1)]] RWTexture2D<float4> gMotion;     // xy: screen motion vector, z: is-hit, w: metallic
+[[vk::binding(7, 1)]] RWTexture2D<float4> gRadiance;          // rgb: this-frame mean radiance
+[[vk::binding(8, 1)]] RWTexture2D<float4> gNormalDepth;       // xyz: world normal, w: view-space linear z
+[[vk::binding(9, 1)]] RWTexture2D<float4> gAlbedoObj;         // rgb: base color, w: object id
+[[vk::binding(10, 1)]] RWTexture2D<float4> gMotion;           // xy: screen motion vector, z: is-hit, w: metallic
 [[vk::binding(11, 1)]] RWTexture2D<float4> gRadianceSpecular; // rgb: this-frame specular-lobe radiance
 [[vk::binding(12, 1)]] RWTexture2D<float4> gSpecAlbedo;       // rgb: pre-integrated specular BRDF (demod factor)
 
@@ -68,8 +68,7 @@ float3 SampleSkyLight(float3 direction)
 {
     if (sky_light.has_sky_map != 0)
     {
-        float3 light =
-            skyMap.SampleLevel(skyMapSampler, direction, 0).rgb;
+        float3 light = skyMap.SampleLevel(skyMapSampler, direction, 0).rgb;
 
         return light;
     }
@@ -149,7 +148,8 @@ float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, f
     // evaluate brdf, split into diffuse/specular lobes (the denoiser demodulates them separately)
     float3 diffuse_radiance;
     float3 specular_radiance;
-    float3 radiance = CalculateDirectLightingSplit(w_o, w_i, light_sample, surface, diffuse_radiance, specular_radiance);
+    float3 radiance =
+        CalculateDirectLightingSplit(w_o, w_i, light_sample, surface, diffuse_radiance, specular_radiance);
 
     float weight = SaturateDot(w_i, intersection.normal) / (out_pdf + Eps);
     specular_out = specular_radiance * weight;
@@ -392,8 +392,8 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
 
         if (bounce == 1)
         {
-            first_hit_dist = (ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? ray_query.CommittedRayT()
-                                                                                     : ray_desc.TMax;
+            first_hit_dist =
+                (ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? ray_query.CommittedRayT() : ray_desc.TMax;
         }
 
         // terminal condition: hit sky
@@ -613,9 +613,7 @@ float3 ComputeFrameRadiance(uint2 pixel, uint seed, float2 pixel_size, out float
     return this_samples / float(spp);
 }
 
-[shader("compute")]
-[numthreads(16, 16, 1)] void shader_main(uint3 DTid
-                                         : SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void shader_main(uint3 DTid : SV_DispatchThreadID) {
     uint2 pixel = uint2(DTid.xy);
 
     // bound check

@@ -159,8 +159,7 @@ void GPURenderer::Render()
             nrd_->RequestReset(); // freshly-allocated history is garbage; start clean
             // enabling after the render freeze: no pass would ever write the NRD output, so restart
             // accumulation (it re-converges through the handoff)
-            if (!camera->NeedClear() &&
-                camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel)
+            if (!camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel)
             {
                 camera->MarkPixelDirty();
             }
@@ -462,8 +461,7 @@ void GPURenderer::Update()
 
     spp_logger_.Tick();
 
-    Logger::LogToScreen("Accumulation",
-                        fmt::format("Accumulated samples: {}", camera->GetCumulatedSampleCount()));
+    Logger::LogToScreen("Accumulation", fmt::format("Accumulated samples: {}", camera->GetCumulatedSampleCount()));
 }
 
 void GPURenderer::MeasurePerformance()
