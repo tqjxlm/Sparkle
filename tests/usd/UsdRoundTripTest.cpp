@@ -72,6 +72,9 @@ public:
                 return Result::Pass;
             }
             break;
+
+        default:
+            break;
         }
 
         return Result::Pending;
