@@ -133,8 +133,8 @@ void RenderFramework::RenderLoop()
 
             renderer_->Render();
 
-            ready_for_auto_screenshot_.store(
-                IsSceneFullyLoaded() && renderer_->IsReadyForAutoScreenshot(), std::memory_order_release);
+            ready_for_auto_screenshot_.store(IsSceneFullyLoaded() && renderer_->IsReadyForAutoScreenshot(),
+                                             std::memory_order_release);
 
             ProcessScreenshotRequest();
 

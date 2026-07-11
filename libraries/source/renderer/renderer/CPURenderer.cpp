@@ -391,8 +391,7 @@ void CPURenderer::BasePass(const SceneRenderProxy &scene, const RenderConfig &co
             {
                 // Per-pixel seed: each pixel gets an independent, deterministic
                 // random sequence regardless of which thread processes this row.
-                sampler::ReseedCurrentThread(j * image_size_.x() + i +
-                                             frame_seed * image_size_.x() * image_size_.y());
+                sampler::ReseedCurrentThread(j * image_size_.x() + i + frame_seed * image_size_.x() * image_size_.y());
                 RenderPixel(i, j, pixel_width, pixel_height, scene, config, debug_point);
             }
         });

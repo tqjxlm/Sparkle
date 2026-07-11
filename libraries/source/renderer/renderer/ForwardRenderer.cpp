@@ -207,8 +207,9 @@ void ForwardRenderer::Render()
             final_after_stage = RHIPipelineStage::Transfer;
         }
 
-        screen_color_->Transition(
-            {.target_layout = RHIImageLayout::Read, .after_stage = final_after_stage, .before_stage = RHIPipelineStage::PixelShader});
+        screen_color_->Transition({.target_layout = RHIImageLayout::Read,
+                                   .after_stage = final_after_stage,
+                                   .before_stage = RHIPipelineStage::PixelShader});
     }
 
     // screen pass: copy screen_color to final buffer

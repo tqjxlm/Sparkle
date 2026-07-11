@@ -48,9 +48,9 @@ def build_and_run(framework, pipeline, scene, other_args, headless=False, env=No
     if skip_build:
         run_cmd.append("--skip_build")
     run_cmd += ["--run",
-               "--test_case", "screenshot",
-               "--clear_screenshots", "true",
-               "--pipeline", pipeline] + other_args
+                "--test_case", "screenshot",
+                "--clear_screenshots", "true",
+                "--pipeline", pipeline] + other_args
 
     if headless:
         run_cmd += ["--headless", "true"]
@@ -144,8 +144,8 @@ def main():
 
     if not args.skip_run:
         build_and_run(args.framework, args.pipeline,
-                args.scene, unknown_args, headless=args.headless, env=env,
-                skip_build=args.skip_build)
+                      args.scene, unknown_args, headless=args.headless, env=env,
+                      skip_build=args.skip_build)
     else:
         print("Skipping app run, using existing screenshot.")
 

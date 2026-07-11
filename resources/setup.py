@@ -4,6 +4,7 @@ from build_system.utils import download_file, extract_zip
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
 
+
 def setup_resources():
     packed_dir = os.path.join(SCRIPTPATH, "packed")
     zip_path = os.path.join(SCRIPTPATH, "resources.zip")

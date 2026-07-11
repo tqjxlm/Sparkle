@@ -120,8 +120,7 @@ public:
     };
 };
 
-NrdDenoiser::NrdDenoiser(RHIContext *ctx, RHIResourceRef<RHIImage> input)
-    : PipelinePass(ctx), input_(std::move(input))
+NrdDenoiser::NrdDenoiser(RHIContext *ctx, RHIResourceRef<RHIImage> input) : PipelinePass(ctx), input_(std::move(input))
 {
     SampleConfig();
     slot_ran_reblur_.resize(rhi_->GetMaxFramesInFlight(), 0);
@@ -220,8 +219,8 @@ void NrdDenoiser::AllocateGBuffer()
 
 void NrdDenoiser::BeginGBufferWrite()
 {
-    for (const auto &image : {g_radiance_, g_normal_depth_, g_albedo_obj_, g_motion_, g_radiance_specular_,
-                              g_spec_albedo_})
+    for (const auto &image :
+         {g_radiance_, g_normal_depth_, g_albedo_obj_, g_motion_, g_radiance_specular_, g_spec_albedo_})
     {
         ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::Top, RHIPipelineStage::ComputeShader);
     }
@@ -272,8 +271,8 @@ void NrdDenoiser::EnsureEnabledResources()
         cooked.VersionBuild() != lib.versionBuild)
     {
         Log(Error, "NRD: cooked shaders are stale ({}.{}.{} vs NRD {}.{}.{}); rebuild to re-run the shader cook",
-            cooked.VersionMajor(), cooked.VersionMinor(), cooked.VersionBuild(), lib.versionMajor,
-            lib.versionMinor, lib.versionBuild);
+            cooked.VersionMajor(), cooked.VersionMinor(), cooked.VersionBuild(), lib.versionMajor, lib.versionMinor,
+            lib.versionBuild);
         enabled_resources_failed_ = true;
         return;
     }
@@ -450,8 +449,7 @@ void NrdDenoiser::Render()
     // The EMA must also die out with the ReBLUR contribution it smooths: its lag otherwise keeps the
     // display on an older, more-ReBLUR-flavored mix than handoff_weight says, and the final resolve
     // (beta pinned to 0) would release that lag as a visible pop right at the freeze.
-    const float stabilization_beta =
-        std::clamp(1.f - stabilization_rate, 0.f, 0.99f) * (1.f - handoff_weight);
+    const float stabilization_beta = std::clamp(1.f - stabilization_rate, 0.f, 0.99f) * (1.f - handoff_weight);
 
     // fully handed off to the accumulator: the ReBLUR result is weighted by zero, so skip its ~1.7 ms of
     // dispatches and run only the resolve (composite + stabilization). ReBLUR's history stays valid — the
@@ -544,15 +542,14 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
 {
     const auto &attr = output_->GetAttributes();
 
-    for (const auto &image : {g_radiance_, g_radiance_specular_, g_normal_depth_, g_albedo_obj_, g_motion_,
-                              g_spec_albedo_})
+    for (const auto &image :
+         {g_radiance_, g_radiance_specular_, g_normal_depth_, g_albedo_obj_, g_motion_, g_spec_albedo_})
     {
         ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
     }
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
-                 RHIPipelineStage::ComputeShader);
+        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
     }
 
     NrdPackShader::UniformBufferData pack_ubo{
@@ -576,8 +573,7 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
     }
     for (const auto &image : {out_diff_, out_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
-                 RHIPipelineStage::ComputeShader);
+        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
     }
 
     // NRD assumes D3D clip conventions (+Y up); undo the engine's Vulkan-style Y flip (proj(1,1) < 0)
@@ -700,8 +696,8 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
                     out.user_image = validation_.get();
                     break;
                 default:
-                    ASSERT_F(false, "NRD: unhandled resource type {} in dispatch '{}'",
-                             static_cast<uint32_t>(res.type), src.name ? src.name : "?");
+                    ASSERT_F(false, "NRD: unhandled resource type {} in dispatch '{}'", static_cast<uint32_t>(res.type),
+                             src.name ? src.name : "?");
                 }
                 break;
             }

@@ -50,12 +50,12 @@ def extract_zip(zip_path, extract_to):
 def compress_zip(source_path, zip_path):
     """Compress a folder or file into a zip archive."""
     print(f"Compressing {source_path} to {zip_path} ...")
-    
+
     # Ensure the destination directory exists
     parent = os.path.dirname(zip_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    
+
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
         if os.path.isfile(source_path):
             # Single file

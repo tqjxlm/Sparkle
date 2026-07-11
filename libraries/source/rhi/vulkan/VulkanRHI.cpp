@@ -239,8 +239,8 @@ void VulkanRHI::CreateBackBufferRenderTarget()
     else
     {
         context->RecreateSwapChain();
-        back_buffer_rt_ =
-            CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetSwapChain()->GetExtent()), "BackBufferRT");
+        back_buffer_rt_ = CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetSwapChain()->GetExtent()),
+                                                       "BackBufferRT");
     }
 
     back_buffer_dirty_ = true;

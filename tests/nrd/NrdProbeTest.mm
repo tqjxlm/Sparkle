@@ -31,10 +31,9 @@ public:
         }
 
         const nrd::LibraryDesc &lib = *nrd::GetLibraryDesc();
-        Log(Info, "{}: NRD v{}.{}.{} spirvOffsets s={} b={} u={} t={}", GetName(), lib.versionMajor,
-            lib.versionMinor, lib.versionBuild, lib.spirvBindingOffsets.samplerOffset,
-            lib.spirvBindingOffsets.constantBufferOffset, lib.spirvBindingOffsets.storageTextureAndBufferOffset,
-            lib.spirvBindingOffsets.textureOffset);
+        Log(Info, "{}: NRD v{}.{}.{} spirvOffsets s={} b={} u={} t={}", GetName(), lib.versionMajor, lib.versionMinor,
+            lib.versionBuild, lib.spirvBindingOffsets.samplerOffset, lib.spirvBindingOffsets.constantBufferOffset,
+            lib.spirvBindingOffsets.storageTextureAndBufferOffset, lib.spirvBindingOffsets.textureOffset);
 
         NrdCookedShaders cooked;
         if (!cooked.Load())
@@ -63,8 +62,7 @@ public:
         for (uint32_t i = 0; i < desc.pipelinesNum; i++)
         {
             RHINrdBackend::CookedPipeline pipeline;
-            if (!cooked.BuildPipeline(desc.pipelines[i].shaderIdentifier, pipeline) ||
-                !backend.AddPipeline(pipeline))
+            if (!cooked.BuildPipeline(desc.pipelines[i].shaderIdentifier, pipeline) || !backend.AddPipeline(pipeline))
             {
                 Log(Error, "{}: [{:2}] {} failed", GetName(), i, desc.pipelines[i].shaderIdentifier);
             }

@@ -949,10 +949,9 @@ void VulkanContext::GetRequiredInstanceExtensions()
         std::vector<VkExtensionProperties> exts(ext_count);
         vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data());
 
-        bool layer_settings_available =
-            std::ranges::any_of(exts, [](const VkExtensionProperties &e) {
-                return std::string_view(e.extensionName) == VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
-            });
+        bool layer_settings_available = std::ranges::any_of(exts, [](const VkExtensionProperties &e) {
+            return std::string_view(e.extensionName) == VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
+        });
         if (layer_settings_available)
         {
             instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
