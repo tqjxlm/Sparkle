@@ -397,7 +397,7 @@ static std::shared_ptr<SkyLight> LoadSkyLight(const tinyusdz::tydra::Node &node,
     }
 
     // the texture path is relative to the USD file
-    auto sky_map_path = (ctx.asset_root.path.parent_path() / asset_path.GetAssetPath()).string();
+    auto sky_map_path = (ctx.asset_root.path.parent_path() / asset_path.GetAssetPath()).lexically_normal().string();
 
     light->SetSkyMap(sky_map_path);
 
@@ -505,8 +505,10 @@ static int TinyusdzAssetResolveFun(const char *asset_name, const std::vector<std
 {
     const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
 
-    // assume single search path for now
-    *resolved_asset_name = search_paths[0] + "/" + asset_name;
+    // assume single search path for now. path-join instead of string concat: the search path is
+    // empty for a USD file at a storage root, and archive-backed storage (e.g. Android assets)
+    // needs ".." normalized out for literal lookups.
+    *resolved_asset_name = (std::filesystem::path(search_paths[0]) / asset_name).lexically_normal().string();
 
     if (user_data->file_manager->Exists(Path(*resolved_asset_name, user_data->path_type)))
     {

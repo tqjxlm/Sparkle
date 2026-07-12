@@ -1,10 +1,10 @@
 """USD round-trip functional test.
 
-Runs the app with --test_case usd_round_trip, which renders the loaded scene (TestScene by
-default), exports it to USD, loads the exported file back and renders it again. The original
-render must match the dev/functional_test.py ground truth (a self-comparison alone would pass
-if both renders broke the same way, e.g. all black), and the reimported render must match the
-original.
+Runs the app with --test_case usd_round_trip, which renders the current scene (built procedurally
+by the test case unless --scene is given), exports it to USD, loads the exported file back and
+renders it again. The original render must match the dev/functional_test.py ground truth (a
+self-comparison alone would pass if both renders broke the same way, e.g. all black), and the
+reimported render must match the original.
 """
 
 import argparse

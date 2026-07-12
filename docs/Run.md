@@ -37,7 +37,7 @@ The base storage path varies by platform:
 | cvar                | type   | default    | pipelines         | description                                                                                                  |
 | ------------------- | ------ | ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
 | `pipeline`          | string | `forward`  | all               | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                                      |
-| `scene`             | string | *(empty)*  | all               | Scene to render. Empty = built-in **TestScene** (the default; also the CI ground-truth scene). Other values = model/scene file path under `resources/models/` |
+| `scene`             | string | *(empty)*  | all               | Scene to render. Empty = packaged **TestScene** (the default; also the CI ground-truth scene). Other values = model/scene file path under `resources/models/` |
 | `width` / `height`  | uint   | 1280 / 720 | all               | Render resolution                                                                                            |
 | `max-spp`           | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                                            |
 | `spp`               | uint   | 1          | cpu, gpu          | Rays per sample per frame                                                                                    |
