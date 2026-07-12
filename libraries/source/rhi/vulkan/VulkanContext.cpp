@@ -850,8 +850,15 @@ bool VulkanContext::CreateLogicalDevice()
     create_info.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size());
     create_info.pQueueCreateInfos = queue_create_infos.data();
 
+    VkPhysicalDeviceFeatures supported_features{};
+    vkGetPhysicalDeviceFeatures(physical_device_, &supported_features);
+
     VkPhysicalDeviceFeatures device_features{};
     device_features.samplerAnisotropy = VK_TRUE;
+    // DXC-compiled shaders (NRD) access storage images without format decorations; without these
+    // features such reads are undefined (Adreno returns zeros) with no validation-layer diagnostic
+    device_features.shaderStorageImageReadWithoutFormat = supported_features.shaderStorageImageReadWithoutFormat;
+    device_features.shaderStorageImageWriteWithoutFormat = supported_features.shaderStorageImageWriteWithoutFormat;
     create_info.pEnabledFeatures = &device_features;
 
     create_info.enabledExtensionCount = static_cast<uint32_t>(device_extensions_.size());

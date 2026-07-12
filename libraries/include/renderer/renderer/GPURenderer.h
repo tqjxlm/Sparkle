@@ -80,6 +80,10 @@ private:
 
     bool gbuffer_write_this_frame_ = false;
 
+    // Enabling NRD on a converged frame must restart accumulation, but the restart is deferred to the
+    // next Update so the whole frame snapshot (write_gbuffer, dispatch gate, UBO) sees it coherently.
+    bool nrd_enable_restart_pending_ = false;
+
     bool scene_ready_last_ = false;
 
     struct ComputePerformanceRecord

@@ -164,8 +164,12 @@ void GPURenderer::Render()
             // accumulation (it re-converges through the handoff)
             if (!camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel)
             {
-                camera->MarkPixelDirty();
+                nrd_enable_restart_pending_ = true;
             }
+            // this frame's Update snapshot predates the enable (write_gbuffer = 0), so the dispatch
+            // would leave the fresh G-buffer unwritten and its undefined contents would poison
+            // ReBLUR's history: activate only on a frame that writes it
+            nrd_on = gbuffer_write_this_frame_;
         }
         nrd_on = nrd_on && nrd_->GetOutput();
         tone_mapping_pass_->SetInput(nrd_on ? nrd_->GetOutput() : scene_texture_);
@@ -199,7 +203,9 @@ void GPURenderer::Render()
                                     .after_stage = RHIPipelineStage::Top,
                                     .before_stage = RHIPipelineStage::ComputeShader});
 
-        if (gbuffer_write_this_frame_)
+        // once the real G-buffer targets exist they stay bound to this pipeline as storage images, so
+        // every dispatch needs them in a writable layout, even when the shader skips the write
+        if (nrd_->GetOutput())
         {
             nrd_->BeginGBufferWrite();
         }
@@ -277,6 +283,12 @@ void GPURenderer::Update()
 
     nrd_->SampleConfig();
     nrd_frame_active_ = nrd_->IsActive();
+
+    if (nrd_enable_restart_pending_)
+    {
+        nrd_enable_restart_pending_ = false;
+        scene_render_proxy_->GetCamera()->MarkPixelDirty();
+    }
 
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
     {
