@@ -31,6 +31,9 @@
 ## IO
 
 * [ ] full USD support (current one is far from complete)
+* [ ] USD export: analytic spheres are exported as tessellated meshes, so ray-traced
+      silhouettes differ after a round trip (see docs/USD.md)
+* [ ] USD export: `.usdz` / `.usdc` output (blocked on tinyusdz's experimental binary writer)
 * [ ] external data loader interface
 
 ## Cook

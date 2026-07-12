@@ -1,5 +1,6 @@
 #include "renderer/renderer/Renderer.h"
 
+#include "core/Path.h"
 #include "core/ThreadManager.h"
 #include "io/Image.h"
 #include "renderer/proxy/SceneRenderProxy.h"
@@ -152,7 +153,7 @@ bool Renderer::ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, boo
             const auto *raw_data = reinterpret_cast<const uint8_t *>(staging_buffer->Lock());
             auto screenshot = Image2D::CreateFromRawPixels(raw_data, width, height, format);
             staging_buffer->UnLock();
-            bool success = screenshot.WriteToFile(output_path);
+            bool success = screenshot.WriteToFile(Path::External(output_path));
 
             if (success)
             {

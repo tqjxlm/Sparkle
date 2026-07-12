@@ -11,7 +11,8 @@ struct AppConfig : public ConfigCollection
         Windows,
         MacOS,
         iOS,
-        Android
+        Android,
+        Linux
     };
 
     void Init();

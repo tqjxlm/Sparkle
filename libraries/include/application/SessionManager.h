@@ -17,6 +17,7 @@ public:
         Vector3 translation = Zeros;
         Vector4 rotation = Vector4(0.f, 0.f, 0.f, 1.f);
         Vector3 scale = Ones;
+        std::optional<float> focus_distance;
     };
 
     static void SaveSession(CameraComponent *camera);

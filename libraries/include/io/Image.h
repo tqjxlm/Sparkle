@@ -7,6 +7,8 @@
 
 namespace sparkle
 {
+struct Path;
+
 class Image2D
 {
 public:
@@ -75,7 +77,7 @@ public:
                pixel_format_ != PixelFormat::Count;
     }
 
-    [[nodiscard]] bool WriteToFile(const std::string &file_path) const;
+    [[nodiscard]] bool WriteToFile(const Path &file_path) const;
 
     [[nodiscard]] Vector3 Sample(const Vector2 &uv) const
     {

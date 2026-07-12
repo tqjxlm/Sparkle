@@ -19,11 +19,23 @@ public:
         color_ = color;
     }
 
+    // only takes effect when no sky map is set
+    [[nodiscard]] const Vector3 &GetColor() const
+    {
+        return color_;
+    }
+
     void SetSkyMap(const std::string &file_path);
 
     [[nodiscard]] const Image2D *GetSkyMap() const
     {
         return sky_map_.get();
+    }
+
+    // the file path passed to SetSkyMap. empty if no sky map is set.
+    [[nodiscard]] const std::string &GetSkyMapPath() const
+    {
+        return sky_map_path_;
     }
 
     void OnAttach() override;
@@ -62,6 +74,8 @@ private:
     Vector3 color_ = Vector3(0.5f, 0.7f, 1.0f);
 
     std::unique_ptr<Image2D> sky_map_;
+
+    std::string sky_map_path_;
 
     std::unique_ptr<Image2D> specular_map_;
 
