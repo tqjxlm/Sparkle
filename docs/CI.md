@@ -46,7 +46,7 @@ In CI, the `render_target_pool` and `pipeline_switch_pool` test cases run on win
   * windows + glfw
   * macos + macos
 * On Windows, the CI functional test uses [Mesa lavapipe](https://github.com/pal1000/mesa-dist-win) (a software Vulkan driver) since GitHub Actions runners have no GPU.
-* For now we only have ground truth for TestScene. TestScene is the app's **built-in default scene**, loaded automatically when `--scene` is not overridden — which is exactly how these ground-truth images are generated (the test harness deliberately does not pass `--scene`). Passing `--scene <path>` renders a different scene and will not match this ground truth.
+* For now we only have ground truth for TestScene. TestScene is the app's **packaged default scene** (`resources/packed/TestScene.usda`, see [USD.md](USD.md)), loaded automatically when `--scene` is not overridden — which is exactly how these ground-truth images are generated (the test harness deliberately does not pass `--scene`). Passing `--scene <path>` renders a different scene and will not match this ground truth.
 * Ground truth are updated manually for now. Please let me know if you want to update them.
 * It is always recommended to run functional test locally with available hardware before pushing. See below for details.
 
