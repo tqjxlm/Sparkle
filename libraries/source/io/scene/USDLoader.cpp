@@ -51,9 +51,10 @@ static void CopyAttributeBuffer(const tinyusdz::tydra::VertexAttribute &attribut
 {
     ASSERT_EQUAL(attribute.format_size(), sizeof(T));
 
-    // assume tightly packed and no multi-sample
+    // assume tightly packed and no multi-sample. tydra expresses tightly packed
+    // either as stride 0 or as an explicit format_size stride, depending on the code path.
     ASSERT_EQUAL(attribute.elementSize, 1);
-    ASSERT_EQUAL(attribute.stride, 0);
+    ASSERT(attribute.stride == 0 || attribute.stride == attribute.format_size());
 
     dst.resize(attribute.data.size() / attribute.format_size());
     ASSERT_EQUAL(dst.size() * sizeof(T), attribute.data.size());
