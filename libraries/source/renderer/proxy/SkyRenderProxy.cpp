@@ -7,7 +7,7 @@
 namespace sparkle
 {
 
-SkyRenderProxy::SkyRenderProxy(const Image2DCube *sky_map) : sky_map_raw_(sky_map)
+SkyRenderProxy::SkyRenderProxy(std::shared_ptr<const Image2DCube> sky_map) : sky_map_raw_(std::move(sky_map))
 {
 }
 
@@ -17,7 +17,7 @@ void SkyRenderProxy::InitRenderResources(RHIContext *rhi, const RenderConfig &co
 
     if (sky_map_raw_ != nullptr)
     {
-        sky_map_ = rhi->CreateTextureCube(sky_map_raw_, "SkyMap_" + sky_map_raw_->GetName());
+        sky_map_ = rhi->CreateTextureCube(sky_map_raw_.get(), "SkyMap_" + sky_map_raw_->GetName());
     }
 
     ubo_.has_sky_map = sky_map_ ? 1 : 0;
