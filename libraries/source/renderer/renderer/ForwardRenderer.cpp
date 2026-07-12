@@ -76,7 +76,8 @@ void ForwardRenderer::InitRenderResources()
             "BasePassSceneDepth");
     }
 
-    screen_color_ = rhi_->CreateImage(
+    RHIRenderTarget::Attribute screen_color_rt_attribute;
+    screen_color_rt_attribute.SetColorAttribute(
         RHIImage::Attribute{
             .format = PixelFormat::B8G8R8A8_SRGB,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
@@ -90,9 +91,10 @@ void ForwardRenderer::InitRenderResources()
 
             .msaa_samples = 1,
         },
-        "ScreenColor");
+        0);
 
-    screen_color_rt_ = rhi_->CreateRenderTarget({}, screen_color_, nullptr, "ToneMappingRT");
+    screen_color_rt_ = rhi_->GetRenderTargetPool().Acquire(screen_color_rt_attribute, "ToneMappingRT");
+    screen_color_ = screen_color_rt_->GetColorImage(0);
     tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_color_, screen_color_rt_);
 
     present_pass_ =
