@@ -18,6 +18,9 @@ public:
 
     ~TaskManager()
     {
+        // join worker threads before dropping the singleton: in-flight tasks (e.g. cook
+        // jobs) may still call Instance() while they finish
+        task_dispatcher_.reset();
         instance_ = nullptr;
     }
 
