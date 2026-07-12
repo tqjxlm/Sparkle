@@ -38,7 +38,7 @@ void SkyLight::SetSkyMap(const std::string &file_path)
 
 std::unique_ptr<RenderProxy> SkyLight::CreateRenderProxy()
 {
-    auto proxy = std::make_unique<SkyRenderProxy>(cube_map_.get());
+    auto proxy = std::make_unique<SkyRenderProxy>(cube_map_);
 
     proxy->SetData(color_);
 

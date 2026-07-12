@@ -21,7 +21,7 @@ public:
         alignas(16) Vector3 color = Zeros;
     };
 
-    explicit SkyRenderProxy(const Image2DCube *sky_map);
+    explicit SkyRenderProxy(std::shared_ptr<const Image2DCube> sky_map);
 
 #pragma region RenderProxy interface
 
@@ -61,6 +61,6 @@ private:
 
     RHIResourceRef<RHIImage> sky_map_;
 
-    const Image2DCube *sky_map_raw_;
+    std::shared_ptr<const Image2DCube> sky_map_raw_;
 };
 } // namespace sparkle
