@@ -287,7 +287,7 @@ void RHIContext::DeferResourceDeletion(RHIResource *resource)
 
 void RHIContext::DeferredDeletion::DeleteResources()
 {
-    std::scoped_lock lock(*mutex);
+    std::scoped_lock<std::mutex> lock(*mutex);
 
     // to handle recursive deletion, we poll resources until it is empty
     while (!resources.empty())

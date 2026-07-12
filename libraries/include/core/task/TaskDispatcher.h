@@ -49,7 +49,7 @@ public:
 
     void EnqueueTask(std::function<void()> &&task, ThreadName thread_name)
     {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         pending_tasks_.emplace(std::move(task), thread_name);
         new_task_pushed_.notify_all();
     }

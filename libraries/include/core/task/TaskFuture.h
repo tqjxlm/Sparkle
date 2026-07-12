@@ -122,7 +122,7 @@ public:
     {
         ASSERT(IsReady());
 
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
 
         if constexpr (std::is_void_v<ReturnType>)
         {
@@ -164,7 +164,7 @@ private:
         if (!IsReady())
         {
             // if current future is not ready, enqueue the task to be executed when it is ready.
-            std::scoped_lock lock(mutex_);
+            std::scoped_lock<std::mutex> lock(mutex_);
             callbacks_.emplace_back(std::forward<TaskFunc>(task), thread_name);
             return;
         }
