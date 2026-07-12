@@ -184,7 +184,7 @@ public:
         return ptr_.get();
     }
 
-    [[nodiscard]] int use_count() const // NOLINT
+    [[nodiscard]] long use_count() const // NOLINT
     {
         return ptr_.use_count();
     }

@@ -141,6 +141,8 @@ public:
         RHIImageLayout initial_layout = RHIImageLayout::Undefined;
         ImageType type = ImageType::Image2D;
 
+        bool operator==(const Attribute &) const = default;
+
         // this hash does not consider all attributes. it only ensures shader compatilibity.
         // i.e. if two images share the same attriute hash, they can be used in the same shader.
         [[nodiscard]] uint32_t GetHashForShader() const

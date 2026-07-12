@@ -77,7 +77,8 @@ void GPURenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
-    scene_texture_ = rhi_->CreateImage(
+    RHIRenderTarget::Attribute scene_rt_attribute;
+    scene_rt_attribute.SetColorAttribute(
         RHIImage::Attribute{
             .format = PixelFormat::RGBAFloat,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
@@ -91,11 +92,13 @@ void GPURenderer::InitRenderResources()
             .mip_levels = 1,
             .msaa_samples = 1,
         },
-        "GPUPipelineColorBuffer");
+        0);
 
-    scene_rt_ = rhi_->CreateRenderTarget({}, scene_texture_, nullptr, "GPUPipelineColorRT");
+    scene_rt_ = rhi_->GetRenderTargetPool().Acquire(scene_rt_attribute, "GPUPipelineColorRT");
+    scene_texture_ = scene_rt_->GetColorImage(0);
 
-    tone_mapping_output_ = rhi_->CreateImage(
+    RHIRenderTarget::Attribute tone_mapping_rt_attribute;
+    tone_mapping_rt_attribute.SetColorAttribute(
         RHIImage::Attribute{
             .format = PixelFormat::B8G8R8A8_SRGB,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
@@ -108,9 +111,10 @@ void GPURenderer::InitRenderResources()
                       RHIImage::ImageUsage::TransferSrc,
             .msaa_samples = 1,
         },
-        "ToneMappingBuffer");
+        0);
 
-    tone_mapping_rt_ = rhi_->CreateRenderTarget({}, tone_mapping_output_, nullptr, "ToneMappingRT");
+    tone_mapping_rt_ = rhi_->GetRenderTargetPool().Acquire(tone_mapping_rt_attribute, "ToneMappingRT");
+    tone_mapping_output_ = tone_mapping_rt_->GetColorImage(0);
 
     // Create the denoiser before the path-tracer pipeline so its G-buffer targets exist and can
     // be bound into the compute shader in InitSceneRenderResources().

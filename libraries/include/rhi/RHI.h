@@ -12,6 +12,7 @@
 #include "rhi/RHIRayTracing.h"
 #include "rhi/RHIRenderPass.h"
 #include "rhi/RHIRenderTarget.h"
+#include "rhi/RHIRenderTargetPool.h"
 #include "rhi/RHIResource.h"
 #include "rhi/RHIResourceArray.h"
 #include "rhi/RHIShader.h"
@@ -228,6 +229,11 @@ public:
 
     RHIResourceRef<RHISampler> GetSampler(RHISampler::SamplerAttribute attribute);
 
+    [[nodiscard]] RHIRenderTargetPool &GetRenderTargetPool()
+    {
+        return render_target_pool_;
+    }
+
     RHIResourceRef<RHIImage> CreateTexture(const Image2D *image, const std::string &name);
 
     RHIResourceRef<RHIImage> CreateTextureCube(const Image2DCube *image, const std::string &name);
@@ -313,6 +319,8 @@ protected:
     RHIResourceRef<RHIComputePass> current_compute_pass_;
 
     std::unordered_map<RHISampler::SamplerAttribute, RHIResourceRef<RHISampler>> samplers_;
+
+    RHIRenderTargetPool render_target_pool_{this};
 
     bool initialization_success_ = false;
     bool back_buffer_dirty_ = true;
