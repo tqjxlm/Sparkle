@@ -42,9 +42,13 @@ void OrbitCameraComponent::SetupFromTransform()
     // pitch: angle between forward and XY plane
     pitch_ = utilities::ToDegree(-std::asin(-forward.z()));
 
-    radius_ = (center_ - position).norm();
+    // the transform alone cannot tell where the orbit center is.
+    // assume the camera focuses on it, which holds for every camera set up via Setup().
+    radius_ = GetAttribute().focus_distance;
 
     ASSERT(radius_ > 0.f);
+
+    center_ = position + forward * radius_;
 
     SetFocusDistance(radius_);
 }

@@ -15,6 +15,11 @@ public:
 
     void SetColor(const Vector3 &color);
 
+    [[nodiscard]] const Vector3 &GetColor() const
+    {
+        return color_;
+    }
+
     void OnAttach() override;
 
 private:

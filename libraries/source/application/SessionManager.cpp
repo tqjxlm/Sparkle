@@ -111,6 +111,7 @@ nlohmann::json BuildCameraJson(const CameraComponent *camera)
     camera_json["translation"] = {translation.x(), translation.y(), translation.z()};
     camera_json["rotation"] = {rotation.x(), rotation.y(), rotation.z(), rotation.w()};
     camera_json["scale"] = {scale.x(), scale.y(), scale.z()};
+    camera_json["focus_distance"] = camera->GetAttribute().focus_distance;
 
     return camera_json;
 }
@@ -232,6 +233,16 @@ std::optional<SessionManager::CameraState> ParseCameraState(const nlohmann::json
         }
     }
 
+    auto focus_distance_it = camera_json.find("focus_distance");
+    if (focus_distance_it != camera_json.end())
+    {
+        if (!focus_distance_it->is_number())
+        {
+            return std::nullopt;
+        }
+        state.focus_distance = focus_distance_it->get<float>();
+    }
+
     return state;
 }
 
@@ -341,6 +352,11 @@ void SessionManager::ApplyCamera(CameraComponent *camera)
     const auto &state = *pending_camera_;
     const Rotation rotation = utilities::Vector4AsQuaternion(state.rotation);
     camera->GetNode()->SetTransform(state.translation, rotation, state.scale);
+
+    if (state.focus_distance)
+    {
+        camera->SetFocusDistance(*state.focus_distance);
+    }
 
     if (auto *orbit_camera = dynamic_cast<OrbitCameraComponent *>(camera))
     {

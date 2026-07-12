@@ -23,11 +23,14 @@ SkyLight::~SkyLight()
 
 void SkyLight::SetSkyMap(const std::string &file_path)
 {
+    sky_map_path_ = file_path;
     sky_map_ = std::make_unique<Image2D>();
     if (!sky_map_->LoadFromFile(file_path))
     {
         Log(Error, "failed to load skymap {}. will fall back to sky light", file_path);
         sky_map_ = nullptr;
+        sky_map_path_.clear();
+        return;
     }
 
     Cook();

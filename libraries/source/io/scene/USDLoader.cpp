@@ -9,7 +9,9 @@
 #include "scene/SceneNode.h"
 #include "scene/component/camera/OrbitCameraComponent.h"
 #include "scene/component/light/DirectionalLight.h"
+#include "scene/component/light/SkyLight.h"
 #include "scene/component/primitive/MeshPrimitive.h"
+#include "scene/material/DieletricMaterial.h"
 #include "scene/material/MaterialManager.h"
 #include "scene/material/PbrMaterial.h"
 
@@ -49,9 +51,10 @@ static void CopyAttributeBuffer(const tinyusdz::tydra::VertexAttribute &attribut
 {
     ASSERT_EQUAL(attribute.format_size(), sizeof(T));
 
-    // assume tightly packed and no multi-sample
+    // assume tightly packed and no multi-sample. tydra expresses tightly packed
+    // either as stride 0 or as an explicit format_size stride, depending on the code path.
     ASSERT_EQUAL(attribute.elementSize, 1);
-    ASSERT_EQUAL(attribute.stride, 0);
+    ASSERT(attribute.stride == 0 || attribute.stride == attribute.format_size());
 
     dst.resize(attribute.data.size() / attribute.format_size());
     ASSERT_EQUAL(dst.size() * sizeof(T), attribute.data.size());
@@ -70,6 +73,7 @@ template <typename T, typename U> static void CopyVectorBuffer(const std::vector
 struct USDLoaderContext
 {
     Scene *scene;
+    const Path &asset_root;
     const tinyusdz::Stage &stage;
     const tinyusdz::tydra::RenderScene &render_scene;
 };
@@ -87,16 +91,33 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
         return nullptr;
     }
 
+    CameraComponent::Attribute attribute;
+
+    // USD lens attributes are in millimeters, ours are in meters
     float focal_length = 35.f;
     render_camera->focalLength.get_value().get(0, &focal_length);
+    attribute.focal_length = focal_length * 0.001f;
 
-    float aperture = 22.f;
-    render_camera->verticalAperture.get_value().get(0, &aperture);
+    float vertical_aperture = attribute.sensor_height * 1000.f;
+    render_camera->verticalAperture.get_value().get(0, &vertical_aperture);
+    attribute.sensor_height = vertical_aperture * 0.001f;
 
-    auto camera = std::make_shared<OrbitCameraComponent>(CameraComponent::Attribute{
-        .focal_length = focal_length * 0.001f, // convert mm to m
-        .aperture = aperture,
-    });
+    // 0 means not authored for both attributes. fall back to our defaults.
+    float f_stop = 0.f;
+    render_camera->fStop.get_value().get(0, &f_stop);
+    if (f_stop > 0.f)
+    {
+        attribute.aperture = f_stop;
+    }
+
+    float focus_distance = 0.f;
+    render_camera->focusDistance.get_value().get(0, &focus_distance);
+    if (focus_distance > 0.f)
+    {
+        attribute.focus_distance = focus_distance;
+    }
+
+    auto camera = std::make_shared<OrbitCameraComponent>(attribute);
 
     // TODO(tqjxlm): this means we can only have one camera. should support multiple cameras in the future.
     ctx.scene->SetMainCamera(camera);
@@ -106,8 +127,21 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
 
 static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id)
 {
-    auto image_id = static_cast<size_t>(ctx.render_scene.textures[texture_id].texture_image_id);
-    const auto &image = ctx.render_scene.images[image_id];
+    // tydra keeps the texture entry but leaves these ids at -1 when it fails to load the image
+    auto image_id = ctx.render_scene.textures[texture_id].texture_image_id;
+    if (image_id < 0)
+    {
+        Log(Error, "USDLoader: texture has no image. texture id: {}", texture_id);
+        return nullptr;
+    }
+
+    const auto &image = ctx.render_scene.images[static_cast<size_t>(image_id)];
+    if (image.buffer_id < 0)
+    {
+        Log(Error, "USDLoader: texture image has no data: {}", image.asset_identifier);
+        return nullptr;
+    }
+
     const auto &image_data = ctx.render_scene.buffers[static_cast<size_t>(image.buffer_id)];
 
     // TODO(tqjxlm): support 3 channels and 1 channel textures
@@ -231,9 +265,14 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
     MaterialResource material_resource;
 
+    bool is_dieletric = false;
+
     if (render_material.hasUsdPreviewSurface())
     {
         const auto &surface_shader = *render_material.surfaceShader;
+
+        // a transmissive UsdPreviewSurface maps to our dieletric material (see USDExporter)
+        is_dieletric = !surface_shader.opacity.is_texture() && surface_shader.opacity.value < 1.f;
 
         if (surface_shader.diffuseColor.is_texture())
         {
@@ -249,6 +288,9 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
         {
             material_resource.emissive_texture =
                 CreateTexture(ctx, static_cast<size_t>(surface_shader.emissiveColor.texture_id));
+
+            // the texture is multiplied by emissive_color, whose default of Zeros would erase it
+            material_resource.emissive_color = Ones;
         }
         else
         {
@@ -264,7 +306,12 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
         if (surface_shader.metallic.is_texture())
         {
             // Curretly we assume metallic and roughness are packed into a single texture.
-            ASSERT_EQUAL(surface_shader.metallic.texture_id, surface_shader.roughness.texture_id);
+            // the b/g channel connections may get distinct tydra texture entries, but must share one image.
+            ASSERT(surface_shader.roughness.is_texture());
+
+            const auto &textures = ctx.render_scene.textures;
+            ASSERT_EQUAL(textures[static_cast<size_t>(surface_shader.metallic.texture_id)].texture_image_id,
+                         textures[static_cast<size_t>(surface_shader.roughness.texture_id)].texture_image_id);
 
             material_resource.metallic_roughness_texture =
                 CreateTexture(ctx, static_cast<size_t>(surface_shader.metallic.texture_id));
@@ -276,11 +323,19 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
         }
     }
 
-    // TODO(tqjxlm): support dieletric materials
-    material_resource.eta = 0;
     material_resource.name = render_material.name;
 
-    auto material = material_manager.GetOrCreateMaterial<PbrMaterial>(material_resource);
+    std::shared_ptr<Material> material;
+    if (is_dieletric)
+    {
+        material_resource.eta = render_material.surfaceShader->ior.value;
+        material = material_manager.GetOrCreateMaterial<DieletricMaterial>(material_resource);
+    }
+    else
+    {
+        material_resource.eta = 0;
+        material = material_manager.GetOrCreateMaterial<PbrMaterial>(material_resource);
+    }
 
     mesh_primitive->SetMaterial(material);
 
@@ -309,6 +364,52 @@ static std::shared_ptr<DirectionalLight> LoadDirectionalLight(const tinyusdz::ty
     return light;
 }
 
+static std::shared_ptr<SkyLight> LoadSkyLight(const tinyusdz::tydra::Node &node, const USDLoaderContext &ctx)
+{
+    // tydra does not convert dome lights for now. we have to retrieve info from the stage.
+    const auto &prim = ctx.stage.GetPrimAtPath(tinyusdz::Path(node.abs_path, ""));
+    const auto *light_prim = prim ? prim.value()->as<tinyusdz::DomeLight>() : nullptr;
+    if (!light_prim)
+    {
+        Log(Warn, "USDLoader: Skipped EnvmapLight that is not a DomeLight. node: {}", node.abs_path);
+        return nullptr;
+    }
+
+    tinyusdz::value::AssetPath asset_path;
+    if (auto file_attribute = light_prim->file.get_value())
+    {
+        file_attribute.value().get(0, &asset_path);
+    }
+
+    auto light = std::make_shared<SkyLight>();
+
+    if (asset_path.GetAssetPath().empty())
+    {
+        // procedural sky: color only
+        tinyusdz::value::color3f color;
+        light_prim->color.get_value().get(0, &color);
+
+        float intensity = 1.0f;
+        light_prim->intensity.get_value().get(0, &intensity);
+
+        light->SetColor(MatrixCast(color) * intensity);
+        return light;
+    }
+
+    // the texture path is relative to the USD file
+    auto sky_map_path = (ctx.asset_root.path.parent_path() / asset_path.GetAssetPath()).string();
+
+    light->SetSkyMap(sky_map_path);
+
+    if (!light->GetSkyMap())
+    {
+        Log(Error, "USDLoader: failed to load dome light texture {}", sky_map_path);
+        return nullptr;
+    }
+
+    return light;
+}
+
 static std::shared_ptr<SceneNode> LoadNode(const tinyusdz::tydra::Node &node, const USDLoaderContext &ctx)
 {
     auto scene_node =
@@ -318,6 +419,8 @@ static std::shared_ptr<SceneNode> LoadNode(const tinyusdz::tydra::Node &node, co
 
     for (const auto &child : node.children)
     {
+        std::shared_ptr<Component> component;
+
         switch (child.nodeType)
         {
         case tinyusdz::tydra::NodeType::Xform:
@@ -325,36 +428,63 @@ static std::shared_ptr<SceneNode> LoadNode(const tinyusdz::tydra::Node &node, co
             {
                 scene_node->AddChild(child_node);
             }
-            break;
+            continue;
         case tinyusdz::tydra::NodeType::Mesh:
-            scene_node->AddComponent(LoadMesh(child, ctx));
+            component = LoadMesh(child, ctx);
             break;
         case tinyusdz::tydra::NodeType::Camera:
-            scene_node->AddComponent(LoadCamera(child, ctx));
+            component = LoadCamera(child, ctx);
             break;
         case tinyusdz::tydra::NodeType::DirectionalLight:
-            scene_node->AddComponent(LoadDirectionalLight(child, ctx));
+            component = LoadDirectionalLight(child, ctx);
             break;
-        case tinyusdz::tydra::NodeType::Skeleton:
-        case tinyusdz::tydra::NodeType::PointLight:
         case tinyusdz::tydra::NodeType::EnvmapLight:
-            Log(Warn, "USDLoader: Skipped unsupported node type {}", Enum2Str(node.nodeType));
-            return nullptr;
+            component = LoadSkyLight(child, ctx);
+            break;
         default:
-            UnImplemented(child.nodeType);
-            return nullptr;
+            Log(Warn, "USDLoader: Skipped unsupported node type {}. node: {}", Enum2Str(child.nodeType),
+                child.display_name);
+            continue;
+        }
+
+        if (component)
+        {
+            scene_node->AddComponent(component);
         }
     }
 
     return scene_node;
 }
 
+// asset paths inside a USD file live in the same storage domain (resource / internal / ...) as the file itself
+struct TinyusdzAssetUserData
+{
+    FileManager *file_manager;
+    PathType path_type;
+};
+
+static int TinyusdzAssetSizeFun(const char *resolved_asset_name, uint64_t *nbytes, std::string *err, void *userdata)
+{
+    const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
+
+    auto size = user_data->file_manager->GetSize(Path(resolved_asset_name, user_data->path_type));
+    if (size == 0)
+    {
+        *err = std::format("TinyUSDZ: failed to get asset size. asset {}", resolved_asset_name);
+        return -1;
+    }
+
+    *nbytes = size;
+
+    return 0;
+}
+
 static int TinyusdzAssetReadFun(const char *resolved_asset_name, uint64_t req_nbytes, uint8_t *out_buf,
                                 uint64_t *nbytes, std::string *err, void *userdata)
 {
-    auto *file_manager = reinterpret_cast<FileManager *>(userdata);
+    const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
 
-    auto data = file_manager->Read(Path::Resource(resolved_asset_name));
+    auto data = user_data->file_manager->Read(Path(resolved_asset_name, user_data->path_type));
     if (data.size() < req_nbytes)
     {
         *err = std::format("TinyUSDZ: asset size smaller than requested. loaded {}. requested {}. asset {}",
@@ -373,12 +503,12 @@ static int TinyusdzAssetReadFun(const char *resolved_asset_name, uint64_t req_nb
 static int TinyusdzAssetResolveFun(const char *asset_name, const std::vector<std::string> &search_paths,
                                    std::string *resolved_asset_name, std::string *err, void *userdata)
 {
-    auto *file_manager = reinterpret_cast<FileManager *>(userdata);
+    const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
 
     // assume single search path for now
     *resolved_asset_name = search_paths[0] + "/" + asset_name;
 
-    if (file_manager->Exists(Path::Resource(*resolved_asset_name)))
+    if (user_data->file_manager->Exists(Path(*resolved_asset_name, user_data->path_type)))
     {
         return 0;
     }
@@ -388,9 +518,9 @@ static int TinyusdzAssetResolveFun(const char *asset_name, const std::vector<std
     return 1;
 }
 
-static std::shared_ptr<SceneNode> LoadScene(const std::string &path, const tinyusdz::Stage &stage, Scene *scene)
+static std::shared_ptr<SceneNode> LoadScene(const Path &asset_root, const tinyusdz::Stage &stage, Scene *scene)
 {
-    std::filesystem::path file_path(path);
+    const std::filesystem::path &file_path = asset_root.path;
 
     tinyusdz::tydra::RenderSceneConverter converter;
 
@@ -403,12 +533,19 @@ static std::shared_ptr<SceneNode> LoadScene(const std::string &path, const tinyu
     env.material_config.preserve_texel_bitdepth = true;
 
     // redirect all asset handling to our file manager.
+    TinyusdzAssetUserData asset_user_data{FileManager::GetNativeFileManager(), asset_root.type};
+
     tinyusdz::AssetResolutionHandler asset_handler;
-    asset_handler.userdata = FileManager::GetNativeFileManager();
+    asset_handler.userdata = &asset_user_data;
+    asset_handler.size_fun = &TinyusdzAssetSizeFun;
     asset_handler.read_fun = &TinyusdzAssetReadFun;
     asset_handler.resolve_fun = &TinyusdzAssetResolveFun;
 
-    env.asset_resolver.register_asset_resolution_handler("", asset_handler);
+    // tinyusdz dispatches handlers by file extension, so one registration does not cover all assets
+    for (const auto *extension : {"", "png", "jpg", "jpeg", "hdr", "exr"})
+    {
+        env.asset_resolver.register_asset_resolution_handler(extension, asset_handler);
+    }
 
     // we assume all dependencies are under the same directory as the main file.
     env.asset_resolver.set_search_paths({file_path.parent_path().string()});
@@ -428,6 +565,7 @@ static std::shared_ptr<SceneNode> LoadScene(const std::string &path, const tinyu
 
     USDLoaderContext ctx{
         .scene = scene,
+        .asset_root = asset_root,
         .stage = stage,
         .render_scene = render_scene,
     };
@@ -507,7 +645,7 @@ std::shared_ptr<SceneNode> USDLoader::Load(Scene *scene)
 
     Log(Debug, "USDLoader: loading file {} ok", path_string);
 
-    auto root_node = LoadScene(path_string, stage, scene);
+    auto root_node = LoadScene(asset_root_, stage, scene);
     if (root_node)
     {
         root_node->SetName(asset_root_.path.string());
