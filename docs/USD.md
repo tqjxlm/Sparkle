@@ -65,16 +65,40 @@ a `TestCase` or a UI action.
 
 ## Round-trip test
 
-The `usd_round_trip` test case renders the current scene, exports it, loads the exported file back
-and renders it again. The driver script first gates the original render against the same ground
-truth as `dev/functional_test.py`, then FLIP-compares the reimported render against the original:
+The `usd_round_trip` test case builds a procedural test scene, renders it, exports it, loads the
+exported file back and renders it again. The driver script first gates the original render against
+the same ground truth as `dev/functional_test.py`, then FLIP-compares the reimported render against
+the original:
 
 ```bash
 python3 tests/usd/usd_roundtrip_test.py --framework glfw --headless
 ```
 
-It exercises the default TestScene, which covers every exportable feature: analytic spheres, mesh
-primitives, glTF-imported models with full PBR texture sets, dielectric glass, a directional light
-and a sky light. CI runs it on the windows/glfw/Release job (see
-[.github/actions/functional-test](../.github/actions/functional-test/action.yml)). See
+The procedural scene (`BuildTestScene` in
+[tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)) covers every exportable
+feature: analytic spheres, mesh primitives, glTF-imported models with full PBR texture sets,
+dielectric glass, a directional light and a sky light. With an explicit `--scene`, the test
+round-trips that scene instead (no ground-truth gate). CI runs it on the windows/glfw/Release job
+(see [.github/actions/functional-test](../.github/actions/functional-test/action.yml)). See
 [Test.md](Test.md) for general test-case mechanics.
+
+## Packaged TestScene
+
+The app's default scene (empty `--scene`) is `resources/packed/TestScene.usda`: the export of the
+round-trip test's procedural scene, with texture references re-pointed at the packaged originals
+(the exporter writes verbatim texture copies, so this is lossless). It must stay at the resource
+root: asset paths resolve relative to the USD file and tinyusdz rejects `..` in them, so the shared
+`models/...` and `skymap/...` files are only reachable from there.
+
+To regenerate it after changing `BuildTestScene`, the exporter or the loader:
+
+1. Run the round-trip test (above). It validates the procedural scene against the ground truth and
+   writes the export to `usd_export/scene.usda` in internal storage.
+2. Copy `usd_export/scene.usda` over `resources/packed/TestScene.usda` and replace each
+   `textures/...` asset path with the corresponding packaged file (the sky map under `skymap/`, the
+   glTF textures under `models/`).
+3. Run `dev/functional_test.py` without `--scene` to confirm the packaged scene still matches the
+   ground truth.
+
+Since `SpherePrimitive` bakes to a triangle mesh on export, ray-traced pipelines render the packaged
+scene's spheres as tessellated meshes instead of analytic spheres.

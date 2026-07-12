@@ -7,13 +7,11 @@
 #include "core/math/Sampler.h"
 #include "core/math/Utilities.h"
 #include "core/task/TaskManager.h"
-#include "io/Mesh.h"
 #include "io/scene/SceneDataFactory.h"
 #include "scene/Scene.h"
 #include "scene/component/camera/OrbitCameraComponent.h"
 #include "scene/component/light/DirectionalLight.h"
 #include "scene/component/light/SkyLight.h"
-#include "scene/component/primitive/MeshPrimitive.h"
 #include "scene/component/primitive/SpherePrimitive.h"
 #include "scene/material/DieletricMaterial.h"
 #include "scene/material/LambertianMaterial.h"
@@ -24,6 +22,9 @@
 namespace sparkle
 {
 static constexpr const char *DefaultSkyMapFile = "skymap/studio_garden.hdr";
+// must live at the resource root: its asset references (models/..., skymap/...) are relative to
+// the file and tinyusdz rejects ".." in asset paths
+static constexpr const char *TestSceneFile = "TestScene.usda";
 static std::vector<SceneNode *> debug_spheres;
 
 static void UpdateSceneConfig(const Path &asset_path)
@@ -123,81 +124,6 @@ static std::shared_ptr<TaskFuture<>> LoadSceneFromFile(Scene *scene, const Path 
     });
 }
 
-static std::shared_ptr<TaskFuture<>> LoadTestScene(Scene *scene)
-{
-    Log(Info, "Loading standard scene");
-
-    auto *scene_root = scene->GetRootNode();
-
-    auto *main_camera = static_cast<OrbitCameraComponent *>(scene->GetMainCamera());
-    main_camera->Setup(Zeros, 25.f, 10.f, -20.f);
-
-    SceneManager::AddDefaultDirectionalLight(scene);
-
-    auto &material_manager = MaterialManager::Instance();
-
-    auto white_marble_material = material_manager.GetOrCreateMaterial<LambertianMaterial>({.name = "WhiteMarble"});
-    auto glass_material = material_manager.GetOrCreateMaterial<DieletricMaterial>({.eta = 1.6f, .name = "Glass"});
-
-    // basic primitives
-    {
-        auto [node, primitive] = MakeNodeWithComponent<MeshPrimitive>(scene, scene_root, "floor", Mesh::GetUnitCube());
-        node->SetTransform(Up * -0.001f, Zeros, {50.f, 50.f, 0.001f});
-        primitive->SetMaterial(white_marble_material);
-    }
-
-    {
-        auto [node, primitive] = MakeNodeWithComponent<SpherePrimitive>(scene, scene_root, "glass sphere");
-        node->SetTransform({0.f, 0.f, 2.f}, Zeros, Ones * 2.f);
-        primitive->SetMaterial(glass_material);
-    }
-    {
-        auto [node, primitive] = MakeNodeWithComponent<SpherePrimitive>(scene, scene_root, "lambert sphere");
-        node->SetTransform({-4.f, 4.f, 2.f}, Zeros, Ones * 2.f);
-        primitive->SetMaterial(white_marble_material);
-    }
-    {
-        auto [node, primitive] = MakeNodeWithComponent<SpherePrimitive>(scene, scene_root, "gold sphere");
-        node->SetTransform({4.f, -4.f, 2.f}, Zeros, Ones * 2.f);
-        primitive->SetMaterial(material_manager.GetMetalMaterials()[MaterialManager::GOLD]);
-    }
-
-    // models
-    std::vector<std::shared_ptr<TaskFuture<>>> model_tasks;
-
-    auto water_bottle_task =
-        SceneDataFactory::Load(Path::Resource("models/WaterBottle/WaterBottle.gltf"), scene)
-            ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
-                if (node)
-                {
-                    node->SetTransform({-4.f, -4.f, 2.7f}, {0, 0, utilities::ToRadian(-30.f)}, Ones * 2.f);
-                    scene_root->AddChild(node);
-                }
-            });
-    model_tasks.emplace_back(water_bottle_task);
-
-    auto boom_box_task = SceneDataFactory::Load(Path::Resource("models/BoomBox/BoomBox.gltf"), scene)
-                             ->Then([scene_root](const std::shared_ptr<SceneNode> &node) {
-                                 if (node)
-                                 {
-                                     node->SetTransform({5.f, 4.f, 3.f}, {0, 0, utilities::ToRadian(30.f)}, Ones * 3.f);
-                                     scene_root->AddChild(node);
-                                 }
-                             });
-    model_tasks.emplace_back(boom_box_task);
-
-    auto models_loaded = TaskManager::OnAll(model_tasks);
-    auto last_task_finished = models_loaded;
-
-    // append a bunch of random spheres to the task chain
-    for (int i = 0; i < 10; i++)
-    {
-        last_task_finished = last_task_finished->Then([scene]() { SceneManager::GenerateRandomSpheres(*scene, 1); });
-    }
-
-    return last_task_finished;
-}
-
 std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky,
                                                           bool need_default_lighting)
 {
@@ -225,10 +151,11 @@ std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Pa
     std::shared_ptr<TaskFuture<>> load_task;
     if (!asset_path.IsValid() || asset_path.path.empty())
     {
-        // No scene path given (the `scene` cvar defaults to empty) => load the built-in TestScene.
+        // No scene path given (the `scene` cvar defaults to empty) => load the packaged TestScene.
         // This is the default scene and is exactly what the CI ground-truth images are rendered from.
-        load_task = LoadTestScene(scene);
-        need_default_sky = true;
+        // It carries its own sky, lights and camera. See tests/usd/UsdRoundTripTest.cpp for how to
+        // regenerate it.
+        load_task = LoadSceneFromFile(scene, Path::Resource(TestSceneFile));
         scene->GetRootNode()->SetName("TestScene");
     }
     else

@@ -10,7 +10,7 @@
 
 ### Confirm you are looking at the right output first
 
-* With **no `--scene`**, the app loads the built-in **TestScene** (a floor, several spheres, and glTF models against a sky map) — the scene the CI ground truth is rendered from. `--scene <path>` loads a model/scene **file path** instead. A name that is not a real path (e.g. `--scene TestScene`) silently logs an error, renders an **empty default-sky scene**, and still exits `0`. Before analysing anything, **verify the expected geometry is actually in the frame** — it is easy to spend a long time analysing a blank or wrong render.
+* With **no `--scene`**, the app loads the packaged **TestScene** (`resources/packed/TestScene.usda`: a floor, several spheres, and glTF models against a sky map) — the scene the CI ground truth is rendered from. `--scene <path>` loads a model/scene **file path** instead. A name that is not a real path (e.g. `--scene TestScene`) silently logs an error, renders an **empty default-sky scene**, and still exits `0`. Before analysing anything, **verify the expected geometry is actually in the frame** — it is easy to spend a long time analysing a blank or wrong render.
 * Likewise confirm the intended pipeline / debug view / cvars actually took effect (check the image, not just the command line).
 
 ### Comparing and diffing renders
