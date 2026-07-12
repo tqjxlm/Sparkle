@@ -411,7 +411,7 @@ std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const 
 {
     auto request = std::make_shared<ScreenshotRequest>(name);
     {
-        std::lock_guard<std::mutex> lock(screenshot_queue_mutex_);
+        std::scoped_lock<std::mutex> lock(screenshot_queue_mutex_);
         screenshot_queue_.push(request);
     }
     return request;
@@ -430,7 +430,7 @@ void RenderFramework::ProcessScreenshotRequest()
     }
 
     {
-        std::lock_guard<std::mutex> lock(screenshot_queue_mutex_);
+        std::scoped_lock<std::mutex> lock(screenshot_queue_mutex_);
         if (screenshot_queue_.empty())
         {
             return;

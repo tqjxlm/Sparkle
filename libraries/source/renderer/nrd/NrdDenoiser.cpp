@@ -322,8 +322,8 @@ void NrdDenoiser::EnsureEnabledResources()
     // disocclusion precision). output_ and output_history_ must keep the accumulator's format: the
     // final resolve copies it through bit-exact.
     in_mv_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdInMv");
-    in_normal_roughness_ = CreateFullScreenTexture(PixelFormat::R10G10B10A2_UNORM, "NrdInNormalRoughness");
-    in_viewz_ = CreateFullScreenTexture(PixelFormat::R32_FLOAT, "NrdInViewZ");
+    in_normal_roughness_ = CreateFullScreenTexture(PixelFormat::R10G10B10A2Unorm, "NrdInNormalRoughness");
+    in_viewz_ = CreateFullScreenTexture(PixelFormat::R32Float, "NrdInViewZ");
     in_diff_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdInDiff");
     in_spec_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdInSpec");
     out_diff_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdOutDiff");

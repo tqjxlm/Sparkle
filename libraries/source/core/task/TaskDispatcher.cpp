@@ -34,7 +34,7 @@ TaskDispatcher::~TaskDispatcher()
 
     shutdown_requested_ = true;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         new_task_pushed_.notify_all();
     }
 
@@ -76,7 +76,7 @@ std::vector<std::function<void()>> ThreadTaskQueue::PopTasks()
 {
     std::vector<std::function<void()>> tasks_copy;
     {
-        std::lock_guard<std::mutex> lock(mutex);
+        std::scoped_lock<std::mutex> lock(mutex);
         tasks_copy.swap(tasks);
     }
     return tasks_copy;
@@ -96,7 +96,7 @@ std::future<void> ThreadTaskQueue::AddTask(std::function<void()> &&task)
 {
     auto task_promise = std::make_shared<std::promise<void>>();
 
-    std::lock_guard<std::mutex> lock(mutex);
+    std::scoped_lock<std::mutex> lock(mutex);
     tasks.emplace_back([task_moved = std::move(task), task_promise] {
         task_moved();
         task_promise->set_value();

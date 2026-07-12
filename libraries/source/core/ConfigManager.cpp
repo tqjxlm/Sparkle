@@ -19,7 +19,7 @@ ConfigManager::~ConfigManager() = default;
 void ConfigManager::SetArgs(int argc, const char *const argv[])
 {
     argc_ = argc;
-    for (auto i = 0u; i < static_cast<unsigned>(argc_); i++)
+    for (int i = 0; i < argc_; i++)
     {
         argv_.emplace_back(argv[i]);
     }

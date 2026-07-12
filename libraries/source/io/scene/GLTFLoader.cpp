@@ -266,7 +266,7 @@ static std::shared_ptr<Image2D> CreateImage2D(const tinygltf::Image &image, bool
     {
     case TINYGLTF_COMPONENT_TYPE_BYTE:
     case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-        format = is_linear ? PixelFormat::R8G8B8A8_UNORM : PixelFormat::R8G8B8A8_SRGB;
+        format = is_linear ? PixelFormat::R8G8B8A8Unorm : PixelFormat::R8G8B8A8Srgb;
         break;
     default:
         UnImplemented(image.pixel_type);

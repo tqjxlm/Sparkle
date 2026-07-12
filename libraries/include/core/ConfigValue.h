@@ -116,8 +116,7 @@ concept AllowedConfigType = std::is_same_v<bool, T> || std::is_same_v<uint32_t, 
 template <AllowedConfigType T> class ConfigValue final : public ConfigValueBase
 {
 public:
-    ConfigValue(const char *name, const char *help, const char *category, const T &default_value,
-                bool is_dynamic = false);
+    ConfigValue(const char *name, const char *help, const char *category, T default_value, bool is_dynamic = false);
 
     [[nodiscard]] T Get() const
     {

@@ -31,12 +31,12 @@ void ConvertPixelsToRGBA8(const uint8_t *source_data, uint8_t *dest, uint32_t pi
 {
     switch (format)
     {
-    case PixelFormat::R8G8B8A8_SRGB:
-    case PixelFormat::R8G8B8A8_UNORM:
+    case PixelFormat::R8G8B8A8Srgb:
+    case PixelFormat::R8G8B8A8Unorm:
         memcpy(dest, source_data, pixel_count * 4);
         break;
-    case PixelFormat::B8G8R8A8_SRGB:
-    case PixelFormat::B8G8R8A8_UNORM:
+    case PixelFormat::B8G8R8A8Srgb:
+    case PixelFormat::B8G8R8A8Unorm:
         for (uint32_t i = 0; i < pixel_count; i++)
         {
             dest[i * 4 + 0] = source_data[i * 4 + 2];
@@ -82,7 +82,7 @@ void ConvertPixelsToRGBA8(const uint8_t *source_data, uint8_t *dest, uint32_t pi
 
 Image2D Image2D::CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format)
 {
-    Image2D image(width, height, PixelFormat::R8G8B8A8_SRGB);
+    Image2D image(width, height, PixelFormat::R8G8B8A8Srgb);
     ConvertPixelsToRGBA8(data, image.pixels_.data(), width * height, source_format);
     return image;
 }
@@ -178,7 +178,7 @@ bool Image2D::LoadFromFile(const std::string &file_path)
         channel_count_ = force_channel_count;
 
         // TODO(tqjxlm): detect pixel format. we always assume linear color for now.
-        pixel_format_ = PixelFormat::R8G8B8A8_UNORM;
+        pixel_format_ = PixelFormat::R8G8B8A8Unorm;
 
         pixels_.resize(width_ * height_ * channel_count_ * sizeof(float));
 

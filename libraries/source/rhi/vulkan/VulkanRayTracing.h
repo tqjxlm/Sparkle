@@ -28,7 +28,7 @@ public:
         return device_address_;
     }
 
-    [[nodiscard]] VkTransformMatrixKHR GetTransform() const
+    [[nodiscard]] VkTransformMatrixKHR GetVulkanTransform() const
     {
         return GetVulkanMatrix(transform_);
     }
@@ -36,7 +36,7 @@ public:
     [[nodiscard]] VkAccelerationStructureInstanceKHR GetDescriptor() const
     {
         VkAccelerationStructureInstanceKHR instance{};
-        instance.transform = GetTransform();
+        instance.transform = GetVulkanTransform();
         instance.mask = 0xff;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;

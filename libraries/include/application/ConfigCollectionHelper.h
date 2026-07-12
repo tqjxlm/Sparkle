@@ -31,10 +31,10 @@ struct ConfigCollectionHelper
             for (auto mode : OutputModes)
             {
                 bool is_selected = old_value == mode.second;
-                if (ImGui::Selectable(mode.second.data(), is_selected))
+                std::string mode_name{mode.second};
+                if (ImGui::Selectable(mode_name.c_str(), is_selected))
                 {
-                    std::string new_value = {mode.second.begin(), mode.second.end()};
-                    config.SetValueAs(new_value);
+                    config.SetValueAs(mode_name);
                 }
 
                 if (is_selected)
@@ -73,7 +73,7 @@ struct ConfigCollectionHelper
         }
         break;
         case ConfigValueBase::Float: {
-            float value = config.GetValueAs<float>();
+            auto value = config.GetValueAs<float>();
             if (ImGui::DragFloat(gui_helper::LabelPrefix(config.GetName()).c_str(), &value, 0.01f))
             {
                 config.SetValueAs(value);

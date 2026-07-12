@@ -48,7 +48,7 @@ RHIContext::RHIContext(const RHIConfig &config) : config_(config)
 
 bool RHIContext::IsHeadless() const
 {
-    return view_ && view_->IsHeadless();
+    return view_ != nullptr && view_->IsHeadless();
 }
 
 void RHIContext::Cleanup()
@@ -287,7 +287,7 @@ void RHIContext::DeferResourceDeletion(RHIResource *resource)
 
 void RHIContext::DeferredDeletion::DeleteResources()
 {
-    std::lock_guard<std::mutex> lock(*mutex);
+    std::scoped_lock<std::mutex> lock(*mutex);
 
     // to handle recursive deletion, we poll resources until it is empty
     while (!resources.empty())

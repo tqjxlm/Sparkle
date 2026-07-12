@@ -33,8 +33,8 @@ class AppFramework
 public:
     enum class ClickButton : uint8_t
     {
-        Primary_Left,
-        Secondary_Right,
+        PrimaryLeft,
+        SecondaryRight,
         Count
     };
 

@@ -236,7 +236,7 @@ void VulkanRHI::CreateBackBufferRenderTarget()
         SetMaxFramesInFlight(HeadlessFramesInFlight);
 
         RHIImage::Attribute color_attribute;
-        color_attribute.format = PixelFormat::B8G8R8A8_SRGB;
+        color_attribute.format = PixelFormat::B8G8R8A8Srgb;
         color_attribute.width = extent.width;
         color_attribute.height = extent.height;
         color_attribute.mip_levels = 1;

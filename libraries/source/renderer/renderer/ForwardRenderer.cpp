@@ -22,7 +22,7 @@ ForwardRenderer::ForwardRenderer(const RenderConfig &render_config, RHIContext *
                                  SceneRenderProxy *scene_render_proxy)
     : Renderer(render_config, rhi_context, scene_render_proxy)
 {
-    ASSERT_EQUAL(render_config_.pipeline, RenderConfig::Pipeline::forward);
+    ASSERT_EQUAL(render_config_.pipeline, RenderConfig::Pipeline::Forward);
 
     use_ray_tracing_ = render_config.IsRayTracingMode();
     use_prepass_ = render_config_.use_prepass;
@@ -79,7 +79,7 @@ void ForwardRenderer::InitRenderResources()
     RHIRenderTarget::Attribute screen_color_rt_attribute;
     screen_color_rt_attribute.SetColorAttribute(
         RHIImage::Attribute{
-            .format = PixelFormat::B8G8R8A8_SRGB,
+            .format = PixelFormat::B8G8R8A8Srgb,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
@@ -200,11 +200,7 @@ void ForwardRenderer::Render()
         has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), true, RHIPipelineStage::ColorOutput);
 
         RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
-        if (has_readback)
-        {
-            final_after_stage = RHIPipelineStage::Transfer;
-        }
-        else if (!rendered_ui && has_readback_without_ui)
+        if (has_readback || (!rendered_ui && has_readback_without_ui))
         {
             final_after_stage = RHIPipelineStage::Transfer;
         }
@@ -236,7 +232,7 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
             sky_box_pass_->OverrideSkyMap(nullptr);
         }
         return true;
-    case RenderConfig::OutputImage::IBL_BrdfTexture:
+    case RenderConfig::OutputImage::IBLBrdfTexture:
         if (!ibl_ || !ibl_->GetBRDFMap())
         {
             return false;
@@ -244,7 +240,7 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
         texture_output_pass_ =
             PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, ibl_->GetBRDFMap(), screen_color_rt_);
         return true;
-    case RenderConfig::OutputImage::IBL_DiffuseMap:
+    case RenderConfig::OutputImage::IBLDiffuseMap:
         if (!ibl_ || !sky_box_pass_ || !ibl_->GetDiffuseMap())
         {
             return false;
@@ -252,7 +248,7 @@ bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
         texture_output_pass_ = nullptr;
         sky_box_pass_->OverrideSkyMap(ibl_->GetDiffuseMap());
         return true;
-    case RenderConfig::OutputImage::IBL_SpecularMap:
+    case RenderConfig::OutputImage::IBLSpecularMap:
         if (!ibl_ || !sky_box_pass_ || !ibl_->GetSpecularMap())
         {
             return false;

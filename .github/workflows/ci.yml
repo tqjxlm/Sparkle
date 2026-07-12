@@ -49,9 +49,40 @@ jobs:
       - name: Check formatting
         run: python3 dev/check_format.py
 
+  # clang-tidy needs a compile database, which requires a real CMake configure with
+  # dependencies fetched; the glfw configure on macos is the cheapest one CI already exercises
+  tidy:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Environment
+        id: setup-environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: glfw
+          os: macos-latest
+      # install into the same interpreter that runs check_tidy.py: the runner's
+      # `pip` belongs to another python, and PATH holds setup-cpp's own clang-tidy
+      - name: Install clang-tidy
+        run: python3 -m pip install --break-system-packages clang-tidy==22.1.7
+      # dependency downloads during the configure fail on transient network errors, retry cheaply
+      - name: Configure
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            python3 build.py --framework glfw --config Release --clangd ${{ steps.setup-environment.outputs.build-args }} && exit 0
+            echo "configure attempt ${attempt} failed"
+            sleep 20
+          done
+          exit 1
+      - name: Check clang-tidy
+        run: python3 dev/check_tidy.py
+
   ci:
     if: always()
-    needs: [changes, build, format]
+    needs: [changes, build, format, tidy]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

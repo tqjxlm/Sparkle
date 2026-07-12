@@ -89,7 +89,7 @@ RHIResourceRef<RHIImageView> RHIImage::GetView(RHIContext *rhi, const RHIImageVi
         return found->second;
     }
 
-    auto view = rhi->CreateImageView(this, std::move(attribute));
+    auto view = rhi->CreateImageView(this, attribute);
 
     image_views_.emplace(attribute, view);
 

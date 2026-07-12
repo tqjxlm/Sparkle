@@ -120,7 +120,7 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     Profiler::RegisterThreadForProfiling("Main");
 #endif
 
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(address_sanitizer)
     Log(Info, "Asan is enabled");
 #endif
@@ -145,7 +145,7 @@ bool AppFramework::Init()
 
     if (app_config_.headless)
     {
-        if (app_config_.platform == AppConfig::NativePlatform::iOS)
+        if (app_config_.platform == AppConfig::NativePlatform::IOS)
         {
             Log(Error, "Headless mode is not supported on iOS.");
             return false;
@@ -668,7 +668,7 @@ void AppFramework::ScrollCallback(double /*xoffset*/, double yoffset)
 void AppFramework::MouseButtonCallback(ClickButton button, KeyAction action, uint32_t mods)
 {
     MouseInputType input_type = MouseInputType::Move;
-    if (button == ClickButton::Primary_Left)
+    if (button == ClickButton::PrimaryLeft)
     {
         input_type = action == KeyAction::Press ? MouseInputType::Press : MouseInputType::Release;
     }
@@ -687,7 +687,7 @@ void AppFramework::MouseButtonCallback(ClickButton button, KeyAction action, uin
         return;
     }
 
-    if (button == ClickButton::Primary_Left)
+    if (button == ClickButton::PrimaryLeft)
     {
         if (action == KeyAction::Release)
         {
@@ -718,7 +718,7 @@ void AppFramework::MouseButtonCallback(ClickButton button, KeyAction action, uin
         }
     }
 
-    if (button == ClickButton::Secondary_Right)
+    if (button == ClickButton::SecondaryRight)
     {
         if (action == KeyAction::Press)
         {
@@ -761,39 +761,39 @@ void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on)
 
     switch (static_cast<NativeKeyboard>(key))
     {
-    case NativeKeyboard::KEY_ESCAPE: {
+    case NativeKeyboard::KeyEscape: {
         if (action == KeyAction::Release)
         {
             RequestExit();
         }
         break;
     }
-    case NativeKeyboard::KEY_SPACE: {
+    case NativeKeyboard::KeySpace: {
         render_config_.accumulate_key_held = (action == KeyAction::Press);
         break;
     }
-    case NativeKeyboard::KEY_UP: {
+    case NativeKeyboard::KeyUp: {
         if (action == KeyAction::Release)
         {
             camera->SetAperture(camera->GetAttribute().aperture + 1.f);
         }
         break;
     }
-    case NativeKeyboard::KEY_DOWN: {
+    case NativeKeyboard::KeyDown: {
         if (action == KeyAction::Release)
         {
             camera->SetAperture(camera->GetAttribute().aperture - 1.f);
         }
         break;
     }
-    case NativeKeyboard::KEY_P: {
+    case NativeKeyboard::KeyP: {
         if (action == KeyAction::Release)
         {
             camera->PrintPosture();
         }
         break;
     }
-    case NativeKeyboard::KEY_KP_ADD: {
+    case NativeKeyboard::KeyKpAdd: {
         if (action == KeyAction::Release)
         {
             Log(Debug, "Add debug sphere");
@@ -801,7 +801,7 @@ void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on)
         }
         break;
     }
-    case NativeKeyboard::KEY_EQUAL: {
+    case NativeKeyboard::KeyEqual: {
         if (shift_on)
         {
             // it is actually '+'
@@ -813,7 +813,7 @@ void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on)
         }
         break;
     }
-    case NativeKeyboard::KEY_MINUS: {
+    case NativeKeyboard::KeyMinus: {
         if (action == KeyAction::Release)
         {
             Log(Debug, "Remove debug sphere");

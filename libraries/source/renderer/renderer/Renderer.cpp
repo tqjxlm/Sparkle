@@ -23,16 +23,16 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
 
     switch (render_config.pipeline)
     {
-    case RenderConfig::Pipeline::cpu:
+    case RenderConfig::Pipeline::Cpu:
         renderer = std::make_unique<CPURenderer>(render_config, rhi_context, scene_render_proxy);
         break;
-    case RenderConfig::Pipeline::gpu:
+    case RenderConfig::Pipeline::Gpu:
         renderer = std::make_unique<GPURenderer>(render_config, rhi_context, scene_render_proxy);
         break;
-    case RenderConfig::Pipeline::forward:
+    case RenderConfig::Pipeline::Forward:
         renderer = std::make_unique<ForwardRenderer>(render_config, rhi_context, scene_render_proxy);
         break;
-    case RenderConfig::Pipeline::deferred:
+    case RenderConfig::Pipeline::Deferred:
         renderer = std::make_unique<DeferredRenderer>(render_config, rhi_context, scene_render_proxy);
         break;
     default:

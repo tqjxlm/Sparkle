@@ -58,8 +58,8 @@ private:
         VkImageView view = VK_NULL_HANDLE;
     };
 
-    PoolImage CreatePoolImage(const PoolTexture &desc, uint32_t width, uint32_t height, uint32_t index);
-    void DestroyPoolImage(PoolImage &pool_image);
+    static PoolImage CreatePoolImage(const PoolTexture &desc, uint32_t width, uint32_t height, uint32_t index);
+    static void DestroyPoolImage(PoolImage &pool_image);
     void InitializePoolLayouts(VkCommandBuffer command_buffer);
 
     std::vector<NrdPipeline> pipelines_;
