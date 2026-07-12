@@ -107,7 +107,9 @@ float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, out bool is_spec
                  Intersection intersection)
 {
     // enter tangent space
-    float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
+    float3 axis_u, axis_v, axis_w;
+    GetLocalAxisFromNormal(intersection.normal, intersection.tangent.xyz, axis_u, axis_v, axis_w);
+    float3 local_w_o = normalize(TransformBasisToLocal(w_o, axis_u, axis_v, axis_w));
 
     // try specular first. it may be the result of
     // 1. all metal reflection
@@ -122,7 +124,7 @@ float3 BxdfMetal(float3 w_o, out float3 w_i, out float out_pdf, out bool is_spec
     }
 
     // back to world space
-    w_i = normalize(TransformBasisToWorld(result.local_w_i, intersection.normal, intersection.tangent.xyz));
+    w_i = normalize(TransformBasisToWorld(result.local_w_i, axis_u, axis_v, axis_w));
     out_pdf = result.pdf;
 
     return result.throughput;
@@ -135,7 +137,9 @@ float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, out bool is_
     is_specular_lobe = true;
 
     // enter tangent space
-    float3 local_w_o = normalize(TransformBasisToLocal(w_o, intersection.normal, intersection.tangent.xyz));
+    float3 axis_u, axis_v, axis_w;
+    GetLocalAxisFromNormal(intersection.normal, intersection.tangent.xyz, axis_u, axis_v, axis_w);
+    float3 local_w_o = normalize(TransformBasisToLocal(w_o, axis_u, axis_v, axis_w));
     float3 local_w_i;
 
     // Perfect dielectric materials
@@ -161,7 +165,7 @@ float3 BxdfDieletric(float3 w_o, out float3 w_i, out float out_pdf, out bool is_
     }
 
     // back to world space
-    w_i = normalize(TransformBasisToWorld(local_w_i, intersection.normal, intersection.tangent.xyz));
+    w_i = normalize(TransformBasisToWorld(local_w_i, axis_u, axis_v, axis_w));
 
     return mat_param.base_color;
 }
