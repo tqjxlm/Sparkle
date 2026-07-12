@@ -27,7 +27,7 @@ RHIResourceRef<RHIImage> MaterialRenderProxy::CreateAndRegisterTexture(RHIContex
     if (!image)
     {
         return rhi->GetOrCreateDummyTexture(RHIImage::Attribute{
-            .format = PixelFormat::R8G8B8A8_SRGB,
+            .format = PixelFormat::R8G8B8A8Srgb,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,

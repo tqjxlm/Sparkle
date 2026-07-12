@@ -26,9 +26,9 @@
 
     unichar keychar = (text.length > 0) ? [text.lowercaseString characterAtIndex:0] : 0;
     // support keyboards with no escape key
-    if (keychar == static_cast<unichar>(sparkle::NativeKeyboard::KEY_DELETE))
+    if (keychar == static_cast<unichar>(sparkle::NativeKeyboard::KeyDelete))
     {
-        keychar = static_cast<unichar>(sparkle::NativeKeyboard::KEY_ESCAPE);
+        keychar = static_cast<unichar>(sparkle::NativeKeyboard::KeyEscape);
     }
 
     app_->KeyboardCallback(keychar, sparkle::AppFramework::KeyAction::Press, shift_on);
@@ -59,13 +59,13 @@
 {
     auto point = [self getMouseLocalPoint:theEvent];
     app_->CursorPositionCallback(point.x, point.y);
-    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left, sparkle::AppFramework::KeyAction::Press,
+    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft, sparkle::AppFramework::KeyAction::Press,
                               0);
 }
 
 - (void)mouseUp:(NSEvent *)theEvent
 {
-    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
+    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
                               sparkle::AppFramework::KeyAction::Release, 0);
 }
 
@@ -73,13 +73,13 @@
 {
     auto point = [self getMouseLocalPoint:theEvent];
     app_->CursorPositionCallback(point.x, point.y);
-    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Secondary_Right,
+    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::SecondaryRight,
                               sparkle::AppFramework::KeyAction::Press, 0);
 }
 
 - (void)rightMouseUp:(NSEvent *)theEvent
 {
-    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Secondary_Right,
+    app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::SecondaryRight,
                               sparkle::AppFramework::KeyAction::Release, 0);
 }
 

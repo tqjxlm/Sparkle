@@ -85,9 +85,9 @@
         auto location = [recognizer locationInView:self];
         auto scaled_location = [self scaledLocationInAppCoordinates:location];
         app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
+        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
                                   sparkle::AppFramework::KeyAction::Press, 0);
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
+        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
                                   sparkle::AppFramework::KeyAction::Release, 0);
     }
 }
@@ -108,14 +108,14 @@
     {
     case UIGestureRecognizerStateBegan:
         app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
+        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
                                   sparkle::AppFramework::KeyAction::Press, 0);
         break;
     case UIGestureRecognizerStateChanged:
         app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
         break;
     case UIGestureRecognizerStateEnded:
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::Primary_Left,
+        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
                                   sparkle::AppFramework::KeyAction::Release, 0);
         break;
     default:

@@ -33,7 +33,7 @@ void AppConfig::Init()
 #if PLATFORM_MACOS
     platform = NativePlatform::MacOS;
 #elif PLATFORM_IOS
-    platform = NativePlatform::iOS;
+    platform = NativePlatform::IOS;
 #elif PLATFORM_ANDROID
     platform = NativePlatform::Android;
 #elif PLATFORM_WINDOWS

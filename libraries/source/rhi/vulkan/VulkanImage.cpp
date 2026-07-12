@@ -80,19 +80,19 @@ void VulkanImage::TransitionLayout(VkCommandBuffer command_buffer, const Transit
 
         switch (attributes_.format)
         {
-        case PixelFormat::B8G8R8A8_SRGB:
-        case PixelFormat::B8G8R8A8_UNORM:
-        case PixelFormat::R8G8B8A8_SRGB:
-        case PixelFormat::R8G8B8A8_UNORM:
+        case PixelFormat::B8G8R8A8Srgb:
+        case PixelFormat::B8G8R8A8Unorm:
+        case PixelFormat::R8G8B8A8Srgb:
+        case PixelFormat::R8G8B8A8Unorm:
         case PixelFormat::RGBAFloat:
         case PixelFormat::RGBAFloat16:
-        case PixelFormat::R10G10B10A2_UNORM:
-        case PixelFormat::R32_UINT:
-        case PixelFormat::R32_FLOAT:
+        case PixelFormat::R10G10B10A2Unorm:
+        case PixelFormat::R32UInt:
+        case PixelFormat::R32Float:
         case PixelFormat::RGBAUInt32:
             barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             break;
-        case PixelFormat::D24_S8:
+        case PixelFormat::D24S8:
             barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
             break;
         case PixelFormat::D32:
@@ -450,7 +450,7 @@ void VulkanImageView::DestroyHandle()
 }
 
 void VulkanImageView::WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
-                                      std::vector<VkWriteDescriptorSet> &out_set_write)
+                                      std::vector<VkWriteDescriptorSet> &out_set_write) const
 {
     auto &set_write = out_set_write.emplace_back(VkWriteDescriptorSet{});
     InitDescriptorWrite(set_write, slot, descriptor_set, 0, descriptor_type);

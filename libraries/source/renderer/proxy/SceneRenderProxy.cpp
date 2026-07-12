@@ -52,7 +52,7 @@ public:
             }
         });
 
-        typename bvh::v2::DefaultBuilder<Node>::Config config;
+        bvh::v2::DefaultBuilder<Node>::Config config;
         config.quality = bvh::v2::DefaultBuilder<Node>::Quality::High;
         bvh_ = bvh::v2::DefaultBuilder<Node>::build(thread_pool, bboxes, centers, config);
 

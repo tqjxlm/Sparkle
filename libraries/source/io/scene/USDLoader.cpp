@@ -156,7 +156,7 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
         bool is_srgb = image.colorSpace == tinyusdz::tydra::ColorSpace::sRGB ||
                        image.usdColorSpace == tinyusdz::tydra::ColorSpace::Lin_sRGB;
 
-        format = is_srgb ? PixelFormat::R8G8B8A8_SRGB : PixelFormat::R8G8B8A8_UNORM;
+        format = is_srgb ? PixelFormat::R8G8B8A8Srgb : PixelFormat::R8G8B8A8Unorm;
         break;
     }
     case tinyusdz::tydra::ComponentType::Half:

@@ -47,6 +47,7 @@ void RHIShaderResourceSet::UpdateResourceHash() const
 {
     resource_hash_ = 0;
 
+    // NOLINTNEXTLINE(modernize-loop-convert): slot is used by the assert, which is compiled out in Release
     for (auto slot = 0u; slot < bindings_.size(); slot++)
     {
         const auto *binding = bindings_[slot];
@@ -77,6 +78,7 @@ void RHIShaderResourceSet::UpdateLayoutHash()
 
     ASSERT(!bindings_.empty());
 
+    // NOLINTNEXTLINE(modernize-loop-convert): slot is used by the assert, which is compiled out in Release
     for (auto slot = 0u; slot < bindings_.size(); slot++)
     {
         auto *binding = bindings_[slot];

@@ -10,7 +10,7 @@ struct AppConfig : public ConfigCollection
     {
         Windows,
         MacOS,
-        iOS,
+        IOS,
         Android,
         Linux
     };

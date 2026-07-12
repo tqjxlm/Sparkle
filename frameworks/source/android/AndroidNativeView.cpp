@@ -388,7 +388,7 @@ void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramewo
             auto app_v = to_app_space(v);
             main_app->CursorPositionCallback(app_v.x(), app_v.y());
 
-            main_app->MouseButtonCallback(AppFramework::ClickButton::Primary_Left, AppFramework::KeyAction::Press, 0);
+            main_app->MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Press, 0);
 
             is_draging_ = true;
         }
@@ -405,7 +405,7 @@ void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramewo
         {
             ASSERT(is_draging_);
 
-            main_app->MouseButtonCallback(AppFramework::ClickButton::Primary_Left, AppFramework::KeyAction::Release, 0);
+            main_app->MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Release, 0);
 
             is_draging_ = false;
         }
@@ -448,7 +448,7 @@ void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramewo
                 pinch_detector_.GetPointer(v);
                 auto app_v = to_app_space(v);
                 main_app->CursorPositionCallback(app_v.x(), app_v.y());
-                main_app->MouseButtonCallback(AppFramework::ClickButton::Primary_Left, AppFramework::KeyAction::Press,
+                main_app->MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Press,
                                               0);
             }
 

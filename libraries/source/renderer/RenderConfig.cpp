@@ -10,7 +10,7 @@
 namespace sparkle
 {
 static ConfigValue<std::string> config_pipeline("pipeline", "render pipeline", "renderer",
-                                                Enum2Str<RenderConfig::Pipeline::forward>(), true);
+                                                Enum2Str<RenderConfig::Pipeline::Forward>(), true);
 static ConfigValue<std::string> config_output_image("output_image", "output image", "renderer",
                                                     Enum2Str<RenderConfig::OutputImage::SceneColor>(), true);
 static ConfigValue<std::string> config_debug_mode("debug_mode", "debug mode", "renderer",
@@ -84,9 +84,9 @@ static RenderConfig::Pipeline GetFallbackRenderMode(RenderConfig::Pipeline mode)
 {
     switch (mode)
     {
-    case RenderConfig::Pipeline::gpu:
-    case RenderConfig::Pipeline::deferred:
-        return RenderConfig::Pipeline::forward;
+    case RenderConfig::Pipeline::Gpu:
+    case RenderConfig::Pipeline::Deferred:
+        return RenderConfig::Pipeline::Forward;
     default:
         return mode;
     }
@@ -109,7 +109,7 @@ void RenderConfig::Validate()
         Log(Info, "effective pipeline: {}", Enum2Str<Pipeline>(pipeline));
     }
 
-    if (pipeline == Pipeline::cpu || pipeline == Pipeline::gpu)
+    if (pipeline == Pipeline::Cpu || pipeline == Pipeline::Gpu)
     {
         if (use_prepass)
         {

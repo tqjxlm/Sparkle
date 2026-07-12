@@ -14,7 +14,7 @@ namespace sparkle
 {
 VulkanUiHandler::VulkanUiHandler() : RHIUiHandler("VulkanUiHandler")
 {
-#if defined(VK_NO_PROTOTYPES)
+#ifdef VK_NO_PROTOTYPES
     auto func_loader = [](const char *func_name, void * /*handler*/) {
         PFN_vkVoidFunction instance_addr = vkGetInstanceProcAddr(context->GetInstance(), func_name);
         if (instance_addr)

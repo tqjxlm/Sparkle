@@ -3,7 +3,7 @@
 namespace sparkle
 {
 PrimitiveRenderProxy::PrimitiveRenderProxy(std::string_view name, AABB local_bound)
-    : local_bound_(std::move(local_bound)), name_(std::move(name))
+    : local_bound_(std::move(local_bound)), name_(name)
 {
     ASSERT(!name.empty());
 

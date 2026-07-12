@@ -215,7 +215,7 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
 
     {
         auto dummy_texture_2d = rhi->GetOrCreateDummyTexture(RHIImage::Attribute{
-            .format = PixelFormat::R8G8B8A8_SRGB,
+            .format = PixelFormat::R8G8B8A8Srgb,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,

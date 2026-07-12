@@ -11,20 +11,20 @@ struct RenderConfig : public ConfigCollection
 {
     enum class Pipeline : uint8_t
     {
-        cpu,
-        gpu,
-        forward,
-        // forward_rt,
-        deferred,
-        // deferred_rt,
+        Cpu,
+        Gpu,
+        Forward,
+        // ForwardRt,
+        Deferred,
+        // DeferredRt,
     };
 
     enum class OutputImage : uint8_t
     {
         SceneColor,
-        IBL_BrdfTexture,
-        IBL_DiffuseMap,
-        IBL_SpecularMap,
+        IBLBrdfTexture,
+        IBLDiffuseMap,
+        IBLSpecularMap,
     };
 
     enum class DebugMode : uint8_t
@@ -45,17 +45,17 @@ struct RenderConfig : public ConfigCollection
 
     [[nodiscard]] bool IsCPURenderMode() const
     {
-        return pipeline == Pipeline::cpu;
+        return pipeline == Pipeline::Cpu;
     }
 
     [[nodiscard]] bool IsRayTracingMode() const
     {
-        return pipeline == Pipeline::gpu;
+        return pipeline == Pipeline::Gpu;
     }
 
     [[nodiscard]] bool IsRaterizationMode() const
     {
-        return pipeline == Pipeline::forward || pipeline == Pipeline::deferred;
+        return pipeline == Pipeline::Forward || pipeline == Pipeline::Deferred;
     }
 
     void Init();
