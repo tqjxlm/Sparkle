@@ -15,8 +15,6 @@ float3 GetWorldPositionFromDepth(float depth, float2 uv, View view)
     float4 view_space = mul(view.InvProjectionMatrix, ndc);
     view_space /= view_space.w;
 
-    view_space.y = -view_space.y;
-
     float4 world_space = mul(view.InvViewMatrix, view_space);
     return world_space.xyz;
 }
