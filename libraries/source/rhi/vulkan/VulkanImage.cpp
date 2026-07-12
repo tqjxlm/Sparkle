@@ -450,7 +450,7 @@ void VulkanImageView::DestroyHandle()
 }
 
 void VulkanImageView::WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
-                                      std::vector<VkWriteDescriptorSet> &out_set_write)
+                                      std::vector<VkWriteDescriptorSet> &out_set_write) const
 {
     auto &set_write = out_set_write.emplace_back(VkWriteDescriptorSet{});
     InitDescriptorWrite(set_write, slot, descriptor_set, 0, descriptor_type);

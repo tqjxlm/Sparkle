@@ -364,7 +364,7 @@ public:
     void DestroyHandle();
 
     void WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
-                         std::vector<VkWriteDescriptorSet> &out_set_write);
+                         std::vector<VkWriteDescriptorSet> &out_set_write) const;
 
 private:
     VkImageView image_view_;
