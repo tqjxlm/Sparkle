@@ -306,7 +306,12 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
         if (surface_shader.metallic.is_texture())
         {
             // Curretly we assume metallic and roughness are packed into a single texture.
-            ASSERT_EQUAL(surface_shader.metallic.texture_id, surface_shader.roughness.texture_id);
+            // the b/g channel connections may get distinct tydra texture entries, but must share one image.
+            ASSERT(surface_shader.roughness.is_texture());
+
+            const auto &textures = ctx.render_scene.textures;
+            ASSERT_EQUAL(textures[static_cast<size_t>(surface_shader.metallic.texture_id)].texture_image_id,
+                         textures[static_cast<size_t>(surface_shader.roughness.texture_id)].texture_image_id);
 
             material_resource.metallic_roughness_texture =
                 CreateTexture(ctx, static_cast<size_t>(surface_shader.metallic.texture_id));
