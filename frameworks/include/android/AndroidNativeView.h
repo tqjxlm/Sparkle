@@ -5,7 +5,7 @@
 #include "application/NativeView.h"
 #include "core/Exception.h"
 
-#include "GestureDetector.h"
+#include <game-activity/native_app_glue/android_native_app_glue.h>
 
 struct ANativeWindowDeleter
 {
@@ -61,10 +61,6 @@ public:
     void ShutdownUiSystem() override;
     void TickUiSystem() override;
 
-    void HandleGesture(GameActivityMotionEvent &event, AppFramework *main_app);
-
-    void ResetInputEvents();
-
     static void OnAppCmd(android_app *app, int32_t cmd);
 
 private:
@@ -80,14 +76,6 @@ private:
     bool should_close_ = false;
     bool ui_enabled_ = false;
     bool headless_ = false;
-
-    PinchDetector pinch_detector_;
-    DragDetector drag_detector_;
-
-    bool is_pinching_ = false;
-    bool is_draging_ = false;
-
-    float pinch_length_ = 0;
 
     int window_width_ = 0;
     int window_height_ = 0;

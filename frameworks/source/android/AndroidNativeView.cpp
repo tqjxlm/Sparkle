@@ -4,13 +4,12 @@
 
 #include "android/AndroidFileManager.h"
 #include "application/AppFramework.h"
+#include "application/InputEvents.h"
 #include "core/Exception.h"
 #include "core/task/TaskManager.h"
 #include "rhi/VulkanRHI.h"
 
 #include <imgui_impl_android.h>
-
-#include <cfloat>
 
 extern "C" bool KeyEventFilter(const GameActivityKeyEvent * /*event*/)
 {
@@ -24,134 +23,42 @@ extern "C" bool MotionEventFilter(const GameActivityMotionEvent * /*event*/)
 
 namespace sparkle
 {
-static bool IsTouchToolType(int32_t tool_type)
+// motion events are treated as touch pointers regardless of tool type.
+// ui space is render-target pixels (rawX/rawY scaled by gui_scale).
+static void PushMotionEvent(const GameActivityMotionEvent &event, AppFramework *main_app, const Vector2 &gui_scale)
 {
-    return tool_type == AMOTION_EVENT_TOOL_TYPE_FINGER || tool_type == AMOTION_EVENT_TOOL_TYPE_UNKNOWN;
-}
+    const int32_t action = event.action;
+    const uint32_t flags = action & AMOTION_EVENT_ACTION_MASK;
+    const int32_t changed_index =
+        (action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
 
-static void ImGuiHandleAndroidInputEvent(const GameActivityMotionEvent *input_event, const Vector2 &gui_scale)
-{
-    ImGuiIO &io = ImGui::GetIO();
-    constexpr float PixelsPerWheelStep = 80.f;
-    constexpr float TouchScrollStartDistance = 8.f;
-    static int32_t touch_pointer_id = -1;
-    static Vector2 touch_start_pos = Vector2::Zero();
-    static Vector2 last_touch_pos = Vector2::Zero();
-    static bool touch_scrolling = false;
-
-    int32_t event_action = input_event->action;
-    int32_t event_pointer_index =
-        (event_action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
-    const auto &axis = input_event->pointers[event_pointer_index];
-    int32_t tool_type = axis.toolType;
-    uint32_t flags = event_action & AMOTION_EVENT_ACTION_MASK;
-
-    Vector2 event_pos{axis.rawX * gui_scale.x(), axis.rawY * gui_scale.y()};
-
-    switch (tool_type)
-    {
-    case AMOTION_EVENT_TOOL_TYPE_MOUSE:
-        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
-        break;
-    case AMOTION_EVENT_TOOL_TYPE_STYLUS:
-    case AMOTION_EVENT_TOOL_TYPE_ERASER:
-        io.AddMouseSourceEvent(ImGuiMouseSource_Pen);
-        break;
-    case AMOTION_EVENT_TOOL_TYPE_FINGER:
-    default:
-        io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
-        break;
-    }
+    auto push = [&](PointerAction pointer_action, int32_t pointer_index) {
+        const auto &pointer = event.pointers[pointer_index];
+        main_app->PushInputEvent(
+            PointerEvent{.device = PointerDevice::Touch,
+                         .action = pointer_action,
+                         .id = static_cast<uint8_t>(pointer.id),
+                         .position = Vector2{pointer.rawX * gui_scale.x(), pointer.rawY * gui_scale.y()}});
+    };
 
     switch (flags)
     {
     case AMOTION_EVENT_ACTION_DOWN:
-    case AMOTION_EVENT_ACTION_UP: {
-        // Physical mouse buttons (and probably other physical devices) also invoke the actions
-        // AMOTION_EVENT_ACTION_DOWN/_UP, but we have to process them separately to identify the actual button pressed.
-        // This is done below via AMOTION_EVENT_ACTION_BUTTON_PRESS/_RELEASE. Here, we only process "FINGER" input (and
-        // "UNKNOWN", as a fallback).
-        if (IsTouchToolType(tool_type))
-        {
-            if (flags == AMOTION_EVENT_ACTION_DOWN)
-            {
-                io.AddMousePosEvent(event_pos.x(), event_pos.y());
-                touch_pointer_id = axis.id;
-                touch_start_pos = event_pos;
-                last_touch_pos = event_pos;
-                touch_scrolling = false;
-            }
-            else
-            {
-                const bool is_active_touch = touch_pointer_id == axis.id;
-                if (is_active_touch && !touch_scrolling)
-                {
-                    // Treat a short single-finger gesture as a tap/click.
-                    io.AddMousePosEvent(event_pos.x(), event_pos.y());
-                    io.AddMouseButtonEvent(0, true);
-                    io.AddMouseButtonEvent(0, false);
-                }
-                touch_pointer_id = -1;
-                touch_scrolling = false;
-                io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
-            }
-        }
-        break;
-    }
     case AMOTION_EVENT_ACTION_POINTER_DOWN:
+        push(PointerAction::Down, changed_index);
+        break;
+    case AMOTION_EVENT_ACTION_UP:
     case AMOTION_EVENT_ACTION_POINTER_UP:
+        push(PointerAction::Up, changed_index);
+        break;
+    case AMOTION_EVENT_ACTION_MOVE:
+        for (uint32_t i = 0; i < event.pointerCount; i++)
+        {
+            push(PointerAction::Move, static_cast<int32_t>(i));
+        }
+        break;
     case AMOTION_EVENT_ACTION_CANCEL:
-        if (IsTouchToolType(tool_type))
-        {
-            touch_pointer_id = -1;
-            touch_scrolling = false;
-            io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
-        }
-        break;
-    case AMOTION_EVENT_ACTION_BUTTON_PRESS:
-    case AMOTION_EVENT_ACTION_BUTTON_RELEASE: {
-        int32_t button_state = input_event->buttonState;
-        io.AddMouseButtonEvent(0, (button_state & AMOTION_EVENT_BUTTON_PRIMARY) != 0);
-        io.AddMouseButtonEvent(1, (button_state & AMOTION_EVENT_BUTTON_SECONDARY) != 0);
-        io.AddMouseButtonEvent(2, (button_state & AMOTION_EVENT_BUTTON_TERTIARY) != 0);
-        break;
-    }
-    case AMOTION_EVENT_ACTION_HOVER_MOVE: // Hovering: Tool moves while NOT pressed (such as a physical mouse)
-        io.AddMousePosEvent(event_pos.x(), event_pos.y());
-        break;
-    case AMOTION_EVENT_ACTION_MOVE: { // Touch pointer moves while DOWN
-        const bool is_touch_tool = IsTouchToolType(tool_type);
-        const bool is_single_touch_pointer =
-            is_touch_tool && input_event->pointerCount == 1 && touch_pointer_id == axis.id;
-        if (is_single_touch_pointer)
-        {
-            auto touch_delta = event_pos - last_touch_pos;
-            if (!touch_scrolling)
-            {
-                io.AddMousePosEvent(event_pos.x(), event_pos.y());
-                auto touch_drag = event_pos - touch_start_pos;
-                if (touch_drag.squaredNorm() >= TouchScrollStartDistance * TouchScrollStartDistance)
-                {
-                    touch_scrolling = true;
-                }
-            }
-
-            if (touch_scrolling && touch_delta.squaredNorm() > 0.f)
-            {
-                auto wheel_delta = touch_delta / PixelsPerWheelStep;
-                io.AddMouseWheelEvent(wheel_delta.x(), wheel_delta.y());
-            }
-
-            last_touch_pos = event_pos;
-            break;
-        }
-
-        io.AddMousePosEvent(event_pos.x(), event_pos.y());
-        break;
-    }
-    case AMOTION_EVENT_ACTION_SCROLL:
-        io.AddMouseWheelEvent(GameActivityPointerAxes_getAxisValue(&axis, AMOTION_EVENT_AXIS_HSCROLL),
-                              GameActivityPointerAxes_getAxisValue(&axis, AMOTION_EVENT_AXIS_VSCROLL));
+        push(PointerAction::Cancel, 0);
         break;
     default:
         break;
@@ -357,106 +264,6 @@ void AndroidNativeView::OnAppCmd(android_app *app_state, int32_t cmd)
     }
 }
 
-void AndroidNativeView::ResetInputEvents()
-{
-    auto *main_app = static_cast<AppFramework *>(app_state_->userData);
-    is_draging_ = false;
-    is_pinching_ = false;
-    pinch_length_ = 0.f;
-    drag_detector_ = DragDetector{};
-    pinch_detector_ = PinchDetector{};
-
-    main_app->ResetInputEvents();
-}
-
-void AndroidNativeView::HandleGesture(GameActivityMotionEvent &event, AppFramework *main_app)
-{
-    auto to_app_space = [this](const Vector2 &point) {
-        return Vector2{point.x() * gui_scale_.x(), point.y() * gui_scale_.y()};
-    };
-
-    GESTURE_STATE drag_state = drag_detector_.Detect(&event);
-    GESTURE_STATE pinch_state = pinch_detector_.Detect(&event);
-
-    if (!is_pinching_)
-    {
-        // Handle drag state
-        if (drag_state & GESTURE_STATE_START)
-        {
-            Vector2 v;
-            drag_detector_.GetPointer(v);
-            auto app_v = to_app_space(v);
-            main_app->CursorPositionCallback(app_v.x(), app_v.y());
-
-            main_app->MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Press, 0);
-
-            is_draging_ = true;
-        }
-        else if (drag_state & GESTURE_STATE_MOVE)
-        {
-            ASSERT(is_draging_);
-
-            Vector2 v;
-            drag_detector_.GetPointer(v);
-            auto app_v = to_app_space(v);
-            main_app->CursorPositionCallback(app_v.x(), app_v.y());
-        }
-        else if (drag_state & GESTURE_STATE_END)
-        {
-            ASSERT(is_draging_);
-
-            main_app->MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Release, 0);
-
-            is_draging_ = false;
-        }
-    }
-
-    if (!is_draging_)
-    {
-        // Handle pinch state
-        if (pinch_state & GESTURE_STATE_START)
-        {
-            // Start new pinch
-            Vector2 v1;
-            Vector2 v2;
-            pinch_detector_.GetPointers(v1, v2);
-            pinch_length_ = (v1 - v2).norm();
-
-            is_pinching_ = true;
-        }
-        else if (pinch_state & GESTURE_STATE_MOVE)
-        {
-            ASSERT(is_pinching_);
-
-            Vector2 v1;
-            Vector2 v2;
-            pinch_detector_.GetPointers(v1, v2);
-            auto this_pinch_length = (v1 - v2).norm();
-            main_app->ScrollCallback(0, (pinch_length_ - this_pinch_length) * 0.1);
-            pinch_length_ = this_pinch_length;
-        }
-        else if (pinch_state & GESTURE_STATE_END)
-        {
-            ASSERT(is_pinching_);
-
-            pinch_length_ = 0;
-
-            if (pinch_detector_.GetNumPointers() > 0)
-            {
-                is_draging_ = true;
-                Vector2 v;
-                pinch_detector_.GetPointer(v);
-                auto app_v = to_app_space(v);
-                main_app->CursorPositionCallback(app_v.x(), app_v.y());
-                main_app->MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Press,
-                                              0);
-            }
-
-            is_pinching_ = false;
-        }
-    }
-}
-
 void AndroidNativeView::Reset(android_app *app_state)
 {
     app_state_ = app_state;
@@ -504,18 +311,9 @@ void AndroidNativeView::HandleInputEvents()
         return;
     }
 
-    // handle gui first, as it may consume the input events
     for (auto i = 0u; i < input_buffer->motionEventsCount; i++)
     {
-        auto &event = input_buffer->motionEvents[i];
-        ImGuiHandleAndroidInputEvent(&event, gui_scale_);
-    }
-
-    // handle motion events
-    for (auto i = 0u; i < input_buffer->motionEventsCount; i++)
-    {
-        auto &event = input_buffer->motionEvents[i];
-        HandleGesture(event, main_app);
+        PushMotionEvent(input_buffer->motionEvents[i], main_app, gui_scale_);
     }
 
     android_app_clear_motion_events(input_buffer);

@@ -274,7 +274,7 @@ bool UiManager::IsPointerOverUi(float x, float y)
     return hovered_window != nullptr;
 }
 
-bool UiManager::IsHanldingKeyboradEvent()
+bool UiManager::IsHandlingKeyboardEvent()
 {
     if (!io_)
     {

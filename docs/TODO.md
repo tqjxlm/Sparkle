@@ -49,7 +49,7 @@
 
 * [ ] modularize core libraries
 * [ ] rhi thread
-* [ ] event based input handling
+* [x] event based input handling
 
 ## Known Issues
 
