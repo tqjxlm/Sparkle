@@ -66,7 +66,8 @@ a `TestCase` or a UI action.
 ## Round-trip test
 
 The `usd_round_trip` test case renders the current scene, exports it, loads the exported file back
-and renders it again. The driver script compares both screenshots with FLIP:
+and renders it again. The driver script first gates the original render against the same ground
+truth as `dev/functional_test.py`, then FLIP-compares the reimported render against the original:
 
 ```bash
 python3 tests/usd/usd_roundtrip_test.py --framework glfw --headless
@@ -74,4 +75,6 @@ python3 tests/usd/usd_roundtrip_test.py --framework glfw --headless
 
 It exercises the default TestScene, which covers every exportable feature: analytic spheres, mesh
 primitives, glTF-imported models with full PBR texture sets, dielectric glass, a directional light
-and a sky light. See [Test.md](Test.md) for general test-case mechanics.
+and a sky light. CI runs it on the windows/glfw/Release job (see
+[.github/actions/functional-test](../.github/actions/functional-test/action.yml)). See
+[Test.md](Test.md) for general test-case mechanics.

@@ -39,6 +39,7 @@ runs:
 
         "$VENV_PY" --version
         "$VENV_PY" dev/functional_test.py --framework ${{ inputs.framework }} --pipeline forward --headless
+        "$VENV_PY" tests/usd/usd_roundtrip_test.py --framework ${{ inputs.framework }} --pipeline forward --headless --skip_build
 
     - name: Upload Test Screenshot
       if: >-

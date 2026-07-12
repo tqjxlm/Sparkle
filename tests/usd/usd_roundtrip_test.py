@@ -21,9 +21,9 @@ import functional_test  # noqa: E402  (reuses screenshot dir/image helpers)
 ORIGINAL_NAME = "usd_round_trip_original.png"
 REIMPORTED_NAME = "usd_round_trip_reimported.png"
 
-# self-comparison in the same run and configuration, so the bar is stricter than the
-# cross-machine ground-truth threshold in dev/functional_test.py
-FLIP_THRESHOLD = 0.05
+# self-comparison in the same run and configuration, so the noise floor is near zero. mean FLIP
+# dilutes localized errors (a small broken region barely moves it), so the threshold must stay tight.
+FLIP_THRESHOLD = 0.01
 
 
 def parse_args():
