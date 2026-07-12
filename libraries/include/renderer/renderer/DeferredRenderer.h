@@ -13,7 +13,7 @@ public:
 
     [[nodiscard]] RenderConfig::Pipeline GetRenderMode() const override
     {
-        return RenderConfig::Pipeline::deferred;
+        return RenderConfig::Pipeline::Deferred;
     }
 
     void Render() override;

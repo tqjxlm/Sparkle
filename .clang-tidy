@@ -152,9 +152,7 @@ CheckOptions:
   - { key: readability-identifier-naming.ClassMemberSuffix, value: _ }
   - { key: readability-identifier-naming.PrivateMemberSuffix, value: _ }
   - { key: readability-identifier-naming.ProtectedMemberSuffix, value: _ }
-  # enum constant naming is not enforced: `Camel_Case` is not a valid style
-  # (clang-tidy 22 rejects it) and the codebase mixes CamelCase and
-  # Camel_Snake_Case
+  - { key: readability-identifier-naming.EnumConstantCase, value: CamelCase }
   - {
       key: readability-identifier-naming.ConstexprVariableCase,
       value: CamelCase,

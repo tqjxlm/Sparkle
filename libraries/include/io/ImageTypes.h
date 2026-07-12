@@ -7,18 +7,18 @@ namespace sparkle
 {
 enum class PixelFormat : uint8_t
 {
-    B8G8R8A8_SRGB,
-    B8G8R8A8_UNORM,
-    R8G8B8A8_SRGB,
-    R8G8B8A8_UNORM,
-    R32_UINT,
-    R32_FLOAT,
-    D24_S8,
+    B8G8R8A8Srgb,
+    B8G8R8A8Unorm,
+    R8G8B8A8Srgb,
+    R8G8B8A8Unorm,
+    R32UInt,
+    R32Float,
+    D24S8,
     D32,
     RGBAFloat,
     RGBAFloat16,
     RGBAUInt32,
-    R10G10B10A2_UNORM,
+    R10G10B10A2Unorm,
     Count
 };
 
@@ -26,20 +26,20 @@ constexpr unsigned GetFormatChannelCount(PixelFormat format)
 {
     switch (format)
     {
-    case PixelFormat::B8G8R8A8_SRGB:
-    case PixelFormat::B8G8R8A8_UNORM:
-    case PixelFormat::R8G8B8A8_SRGB:
-    case PixelFormat::R8G8B8A8_UNORM:
+    case PixelFormat::B8G8R8A8Srgb:
+    case PixelFormat::B8G8R8A8Unorm:
+    case PixelFormat::R8G8B8A8Srgb:
+    case PixelFormat::R8G8B8A8Unorm:
     case PixelFormat::RGBAFloat:
-    case PixelFormat::R10G10B10A2_UNORM:
+    case PixelFormat::R10G10B10A2Unorm:
     case PixelFormat::RGBAFloat16:
     case PixelFormat::RGBAUInt32:
         return 4;
-    case PixelFormat::D24_S8:
+    case PixelFormat::D24S8:
         return 2;
     case PixelFormat::D32:
-    case PixelFormat::R32_UINT:
-    case PixelFormat::R32_FLOAT:
+    case PixelFormat::R32UInt:
+    case PixelFormat::R32Float:
         return 1;
     case PixelFormat::Count:
     default:
@@ -53,15 +53,15 @@ constexpr unsigned GetPixelSize(PixelFormat format)
 {
     switch (format)
     {
-    case PixelFormat::B8G8R8A8_SRGB:
-    case PixelFormat::B8G8R8A8_UNORM:
-    case PixelFormat::R8G8B8A8_SRGB:
-    case PixelFormat::R8G8B8A8_UNORM:
-    case PixelFormat::R10G10B10A2_UNORM:
-    case PixelFormat::D24_S8:
+    case PixelFormat::B8G8R8A8Srgb:
+    case PixelFormat::B8G8R8A8Unorm:
+    case PixelFormat::R8G8B8A8Srgb:
+    case PixelFormat::R8G8B8A8Unorm:
+    case PixelFormat::R10G10B10A2Unorm:
+    case PixelFormat::D24S8:
     case PixelFormat::D32:
-    case PixelFormat::R32_UINT:
-    case PixelFormat::R32_FLOAT:
+    case PixelFormat::R32UInt:
+    case PixelFormat::R32Float:
         return sizeof(uint32_t);
     case PixelFormat::RGBAFloat:
     case PixelFormat::RGBAUInt32:
@@ -80,18 +80,18 @@ constexpr bool IsSRGBFormat(PixelFormat pixel_format)
 {
     switch (pixel_format)
     {
-    case PixelFormat::R8G8B8A8_SRGB:
-    case PixelFormat::B8G8R8A8_SRGB:
+    case PixelFormat::R8G8B8A8Srgb:
+    case PixelFormat::B8G8R8A8Srgb:
         return true;
-    case PixelFormat::B8G8R8A8_UNORM:
-    case PixelFormat::R8G8B8A8_UNORM:
-    case PixelFormat::D24_S8:
+    case PixelFormat::B8G8R8A8Unorm:
+    case PixelFormat::R8G8B8A8Unorm:
+    case PixelFormat::D24S8:
     case PixelFormat::D32:
     case PixelFormat::RGBAFloat:
     case PixelFormat::RGBAFloat16:
-    case PixelFormat::R10G10B10A2_UNORM:
-    case PixelFormat::R32_UINT:
-    case PixelFormat::R32_FLOAT:
+    case PixelFormat::R10G10B10A2Unorm:
+    case PixelFormat::R32UInt:
+    case PixelFormat::R32Float:
     case PixelFormat::RGBAUInt32:
         return false;
     case PixelFormat::Count:
@@ -106,18 +106,18 @@ constexpr bool IsSwizzeldFormat(PixelFormat pixel_format)
 {
     switch (pixel_format)
     {
-    case PixelFormat::B8G8R8A8_SRGB:
-    case PixelFormat::B8G8R8A8_UNORM:
+    case PixelFormat::B8G8R8A8Srgb:
+    case PixelFormat::B8G8R8A8Unorm:
         return true;
-    case PixelFormat::R8G8B8A8_SRGB:
-    case PixelFormat::R8G8B8A8_UNORM:
-    case PixelFormat::D24_S8:
+    case PixelFormat::R8G8B8A8Srgb:
+    case PixelFormat::R8G8B8A8Unorm:
+    case PixelFormat::D24S8:
     case PixelFormat::D32:
     case PixelFormat::RGBAFloat:
     case PixelFormat::RGBAFloat16:
-    case PixelFormat::R10G10B10A2_UNORM:
-    case PixelFormat::R32_UINT:
-    case PixelFormat::R32_FLOAT:
+    case PixelFormat::R10G10B10A2Unorm:
+    case PixelFormat::R32UInt:
+    case PixelFormat::R32Float:
     case PixelFormat::RGBAUInt32:
         return false;
     case PixelFormat::Count:

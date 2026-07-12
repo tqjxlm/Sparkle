@@ -114,7 +114,7 @@ private:
     static RHIRenderTarget::Attribute MakeAttribute()
     {
         RHIImage::Attribute image_attribute;
-        image_attribute.format = PixelFormat::R8G8B8A8_UNORM;
+        image_attribute.format = PixelFormat::R8G8B8A8Unorm;
         image_attribute.width = 64;
         image_attribute.height = 64;
         image_attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment;

@@ -17,7 +17,7 @@ public:
 
     [[nodiscard]] RenderConfig::Pipeline GetRenderMode() const override
     {
-        return RenderConfig::Pipeline::forward;
+        return RenderConfig::Pipeline::Forward;
     }
 
     void Render() override;

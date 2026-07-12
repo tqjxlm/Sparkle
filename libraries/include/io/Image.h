@@ -28,7 +28,7 @@ public:
         memcpy(pixels_.data(), pixels.data(), pixels.size());
     }
 
-    // Creates an R8G8B8A8_SRGB image from raw pixel data in the given source format.
+    // Creates an R8G8B8A8Srgb image from raw pixel data in the given source format.
     // Handles BGRA swizzle and linear-to-sRGB conversion for HDR formats.
     static Image2D CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format);
 
@@ -125,10 +125,10 @@ public:
 
         switch (pixel_format_)
         {
-        case PixelFormat::R8G8B8A8_SRGB:
-        case PixelFormat::R8G8B8A8_UNORM:
-        case PixelFormat::B8G8R8A8_SRGB:
-        case PixelFormat::B8G8R8A8_UNORM: {
+        case PixelFormat::R8G8B8A8Srgb:
+        case PixelFormat::R8G8B8A8Unorm:
+        case PixelFormat::B8G8R8A8Srgb:
+        case PixelFormat::B8G8R8A8Unorm: {
             auto color_int = utilities::VecToColor(color);
             SetPixel<Color4>(x, y, swizzle_b_g ? utilities::Rgba2Bgra(color_int) : color_int);
             break;
@@ -152,10 +152,10 @@ public:
     {
         switch (pixel_format_)
         {
-        case PixelFormat::R8G8B8A8_SRGB:
-        case PixelFormat::R8G8B8A8_UNORM:
-        case PixelFormat::B8G8R8A8_SRGB:
-        case PixelFormat::B8G8R8A8_UNORM:
+        case PixelFormat::R8G8B8A8Srgb:
+        case PixelFormat::R8G8B8A8Unorm:
+        case PixelFormat::B8G8R8A8Srgb:
+        case PixelFormat::B8G8R8A8Unorm:
             return utilities::ColorToVec(AccessPixel<Color4>(x, y));
         case PixelFormat::RGBAFloat:
             return AccessPixel<Vector4>(x, y);

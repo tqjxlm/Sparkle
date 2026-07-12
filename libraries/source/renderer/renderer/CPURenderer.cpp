@@ -24,7 +24,7 @@ CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
     : Renderer(render_config, rhi_context, scene_render_proxy),
       output_image_(image_size_.x(), image_size_.y(), PixelFormat::RGBAFloat16)
 {
-    ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::cpu);
+    ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Cpu);
 }
 
 CPURenderer::~CPURenderer() = default;

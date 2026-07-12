@@ -16,7 +16,7 @@ a SKIPPED marker instead of failing — the gpu pipeline cannot run there at all
 meaningless rather than broken. On unsupported GPUs the app silently falls back to forward
 rendering and still exits 0, so exit codes alone cannot tell "gates ran against NRD" from "gates
 ran against a forward render that trivially passes". The probe therefore requires the app's
-"effective pipeline: gpu" log line (RenderConfig::Validate) as positive proof; if the marker is
+"effective pipeline: Gpu" log line (RenderConfig::Validate) as positive proof; if the marker is
 missing for any other reason than the fallback warning, the suite fails loudly.
 
 Run:  python3 tests/nrd/run_nrd_gates.py [--skip_build] [--allow_unsupported]
@@ -55,7 +55,7 @@ def main():
     probe = build + (["--skip_build"] if args.skip_build else []) + [
         "--run", "--test_case", "screenshot", "--pipeline", "gpu", "--headless", "true", "--max_spp", "512"]
     code, output = run(probe, capture=True)
-    if "effective pipeline: gpu" not in output:
+    if "effective pipeline: Gpu" not in output:
         if args.allow_unsupported and "hardware ray tracing not supported" in output:
             print("SKIPPED: this GPU has no hardware ray tracing; the gpu pipeline (and NRD) cannot run here.")
             sys.exit(0)

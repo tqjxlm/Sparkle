@@ -22,9 +22,9 @@ static AppFramework::ClickButton GetClickButton(int button)
     switch (button)
     {
     case GLFW_MOUSE_BUTTON_LEFT:
-        return AppFramework::ClickButton::Primary_Left;
+        return AppFramework::ClickButton::PrimaryLeft;
     case GLFW_MOUSE_BUTTON_RIGHT:
-        return AppFramework::ClickButton::Secondary_Right;
+        return AppFramework::ClickButton::SecondaryRight;
     default:
         UnImplemented(button);
     }

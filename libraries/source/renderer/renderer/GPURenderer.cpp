@@ -67,7 +67,7 @@ GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
     : Renderer(render_config, rhi_context, scene_render_proxy),
       spp_logger_(1.f, false, [this](float) { MeasurePerformance(); })
 {
-    ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::gpu);
+    ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Gpu);
 
     ASSERT(rhi_->SupportsHardwareRayTracing());
 }
@@ -99,7 +99,7 @@ void GPURenderer::InitRenderResources()
     RHIRenderTarget::Attribute tone_mapping_rt_attribute;
     tone_mapping_rt_attribute.SetColorAttribute(
         RHIImage::Attribute{
-            .format = PixelFormat::B8G8R8A8_SRGB,
+            .format = PixelFormat::B8G8R8A8Srgb,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
@@ -516,7 +516,7 @@ void GPURenderer::InitSceneRenderResources()
     BindNrdGBuffer();
 
     auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::R8G8B8A8_SRGB,
+        .format = PixelFormat::R8G8B8A8Srgb,
         .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                     .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                     .filtering_method_mag = RHISampler::FilteringMethod::Nearest,

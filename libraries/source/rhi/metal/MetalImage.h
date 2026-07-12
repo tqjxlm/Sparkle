@@ -85,16 +85,16 @@ inline MTLPixelFormat GetMetalPixelFormat(PixelFormat format)
 {
     switch (format)
     {
-    case PixelFormat::B8G8R8A8_SRGB:
+    case PixelFormat::B8G8R8A8Srgb:
         return MTLPixelFormatBGRA8Unorm_sRGB;
-    case PixelFormat::B8G8R8A8_UNORM:
+    case PixelFormat::B8G8R8A8Unorm:
         return MTLPixelFormatBGRA8Unorm;
-    case PixelFormat::R8G8B8A8_SRGB:
+    case PixelFormat::R8G8B8A8Srgb:
         return MTLPixelFormatRGBA8Unorm_sRGB;
-    case PixelFormat::R8G8B8A8_UNORM:
+    case PixelFormat::R8G8B8A8Unorm:
         return MTLPixelFormatRGBA8Unorm;
 #if FRAMEWORK_MACOS
-    case PixelFormat::D24_S8:
+    case PixelFormat::D24S8:
         return MTLPixelFormatDepth24Unorm_Stencil8;
 #endif
     case PixelFormat::D32:
@@ -103,11 +103,11 @@ inline MTLPixelFormat GetMetalPixelFormat(PixelFormat format)
         return MTLPixelFormatRGBA32Float;
     case PixelFormat::RGBAFloat16:
         return MTLPixelFormatRGBA16Float;
-    case PixelFormat::R10G10B10A2_UNORM:
+    case PixelFormat::R10G10B10A2Unorm:
         return MTLPixelFormatRGB10A2Unorm;
-    case PixelFormat::R32_UINT:
+    case PixelFormat::R32UInt:
         return MTLPixelFormatR32Uint;
-    case PixelFormat::R32_FLOAT:
+    case PixelFormat::R32Float:
         return MTLPixelFormatR32Float;
     case PixelFormat::RGBAUInt32:
         return MTLPixelFormatRGBA32Uint;

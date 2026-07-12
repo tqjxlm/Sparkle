@@ -19,7 +19,7 @@ public:
 
     [[nodiscard]] RenderConfig::Pipeline GetRenderMode() const override
     {
-        return RenderConfig::Pipeline::gpu;
+        return RenderConfig::Pipeline::Gpu;
     }
 
     void Render() override;

@@ -185,13 +185,13 @@ inline VkFormat GetVkPixelFormat(PixelFormat format)
 {
     switch (format)
     {
-    case PixelFormat::B8G8R8A8_SRGB:
+    case PixelFormat::B8G8R8A8Srgb:
         return VK_FORMAT_B8G8R8A8_SRGB;
-    case PixelFormat::B8G8R8A8_UNORM:
+    case PixelFormat::B8G8R8A8Unorm:
         return VK_FORMAT_B8G8R8A8_UNORM;
-    case PixelFormat::R8G8B8A8_SRGB:
+    case PixelFormat::R8G8B8A8Srgb:
         return VK_FORMAT_R8G8B8A8_SRGB;
-    case PixelFormat::R8G8B8A8_UNORM:
+    case PixelFormat::R8G8B8A8Unorm:
         return VK_FORMAT_R8G8B8A8_UNORM;
     case PixelFormat::RGBAFloat:
         return VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -199,15 +199,15 @@ inline VkFormat GetVkPixelFormat(PixelFormat format)
         return VK_FORMAT_R16G16B16A16_SFLOAT;
     case PixelFormat::RGBAUInt32:
         return VK_FORMAT_R32G32B32A32_UINT;
-    case PixelFormat::D24_S8:
+    case PixelFormat::D24S8:
         return VK_FORMAT_D24_UNORM_S8_UINT;
     case PixelFormat::D32:
         return VK_FORMAT_D32_SFLOAT;
-    case PixelFormat::R10G10B10A2_UNORM:
+    case PixelFormat::R10G10B10A2Unorm:
         return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-    case PixelFormat::R32_UINT:
+    case PixelFormat::R32UInt:
         return VK_FORMAT_R32_UINT;
-    case PixelFormat::R32_FLOAT:
+    case PixelFormat::R32Float:
         return VK_FORMAT_R32_SFLOAT;
     default:
         ASSERT_F(false, "Unsupported image format {}", static_cast<int>(format));
@@ -282,27 +282,27 @@ inline PixelFormat VkFormatToPixelFormat(VkFormat format)
     switch (format)
     {
     case VK_FORMAT_B8G8R8A8_SRGB:
-        return PixelFormat::B8G8R8A8_SRGB;
+        return PixelFormat::B8G8R8A8Srgb;
     case VK_FORMAT_B8G8R8A8_UNORM:
-        return PixelFormat::B8G8R8A8_UNORM;
+        return PixelFormat::B8G8R8A8Unorm;
     case VK_FORMAT_R8G8B8A8_SRGB:
-        return PixelFormat::R8G8B8A8_SRGB;
+        return PixelFormat::R8G8B8A8Srgb;
     case VK_FORMAT_R8G8B8A8_UNORM:
-        return PixelFormat::R8G8B8A8_UNORM;
+        return PixelFormat::R8G8B8A8Unorm;
     case VK_FORMAT_R32G32B32A32_SFLOAT:
         return PixelFormat::RGBAFloat;
     case VK_FORMAT_R16G16B16A16_SFLOAT:
         return PixelFormat::RGBAFloat16;
     case VK_FORMAT_D24_UNORM_S8_UINT:
-        return PixelFormat::D24_S8;
+        return PixelFormat::D24S8;
     case VK_FORMAT_D32_SFLOAT:
         return PixelFormat::D32;
     case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
-        return PixelFormat::R10G10B10A2_UNORM;
+        return PixelFormat::R10G10B10A2Unorm;
     case VK_FORMAT_R32_UINT:
-        return PixelFormat::R32_UINT;
+        return PixelFormat::R32UInt;
     case VK_FORMAT_R32_SFLOAT:
-        return PixelFormat::R32_FLOAT;
+        return PixelFormat::R32Float;
     case VK_FORMAT_R32G32B32A32_UINT:
         return PixelFormat::RGBAUInt32;
     default:

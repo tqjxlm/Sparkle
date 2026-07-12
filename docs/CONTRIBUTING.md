@@ -45,7 +45,7 @@ All C++ code must follow the `.clang-tidy` naming rules. Key conventions:
 | Public member                          | `lower_case`                 | `width`                 |
 | Private / protected member             | `lower_case_` (trailing `_`) | `render_thread_`        |
 | `constexpr` / static / global constant | `CamelCase`                  | `MaxBufferedTaskFrames` |
-| Enum constant                          | `Camel_Snake_Case` (not enforced) | `Primary_Left`     |
+| Enum constant                          | `CamelCase`                  | `PrimaryLeft`           |
 
 All warnings are treated as errors (`WarningsAsErrors: "*"` in `.clang-tidy`).
 Avoid nested ternary operators (`readability-avoid-nested-conditional-operator`).

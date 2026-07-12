@@ -24,7 +24,7 @@ void MetalContext::CreateBackBuffer()
     attribute.height = drawable_size.height;
     attribute.mip_levels = 1;
     attribute.msaa_samples = 1;
-    attribute.format = PixelFormat::B8G8R8A8_SRGB;
+    attribute.format = PixelFormat::B8G8R8A8Srgb;
     attribute.usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransientAttachment;
     attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                          .filtering_method_min = RHISampler::FilteringMethod::Linear,
