@@ -6,6 +6,9 @@
 #include "random.h.slang"
 #include "sky_light.h.slang"
 
+// FORCE_OPAQUE is valid only because the pipeline has no alpha testing / any-hit shader.
+#define CLOSEST_HIT_FLAGS RAY_FLAG_FORCE_OPAQUE
+
 struct Camera
 {
     float3 position;
@@ -101,8 +104,10 @@ float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, fl
 
 bool IsRayOccluded(RayDesc ray_desc)
 {
-    RayQuery<RAY_FLAG_NONE> ray_query;
-    ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray_desc);
+    // FORCE_OPAQUE is valid only because the pipeline has no alpha testing / any-hit shader.
+    const uint occlusion_flags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE;
+    RayQuery<occlusion_flags> ray_query;
+    ray_query.TraceRayInline(tlas, occlusion_flags, 0xFF, ray_desc);
     while (ray_query.Proceed())
     {
     }
@@ -232,7 +237,7 @@ VertexAttribute GetVertexAttribute(uint instance_id, uint index)
     return vertexAttributeBuffers[instance_id][index];
 }
 
-void GetIntersection(RayDesc ray_desc, RayQuery<RAY_FLAG_NONE> ray_query, out Intersection intersection)
+void GetIntersection(RayDesc ray_desc, RayQuery<CLOSEST_HIT_FLAGS> ray_query, out Intersection intersection)
 {
     const float2 intersection_uv = ray_query.CommittedTriangleBarycentrics();
     const uint instance_id = ray_query.CommittedInstanceIndex();
@@ -286,8 +291,8 @@ void WritePrimaryHitGBuffer(uint2 pixel)
     ray_desc.TMin = Tolerance;
     ray_desc.TMax = 1000.0f;
 
-    RayQuery<RAY_FLAG_NONE> ray_query;
-    ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray_desc);
+    RayQuery<CLOSEST_HIT_FLAGS> ray_query;
+    ray_query.TraceRayInline(tlas, CLOSEST_HIT_FLAGS, 0xFF, ray_desc);
     while (ray_query.Proceed())
     {
     }
@@ -352,7 +357,7 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
     // means "no nearby occluder" -> the far distance. Routed below to the channel the primary lobe sampled.
     float first_hit_dist = 0.f;
 
-    RayQuery<RAY_FLAG_NONE> ray_query;
+    RayQuery<CLOSEST_HIT_FLAGS> ray_query;
     Intersection intersection;
 
     float3 pixel_color = float3(0, 0, 0);
@@ -372,7 +377,7 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
     [loop] for (bounce = 0; bounce <= camera.max_bounce; bounce++)
     {
         // initialize ray query
-        ray_query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray_desc);
+        ray_query.TraceRayInline(tlas, CLOSEST_HIT_FLAGS, 0xFF, ray_desc);
 
         // wait for ray query completion
         while (ray_query.Proceed())
@@ -406,7 +411,7 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
 
         // terminal condition: emissive
         float3 emissive_color = SampleEmissive(intersection, mat_param);
-        if (length(emissive_color) > Eps)
+        if (dot(emissive_color, emissive_color) > Eps * Eps)
         {
             float3 contribution = emissive_color * throughput * bsdf_mis_weight;
             pixel_color += contribution;
@@ -480,7 +485,7 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
         throughput *= this_throughput;
 
         // terminal condition: early out
-        if (length(throughput) < Eps)
+        if (dot(throughput, throughput) < Eps * Eps)
         {
             break;
         }
