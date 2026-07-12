@@ -624,10 +624,10 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
     // the pack marks skipped-lobe frames with hitT = 0 (probabilistic primary-lobe selection); NRD requires
     // reconstruction to fill those from neighbors
     rs.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3;
-    // strict metal/dielectric comparison (IDs 0/1 from nrd_pack): demodulated signals are
-    // discontinuous across that boundary, and unrestricted blur paints halos around material edges
-    rs.minMaterialForDiffuse = 0.f;
-    rs.minMaterialForSpecular = 0.f;
+    // >maxID disables NRD's materialID test: it compares two differently-derived float decodes for
+    // exact equality, and Adreno's unorm decode is 1 ulp off -> metals reject ALL history every frame
+    rs.minMaterialForDiffuse = 4.f;
+    rs.minMaterialForSpecular = 4.f;
     if (!config_.stabilization)
     {
         rs.maxStabilizedFrameNum = 0;
