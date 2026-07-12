@@ -288,6 +288,13 @@ void RenderFramework::RecreateRendererIfNecessary()
 
     renderer_ = Renderer::CreateRenderer(render_config_, rhi_, scene_->GetRenderProxy());
 
+    // the scene-loaded notification is one-shot; a renderer created after it must not miss it
+    // (readiness stays false otherwise, and e.g. GPURenderer then resets NRD history every frame)
+    if (scene_loaded_notified_)
+    {
+        renderer_->NotifySceneLoaded();
+    }
+
     renderer_created_event_.Trigger();
 }
 
