@@ -129,8 +129,16 @@ bool NrdCookedShaders::Load()
             {
                 return false;
             }
-            auto &pairs = tag == "srv" ? current->srv : tag == "uav" ? current->uav : current->samplers;
-            if (!ReadIndexPairs(tokens, pairs))
+            auto *pairs = &current->samplers;
+            if (tag == "srv")
+            {
+                pairs = &current->srv;
+            }
+            else if (tag == "uav")
+            {
+                pairs = &current->uav;
+            }
+            if (!ReadIndexPairs(tokens, *pairs))
             {
                 Log(Error, "NRD: broken cooked manifest line: {}", line);
                 return false;
@@ -162,8 +170,7 @@ bool NrdCookedShaders::BuildPipeline(const char *shader_identifier, RHINrdBacken
     }
 
     out.entry_point = entry.entry_point;
-    std::copy(std::begin(entry.threads_per_group), std::end(entry.threads_per_group),
-              std::begin(out.threads_per_group));
+    std::ranges::copy(entry.threads_per_group, std::begin(out.threads_per_group));
     out.constant_buffer_index = entry.constant_buffer_index;
 
     const auto &offsets = nrd::GetLibraryDesc()->spirvBindingOffsets;

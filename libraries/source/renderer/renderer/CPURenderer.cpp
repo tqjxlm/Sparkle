@@ -15,6 +15,8 @@
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "rhi/RHI.h"
 
+#include <utility>
+
 namespace sparkle
 {
 CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
@@ -423,7 +425,8 @@ static void SpatialDenoisePixel(unsigned i, unsigned j, unsigned width, unsigned
         auto [dx, dy] = Directions[k];
         int sample_i = static_cast<int>(i) + dx;
         int sample_j = static_cast<int>(j) + dy;
-        if (sample_i < 0 || sample_i >= static_cast<int>(width) || sample_j < 0 || sample_j >= static_cast<int>(height))
+        if (sample_i < 0 || std::cmp_greater_equal(sample_i, width) || sample_j < 0 ||
+            std::cmp_greater_equal(sample_j, height))
         {
             continue;
         }

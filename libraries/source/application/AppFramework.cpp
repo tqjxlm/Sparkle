@@ -120,7 +120,7 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     Profiler::RegisterThreadForProfiling("Main");
 #endif
 
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(address_sanitizer)
     Log(Info, "Asan is enabled");
 #endif

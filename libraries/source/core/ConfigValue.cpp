@@ -24,9 +24,8 @@ void ConfigValueBase::PrintLoading(const std::string &previous_value) const
 }
 
 template <AllowedConfigType T>
-ConfigValue<T>::ConfigValue(const char *name, const char *help, const char *category, const T &default_value,
-                            bool dynamic)
-    : ConfigValueBase(name, help, category, GetType(), dynamic), value_(default_value)
+ConfigValue<T>::ConfigValue(const char *name, const char *help, const char *category, T default_value, bool dynamic)
+    : ConfigValueBase(name, help, category, GetType(), dynamic), value_(std::move(default_value))
 {
     GetRegistration().insert_or_assign(name, this);
 

@@ -160,11 +160,11 @@ public:
         return index_buffer_;
     }
 
-    template <class T> typename T::ResourceTable *GetShaderResource()
+    template <class T> T::ResourceTable *GetShaderResource()
     {
         ASSERT(compiled_);
 
-        return static_cast<typename T::ResourceTable *>(GetResourceTable(T::GetStage()));
+        return static_cast<T::ResourceTable *>(GetResourceTable(T::GetStage()));
     }
 
 protected:

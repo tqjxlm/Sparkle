@@ -251,11 +251,7 @@ void GPURenderer::Render()
         has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, true, RHIPipelineStage::ColorOutput);
 
         RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
-        if (has_readback)
-        {
-            final_after_stage = RHIPipelineStage::Transfer;
-        }
-        else if (!rendered_ui && has_readback_without_ui)
+        if (has_readback || (!rendered_ui && has_readback_without_ui))
         {
             final_after_stage = RHIPipelineStage::Transfer;
         }

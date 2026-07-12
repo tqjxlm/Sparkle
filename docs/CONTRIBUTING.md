@@ -28,8 +28,9 @@ Always use formatters in the environment or IDE to format code and documents aft
 * python: PEP8 (autopep8, configured in `pyproject.toml`)
 * All code must pass clang-tidy with the project's [.clang-tidy](../.clang-tidy) configuration. All warnings are treated as errors (`WarningsAsErrors: "*"`).
 
-CI enforces formatting on every push and PR. Check or fix everything locally with
-`python3 dev/check_format.py [--fix]`. See [CI.md](CI.md) for details.
+CI enforces formatting on every push and PR, and clang-tidy on every push and PR
+that touches code. Check locally with `python3 dev/check_format.py [--fix]` and
+`python3 dev/check_tidy.py`. See [CI.md](CI.md) for details.
 
 ### Naming Conventions
 
@@ -44,7 +45,7 @@ All C++ code must follow the `.clang-tidy` naming rules. Key conventions:
 | Public member                          | `lower_case`                 | `width`                 |
 | Private / protected member             | `lower_case_` (trailing `_`) | `render_thread_`        |
 | `constexpr` / static / global constant | `CamelCase`                  | `MaxBufferedTaskFrames` |
-| Enum constant                          | `Camel_Case`                 | `Primary_Left`          |
+| Enum constant                          | `Camel_Snake_Case` (not enforced) | `Primary_Left`     |
 
 All warnings are treated as errors (`WarningsAsErrors: "*"` in `.clang-tidy`).
 Avoid nested ternary operators (`readability-avoid-nested-conditional-operator`).

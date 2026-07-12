@@ -25,23 +25,20 @@ template <class T> void HashCombine(size_t &seed, const T &v)
     std::hash<T> hasher;
     seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
-} // namespace sparkle
 
-namespace std
-{
 template <class T1, class T2> struct PairHash
 {
-    size_t operator()(const pair<T1, T2> &x) const
+    size_t operator()(const std::pair<T1, T2> &x) const
     {
-        hash<T1> hasher1;
-        hash<T2> hasher2;
+        std::hash<T1> hasher1;
+        std::hash<T2> hasher2;
 
         size_t seed = 0;
 
-        sparkle::HashCombine(seed, hasher1(x.first));
-        sparkle::HashCombine(seed, hasher2(x.second));
+        HashCombine(seed, hasher1(x.first));
+        HashCombine(seed, hasher2(x.second));
 
         return seed;
     }
 };
-} // namespace std
+} // namespace sparkle

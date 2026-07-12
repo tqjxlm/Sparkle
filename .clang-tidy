@@ -43,6 +43,46 @@
 #     Almost any expression of the form `2 * variable` or `long x = a_int * b_int;`
 #     generates an error.
 #
+#  -bugprone-throwing-static-initialization: static constants (e.g. the vector
+#      constants in core/math/Types.h) would all be flagged; terminating on a
+#      throwing static initializer is acceptable for this project.
+#
+#  -bugprone-exception-escape: destructors and noexcept functions that log or
+#      clean up are flagged; terminating in these cases is acceptable.
+#
+#  -bugprone-invalid-enum-default-initialization: Vulkan flag-bit enums have no
+#      zero enumerator, but zero-initializing them before assignment is the
+#      established pattern.
+#
+#  -misc-include-cleaner: include hygiene is handled by clangd
+#      (UnusedIncludes: Strict in .clangd); this check does not understand
+#      umbrella headers and flags thousands of transitive includes.
+#
+#  -misc-const-correctness: flags most mutable local variables; the noise
+#      outweighs the value.
+#
+#  -misc-use-internal-linkage: same reason as misc-use-anonymous-namespace.
+#
+#  -misc-override-with-different-visibility: changing the visibility of virtual
+#      overrides is used intentionally (e.g. VulkanRHI::CreateUiHandler).
+#
+#  -modernize-use-designated-initializers: positional aggregate init of
+#      third-party API structs (e.g. Vulkan create-infos) is idiomatic.
+#
+#  -modernize-macro-to-enum: platform/feature macros participate in
+#      preprocessor conditionals and cannot be enums.
+#
+#  -performance-unnecessary-value-param: by-value parameters in templates are
+#      flagged based on specific instantiations even when the generic code is
+#      correct as written.
+#
+#  -portability-avoid-pragma-once: the project uses `#pragma once` everywhere
+#      by convention.
+#
+#  -portability-template-virtual-member-function: virtual members of class
+#      templates (e.g. ConfigValue) are only instantiated when used by the
+#      clang-based compilers this project supports.
+#
 Checks: >
   -*,
   abseil-*,
@@ -75,7 +115,19 @@ Checks: >
   -misc-use-anonymous-namespace,
   -bugprone-narrowing-conversions,
   -bugprone-easily-swappable-parameters,
-  -bugprone-implicit-widening-of-multiplication-result
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-throwing-static-initialization,
+  -bugprone-exception-escape,
+  -bugprone-invalid-enum-default-initialization,
+  -misc-include-cleaner,
+  -misc-const-correctness,
+  -misc-use-internal-linkage,
+  -misc-override-with-different-visibility,
+  -modernize-use-designated-initializers,
+  -modernize-macro-to-enum,
+  -performance-unnecessary-value-param,
+  -portability-avoid-pragma-once,
+  -portability-template-virtual-member-function
 
 WarningsAsErrors: "*"
 
@@ -100,7 +152,9 @@ CheckOptions:
   - { key: readability-identifier-naming.ClassMemberSuffix, value: _ }
   - { key: readability-identifier-naming.PrivateMemberSuffix, value: _ }
   - { key: readability-identifier-naming.ProtectedMemberSuffix, value: _ }
-  - { key: readability-identifier-naming.EnumConstantCase, value: Camel_Case }
+  # enum constant naming is not enforced: `Camel_Case` is not a valid style
+  # (clang-tidy 22 rejects it) and the codebase mixes CamelCase and
+  # Camel_Snake_Case
   - {
       key: readability-identifier-naming.ConstexprVariableCase,
       value: CamelCase,
