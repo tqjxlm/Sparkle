@@ -36,8 +36,8 @@ TestCase tests run inside the app process and exit with code 0 (pass) or 1 (fail
 They are suitable for lightweight in-process checks after scene load.
 See [Test.md](Test.md) for how to write and run them.
 
-In CI, the `render_target_pool` test case runs on windows + glfw (Release, headless, Mesa lavapipe)
-right after the functional test.
+In CI, the `render_target_pool` and `pipeline_switch_pool` test cases run on windows + glfw
+(Release, headless, Mesa lavapipe) right after the functional test.
 
 ## Functional Test
 
