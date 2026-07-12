@@ -126,11 +126,34 @@ def compare_images(ground_truth, screenshot):
     return mean_flip
 
 
+def _requirements_satisfied(requirements):
+    import re
+    from importlib.metadata import PackageNotFoundError, version
+    with open(requirements) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            name = re.split(r"[<>=!~; \[]", line, maxsplit=1)[0]
+            try:
+                version(name)
+            except PackageNotFoundError:
+                return False
+    return True
+
+
 def install_dependencies():
     requirements = os.path.join(SCRIPT_DIR, "requirements.txt")
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-r", requirements],
-        stdout=subprocess.DEVNULL)
+    if _requirements_satisfied(requirements):
+        return
+    cmd = [sys.executable, "-m", "pip", "install", "-r", requirements]
+    try:
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        # PEP 668: Homebrew/system interpreters refuse a global install without this flag.
+        print("pip install refused (externally-managed env); retrying with --break-system-packages",
+              flush=True)
+        subprocess.check_call(cmd + ["--break-system-packages"], stdout=subprocess.DEVNULL)
 
 
 def main():
