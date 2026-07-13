@@ -129,6 +129,13 @@ else()
         -Wextra
         -Wpedantic
         -Werror
+        # clang-cl expands -Wall to -Weverything, so windows CI enforces warnings no other
+        # build sees; opt into the useful ones so every compiler and clang-tidy catch them
+        # locally, and opt out of the noisy ones so windows stops enforcing them
+        -Wshadow-uncaptured-local
+        -Wmissing-designated-field-initializers
+        -Wno-sign-conversion
+        -Wno-double-promotion
         -Wno-c++98-compat               # we are targeting c++20
         -Wno-c++98-compat-pedantic      # we are targeting c++20
         -Wno-c++20-compat               # fires on c++20-only constructs (e.g. implicit typename), which we use freely
