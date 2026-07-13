@@ -19,14 +19,8 @@ void MetalShader::Load()
 
     MTLCompileOptions *compile_option = [[MTLCompileOptions alloc] init];
 
-    if (context->GetRHI()->SupportsHardwareRayTracing())
-    {
-        compile_option.languageVersion = MTLLanguageVersion3_0;
-    }
-    else
-    {
-        compile_option.languageVersion = MTLLanguageVersion2_2;
-    }
+    // slang-emitted [[vertex]]/[[fragment]]/[[kernel]] attributes need MSL 2.3+; lower versions fail on every shader
+    compile_option.languageVersion = MTLLanguageVersion3_0;
 
     NSError *error;
     NSString *shader_source = [NSString stringWithCString:shader_data.c_str() encoding:NSASCIIStringEncoding];
