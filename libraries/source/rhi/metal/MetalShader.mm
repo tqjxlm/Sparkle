@@ -3,7 +3,9 @@
 #include "MetalShader.h"
 
 #include "MetalContext.h"
+#include "core/Exception.h"
 #include "core/FileManager.h"
+#include "core/Logger.h"
 
 namespace sparkle
 {
@@ -24,12 +26,20 @@ void MetalShader::Load()
 
     NSError *error;
     NSString *shader_source = [NSString stringWithCString:shader_data.c_str() encoding:NSASCIIStringEncoding];
-    ASSERT_F(shader_source.length > 0, "Failed to load shader file {}", path);
+    if (shader_source.length == 0)
+    {
+        Log(Error, "Failed to load shader file {}", path);
+        DumpAndAbort();
+    }
 
     library_ = [context->GetDevice() newLibraryWithSource:shader_source options:compile_option error:&error];
 
-    ASSERT_F(library_, "Failed to load and compile shader library {}. error: {}", path,
-             [error.localizedDescription UTF8String]);
+    if (!library_)
+    {
+        Log(Error, "Failed to load and compile shader library {}. error: {}", path,
+            [error.localizedDescription UTF8String]);
+        DumpAndAbort();
+    }
 
     auto find_function = [&](const std::string &entry_point) -> bool {
         function_ = [library_ newFunctionWithName:[NSString stringWithUTF8String:entry_point.c_str()]];
@@ -57,7 +67,11 @@ void MetalShader::Load()
         find_function("main0");
     }
 
-    ASSERT_F(function_, "Failed to load shader function {}", path);
+    if (!function_)
+    {
+        Log(Error, "Failed to load shader function {}", path);
+        DumpAndAbort();
+    }
 
     SetDebugInfo(function_, GetName());
 
