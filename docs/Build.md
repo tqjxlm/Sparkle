@@ -100,6 +100,8 @@ Otherwise, you need to specify them via environment variables. See the table bel
 | JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home  | android          | no (Android Studio)             |
 | VS_PATH      | C:/Program Files/Microsoft Visual Studio/[version]/[edition] | all windows      | no (vs-installer)               |
 
+`SPARKLE_BUILD_JOBS` optionally overrides glfw build parallelism (defaults: 64 on windows, 16 elsewhere). CI sets it to 8 because hosted runners only have ~4 vcpus and oversubscribing them can starve the runner agent.
+
 ### Quick Start Examples
 
 ``` shell
@@ -175,6 +177,7 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 * `--asan` - Enable AddressSanitizer.
 * `--clean` - Clean output directory before configure, which resolves some build errors.
 * `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)
+* `--cmake-args='...'` - Pass extra arguments to CMake, e.g. `--cmake-args='-DENABLE_LTO=ON'` to enable link time optimization for a distribution build (off by default: it adds minutes of Release link time).
 * `--help` - Show all usage help.
 * `--run` - Run after building. For mobile builds, it tries to run on a connected device.
 

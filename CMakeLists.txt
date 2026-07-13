@@ -14,6 +14,7 @@ option(USE_GLFW "Use GLFW instead of the native window system" OFF)
 option(ENABLE_PROFILER "Build with profiler support" OFF)
 option(ENABLE_TEST_CASES "Build with test case support" ON)
 option(ENABLE_APPLE_AUTO_SIGN "Configure xcode project to manage signing automatically" OFF)
+option(ENABLE_LTO "Enable link time optimization for Release builds" OFF)
 
 macro(assign_bool var)
      if(${ARGN})
@@ -142,14 +143,16 @@ else()
         )
 endif()
 
+# LTO is opt-in: it adds minutes of Release link time, and nothing depends on it
+# (a property-name typo had left it silently disabled since introduction).
 # android does not support LTO for now.
-if (NOT (ANDROID))
+if (ENABLE_LTO AND NOT ANDROID)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT supported OUTPUT error)
 
     if( supported )
         message(STATUS "IPO / LTO enabled for release builds")
-        set_property(TARGET sparkle PROPERTY CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        set_property(TARGET sparkle PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     else()
         message(STATUS "IPO / LTO not supported: <${error}>")
     endif()
