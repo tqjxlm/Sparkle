@@ -131,6 +131,7 @@ else()
         -Wextra
         -Wpedantic
         -Werror
+        -Wno-unknown-warning-option     # clang versions differ across platforms (apple/ndk/clang-cl/clang-tidy); newer -Wno flags below must not error on older clang
         -Wno-c++98-compat               # we are targeting c++20
         -Wno-c++98-compat-pedantic      # we are targeting c++20
         -Wno-c++20-compat               # fires on c++20-only constructs (e.g. implicit typename), which we use freely
@@ -142,6 +143,11 @@ else()
         -Wno-unsafe-buffer-usage        # fires on nearly all pointer arithmetic, not practical for a renderer
         -Wno-global-constructors        # self-registering globals (e.g. ConfigValue) are used by design
         -Wno-exit-time-destructors      # same reason as -Wno-global-constructors
+        -Wno-padded                     # compiler-inserted padding is fine for cpu-side structs; gpu structs align explicitly
+        -Wno-weak-vtables               # requiring key functions everywhere is not worth it (ms abi lacks the concept entirely)
+        -Wno-thread-safety-negative     # negative capability annotations are too invasive; basic thread-safety analysis stays on
+        -Wno-missing-include-dirs       # the xcode generator lists derived-source include dirs that do not exist yet
+        -Wno-nrvo                       # clang 22+: informational note about missed copy elision, not a defect
         )
 endif()
 
