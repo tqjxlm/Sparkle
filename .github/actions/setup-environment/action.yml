@@ -58,7 +58,8 @@ runs:
         # runners reinstall toolchains with fresh timestamps every run: hash the compiler
         # binary content instead, or every run would miss the cache
         echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
-        echo "CCACHE_MAXSIZE=500M" >> $GITHUB_ENV
+        # must hold one full build per os/framework/config; android Debug is the largest at ~600M
+        echo "CCACHE_MAXSIZE=1G" >> $GITHUB_ENV
 
     - name: Install ccache (Linux)
       if: runner.os == 'Linux'
