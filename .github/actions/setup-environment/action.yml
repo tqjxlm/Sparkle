@@ -27,6 +27,9 @@ runs:
         restore-keys: |
           ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
 
+    # app/build and build are deliberately NOT cached: they are multi-GB intermediates that
+    # crowd the repo's 10GB actions-cache quota and evict the compiler caches; ccache covers
+    # the expensive (native) part of what they saved
     - name: Cache Gradle packages (Android)
       if: inputs.framework == 'android'
       uses: actions/cache@v4
@@ -35,8 +38,6 @@ runs:
           ~/.gradle/caches
           ~/.gradle/wrapper
           ./build_system/android/.gradle
-          ./build_system/android/app/build
-          ./build_system/android/build
         key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/**/*.gradle', './build_system/android/**/gradle.properties', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}
         restore-keys: |
           ${{ inputs.os }}-android-gradle-
@@ -60,6 +61,9 @@ runs:
         echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
         # must hold one full build per os/framework/config; android Debug is the largest at ~600M
         echo "CCACHE_MAXSIZE=1G" >> $GITHUB_ENV
+        # the android gradle plugin runs CMake in a randomly-named per-run directory, and by
+        # default ccache hashes the cwd for -g compiles, so android Debug would never hit
+        echo "CCACHE_NOHASHDIR=1" >> $GITHUB_ENV
 
     - name: Install ccache (Linux)
       if: runner.os == 'Linux'
