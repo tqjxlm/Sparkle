@@ -1,6 +1,6 @@
 #pragma once
 
-#if _MSC_VER
+#ifdef _MSC_VER
 // to make msvc happy...
 #define FMT_USE_NONTYPE_TEMPLATE_ARGS 0
 #endif

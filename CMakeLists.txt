@@ -122,6 +122,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         /wd4714                         # function marked as __forceinline not inlined: we understand inline is just a suggestion
         )
 else()
+    # note: clang-cl (the windows glfw framework) maps -Wall to -Weverything, so exclusions below
+    # that -Wall/-Wextra/-Wpedantic never enable are still load-bearing for windows builds.
     target_compile_options(sparkle PRIVATE
         -Wall
         -Wextra
@@ -129,17 +131,15 @@ else()
         -Werror
         -Wno-c++98-compat               # we are targeting c++20
         -Wno-c++98-compat-pedantic      # we are targeting c++20
-        -Wno-c99-extensions             # we are targeting c++20
-        -Wno-c++20-compat               # we are targeting c++20
+        -Wno-c++20-compat               # fires on c++20-only constructs (e.g. implicit typename), which we use freely
         -Wno-extra-semi-stmt            # not that necessary
-        -Wno-unused-macros              # too much false alerts
-        -Wno-covered-switch-default     # -Wswitch-default has already provided enough protection
+        -Wno-unused-macros              # GlobalMacro.h is force-included everywhere, but most files use only a few of its macros
+        -Wno-covered-switch-default     # contradicts -Wswitch-default: a fully covered switch must still have a default case
         -Wno-switch-enum                # it is not always possible to list all enums (especially for vulkan enums)
-        -Wno-cast-function-type-strict  # TODO: remove later
-        -Wno-unsafe-buffer-usage        # TODO: remove later
-        -Wno-global-constructors        # TODO: remove later
-        -Wno-exit-time-destructors      # TODO: remove later
-        -Wno-unknown-pragmas            # TODO: remove later
+        -Wno-cast-function-type-strict  # vulkan function loading casts PFN_vkVoidFunction to concrete PFN_* types by design
+        -Wno-unsafe-buffer-usage        # fires on nearly all pointer arithmetic, not practical for a renderer
+        -Wno-global-constructors        # self-registering globals (e.g. ConfigValue) are used by design
+        -Wno-exit-time-destructors      # same reason as -Wno-global-constructors
         )
 endif()
 
