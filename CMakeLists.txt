@@ -122,10 +122,12 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         /wd4714                         # function marked as __forceinline not inlined: we understand inline is just a suggestion
         )
 else()
-    # note: clang-cl (the windows glfw framework) maps -Wall to -Weverything, so exclusions below
-    # that -Wall/-Wextra/-Wpedantic never enable are still load-bearing for windows builds.
+    # -Weverything is intentional: clang-cl (the windows glfw framework) maps -Wall to -Weverything,
+    # so windows has always built against the full warning set. Making it explicit keeps every
+    # platform on the same surface, so regressions fail on the first build anywhere instead of
+    # only in the windows CI job.
     target_compile_options(sparkle PRIVATE
-        -Wall
+        -Weverything
         -Wextra
         -Wpedantic
         -Werror
