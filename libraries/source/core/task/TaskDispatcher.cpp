@@ -28,8 +28,24 @@ TaskDispatcher::TaskDispatcher(unsigned int max_parallism)
     });
 }
 
+void TaskDispatcher::RunInDedicatedThread(std::function<void()> &&task)
+{
+    std::scoped_lock<std::mutex> lock(dedicated_mutex_);
+    dedicated_threads_.emplace_back(std::move(task));
+}
+
 TaskDispatcher::~TaskDispatcher()
 {
+    // dedicated threads may still be blocked on pool futures and enqueue tasks as they
+    // finish, so join them while the pool and the monitor are alive
+    {
+        std::scoped_lock<std::mutex> lock(dedicated_mutex_);
+        for (auto &thread : dedicated_threads_)
+        {
+            thread.join();
+        }
+    }
+
     instance_ = nullptr;
 
     shutdown_requested_ = true;

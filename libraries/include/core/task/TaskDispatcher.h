@@ -59,6 +59,8 @@ public:
         return *worker_thread_pool_;
     }
 
+    void RunInDedicatedThread(std::function<void()> &&task);
+
 private:
     void DispatchPendingTasks();
 
@@ -67,6 +69,10 @@ private:
     std::mutex mutex_;
 
     std::unique_ptr<BS::light_thread_pool> worker_thread_pool_;
+
+    std::vector<std::thread> dedicated_threads_;
+
+    std::mutex dedicated_mutex_;
 
     std::unordered_map<ThreadName, std::weak_ptr<ThreadTaskQueue>> task_queues_;
 
