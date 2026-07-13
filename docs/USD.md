@@ -67,8 +67,7 @@ a `TestCase` or a UI action.
 
 The `usd_round_trip` test case builds a procedural test scene, renders it, exports it, loads the
 exported file back and renders it again. The driver script first gates the original render against
-the same ground truth as `dev/functional_test.py`, then FLIP-compares the reimported render against
-the original:
+the screenshot ground truth, then FLIP-compares the reimported render against the original:
 
 ```bash
 python3 tests/usd/usd_roundtrip_test.py --framework glfw --headless
@@ -79,7 +78,7 @@ The procedural scene (`BuildTestScene` in
 feature: analytic spheres, mesh primitives, glTF-imported models with full PBR texture sets,
 dielectric glass, a directional light and a sky light. With an explicit `--scene`, the test
 round-trips that scene instead (no ground-truth gate). CI runs it on the windows/glfw/Release job
-(see [.github/actions/functional-test](../.github/actions/functional-test/action.yml)). See
+(see the `test` job in [.github/workflows/build.yml](../.github/workflows/build.yml)). See
 [Test.md](Test.md) for general test-case mechanics.
 
 ## Packaged TestScene
@@ -97,8 +96,8 @@ To regenerate it after changing `BuildTestScene`, the exporter or the loader:
 2. Copy `usd_export/scene.usda` over `resources/packed/TestScene.usda` and replace each
    `textures/...` asset path with the corresponding packaged file (the sky map under `skymap/`, the
    glTF textures under `models/`).
-3. Run `dev/functional_test.py` without `--scene` to confirm the packaged scene still matches the
-   ground truth.
+3. Run `dev/run_tests.py --pipeline forward` without `--scene` to confirm the packaged scene still
+   matches the ground truth.
 
 Since `SpherePrimitive` bakes to a triangle mesh on export, ray-traced pipelines render the packaged
 scene's spheres as tessellated meshes instead of analytic spheres.

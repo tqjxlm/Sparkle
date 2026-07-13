@@ -18,7 +18,7 @@ import argparse
 import os
 import shutil
 
-from nrd_common import PROJECT_ROOT, ft, load_image, lum, run_sweep
+from nrd_common import PROJECT_ROOT, load_image, lum, run_sweep, static_render_test
 
 SEED_STRIDE = 7919
 MOTION_FRAME = 15
@@ -42,13 +42,14 @@ def laplacian_rms(img):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--framework", default="macos", choices=ft.SUPPORTED_FRAMEWORKS)
+    parser.add_argument("--framework", default="macos",
+                        choices=static_render_test.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--realizations", type=int, default=8)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--skip_build", action="store_true")
     args, passthrough = parser.parse_known_args()
 
-    shot_dir = ft.get_screenshot_dir(args.framework)
+    shot_dir = static_render_test.get_screenshot_dir(args.framework)
     work_dir = os.path.join(shot_dir, "motion_fidelity")
     os.makedirs(work_dir, exist_ok=True)
 

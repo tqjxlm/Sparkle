@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import sys
 
-from nrd_common import PROJECT_ROOT, ft
+from nrd_common import PROJECT_ROOT, static_render_test
 
 
 def run(cmd, capture=False):
@@ -65,9 +65,11 @@ def main():
         print("probe run failed")
         sys.exit(1)
 
-    stability_dir = os.path.join(ft.get_screenshot_dir(args.framework), "static_stability")
+    stability_dir = os.path.join(
+        static_render_test.get_screenshot_dir(args.framework), "static_stability")
     os.makedirs(stability_dir, exist_ok=True)
-    shutil.copy(ft.find_screenshot(args.framework), os.path.join(stability_dir, "gt.png"))
+    shutil.copy(static_render_test.find_screenshot(args.framework),
+                os.path.join(stability_dir, "gt.png"))
 
     gates = [
         [py, "tests/nrd/nrd_static_stability_test.py", "--framework", args.framework, "--headless",
