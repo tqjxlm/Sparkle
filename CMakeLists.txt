@@ -131,6 +131,7 @@ else()
         -Werror
         -Wno-c++98-compat               # we are targeting c++20
         -Wno-c++98-compat-pedantic      # we are targeting c++20
+        -Wno-c++20-compat               # fires on c++20-only constructs (e.g. implicit typename), which we use freely
         -Wno-extra-semi-stmt            # not that necessary
         -Wno-unused-macros              # GlobalMacro.h is force-included everywhere, but most files use only a few of its macros
         -Wno-covered-switch-default     # contradicts -Wswitch-default: a fully covered switch must still have a default case
