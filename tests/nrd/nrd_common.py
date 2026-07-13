@@ -10,8 +10,8 @@ import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
-import functional_test as ft  # noqa: E402,F401
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "screenshot"))
+import static_render_test  # noqa: E402,F401
 
 NUM_FRAMES = 16  # must match DenoiserSweepTest.cpp NumFrames
 
@@ -22,6 +22,19 @@ def run_sweep(framework, extra, skip_build=False, headless=False):
         cmd.append("--skip_build")
     cmd += ["--run", "--test_case", "denoiser_sweep", "--clear_screenshots", "true", "--pipeline", "gpu"]
     cmd += list(extra)
+    if headless:
+        cmd += ["--headless", "true"]
+    print("Running:", " ".join(cmd), flush=True)
+    if subprocess.run(cmd, cwd=PROJECT_ROOT).returncode != 0:
+        sys.exit(1)
+
+
+def run_test_case(framework, test_case, extra, skip_build=False, headless=False):
+    cmd = [sys.executable, os.path.join(PROJECT_ROOT, "build.py"),
+           "--framework", framework]
+    if skip_build:
+        cmd.append("--skip_build")
+    cmd += ["--run", "--test_case", test_case] + list(extra)
     if headless:
         cmd += ["--headless", "true"]
     print("Running:", " ".join(cmd), flush=True)

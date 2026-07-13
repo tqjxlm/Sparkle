@@ -4,7 +4,7 @@
 
 * [x] format and style check pipeline
 * [ ] unit test pipeline
-* [ ] functional test pipeline
+* [x] functional test pipeline
 * [ ] performance test pipeline
 
 ## Path Tracing Renderers

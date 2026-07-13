@@ -27,6 +27,7 @@ jobs:
               - 'build_system/**'
               - 'resources/**'
               - 'dev/**'
+              - 'tests/**'
               - '.github/**'
               - '.gitmodules'
               - 'CMakeLists.txt'

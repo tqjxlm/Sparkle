@@ -26,7 +26,7 @@ import os
 import shutil
 import sys
 
-from nrd_common import ft, load_image, lum  # noqa: E402
+from nrd_common import load_image, lum, run_test_case, static_render_test  # noqa: E402
 
 
 def stats_of(path):
@@ -90,25 +90,32 @@ CHECKS = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--framework", default="macos", choices=ft.SUPPORTED_FRAMEWORKS)
+    parser.add_argument("--framework", default="macos",
+                        choices=static_render_test.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--spp", type=int, default=16)
     parser.add_argument("--views", default=",".join(CHECKS.keys()))
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--skip_build", action="store_true")
     args = parser.parse_args()
 
-    out_dir = os.path.join(ft.get_screenshot_dir(args.framework), "nrd_inputs")
+    out_dir = os.path.join(
+        static_render_test.get_screenshot_dir(args.framework), "nrd_inputs")
     os.makedirs(out_dir, exist_ok=True)
 
     skip_build = args.skip_build
     failures = []
     for view in args.views.split(","):
-        ft.build_and_run(args.framework, "gpu", None,
-                         ["--nrd", "true", "--nrd_debug", view, "--max_spp", str(args.spp)],
-                         headless=args.headless, skip_build=skip_build)
+        run_test_case(
+            args.framework,
+            "screenshot",
+            ["--clear_screenshots", "true", "--pipeline", "gpu", "--nrd", "true",
+             "--nrd_debug", view, "--max_spp", str(args.spp)],
+            headless=args.headless,
+            skip_build=skip_build,
+        )
         skip_build = True  # one build is enough for all views
 
-        shot = ft.find_screenshot(args.framework)
+        shot = static_render_test.find_screenshot(args.framework)
         dst = os.path.join(out_dir, f"{view}.png")
         shutil.copy(shot, dst)
 

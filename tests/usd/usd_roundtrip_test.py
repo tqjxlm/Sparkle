@@ -2,7 +2,7 @@
 
 Runs the app with --test_case usd_round_trip, which renders the current scene (built procedurally
 by the test case unless --scene is given), exports it to USD, loads the exported file back and
-renders it again. The original render must match the dev/functional_test.py ground truth (a
+renders it again. The original render must match the static-render ground truth (a
 self-comparison alone would pass if both renders broke the same way, e.g. all black), and the
 reimported render must match the original.
 """
@@ -15,8 +15,8 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
-import functional_test  # noqa: E402  (reuses screenshot dir/image helpers)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "screenshot"))
+import static_render_test  # noqa: E402  (reuses screenshot/image helpers)
 
 ORIGINAL_NAME = "usd_round_trip_original.png"
 REIMPORTED_NAME = "usd_round_trip_reimported.png"
@@ -30,7 +30,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Run the USD round-trip test case and compare original vs reimported renders.")
     parser.add_argument("--framework", required=True,
-                        choices=functional_test.SUPPORTED_FRAMEWORKS)
+                        choices=static_render_test.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--pipeline", default="forward")
     parser.add_argument("--scene")
     parser.add_argument("--headless", action="store_true")
@@ -63,7 +63,7 @@ def build_and_run(args, other_args):
 
 
 def find_screenshots(framework):
-    screenshot_dir = functional_test.get_screenshot_dir(framework)
+    screenshot_dir = static_render_test.get_screenshot_dir(framework)
     paths = [os.path.join(screenshot_dir, name)
              for name in (ORIGINAL_NAME, REIMPORTED_NAME)]
     for path in paths:
@@ -75,7 +75,7 @@ def find_screenshots(framework):
 
 
 def main():
-    functional_test.install_dependencies()
+    static_render_test.install_dependencies()
     args, unknown_args = parse_args()
 
     if not args.skip_run:
@@ -89,15 +89,15 @@ def main():
         print(f"No ground truth for custom scene {args.scene}, skipping ground truth check.", flush=True)
     else:
         print("Downloading ground truth...", flush=True)
-        ground_truth = functional_test.download_ground_truth(
-            args.framework, functional_test.DEFAULT_SCENE, args.pipeline)
-        gt_flip = functional_test.compare_images(ground_truth, original)
-        if gt_flip > functional_test.FLIP_THRESHOLD:
+        ground_truth = static_render_test.download_ground_truth(
+            args.framework, static_render_test.DEFAULT_SCENE, args.pipeline)
+        gt_flip = static_render_test.compare_images(ground_truth, original)
+        if gt_flip > static_render_test.FLIP_THRESHOLD:
             print(f"FAIL: original render vs ground truth mean FLIP error "
-                  f"{gt_flip:.4f} > {functional_test.FLIP_THRESHOLD}")
+                  f"{gt_flip:.4f} > {static_render_test.FLIP_THRESHOLD}")
             return 1
 
-    round_trip_flip = functional_test.compare_images(original, reimported)
+    round_trip_flip = static_render_test.compare_images(original, reimported)
     if round_trip_flip <= FLIP_THRESHOLD:
         print("PASS", flush=True)
         return 0

@@ -72,6 +72,18 @@ def first_party_files(build_dir):
     return sorted(files)
 
 
+def compiler_args():
+    if sys.platform != "darwin":
+        return []
+
+    sdk_path = subprocess.check_output(
+        ["xcrun", "--show-sdk-path"], text=True).strip()
+    return [
+        "--extra-arg-before=-isysroot",
+        f"--extra-arg-before={sdk_path}",
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", default=DEFAULT_BUILD_DIR,
@@ -86,10 +98,13 @@ def main():
     if files is None:
         sys.exit(1)
 
+    extra_args = compiler_args()
+
     def check(file):
-        result = subprocess.run([clang_tidy, "-p", args.build_dir, "--quiet", file],
+        command = [clang_tidy, "-p", args.build_dir, "--quiet"] + extra_args + [file]
+        result = subprocess.run(command,
                                 capture_output=True, text=True)
-        return file, result.returncode, result.stdout
+        return file, result.returncode, result.stdout + result.stderr
 
     failures = 0
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:

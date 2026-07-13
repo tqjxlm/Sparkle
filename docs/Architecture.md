@@ -64,7 +64,8 @@ sparkle/
 │   ├── standard/         # Vertex/pixel shaders
 │   └── utilities/        # Utility compute shaders
 ├── resources/            # Assets: models, textures, default config
-├── dev/                  # Developer scripts (functional_test.py…)
+├── dev/                  # Developer entry points and validation orchestrator
+├── tests/                # Focused test cases, evaluators, and test helpers
 ├── ide/                  # IDE config templates (.vscode, launch configs)
 └── thirdparty/           # Third-party dependencies (git submodules)
 ```
