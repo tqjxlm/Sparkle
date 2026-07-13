@@ -143,7 +143,8 @@ void RenderConfig::Validate()
         int back_buffer_width;
         int back_buffer_height;
         view_->GetFrameBufferSize(back_buffer_width, back_buffer_height);
-        image_width = image_height * (static_cast<float>(back_buffer_width) / back_buffer_height);
+        const float aspect_ratio = static_cast<float>(back_buffer_width) / static_cast<float>(back_buffer_height);
+        image_width = static_cast<uint32_t>(static_cast<float>(image_height) * aspect_ratio);
         config_width.Set(image_width);
 
         Log(Info, "View size [{}, {}]", image_width, image_height);
