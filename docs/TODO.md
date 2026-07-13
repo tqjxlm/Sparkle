@@ -63,3 +63,8 @@
       compiled shader (e.g. dead-code-eliminated by slang) crashes with a null dereference in
       `RHIShaderResourceSet::UpdateLayoutHash` during pipeline setup instead of failing with a
       clear error.
+* [ ] the windows Release functional test (Mesa lavapipe, software rendering) can run close to
+      an hour and occasionally kills the job with "the hosted runner lost communication with the
+      server" — lavapipe saturates every core and starves the runner agent. Consider running the
+      app at lower process priority or with a capped thread count in CI, or splitting the
+      functional test into its own job so a flake does not discard a finished build.
