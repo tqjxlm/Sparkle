@@ -157,7 +157,8 @@ class GlfwBuilder(FrameworkBuilder):
         """Build the project."""
         configure(args, False)
 
-        build_threads = "64" if is_windows else "16"
+        build_threads = os.environ.get(
+            "SPARKLE_BUILD_JOBS", "64" if is_windows else "16")
         cmake_cmd = [args["cmake_executable"], "--build", ".", "-j",
                      build_threads, "--config", args["config"]]
 

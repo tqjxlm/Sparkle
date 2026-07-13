@@ -81,8 +81,12 @@ jobs:
           done
           exit 1
 
+      # hosted runners have ~4 vcpus and 16GB; the default -j64 on windows oversubscribes them
+      # badly enough that the runner agent can starve and drop off ("runner lost communication")
       - name: Build
         shell: bash
+        env:
+          SPARKLE_BUILD_JOBS: 8
         run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --archive ${{ steps.setup-environment.outputs.build-args }}
 
       # hit rate should approach 100% for PRs that touch few files; a cold cache shows all misses

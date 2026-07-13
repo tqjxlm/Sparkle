@@ -100,6 +100,8 @@ Otherwise, you need to specify them via environment variables. See the table bel
 | JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home  | android          | no (Android Studio)             |
 | VS_PATH      | C:/Program Files/Microsoft Visual Studio/[version]/[edition] | all windows      | no (vs-installer)               |
 
+`SPARKLE_BUILD_JOBS` optionally overrides glfw build parallelism (defaults: 64 on windows, 16 elsewhere). CI sets it to 8 because hosted runners only have ~4 vcpus and oversubscribing them can starve the runner agent.
+
 ### Quick Start Examples
 
 ``` shell
