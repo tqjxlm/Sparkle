@@ -22,10 +22,36 @@
 ## Python Test Scripts
 
 * When possible, always use python scripts to perform tests.
-* Make use of any necessary python libraries and add them to dev/requirements.txt
-* General test scripts are stored at dev/.
-* Dedicated test scripts are stored at tests/.
-* If python is not sufficient to test your case, also make use of TestCase system below. They can be combined with python scripts freely. See dev/functional_test.py as an example.
+* Add Python test dependencies to `tests/requirements.txt`.
+* `dev/run_tests.py` is the single general test orchestrator. Do not add another
+  script that builds or sequences the general test suite.
+* Focused test implementations, evaluators, and reusable test helpers belong under
+  `tests/`, next to the feature they validate.
+* If Python is not sufficient, combine a focused script under `tests/` with the
+  TestCase system below.
+
+## Test Orchestration
+
+`dev/run_tests.py` runs the Python unit tests first, builds once, runs both
+screenshot pipelines, evaluates their ground truth, runs the USD round trip, and
+executes the cooker and render-target pool TestCases. The preflight tests fail fast;
+the application suite runs to completion and reports all failures together.
+
+```bash
+python3 dev/run_tests.py --framework macos --config Release --headless
+python3 dev/run_tests.py --framework glfw --config Release --headless
+```
+
+Use `--pipeline <name>` to focus screenshot coverage while developing; repeat the
+option for multiple pipelines. Use `--skip_build` only when the intended binary is
+already built. CI additionally uses `--software --require_cooked` to run the
+packaged Windows build under Lavapipe and reject runtime cooking.
+
+The static-render evaluator lives at
+[`tests/screenshot/static_render_test.py`](../tests/screenshot/static_render_test.py), and
+the USD evaluator lives at
+[`tests/usd/usd_roundtrip_test.py`](../tests/usd/usd_roundtrip_test.py). They own
+specialized assertions; they do not orchestrate the general suite.
 
 ## TestCase System
 

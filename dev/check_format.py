@@ -1,6 +1,7 @@
 """Check or fix source formatting for the whole repository.
 
-Runs the same formatters CI uses, over all git-tracked files (thirdparty excluded):
+Runs the same formatters CI uses over all tracked and untracked, non-ignored files
+(thirdparty excluded):
 
 * c++/objc/slang: clang-format (major version pinned below, using .clang-format)
 * python: autopep8 (configured in pyproject.toml)
@@ -28,8 +29,13 @@ CHUNK_SIZE = 50
 
 def git_files(*patterns):
     output = subprocess.check_output(
-        ["git", "ls-files", "--", *patterns], text=True)
-    return [f for f in output.splitlines() if not f.startswith("thirdparty/")]
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard",
+         "--", *patterns], text=True)
+    deleted_output = subprocess.check_output(
+        ["git", "ls-files", "--deleted", "--", *patterns], text=True)
+    deleted = set(deleted_output.splitlines())
+    return [f for f in output.splitlines()
+            if f not in deleted and not f.startswith("thirdparty/")]
 
 
 def run_chunked(base_cmd, files):
