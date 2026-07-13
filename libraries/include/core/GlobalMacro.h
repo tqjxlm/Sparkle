@@ -57,6 +57,15 @@
 
 #pragma endregion
 
+#pragma region Graphics API Macros
+
+// defined by the build system on platforms that use the corresponding graphics api
+#ifndef ENABLE_VULKAN
+#define ENABLE_VULKAN 0
+#endif
+
+#pragma endregion
+
 #pragma region Platform Sanity Check
 
 #if PLATFORM_MACOS
