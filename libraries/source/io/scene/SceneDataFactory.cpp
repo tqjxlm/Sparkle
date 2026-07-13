@@ -34,8 +34,14 @@ std::shared_ptr<TaskFuture<std::shared_ptr<SceneNode>>> SceneDataFactory::Load(c
                                                    TargetThread::Current);
     }
 
-    return TaskManager::Instance().EnqueueTask(
-        [loader_moved = std::move(loader), path, scene]() { return loader_moved->Load(scene); },
-        async ? TargetThread::Worker : TargetThread::Current);
+    auto load_task = [loader_moved = std::move(loader), path, scene]() { return loader_moved->Load(scene); };
+
+    // loaders fan out to the worker pool and wait on it, so they must not hold a pool worker
+    if (async)
+    {
+        return TaskManager::RunInDedicatedThread(std::move(load_task));
+    }
+
+    return TaskManager::Instance().EnqueueTask(std::move(load_task), TargetThread::Current);
 }
 } // namespace sparkle

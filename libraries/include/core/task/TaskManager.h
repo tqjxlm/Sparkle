@@ -34,23 +34,11 @@ public:
     auto EnqueueTask(Func &&task, TargetThread target_thread, bool allow_run_now = true)
     {
         using ReturnType = std::invoke_result_t<Func>;
-        std::function<ReturnType()> func = std::forward<Func>(task);
 
         auto task_promise = std::make_shared<std::promise<ReturnType>>();
         auto future = std::make_shared<TaskFuture<ReturnType>>(task_promise->get_future());
 
-        auto task_to_dispatch = [async_task = std::move(func), future, task_promise]() {
-            if constexpr (std::is_void_v<ReturnType>)
-            {
-                async_task();
-                task_promise->set_value();
-            }
-            else
-            {
-                task_promise->set_value(async_task());
-            }
-            future->OnReady();
-        };
+        auto task_to_dispatch = PackageTask<ReturnType>(std::forward<Func>(task), task_promise, future);
 
         ThreadName thread_name = GetTargetThreadName(target_thread);
 
@@ -83,6 +71,21 @@ public:
         return TaskManager::Instance().EnqueueTask(std::forward<Func>(task), TargetThread::Worker, allow_run_now);
     }
 
+    // for coordinator tasks that fan out to the worker pool and block on it (ParallelFor, OnAll):
+    // a pool worker must never host such a task, or pools with few threads deadlock
+    template <std::invocable<> Func> static auto RunInDedicatedThread(Func &&task)
+    {
+        using ReturnType = std::invoke_result_t<Func>;
+
+        auto task_promise = std::make_shared<std::promise<ReturnType>>();
+        auto future = std::make_shared<TaskFuture<ReturnType>>(task_promise->get_future());
+
+        TaskDispatcher::Instance().RunInDedicatedThread(
+            PackageTask<ReturnType>(std::forward<Func>(task), task_promise, future));
+
+        return future;
+    }
+
     template <typename Func> static auto ParallelFor(unsigned first_index, unsigned index_after_last, Func &&task)
     {
         return TaskDispatcher::Instance().GetThreadPool().submit_loop(first_index, index_after_last,
@@ -92,6 +95,25 @@ public:
     static std::shared_ptr<TaskFuture<>> OnAll(const std::vector<std::shared_ptr<TaskFuture<>>> &tasks);
 
 private:
+    template <typename ReturnType, typename Func>
+    static std::function<void()> PackageTask(Func &&task, std::shared_ptr<std::promise<ReturnType>> task_promise,
+                                             std::shared_ptr<TaskFuture<ReturnType>> future)
+    {
+        return [async_task = std::function<ReturnType()>(std::forward<Func>(task)), future,
+                promise = std::move(task_promise)]() {
+            if constexpr (std::is_void_v<ReturnType>)
+            {
+                async_task();
+                promise->set_value();
+            }
+            else
+            {
+                promise->set_value(async_task());
+            }
+            future->OnReady();
+        };
+    }
+
     std::unique_ptr<TaskDispatcher> task_dispatcher_;
 
     static TaskManager *instance_;
