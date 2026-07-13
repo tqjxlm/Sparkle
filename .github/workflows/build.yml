@@ -53,6 +53,7 @@ jobs:
         with:
           framework: ${{ matrix.framework }}
           os: ${{ matrix.os }}
+          build-type: ${{ matrix.build_type }}
 
       - name: Setup Signing Certificates (iOS)
         if: matrix.framework == 'ios'
@@ -81,7 +82,14 @@ jobs:
           exit 1
 
       - name: Build
+        shell: bash
         run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --archive ${{ steps.setup-environment.outputs.build-args }}
+
+      # hit rate should approach 100% for PRs that touch few files; a cold cache shows all misses
+      - name: Compiler cache stats
+        if: always()
+        shell: bash
+        run: ccache -s || true
 
       - name: Archive App Bundle (macOS)
         if: matrix.framework == 'macos'

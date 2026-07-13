@@ -175,6 +175,7 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 * `--asan` - Enable AddressSanitizer.
 * `--clean` - Clean output directory before configure, which resolves some build errors.
 * `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)
+* `--cmake-args='...'` - Pass extra arguments to CMake, e.g. `--cmake-args='-DENABLE_LTO=ON'` to enable link time optimization for a distribution build (off by default: it adds minutes of Release link time).
 * `--help` - Show all usage help.
 * `--run` - Run after building. For mobile builds, it tries to run on a connected device.
 

@@ -7,6 +7,10 @@ inputs:
   os:
     description: "Operating system"
     required: true
+  build-type:
+    description: "Build configuration (Debug/Release), used to key the compiler cache"
+    required: false
+    default: ""
 outputs:
   build-args:
     description: "Additional build arguments"
@@ -19,7 +23,7 @@ runs:
       with:
         path: |
           ./build_cache
-        key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}}
+        key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
         restore-keys: |
           ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
 
@@ -33,9 +37,37 @@ runs:
           ./build_system/android/.gradle
           ./build_system/android/app/build
           ./build_system/android/build
-        key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/**/*.gradle', './build_system/android/**/gradle.properties', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}}
+        key: ${{ inputs.os }}-android-gradle-${{ hashFiles('./build_system/android/**/*.gradle', './build_system/android/**/gradle.properties', './build_system/android/gradle/wrapper/gradle-wrapper.properties') }}
         restore-keys: |
           ${{ inputs.os }}-android-gradle-
+
+    # compiled objects are cached with ccache across runs. the key always misses (github.sha)
+    # so the updated cache is saved after every run; restore-keys picks up the newest previous one.
+    - name: Cache compiler cache (All Platforms)
+      uses: actions/cache@v4
+      with:
+        path: ./.ccache
+        key: ${{ inputs.os }}-${{ inputs.framework }}-${{ inputs.build-type }}-ccache-${{ github.sha }}
+        restore-keys: |
+          ${{ inputs.os }}-${{ inputs.framework }}-${{ inputs.build-type }}-ccache-
+
+    - name: Configure ccache
+      shell: bash
+      run: |
+        echo "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $GITHUB_ENV
+        # runners reinstall toolchains with fresh timestamps every run: hash the compiler
+        # binary content instead, or every run would miss the cache
+        echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
+        echo "CCACHE_MAXSIZE=500M" >> $GITHUB_ENV
+
+    - name: Install ccache (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        if ! command -v ccache >/dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y ccache
+        fi
 
     - name: Setup GLFW Environment (All Platforms)
       if: inputs.framework == 'glfw'
@@ -69,13 +101,49 @@ runs:
       with:
         xcode-version: latest-stable
 
+    # the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so the compiler is routed
+    # through ccache with wrapper scripts wired into Xcode build settings (CC/CXX/LD/LDPLUSPLUS).
+    # must run after Setup Xcode so xcrun resolves the selected toolchain.
+    - name: Setup ccache for Xcode (macOS/iOS)
+      if: inputs.framework == 'macos' || inputs.framework == 'ios'
+      shell: bash
+      run: |
+        command -v ccache || HOMEBREW_NO_AUTO_UPDATE=1 brew install ccache
+        CCACHE="$(command -v ccache)"
+        SHIM_DIR="${{ github.workspace }}/.ccache-shims"
+        mkdir -p "${SHIM_DIR}"
+        printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "${CCACHE}" "$(xcrun -f clang)" > "${SHIM_DIR}/clang"
+        printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "${CCACHE}" "$(xcrun -f clang++)" > "${SHIM_DIR}/clang++"
+        chmod +x "${SHIM_DIR}/clang" "${SHIM_DIR}/clang++"
+        echo "CCACHE_SHIM_DIR=${SHIM_DIR}" >> $GITHUB_ENV
+
     - name: Set build arguments
       id: set-build-args
       shell: bash
       run: |
+        EXTRA_CMAKE_ARGS=""
+
+        if [[ "${{ inputs.framework }}" == "glfw" || "${{ inputs.framework }}" == "android" ]]; then
+          EXTRA_CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+        fi
+
+        if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"windows"* ]]; then
+          # ccache cannot cache /Zi (separate .pdb writes); store debug info in the objects (/Z7)
+          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
+        fi
+
         if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"macos"* ]]; then
           LLVM_PREFIX=$(brew --prefix llvm)
-          echo "args=--cmake-args='-DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\"'" >> $GITHUB_OUTPUT
-        else
-          echo "args=" >> $GITHUB_OUTPUT
+          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\""
         fi
+
+        if [[ "${{ inputs.framework }}" == "macos" || "${{ inputs.framework }}" == "ios" ]]; then
+          EXTRA_CMAKE_ARGS="-DCMAKE_XCODE_ATTRIBUTE_CC=${CCACHE_SHIM_DIR}/clang"
+          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_CXX=${CCACHE_SHIM_DIR}/clang++"
+          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_LD=${CCACHE_SHIM_DIR}/clang"
+          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_LDPLUSPLUS=${CCACHE_SHIM_DIR}/clang++"
+          # the index store output makes compilations uncacheable, and CI has no use for it
+          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE=NO"
+        fi
+
+        echo "args=--cmake-args='${EXTRA_CMAKE_ARGS}'" >> $GITHUB_OUTPUT
