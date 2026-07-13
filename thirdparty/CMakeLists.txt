@@ -118,10 +118,12 @@ target_link_libraries(sparkle_thirdparty PUBLIC mimalloc-obj)
 
 # ------------------ debugger ------------------
 
+# archive download instead of a git clone: much faster and one less failure point during configure
 FetchContent_Declare(
     cpptrace
-    GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
-    GIT_TAG        v1.0.4
+    DOWNLOAD_EXTRACT_TIMESTAMP 1
+    DOWNLOAD_NO_PROGRESS 1
+    URL https://github.com/jeremy-rifkin/cpptrace/archive/refs/tags/v1.0.4.zip
 )
 
 # Check if compiler supports C++20 modules
