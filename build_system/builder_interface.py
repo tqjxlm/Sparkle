@@ -42,6 +42,10 @@ class FrameworkBuilder(ABC):
         """Archive the built project."""
         pass
 
+    def resign_package(self, package_path: str) -> None:
+        """Restore the package signature after cooked-content injection.
+        Frameworks whose package format carries a signature override this."""
+
     @abstractmethod
     def run(self, args: Dict[str, Any]) -> Optional[int]:
         """Run the built project. Returns the process exit code, or None."""

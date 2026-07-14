@@ -1,5 +1,5 @@
 name: "Release Platform"
-description: "Inject cooked content into one build product and re-sign it where injection breaks the signature"
+description: "Package the cooked content image into one build product and re-sign it where packaging breaks the signature"
 inputs:
   framework:
     description: "Target framework (glfw, android, macos, ios)"
@@ -41,7 +41,7 @@ runs:
         name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}
         path: build_system/${{ inputs.framework }}/product
 
-    - name: Download cooked content
+    - name: Download cooked content image
       uses: actions/download-artifact@v4
       with:
         name: cooked-shared
@@ -64,11 +64,11 @@ runs:
         fi
         echo "path=$pkg" >> $GITHUB_OUTPUT
 
-    - name: Inject cooked content
+    - name: Package cooked content image
       shell: bash
-      run: python3 dev/inject_cooked.py --framework ${{ inputs.framework }} --package "${{ steps.package.outputs.path }}" --cooked cooked
+      run: python3 dev/package_cooked.py --framework ${{ inputs.framework }} --package "${{ steps.package.outputs.path }}" --cooked cooked
 
-    # appending to the apk breaks its alignment and signature; restore both with the
+    # rewriting the apk breaks its alignment and signature; restore both with the
     # standard debug key, matching the gradle signing config
     - name: Re-sign (Android)
       if: inputs.framework == 'android'
@@ -92,7 +92,7 @@ runs:
         appstore-key-id: ${{ inputs.ios-appstore-key-id }}
         appstore-private-key: ${{ inputs.ios-appstore-private-key }}
 
-    # injecting into the bundle invalidates the code seal; re-sign with the same identity
+    # rewriting the bundle invalidates the code seal; re-sign with the same identity
     - name: Re-sign (iOS)
       if: inputs.framework == 'ios'
       shell: bash

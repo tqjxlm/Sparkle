@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,14 +22,19 @@ class ResolveStagesTest(unittest.TestCase):
                 framework="macos"):
         return build_script.resolve_stages(stage_args, skip_build, cook, archive, framework)
 
-    def test_default_is_build_and_cook(self):
+    def test_default_is_build_and_cook_for_desktop(self):
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", "glfw"):
             self.assertEqual(self.resolve(framework="macos"), ["build", "cook"])
-            self.assertEqual(self.resolve(framework="android"), ["build", "cook"])
+            self.assertEqual(self.resolve(framework="glfw"), ["build", "cook"])
+
+    def test_default_includes_package_for_device_frameworks(self):
+        with patch.object(build_script, "HOST_COOK_FRAMEWORK", "glfw"):
+            self.assertEqual(self.resolve(framework="android"), ["build", "cook", "package"])
+            self.assertEqual(self.resolve(framework="ios"), ["build", "cook", "package"])
 
     def test_default_degrades_to_build_when_the_host_cannot_cook(self):
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
-            self.assertEqual(self.resolve(framework="android"), ["build"])
+            self.assertEqual(self.resolve(framework="android"), ["build", "package"])
             self.assertEqual(self.resolve(framework="glfw"), ["build", "cook"])
 
     def test_all_selects_every_stage_in_canonical_order(self):
@@ -82,11 +88,12 @@ class ValidateStagesTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 build_script.validate_stages(["build", "cook"], "android")
 
-    def test_default_cooked_dir_is_none_when_the_host_cannot_cook(self):
+    def test_default_image_dir_is_none_when_the_host_cannot_cook(self):
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
-            self.assertIsNone(build_script.default_cooked_dir("android"))
+            self.assertIsNone(build_script.default_cooked_image_dir("android"))
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", "glfw"):
-            self.assertTrue(build_script.default_cooked_dir("android").endswith("cooked"))
+            self.assertTrue(build_script.default_cooked_image_dir("android")
+                            .endswith("cooked_image"))
 
     def test_products_are_named_by_target_except_glfw(self):
         self.assertEqual(build_script.product_name("android", "Release", ".apk"),
@@ -117,6 +124,50 @@ class ValidateStagesTest(unittest.TestCase):
 
     def test_package_alone_is_valid_for_any_framework(self):
         build_script.validate_stages(["package"], "android")
+
+
+class PackageProjectTest(unittest.TestCase):
+    class FakeBuilder:
+        def __init__(self):
+            self.resigned = []
+
+        def archive(self, args):
+            return "unused"
+
+        def resign_package(self, package_path):
+            self.resigned.append(package_path)
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.product = os.path.join(self.directory.name, "android-Release.apk")
+        self.image = os.path.join(self.directory.name, "image")
+        self.builder = self.FakeBuilder()
+
+        with zipfile.ZipFile(self.product, "w") as zip_file:
+            zip_file.writestr("assets/packed/config/cook_list.json", "{}")
+
+    def package(self, image_dir):
+        args = {"framework": "android", "config": "Release", "cooked": image_dir}
+        with patch.object(build_script, "copy_build_products", return_value=self.product):
+            build_script.package_project(self.builder, args)
+        return args
+
+    def test_packaged_content_triggers_resign_and_records_the_product(self):
+        os.makedirs(os.path.join(self.image, "cooked"))
+        with open(os.path.join(self.image, "cooked", "manifest.json"), "w") as manifest:
+            manifest.write("{}")
+
+        args = self.package(self.image)
+
+        self.assertEqual(self.builder.resigned, [self.product])
+        self.assertEqual(args["product_path"], self.product)
+
+    def test_no_cooked_content_skips_resign_but_records_the_product(self):
+        args = self.package(self.image)
+
+        self.assertEqual(self.builder.resigned, [])
+        self.assertEqual(args["product_path"], self.product)
 
 
 if __name__ == "__main__":

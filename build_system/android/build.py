@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 import urllib.request
 import platform
 from pathlib import Path
@@ -11,6 +12,7 @@ from build_system.prerequisites import setup_android_validation
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPTPATH))
 
 
 def download_gradle_wrapper():
@@ -140,11 +142,81 @@ def get_apk_path(args):
     return os.path.join(SCRIPTPATH, "app", "build", "outputs", "apk", variant, apk_name)
 
 
+def find_android_sdk():
+    sdk = os.environ.get("ANDROID_HOME")
+    if sdk and os.path.isdir(sdk):
+        return sdk
+
+    if platform.system() == "Darwin":
+        default = os.path.expanduser("~/Library/Android/sdk")
+    elif platform.system() == "Windows":
+        default = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk")
+    else:
+        default = os.path.expanduser("~/Android/Sdk")
+    if os.path.isdir(default):
+        return default
+
+    raise RuntimeError("Android SDK not found; set ANDROID_HOME")
+
+
+def newest_build_tools(sdk):
+    tools_root = os.path.join(sdk, "build-tools")
+    versions = [entry for entry in os.listdir(tools_root)
+                if os.path.isdir(os.path.join(tools_root, entry))] if os.path.isdir(tools_root) else []
+    if not versions:
+        raise RuntimeError(f"no Android build-tools under {tools_root}")
+
+    def version_key(name):
+        return [int(part) for part in re.findall(r"\d+", name)]
+
+    return os.path.join(tools_root, max(versions, key=version_key))
+
+
+def resign_apk(apk_path):
+    """Injection appends entries to the apk, which breaks zip alignment and the
+    signature; restore both with the debug key gradle signs with, so an installed
+    build still upgrades in place."""
+    keystore = os.path.expanduser("~/.android/debug.keystore")
+    if not os.path.isfile(keystore):
+        raise RuntimeError(f"debug keystore not found at {keystore};"
+                           " build any android app once to create it")
+
+    tools = newest_build_tools(find_android_sdk())
+    windows = platform.system() == "Windows"
+    zipalign = os.path.join(tools, "zipalign.exe" if windows else "zipalign")
+    apksigner = os.path.join(tools, "apksigner.bat" if windows else "apksigner")
+
+    aligned_path = apk_path + ".aligned"
+    subprocess.run([zipalign, "-f", "4", apk_path, aligned_path], check=True)
+    subprocess.run([apksigner, "sign", "--ks", keystore, "--ks-pass", "pass:android",
+                    "--out", apk_path, aligned_path], check=True)
+    os.remove(aligned_path)
+    print(f"re-signed {apk_path} with the debug key")
+
+
+def report_cook_activity(log_path):
+    sys.path.insert(0, os.path.join(REPO_ROOT, "dev"))
+    from cook_log import count_cook_activity
+
+    with open(log_path, errors="replace") as log_file:
+        hits, cooked = count_cook_activity(log_file)
+    if cooked:
+        print(f"WARNING: {cooked} on-the-fly cook(s): the installed package"
+              " did not provide this content pre-cooked")
+    else:
+        print(f"{hits} cook artifact hit(s), no on-the-fly cooking")
+
+
 def run_on_device(args):
     """Install APK and run the application."""
     package_name = "io.tqjxlm.sparkle"
     activity_name = f"{package_name}/{package_name}.VulkanActivity"
-    apk_path = get_apk_path(args)
+
+    apk_path = args.get("product_path")
+    if not apk_path:
+        apk_path = get_apk_path(args)
+        print("Installing the raw build output; without the package stage"
+              " it carries no cooked content and the device cooks on the fly.")
 
     print("Installing APK...")
     result = subprocess.run(["adb", "install", apk_path])
@@ -166,8 +238,10 @@ def run_on_device(args):
 
     log_destination = os.path.join(os.getcwd(), "output.log")
     print(f"Pulling application output log to {log_destination}...")
-    subprocess.run(["adb", "pull",
-                    f"/sdcard/Android/data/{package_name}/files/logs/output.log", "."])
+    pulled = subprocess.run(["adb", "pull",
+                             f"/sdcard/Android/data/{package_name}/files/logs/output.log", "."])
+    if pulled.returncode == 0:
+        report_cook_activity(log_destination)
 
 
 def sync_only(args):
@@ -234,6 +308,9 @@ class AndroidBuilder(FrameworkBuilder):
     def archive(self, args):
         """Archive the built project."""
         return get_apk_path(args)
+
+    def resign_package(self, package_path):
+        resign_apk(package_path)
 
     def run(self, args):
         """Run the built project."""
