@@ -4,15 +4,11 @@
 
 You must conform to CI/CD requirements. See [CI.md](CI.md) for details.
 
-A code change is not ready until the local validation gates pass. Run them in the
-fail-fast order documented under [Local Validation Gates](CI.md#local-validation-gates):
-format, clang-tidy, then the complete `run_tests.py` suite. Do not substitute a
-focused test for the complete suite when declaring work finished.
+A code change is not ready until the local validation gates pass. Run them in the fail-fast order documented under [Local Validation Gates](CI.md#local-validation-gates): format, clang-tidy, then the complete `run_tests.py` suite. Do not substitute a focused test for the complete suite when declaring work finished.
 
 ## Writing Tests
 
-Use the TestCase system for in-process functional verification. See [Test.md](Test.md)
-for how to write test cases and run them locally before pushing.
+Use the TestCase system for in-process functional verification. See [Test.md](Test.md) for how to write test cases and run them locally before pushing.
 
 ## Coding Style
 
@@ -33,8 +29,7 @@ Always use formatters in the environment or IDE to format code and documents aft
 * python: PEP8 (autopep8, configured in `pyproject.toml`)
 * All code must pass clang-tidy with the project's [.clang-tidy](../.clang-tidy) configuration. All warnings are treated as errors (`WarningsAsErrors: "*"`).
 
-CI enforces formatting on every push and PR, and clang-tidy on every push and PR
-that touches code. See [CI.md](CI.md) for the matching local commands.
+CI enforces formatting on every push and PR, and clang-tidy on every push and PR that touches code. See [CI.md](CI.md) for the matching local commands.
 
 ### Naming Conventions
 
@@ -51,5 +46,4 @@ All C++ code must follow the `.clang-tidy` naming rules. Key conventions:
 | `constexpr` / static / global constant | `CamelCase`                  | `MaxBufferedTaskFrames` |
 | Enum constant                          | `CamelCase`                  | `PrimaryLeft`           |
 
-All warnings are treated as errors (`WarningsAsErrors: "*"` in `.clang-tidy`).
 Avoid nested ternary operators (`readability-avoid-nested-conditional-operator`).

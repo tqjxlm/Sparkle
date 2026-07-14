@@ -22,14 +22,14 @@ The base storage path varies by platform:
 ## Config System
 
 * We adopt a Unreal-like console variable (cvar) system. For each cvar, the override rule is: code default->packaged config->user config->commandline argument.
-* Use `--[cvar_name]` to set a cvar in command line. Example: `--pipeline gpu --max-spp 512 --scene models/mymodel.usd`
-* For platforms that cannot use commanline arguments (i.e. mobile platforms), you must use config files to control cvars.
+* Use `--[cvar_name]` to set a cvar in command line. Example: `--pipeline gpu --max_spp 512 --scene models/mymodel.usd`
+* For platforms that cannot use commandline arguments (i.e. mobile platforms), you must use config files to control cvars.
 * Not all cvar can be toggled at runtime.
 * Use `--help` to show all cvar.
 
 ### Config File
 
-* Default config: copied from resources/config/config.json to final package on every build.
+* Default config: copied from resources/packed/config/config.json to final package on every build.
 * User config: generated at `<external-storage-path>/config/config.json` on first run of the built package. It overrides the default config. See [External Storage Paths](#external-storage-paths) for the platform-specific base path.
 
 ### Important Configs
@@ -39,7 +39,7 @@ The base storage path varies by platform:
 | `pipeline`          | string | `forward`  | all               | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                                      |
 | `scene`             | string | *(empty)*  | all               | Scene to render. Empty = packaged **TestScene** (the default; also the CI ground-truth scene). Other values = model/scene file path under `resources/models/` |
 | `width` / `height`  | uint   | 1280 / 720 | all               | Render resolution                                                                                            |
-| `max-spp`           | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                                            |
+| `max_spp`           | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                                            |
 | `spp`               | uint   | 1          | cpu, gpu          | Rays per sample per frame                                                                                    |
 | `bounce`            | uint   | 8          | cpu, gpu          | Max ray bounces per path                                                                                     |
 | `thread`            | uint   | 64         | cpu               | Max threads for CPU path tracer                                                                              |

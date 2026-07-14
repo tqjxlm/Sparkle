@@ -7,7 +7,7 @@
 | framework | windows                 | macos              | ios                | android               |
 | --------- | ----------------------- | ------------------ | ------------------ | --------------------- |
 | glfw      | clang-cl (vs-installer) | apple-llvm (Xcode) | -                  | -                     |
-| glfw-sln  | msvc (Visual Studio)    | -                  | -                  | -                     |
+| glfw (VS solution via `--generate_only`) | msvc (Visual Studio) | -     | -                  | -                     |
 | macos     | -                       | apple-llvm (Xcode) | -                  | -                     |
 | ios       | -                       | -                  | apple-llvm (Xcode) | -                     |
 | android   | -                       | -                  | -                  | llvm (Android Studio) |
