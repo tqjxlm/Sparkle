@@ -169,8 +169,8 @@ void VulkanSwapChain::Recreate()
     else
     {
         create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        create_info.queueFamilyIndexCount = 0;     // Optional
-        create_info.pQueueFamilyIndices = nullptr; // Optional
+        create_info.queueFamilyIndexCount = 0;
+        create_info.pQueueFamilyIndices = nullptr;
     }
 
     if (swap_chain_support.capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)

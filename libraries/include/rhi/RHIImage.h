@@ -166,7 +166,6 @@ public:
         RHIPipelineStage before_stage;
         // by default, all mips are transitioned
         unsigned base_mip = 0;
-        // by default, all mips are transitioned
         unsigned mip_count = 0;
     };
 

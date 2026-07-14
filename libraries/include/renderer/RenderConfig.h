@@ -14,9 +14,7 @@ struct RenderConfig : public ConfigCollection
         Cpu,
         Gpu,
         Forward,
-        // ForwardRt,
         Deferred,
-        // DeferredRt,
     };
 
     enum class OutputImage : uint8_t

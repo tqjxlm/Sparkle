@@ -205,17 +205,10 @@ void ImGui_ImplIOS_Shutdown()
     io.BackendFlags &= ~(ImGuiBackendFlags_HasMouseCursors | ImGuiBackendFlags_HasGamepad);
 }
 
-void ImGui_ImplIOS_NewFrame(MTKView *view)
+void ImGui_ImplIOS_NewFrame(MTKView * /*view*/)
 {
     ImGui_ImplIOS_Data *bd = ImGui_ImplIOS_GetBackendData();
     ImGuiIO &io = ImGui::GetIO();
-
-    // Setup display size
-    if (view)
-    {
-        // const float dpi = (float)[view.window contentScaleFactor];
-        // io.DisplayFramebufferScale = ImVec2(dpi, dpi);
-    }
 
     // Setup time step
     if (bd->time_ == 0.0)

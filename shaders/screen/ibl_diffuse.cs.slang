@@ -53,8 +53,6 @@
         float3 total_radiance = env_sample;
 
         // the sampling method we use allow us to skip cos_w_i and InvPi here
-        // float cos_w_i = AbsCosTheta(local_w_i);
-        // total_radiance *= cos_w_i * InvPi;
         batch_radiance += total_radiance;
     }
 

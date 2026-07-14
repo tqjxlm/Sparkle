@@ -76,7 +76,6 @@ OneShotCommandBufferScope::CommandBufferResources::~CommandBufferResources()
     }
     if (fence)
     {
-        // vkResetFences(rhi->GetDevice(), 1, &resources.fence);
         vkDestroyFence(context->GetDevice(), fence, nullptr);
     }
 }

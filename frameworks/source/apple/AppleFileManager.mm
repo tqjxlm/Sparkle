@@ -27,7 +27,6 @@ std::filesystem::path AppleFileManager::ResolvePath(const Path &path)
         return {};
     }
 
-    // For Internal and External, use platform-specific paths
     @autoreleasepool
     {
         NSError *error = nil;
@@ -87,7 +86,6 @@ bool AppleFileManager::Exists(const Path &file)
         return !GetResourceFilePath(file.path).empty();
     }
 
-    // For Internal and External, use parent implementation
     return StdFileManager::Exists(file);
 }
 
@@ -115,7 +113,6 @@ size_t AppleFileManager::GetSize(const Path &file)
         }
     }
 
-    // For Internal and External, use parent implementation
     return StdFileManager::GetSize(file);
 }
 
@@ -151,7 +148,6 @@ std::vector<char> AppleFileManager::Read(const Path &file)
         }
     }
 
-    // For Internal and External, use parent implementation
     return StdFileManager::Read(file);
 }
 
@@ -198,7 +194,6 @@ std::vector<Path> AppleFileManager::ListDirectory(const Path &dirpath)
         return entries;
     }
 
-    // For Internal and External, use parent implementation
     return StdFileManager::ListDirectory(dirpath);
 }
 

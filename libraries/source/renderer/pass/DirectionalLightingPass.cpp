@@ -62,7 +62,6 @@ void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneR
     ScreenQuadPass::UpdateFrameData(config, scene);
 
     bool use_ssao = config.use_ssao;
-    // bool ibl_ready = (resources_.ibl != nullptr) && !resources_.ibl->NeedUpdate();
     bool use_diffuse_ibl = (resources_.ibl != nullptr) && config.use_diffuse_ibl;
     bool use_specular_ibl = (resources_.ibl != nullptr) && config.use_specular_ibl;
 

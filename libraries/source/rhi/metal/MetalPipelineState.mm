@@ -414,11 +414,9 @@ void MetalGraphicsPipeline::CreatePipelineState()
              [error.localizedDescription UTF8String]);
 
 #if DESCRIPTOR_SET_AS_ARGUMENT_BUFFER
-    // set up shader resource bindings with descriptor info
     SetupShaderResources(RHIShaderStage::Vertex);
     SetupShaderResources(RHIShaderStage::Pixel);
 #else
-    // setup up shader resource bindings using reflection info
     SetupShaderResources(reflection, nullptr, RHIShaderStage::Vertex);
     SetupShaderResources(reflection, nullptr, RHIShaderStage::Pixel);
 #endif
@@ -479,10 +477,8 @@ void MetalComputePipeline::CreatePipelineState()
              [error.localizedDescription UTF8String]);
 
 #if DESCRIPTOR_SET_AS_ARGUMENT_BUFFER
-    // set up shader resource bindings with descriptor info
     SetupShaderResources(RHIShaderStage::Compute);
 #else
-    // setup up shader resource bindings using reflection info
     SetupShaderResources(nullptr, reflection, RHIShaderStage::Compute);
 #endif
 
