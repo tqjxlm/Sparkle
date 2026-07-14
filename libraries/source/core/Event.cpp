@@ -50,7 +50,7 @@ EventSubscription &EventSubscription::operator=(EventSubscription &&other) noexc
 {
     if (this != &other)
     {
-        Unsubscribe(); // Clean up current subscription
+        Unsubscribe();
         listener_ = std::move(other.listener_);
         id_ = other.id_;
         other.id_ = InvalidId;

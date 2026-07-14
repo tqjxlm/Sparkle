@@ -36,57 +36,6 @@ static id<MTLAccelerationStructure> NewAccelerationStructureWithDescriptor(
     return acceleration_structure;
 
     // TODO(tqjxlm): compaction
-
-    // // Allocate a buffer for Metal to write the compacted accelerated structure's size into.
-    // id<MTLBuffer> compacted_size_buffer = [device newBufferWithLength:sizeof(uint32_t)
-    //                                                           options:MTLResourceStorageModeShared];
-
-    // // Compute and write the compacted acceleration structure size into the buffer. You
-    // // must already have a built acceleration structure because Metal determines the compacted
-    // // size based on the final size of the acceleration structure. Compacting an acceleration
-    // // structure can potentially reclaim significant amounts of memory because Metal must
-    // // create the initial structure using a conservative approach.
-
-    // [command_encoder writeCompactedAccelerationStructureSize:acceleration_structure
-    //                                                 toBuffer:compacted_size_buffer
-    //                                                   offset:0];
-
-    // // The sample waits for Metal to finish executing the command buffer so that it can
-    // // read back the compacted size.
-
-    // // Note: Don't wait for Metal to finish executing the command buffer if you aren't compacting
-    // // the acceleration structure, as doing so requires CPU/GPU synchronization. You don't have
-    // // to compact acceleration structures, but do so when creating large static acceleration
-    // // structures, such as static scene geometry. Avoid compacting acceleration structures that
-    // // you rebuild every frame, as the synchronization cost may be significant.
-
-    // [command_buffer waitUntilCompleted];
-
-    // uint32_t compacted_size = *(uint32_t *)compacted_size_buffer.contents;
-
-    // // Allocate a smaller acceleration structure based on the returned size.
-    // id<MTLAccelerationStructure> compacted_acceleration_structure =
-    //     [device newAccelerationStructureWithSize:compacted_size];
-
-    // // Create another command buffer and encoder.
-    // commandBuffer = [_queue commandBuffer];
-
-    // command_encoder = [commandBuffer accelerationStructureCommandEncoder];
-
-    // // Encode the command to copy and compact the acceleration structure into the
-    // // smaller acceleration structure.
-    // [command_encoder copyAndCompactAccelerationStructure:acceleration_structure
-    //                              toAccelerationStructure:compacted_acceleration_structure];
-
-    // // End encoding and commit the command buffer. You don't need to wait for Metal to finish
-    // // executing this command buffer as long as you synchronize any ray-intersection work
-    // // to run after this command buffer completes. The sample relies on Metal's default
-    // // dependency tracking on resources to automatically synchronize access to the new
-    // // compacted acceleration structure.
-    // [command_encoder endEncoding];
-    // [commandBuffer commit];
-
-    // return compacted_acceleration_structure;
 }
 
 static void FillBLASDescriptor(const MetalBLAS *blas, uint32_t primitive_id,
@@ -95,11 +44,6 @@ static void FillBLASDescriptor(const MetalBLAS *blas, uint32_t primitive_id,
     out_descriptor.accelerationStructureIndex = primitive_id;
 
     // we do not support ray tracing pipeline yet, so no need to use function table
-
-    // instance_descriptors[instance_index].options =
-    //     instance.geometry.intersectionFunctionName == nil ? MTLAccelerationStructureInstanceOptionOpaque : 0;
-    // instance_descriptors[instance_index].intersectionFunctionTableOffset = 0;
-
     out_descriptor.options = MTLAccelerationStructureInstanceOptionOpaque;
 
     out_descriptor.mask = 0xffffffff;

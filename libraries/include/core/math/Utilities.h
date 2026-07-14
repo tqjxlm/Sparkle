@@ -318,13 +318,6 @@ inline float FrDielectric(float cos_theta_i, float eta_i, float eta_t)
         return 1.f;
     }
 
-    // auto cos_theta_t = std::sqrt(1 - sin_theta_t * sin_theta_t);
-
-    // auto r_parl = ((eta_t * cos_theta_i) - (eta_i * cos_theta_t)) / ((eta_t * cos_theta_i) + (eta_i * cos_theta_t));
-    // auto r_perp = ((eta_i * cos_theta_i) - (eta_t * cos_theta_t)) / ((eta_i * cos_theta_i) + (eta_t * cos_theta_t));
-
-    // return (r_parl * r_parl + r_perp * r_perp) / 2.f;
-
     auto r0 = (1.f - ref_idx) / (1.f + ref_idx);
     r0 = r0 * r0;
     return SchlickApproximation(cos_theta_i, r0);

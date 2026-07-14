@@ -55,14 +55,6 @@ inline VkAccessFlags GetImageAccessFlags(const RHIImage *image, RHIImageLayout l
     if (layout == RHIImageLayout::Read)
     {
         // TODO(tqjxlm): handle subpass read
-        // if (usages & RHIImage::ImageUsage::DepthStencilAttachment)
-        // {
-        //     return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-        // }
-        // if (usages & RHIImage::ImageUsage::ColorAttachment)
-        // {
-        //     return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-        // }
         return VK_ACCESS_SHADER_READ_BIT;
     }
 

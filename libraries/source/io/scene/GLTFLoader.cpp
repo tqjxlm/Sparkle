@@ -33,17 +33,10 @@ namespace sparkle
 /// elements.
 template <typename T> struct ArrayAdapter
 {
-    /// Pointer to the bytes
     const unsigned char *dataPtr;
-    /// Number of elements in the array
     const size_t elemCount;
-    /// Stride in bytes between two elements
     const size_t stride;
 
-    /// Construct an array adapter.
-    /// \param ptr Pointer to the start of the data, with offset applied
-    /// \param count Number of elements in the array
-    /// \param byte_stride Stride betweens elements in the array
     ArrayAdapter(const unsigned char *ptr, size_t count, size_t byte_stride)
         : dataPtr(ptr), elemCount(count), stride(byte_stride)
     {

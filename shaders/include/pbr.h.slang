@@ -69,16 +69,13 @@ float3 CalculateDirectLightingSplit(float3 V, float3 L, float3 radiance, Surface
     float3 H = normalize(H_raw);
     float HdotV = SaturateDot(H, V);
 
-    // micro surface
     float NDF = DistributionGGX::Evaluate(N, H, surface.roughness);
     float G = SmithGGX(NdotV, NdotL, surface.roughness);
 
     float3 F0 = ComputeF0(surface.albedo, surface.metallic);
 
-    // fresnel
     float3 F = FresnelSchlick(HdotV, F0);
 
-    // specular
     float3 numerator = NDF * G;
     float denominator = 4.0 * NdotV * NdotL + Eps;
     float3 specular = numerator / denominator;
@@ -91,7 +88,6 @@ float3 CalculateDirectLightingSplit(float3 V, float3 L, float3 radiance, Surface
     // here we allow the possibility of values in between.
     kD *= 1.0 - surface.metallic;
 
-    // diffuse
     float3 diffuse = surface.albedo * InvPi;
 
     float3 common = radiance * NdotL;

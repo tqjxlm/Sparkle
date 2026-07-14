@@ -137,7 +137,6 @@ void VulkanImage::TransitionLayout(VkCommandBuffer command_buffer, const Transit
     // transition last range
     transition_mip_range(GetVulkanImageLayout(old_layout), range_start, range_end);
 
-    // now we have transition
     SetCurrentLayout(request.target_layout, request.base_mip, mip_count);
 }
 
@@ -327,7 +326,6 @@ void VulkanImage::CopyToBuffer(const RHIBuffer *rhi_buffer) const
         copied_bytes += GetStorageSize(mip_level) * num_layers;
     }
 
-    // Copy the image to the buffer
     vkCmdCopyImageToBuffer(context->GetCurrentCommandBuffer(), image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            buffer->GetResourceThisFrame(), static_cast<unsigned>(copy_regions.size()),
                            copy_regions.data());
