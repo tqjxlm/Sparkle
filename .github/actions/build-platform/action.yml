@@ -1,0 +1,87 @@
+name: "Build Platform"
+description: "Configure, build, and upload one platform's product archive"
+inputs:
+  framework:
+    description: "Target framework (glfw, android, macos, ios)"
+    required: true
+  os:
+    description: "Runner operating system"
+    required: true
+  build-type:
+    description: "Build configuration (Debug or Release)"
+    required: true
+  ios-certificate-p12-base64:
+    default: ""
+  ios-certificate-password:
+    default: ""
+  ios-team-id:
+    default: ""
+  ios-appstore-issuer-id:
+    default: ""
+  ios-appstore-key-id:
+    default: ""
+  ios-appstore-private-key:
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    # the android build (SDK/NDK + gradle + two CMake variants) can exhaust the ~14 GB free on
+    # hosted ubuntu runners; drop preinstalled toolchains this project never uses (~45 GB)
+    - name: Free Disk Space (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /opt/ghc /usr/share/swift /opt/hostedtoolcache/CodeQL
+        df -h /
+
+    - name: Setup Environment
+      id: setup-environment
+      uses: ./.github/actions/setup-environment
+      with:
+        framework: ${{ inputs.framework }}
+        os: ${{ inputs.os }}
+        build-type: ${{ inputs.build-type }}
+
+    - name: Setup Signing Certificates (iOS)
+      if: inputs.framework == 'ios'
+      uses: ./.github/actions/setup-certs-ios
+      with:
+        certificate-p12-base64: ${{ inputs.ios-certificate-p12-base64 }}
+        certificate-password: ${{ inputs.ios-certificate-password }}
+        team-id: ${{ inputs.ios-team-id }}
+        appstore-issuer-id: ${{ inputs.ios-appstore-issuer-id }}
+        appstore-key-id: ${{ inputs.ios-appstore-key-id }}
+        appstore-private-key: ${{ inputs.ios-appstore-private-key }}
+
+    # dependency downloads (CMake FetchContent) happen during the configure and are the one phase
+    # that fails on transient network errors (e.g. GitHub 504s); retry it cheaply so the full
+    # build step never pays for a flaky download. android's CMake configure only runs inside the
+    # gradle build, so there is nothing to prefetch there.
+    - name: Configure
+      if: inputs.framework != 'android'
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --configure_only ${{ steps.setup-environment.outputs.build-args }} && exit 0
+          echo "configure attempt ${attempt} failed"
+          sleep 20
+        done
+        exit 1
+
+    - name: Build
+      shell: bash
+      env:
+        SPARKLE_BUILD_JOBS: 8
+      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --archive ${{ steps.setup-environment.outputs.build-args }}
+
+    # hit rate should approach 100% for PRs that touch few files; a cold cache shows all misses
+    - name: Compiler cache stats
+      if: always()
+      shell: bash
+      run: ccache -s || true
+
+    - name: Upload build product
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}
+        path: build_system/${{ inputs.framework }}/product

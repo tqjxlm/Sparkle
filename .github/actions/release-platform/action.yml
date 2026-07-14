@@ -1,0 +1,124 @@
+name: "Release Platform"
+description: "Inject cooked content into one build product and re-sign it where injection breaks the signature"
+inputs:
+  framework:
+    description: "Target framework (glfw, android, macos, ios)"
+    required: true
+  os:
+    description: "Runner OS the product was built on (part of the build artifact identity)"
+    required: true
+  build-type:
+    description: "Build configuration (Debug or Release)"
+    required: true
+  macos-certificate-p12-base64:
+    default: ""
+  macos-certificate-password:
+    default: ""
+  macos-signing-identity:
+    default: ""
+  macos-notarization-username:
+    default: ""
+  macos-notarization-password:
+    default: ""
+  apple-team-id:
+    default: ""
+  ios-certificate-p12-base64:
+    default: ""
+  ios-certificate-password:
+    default: ""
+  ios-appstore-issuer-id:
+    default: ""
+  ios-appstore-key-id:
+    default: ""
+  ios-appstore-private-key:
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Download build product
+      uses: actions/download-artifact@v4
+      with:
+        name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}
+        path: build_system/${{ inputs.framework }}/product
+
+    - name: Download cooked content
+      uses: actions/download-artifact@v4
+      with:
+        name: cooked-shared
+        path: cooked
+
+    - name: Resolve package path
+      id: package
+      shell: bash
+      run: |
+        # products are named by target; only glfw carries the host system in its name
+        if [ "${{ inputs.framework }}" = "glfw" ]; then
+          case "${{ inputs.os }}" in
+            macos-latest) system=macos ;;
+            windows-latest) system=windows ;;
+            ubuntu-latest) system=linux ;;
+          esac
+          pkg=$(ls build_system/glfw/product/${system}-glfw-${{ inputs.build-type }}.*)
+        else
+          pkg=$(ls build_system/${{ inputs.framework }}/product/${{ inputs.framework }}-${{ inputs.build-type }}.*)
+        fi
+        echo "path=$pkg" >> $GITHUB_OUTPUT
+
+    - name: Inject cooked content
+      shell: bash
+      run: python3 dev/inject_cooked.py --framework ${{ inputs.framework }} --package "${{ steps.package.outputs.path }}" --cooked cooked
+
+    # appending to the apk breaks its alignment and signature; restore both with the
+    # standard debug key, matching the gradle signing config
+    - name: Re-sign (Android)
+      if: inputs.framework == 'android'
+      shell: bash
+      run: |
+        TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+        PKG="${{ steps.package.outputs.path }}"
+        keytool -genkeypair -keystore debug.keystore -storepass android -keypass android \
+          -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -validity 10000
+        "$TOOLS/zipalign" -f 4 "$PKG" aligned.apk
+        "$TOOLS/apksigner" sign --ks debug.keystore --ks-pass pass:android --out "$PKG" aligned.apk
+
+    - name: Setup Signing Certificates (iOS)
+      if: inputs.framework == 'ios'
+      uses: ./.github/actions/setup-certs-ios
+      with:
+        certificate-p12-base64: ${{ inputs.ios-certificate-p12-base64 }}
+        certificate-password: ${{ inputs.ios-certificate-password }}
+        team-id: ${{ inputs.apple-team-id }}
+        appstore-issuer-id: ${{ inputs.ios-appstore-issuer-id }}
+        appstore-key-id: ${{ inputs.ios-appstore-key-id }}
+        appstore-private-key: ${{ inputs.ios-appstore-private-key }}
+
+    # injecting into the bundle invalidates the code seal; re-sign with the same identity
+    - name: Re-sign (iOS)
+      if: inputs.framework == 'ios'
+      shell: bash
+      run: |
+        PKG="${{ steps.package.outputs.path }}"
+        rm -rf ipa_work && mkdir ipa_work
+        ditto -x -k "$PKG" ipa_work
+        IDENTITY=$(security find-identity -v -p codesigning | awk -F'"' 'NR==1 {print $2}')
+        codesign --force --sign "$IDENTITY" --preserve-metadata=entitlements ipa_work/Payload/sparkle.app
+        rm -f "$PKG"
+        (cd ipa_work && zip -qry "$OLDPWD/$PKG" Payload)
+
+    - name: Archive App Bundle (macOS)
+      if: inputs.framework == 'macos'
+      uses: ./.github/actions/archive-macos
+      with:
+        certificate-p12-base64: ${{ inputs.macos-certificate-p12-base64 }}
+        certificate-password: ${{ inputs.macos-certificate-password }}
+        signing-identity: ${{ inputs.macos-signing-identity }}
+        notarization-username: ${{ inputs.macos-notarization-username }}
+        notarization-password: ${{ inputs.macos-notarization-password }}
+        team-id: ${{ inputs.apple-team-id }}
+        app-path: ${{ steps.package.outputs.path }}
+
+    - name: Upload release product
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}
+        path: build_system/${{ inputs.framework }}/product

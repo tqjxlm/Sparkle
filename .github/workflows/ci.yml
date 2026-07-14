@@ -34,7 +34,7 @@ jobs:
               - 'build.py'
               - 'prerequisites.json'
 
-  build:
+  pipeline:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/build.yml
@@ -83,7 +83,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [changes, build, format, tidy]
+    needs: [changes, pipeline, format, tidy]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1
