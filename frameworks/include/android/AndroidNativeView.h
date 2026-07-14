@@ -12,7 +12,6 @@ struct ANativeWindowDeleter
     void operator()(ANativeWindow *)
     {
         // TODO(tqjxlm): it should be released somewhere
-        // ANativeWindow_release(window);
     }
 };
 

@@ -120,13 +120,6 @@ float SmithGGX(float cos_o, float cos_i, float roughness)
     float ggx_i = cos_o * sqrt((-cos_i * a2 + cos_i) * cos_i + a2 + Eps);
     float ggx_o = cos_i * sqrt((-cos_o * a2 + cos_o) * cos_o + a2 + Eps);
     return 2.f * cos_o * cos_i / (ggx_o + ggx_i + Eps);
-
-    // another implementation
-
-    // float ggx2 = GeometrySchlickGGX(cos_o, roughness);
-    // float ggx1 = GeometrySchlickGGX(cos_i, roughness);
-
-    // return ggx1 * ggx2;
 }
 
 float3 FresnelSchlickRoughness(float cos_theta_i, float3 r0, float roughness)

@@ -78,10 +78,6 @@ void VulkanFunctionLoader::LoadDevice(VkDevice device)
         GET_VK_FN_CHECKED(vkGetAccelerationStructureBuildSizesKHR);
         GET_VK_FN_CHECKED(vkGetAccelerationStructureDeviceAddressKHR);
         GET_VK_FN_CHECKED(vkCmdBuildAccelerationStructuresKHR);
-        // GET_VK_FN_CHECKED(vkBuildAccelerationStructuresKHR);
-        // GET_VK_FN_CHECKED(vkCmdTraceRaysKHR);
-        // GET_VK_FN_CHECKED(vkGetRayTracingShaderGroupHandlesKHR);
-        // GET_VK_FN_CHECKED(vkCreateRayTracingPipelinesKHR);
     }
 
     if (rhi->GetRHI()->GetConfig().enable_validation)

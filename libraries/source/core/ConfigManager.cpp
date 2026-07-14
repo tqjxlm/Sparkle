@@ -70,8 +70,6 @@ void ConfigManager::LoadFromArgs()
         argparser_->add_argument(AsArgumentName(config.GetName())).help(config.GetHelp());
     }
 
-    // Log(Info, "{}", argparser_->help().str());
-
     argparser_->parse_known_args(argc_, argv_.data());
 
     for (auto &[name, config] : registered_configs_)

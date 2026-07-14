@@ -53,7 +53,7 @@ private:
     // output of rendering passes. cleared every frame.
     CPUGBuffer gbuffer_;
 
-    // a temporary color buffer to store color values. cleared every frame
+    // cleared every frame
     std::vector<std::vector<Vector4>> ping_pong_buffer_;
 
     // accumulate all frame's results after temporal denoising. cleared on dirty

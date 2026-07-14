@@ -131,7 +131,7 @@ static void GenerateCube(std::vector<Vector3> &InVertices, std::vector<uint32_t>
     const Vector3 p6 = Vector3(-offset_x, -offset_y, offset_z);
     const Vector3 p7 = Vector3(-offset_x, offset_y, offset_z);
 
-    // Now we create 6x faces, 4 vertices each
+    // 6 faces, 4 vertices each
     uint32_t vertex_offset = 0;
     uint32_t triangle_offset = 0;
     Vector3 normal;

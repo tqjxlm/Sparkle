@@ -116,9 +116,9 @@ def run_command_with_logging(cmd, log_file_path, description):
         # Read output line by line and write to both console and file
         if process.stdout:
             for line in process.stdout:
-                print(line, end='')  # Print to console
-                log.write(line)      # Write to log file
-                log.flush()          # Ensure immediate write
+                print(line, end='')
+                log.write(line)
+                log.flush()
 
         return_code = process.wait()
 

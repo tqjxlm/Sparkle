@@ -19,17 +19,11 @@ struct Mesh
     std::vector<Vector3> normals;
     // [xyzw] * 3(triangle) * num_faces
     std::vector<Vector4> tangents;
-    // [xyz] * 3(triangle) * num_faces
-    // std::vector<T> facevarying_binormals;
     // [xy]  * 3(triangle) * num_faces
     // TODO(tqjxlm): support multi-texcoords
     std::vector<Vector2> uvs;
-    // [xyz] * 3(triangle) * num_faces
-    // std::vector<T> facevarying_vertex_colors;
     // triangle x num_faces
     std::vector<unsigned int> indices;
-    // index x num_faces
-    // std::vector<unsigned int> material_ids;
 
     Vector3 center;
     Vector3 extent;

@@ -19,9 +19,7 @@
 namespace sparkle
 {
 static std::vector<const char *> ray_tracing_extensions = {
-    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-    // VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-    VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
+    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
     // Required by VK_KHR_acceleration_structure
     VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
     VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
@@ -139,15 +137,6 @@ static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
     {
         return false;
     }
-
-    // VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline_properties{};
-    // ray_tracing_pipeline_properties.sType =
-    // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-
-    // VkPhysicalDeviceProperties2 device_properties2{};
-    // device_properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    // device_properties2.pNext = &ray_tracing_pipeline_properties;
-    // vkGetPhysicalDeviceProperties2(physical_device_, &device_properties2);
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure_features{};
     acceleration_structure_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -438,8 +427,8 @@ void VulkanContext::BeginFrame()
 
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin_info.flags = 0;                  // Optional
-    begin_info.pInheritanceInfo = nullptr; // Optional
+    begin_info.flags = 0;
+    begin_info.pInheritanceInfo = nullptr;
 
     CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
 
@@ -491,7 +480,6 @@ VkResult VulkanContext::EndFrame()
     submit_info.pWaitSemaphores = wait_semaphores;
     submit_info.pWaitDstStageMask = wait_stages;
 
-    // It's possible to submit multiple command buffers
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &current_command_buffer_;
 
@@ -509,13 +497,12 @@ VkResult VulkanContext::EndFrame()
     present_info.waitSemaphoreCount = 1;
     present_info.pWaitSemaphores = signal_semaphores;
 
-    // It's possible to present to multiple swap chains
     VkSwapchainKHR swap_chains[] = {swap_chain_->GetSwapchain()};
     uint32_t image_indices[] = {image_index};
     present_info.swapchainCount = 1;
     present_info.pSwapchains = swap_chains;
     present_info.pImageIndices = image_indices;
-    present_info.pResults = nullptr; // Optional
+    present_info.pResults = nullptr;
 
     const VkResult result = vkQueuePresentKHR(present_queue_, &present_info);
 
@@ -879,7 +866,6 @@ bool VulkanContext::CreateLogicalDevice()
     VkPhysicalDeviceRayQueryFeaturesKHR enabled_ray_query_features{};
     VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing_features{};
     VkPhysicalDeviceRobustness2FeaturesEXT enabled_robustness_features{};
-    // VkPhysicalDeviceScalarBlockLayoutFeaturesEXT enabled_scalar_block_layout_features{};
 
     if (rhi_->SupportsHardwareRayTracing())
     {
@@ -900,7 +886,6 @@ bool VulkanContext::CreateLogicalDevice()
         enabled_descriptor_indexing_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
         enabled_descriptor_indexing_features.descriptorBindingPartiallyBound = VK_TRUE;
         enabled_descriptor_indexing_features.runtimeDescriptorArray = VK_TRUE;
-        // enabled_descriptor_indexing_features.descriptorBindingVariableDescriptorCount = VK_TRUE;
         enabled_descriptor_indexing_features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
         enabled_descriptor_indexing_features.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
         ChainVkStructurePtr(create_info, enabled_descriptor_indexing_features);
@@ -908,11 +893,6 @@ bool VulkanContext::CreateLogicalDevice()
         enabled_robustness_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
         enabled_robustness_features.nullDescriptor = VK_TRUE;
         ChainVkStructurePtr(create_info, enabled_robustness_features);
-
-        // enabled_scalar_block_layout_features.sType =
-        // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES_EXT;
-        // enabled_scalar_block_layout_features.scalarBlockLayout = VK_TRUE;
-        // ChainVkStructurePtr(create_info, enabled_scalar_block_layout_features);
     }
 
     auto success = vkCreateDevice(physical_device_, &create_info, nullptr, &device_) == VK_SUCCESS;

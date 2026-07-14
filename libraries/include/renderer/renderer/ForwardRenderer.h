@@ -41,7 +41,6 @@ private:
     RHIResourceRef<RHIImage> scene_depth_;
     RHIResourceRef<RHIImage> screen_color_;
 
-    // render targets
     RHIResourceRef<RHIRenderTarget> screen_color_rt_;
 
     // generate directional shadow map
@@ -61,7 +60,6 @@ private:
     // copy screen_color to the backbuffer, probably converting float16 to sRGB
     std::unique_ptr<class ScreenQuadPass> present_pass_;
 
-    // ray tracing resources
     RHIResourceRef<RHITLAS> tlas_;
 
     class ImageBasedLighting *ibl_ = nullptr;

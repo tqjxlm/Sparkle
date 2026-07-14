@@ -190,7 +190,6 @@ void ForwardMeshPass::UpdateFrameData(const RenderConfig &config, SceneRenderPro
     MeshPass::UpdateFrameData(config, scene);
 
     bool use_ssao = config.use_ssao;
-    // bool ibl_ready = (ibl_ != nullptr) && !ibl_->NeedUpdate();
     bool use_diffuse_ibl = (ibl_ != nullptr) && config.use_diffuse_ibl;
     bool use_specular_ibl = (ibl_ != nullptr) && config.use_specular_ibl;
 

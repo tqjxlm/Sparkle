@@ -228,13 +228,13 @@ void VulkanForwardPipelineState::SetupColorAndDepthAttachments()
     color_blending_ = {};
     color_blending_.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     color_blending_.logicOpEnable = VK_FALSE;
-    color_blending_.logicOp = VK_LOGIC_OP_COPY; // Optional
+    color_blending_.logicOp = VK_LOGIC_OP_COPY;
     color_blending_.attachmentCount = static_cast<uint32_t>(color_blend_attachments_.size());
     color_blending_.pAttachments = color_blend_attachments_.data();
-    color_blending_.blendConstants[0] = 0.0f; // Optional
-    color_blending_.blendConstants[1] = 0.0f; // Optional
-    color_blending_.blendConstants[2] = 0.0f; // Optional
-    color_blending_.blendConstants[3] = 0.0f; // Optional
+    color_blending_.blendConstants[0] = 0.0f;
+    color_blending_.blendConstants[1] = 0.0f;
+    color_blending_.blendConstants[2] = 0.0f;
+    color_blending_.blendConstants[3] = 0.0f;
 
     depth_stencil_ = {};
     depth_stencil_.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -242,11 +242,9 @@ void VulkanForwardPipelineState::SetupColorAndDepthAttachments()
     depth_stencil_.depthWriteEnable = depth_state_.write_depth ? VK_TRUE : VK_FALSE;
     depth_stencil_.depthCompareOp = GetDepthCompareOp(depth_state_);
     depth_stencil_.depthBoundsTestEnable = VK_FALSE;
-    // depthStencil_.minDepthBounds = 0.0f; // Optional
-    // depthStencil_.maxDepthBounds = 1.0f; // Optional
     depth_stencil_.stencilTestEnable = VK_FALSE;
-    depth_stencil_.front = {}; // Optional
-    depth_stencil_.back = {};  // Optional
+    depth_stencil_.front = {};
+    depth_stencil_.back = {};
 }
 
 void VulkanForwardPipelineState::SetupRasterizationStateInfo()

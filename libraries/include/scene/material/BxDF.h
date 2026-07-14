@@ -27,8 +27,6 @@ class BxDF
 public:
     // notice: BSDF assumes tangent space, i.e. the local surface normal always points to (0, 0, 1)
     // use TransformBasisToWorld and TransformBasisToLocal to transform light directions
-    // [[nodiscard]] virtual Vector3 Evaluate(const Vector3 &base_color, const Vector3 &w_o, Vector3 &w_i,
-    //                                        float &probability) const = 0;
 };
 
 class LambertianBxDF : public BxDF
@@ -41,8 +39,6 @@ public:
         auto local_w_i = sampler::CosineWeightedHemiSphere::Sample();
         result.local_w_i = local_w_i;
 
-        // float probability = sampler::CosineWeightedHemiSphere::Pdf(local_w_i);
-        // result.throughput = surface.base_color * InvPi / probability * utilities::SaturatedCosTheta(local_w_i);
         result.throughput = surface.base_color;
 
         return result;
@@ -103,10 +99,6 @@ public:
         {
             return result;
         }
-
-        // auto occlusion = utilities::GeometrySmith(cos_o, cos_i, roughness);
-        // auto normalizer = cos_m * cos_o + Eps;
-        // throughput = fresnel_color * occlusion / normalizer * utilities::Saturate(local_cos_i);
 
         auto occlusion = utilities::SmithGGXCorrelated(cos_o, cos_i, surface.roughness);
         auto normalizer = utilities::GeometrySchlickGGX(cos_o, surface.roughness) + Eps;

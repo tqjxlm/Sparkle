@@ -21,7 +21,6 @@ struct CPUGBuffer
     // holds one frame's color output. alpha channel: whether this pixel is valid
     std::vector<std::vector<Vector4>> color;
 
-    // holds one frame's normal output
     std::vector<std::vector<Vector3>> world_normal;
 
     [[nodiscard]] bool IsValid(unsigned i, unsigned j) const

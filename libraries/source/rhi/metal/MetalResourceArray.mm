@@ -122,8 +122,6 @@ void MetalResourceArray::Bind(id<MTLCommandEncoder> encoder, RHIShaderStage stag
         UnImplemented(stage);
         break;
     }
-
-    //[argument_buffer.buffer didModifyRange:NSMakeRange(0, argument_buffer.buffer.length)];
 }
 } // namespace sparkle
 

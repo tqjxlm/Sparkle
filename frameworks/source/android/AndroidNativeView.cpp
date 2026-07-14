@@ -504,12 +504,6 @@ void AndroidNativeView::HandleInputEvents()
         return;
     }
 
-    // handle key events
-    //    for (auto i = 0u; i < input_buffer->keyEventsCount; i++)
-    //    {
-    //        auto &event = input_buffer->keyEvents[i];
-    //    }
-
     // handle gui first, as it may consume the input events
     for (auto i = 0u; i < input_buffer->motionEventsCount; i++)
     {
