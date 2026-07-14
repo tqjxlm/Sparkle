@@ -84,6 +84,20 @@ class RunTestsCommandTest(unittest.TestCase):
         self.assertNotIn("tests/screenshot/screenshot_test.py", flattened)
         self.assertNotIn("functional_test.py", flattened)
 
+    def test_suite_checks_scene_load_failure_propagation(self):
+        steps = run_tests.test_steps(
+            framework="macos",
+            config="Release",
+            software=False,
+            headless=True,
+            pipelines=["forward"],
+            scene=None,
+            other_args=[],
+            test_python="test-python",
+        )
+
+        self.assertIn("scene load failure", dict(steps))
+
     def test_custom_scene_path_is_separate_from_its_ground_truth_name(self):
         scene = os.path.join("resources", "custom", "Atrium.usda")
         steps = run_tests.test_steps(
@@ -136,6 +150,40 @@ class RunTestsCommandTest(unittest.TestCase):
 
         self.assertFalse(passed)
         self.assertIn("1 on-the-fly cook", detail)
+
+    def test_cook_gate_exempts_cooker_request_fixtures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = os.path.join(directory, "sparkle.log")
+            with open(log, "w") as log_file:
+                log_file.write("initial log\n")
+            previous_sizes = {log: os.path.getsize(log)}
+            with open(log, "a") as log_file:
+                log_file.write(
+                    "] cooking cooker_request_test_dup: assets/duplicate/contract.bin\n")
+                log_file.write("cook artifact hit\n")
+
+            with patch.object(run_tests, "log_pattern",
+                              return_value=os.path.join(directory, "*.log")):
+                passed, _ = run_tests.cook_gate("glfw", previous_sizes)
+
+        self.assertTrue(passed)
+
+    def test_ibl_parity_runs_only_on_a_physical_gpu_framework(self):
+        def suite(framework, software):
+            return dict(run_tests.test_steps(
+                framework=framework,
+                config="Release",
+                software=software,
+                headless=True,
+                pipelines=["forward"],
+                scene=None,
+                other_args=[],
+                test_python="test-python",
+            ))
+
+        self.assertIn("ibl parity", suite("macos", software=False))
+        self.assertNotIn("ibl parity", suite("glfw", software=True))
+        self.assertNotIn("ibl parity", suite("glfw", software=False))
 
 
 if __name__ == "__main__":

@@ -170,7 +170,8 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
         return nullptr;
     }
 
-    return std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
+    auto texture = std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
+    return texture;
 }
 
 static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node, const USDLoaderContext &ctx)
@@ -400,12 +401,6 @@ static std::shared_ptr<SkyLight> LoadSkyLight(const tinyusdz::tydra::Node &node,
     auto sky_map_path = (ctx.asset_root.path.parent_path() / asset_path.GetAssetPath()).lexically_normal().string();
 
     light->SetSkyMap(sky_map_path);
-
-    if (!light->GetSkyMap())
-    {
-        Log(Error, "USDLoader: failed to load dome light texture {}", sky_map_path);
-        return nullptr;
-    }
 
     return light;
 }

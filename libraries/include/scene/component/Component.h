@@ -3,6 +3,8 @@
 #include "core/math/AABB.h"
 #include "scene/SceneNode.h"
 
+#include <memory>
+
 namespace sparkle
 {
 class Component

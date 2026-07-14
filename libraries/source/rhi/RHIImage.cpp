@@ -1,11 +1,10 @@
 #include "rhi/RHIImage.h"
 
-#include "core/FileManager.h"
 #include "rhi/RHI.h"
 
 namespace sparkle
 {
-std::string RHIImage::SaveToFile(const std::string &file_path, RHIContext *rhi)
+std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 {
     auto image_size = GetStorageSize();
 
@@ -14,7 +13,7 @@ std::string RHIImage::SaveToFile(const std::string &file_path, RHIContext *rhi)
                            .usages = RHIBuffer::BufferUsage::TransferDst,
                            .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
                            .is_dynamic = false},
-                          "ImageSaveStagingBuffer");
+                          "ImageReadBackStagingBuffer");
 
     rhi->BeginCommandBuffer();
 
@@ -35,32 +34,11 @@ std::string RHIImage::SaveToFile(const std::string &file_path, RHIContext *rhi)
 
     const char *buffer_data = reinterpret_cast<const char *>(staging_buffer->Lock());
 
-    auto written_path = FileManager::GetNativeFileManager()->Write(Path::Internal(file_path), buffer_data, image_size);
+    std::vector<char> data(buffer_data, buffer_data + image_size);
 
     staging_buffer->UnLock();
 
-    return written_path;
-}
-
-bool RHIImage::LoadFromFile(const std::string &file_path)
-{
-    auto file_data = FileManager::GetNativeFileManager()->Read(Path::Internal(file_path));
-    if (file_data.empty())
-    {
-        return false;
-    }
-
-    auto image_size = GetStorageSize();
-    if (file_data.size() != image_size)
-    {
-        Log(Warn, "image loading failed. size mismatch. loaded {}. expected {}.", file_data.size(), image_size);
-
-        return false;
-    }
-
-    Upload(reinterpret_cast<uint8_t *>(file_data.data()));
-
-    return true;
+    return data;
 }
 
 RHIImage::RHIImage(const Attribute &attributes, const std::string &name) : RHIResource(name), attributes_(attributes)

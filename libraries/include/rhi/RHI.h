@@ -124,6 +124,10 @@ public:
     virtual void InitRenderResources() = 0;
     virtual bool SupportsHardwareRayTracing() = 0;
 
+    // false on software rasterizers (e.g. lavapipe): GPU-accelerated cooking is only
+    // worthwhile on a physical device, otherwise the CPU cook jobs run instead
+    virtual bool HasPhysicalGpu() = 0;
+
     [[nodiscard]] virtual uint32_t GetMinBufferOffsetAlignment() const
     {
         return 64;

@@ -19,7 +19,7 @@ import os
 import sys
 
 import nrd_common
-from nrd_common import NUM_FRAMES, PROJECT_ROOT, run_sweep, static_render_test
+from nrd_common import NUM_FRAMES, PROJECT_ROOT, render_test_support, run_sweep
 
 SETTLE = 16
 
@@ -27,7 +27,7 @@ SETTLE = 16
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--framework", default="macos",
-                   choices=static_render_test.SUPPORTED_FRAMEWORKS)
+                   choices=render_test_support.SUPPORTED_FRAMEWORKS)
     p.add_argument("--settle", type=int, default=16,
                    help="frames to accumulate before capturing (16 = early transient; 2000 = converged)")
     p.add_argument("--headless", action="store_true")
@@ -44,7 +44,7 @@ def run_static(args, extra, skip_build, passthrough):
 
 def collect(framework, prefix, work_dir):
     import shutil
-    shot_dir = static_render_test.get_screenshot_dir(framework)
+    shot_dir = render_test_support.get_screenshot_dir(framework)
     paths = []
     for k in range(NUM_FRAMES):
         src = os.path.join(shot_dir, f"denoiser_sweep_{k}.png")
@@ -101,12 +101,12 @@ def build_montage(rows, work_dir):
 
 def main():
     global SETTLE
-    static_render_test.install_dependencies()
+    render_test_support.install_dependencies()
     args, passthrough = parse_args()
     SETTLE = args.settle
 
     work_dir = os.path.join(
-        static_render_test.get_screenshot_dir(args.framework), "static_stability")
+        render_test_support.get_screenshot_dir(args.framework), "static_stability")
     os.makedirs(work_dir, exist_ok=True)
 
     configs = [("raw", []), ("nrd", ["--nrd", "true"])]

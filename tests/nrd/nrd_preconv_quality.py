@@ -19,7 +19,7 @@ import argparse
 import os
 import sys
 
-from nrd_common import NUM_FRAMES, load_image, lum, static_render_test
+from nrd_common import NUM_FRAMES, load_image, lum, render_test_support
 
 FIREFLY_SPIKE = 0.10
 
@@ -68,7 +68,7 @@ def analyze(name, frames, gt, out_dir):  # returns firefly count for gating
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--framework", default="macos",
-                        choices=static_render_test.SUPPORTED_FRAMEWORKS)
+                        choices=render_test_support.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--gt", default=None, help="converged raw reference png")
     parser.add_argument("--assert_fireflies", type=int, default=0,
                         help="fail if the nrd arm has more temporally spiking pixels than this (0 = report only)")
@@ -77,7 +77,7 @@ def main():
     import numpy as np
 
     work_dir = os.path.join(
-        static_render_test.get_screenshot_dir(args.framework), "static_stability")
+        render_test_support.get_screenshot_dir(args.framework), "static_stability")
     gt_path = args.gt or os.path.join(work_dir, "gt.png")
     gt = load_image(gt_path)
 

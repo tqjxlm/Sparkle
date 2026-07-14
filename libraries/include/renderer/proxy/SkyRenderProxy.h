@@ -7,13 +7,11 @@
 namespace sparkle
 {
 class Image2DCube;
+class ImageBasedLighting;
 
 class SkyRenderProxy : public LightRenderProxy
 {
 public:
-    static constexpr Scalar MaxBrightness = 100.0f;
-    static constexpr Scalar MaxIBLBrightness = 10.f;
-
     // must match SkyLight in shaders/include/sky_light.h.slang
     struct UniformBufferData
     {
@@ -23,7 +21,11 @@ public:
 
     explicit SkyRenderProxy(std::shared_ptr<const Image2DCube> sky_map);
 
+    ~SkyRenderProxy() override;
+
 #pragma region RenderProxy interface
+
+    void Update(RHIContext *rhi, const CameraRenderProxy &camera, const RenderConfig &config) override;
 
     void InitRenderResources(RHIContext *rhi, const RenderConfig &config) override;
 
@@ -32,6 +34,11 @@ public:
     [[nodiscard]] RHIResourceRef<RHIImage> GetSkyMap() const
     {
         return sky_map_;
+    }
+
+    [[nodiscard]] ImageBasedLighting *GetImageBasedLighting() const
+    {
+        return image_based_lighting_.get();
     }
 
     void SetData(const Vector3 &color)
@@ -62,5 +69,7 @@ private:
     RHIResourceRef<RHIImage> sky_map_;
 
     std::shared_ptr<const Image2DCube> sky_map_raw_;
+
+    std::unique_ptr<ImageBasedLighting> image_based_lighting_;
 };
 } // namespace sparkle

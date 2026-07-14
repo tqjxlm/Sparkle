@@ -1,43 +1,39 @@
 #pragma once
 
 #include "core/Event.h"
-#include "renderer/pass/IBLPass.h"
+#include "rhi/RHIImage.h"
 
+#include <atomic>
 #include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace sparkle
 {
+class CookHandle;
+class CookJob;
+class IBLPass;
+class Image2DCube;
+struct RenderConfig;
+
 class ImageBasedLighting
 {
 public:
-    explicit ImageBasedLighting(const RHIResourceRef<RHIImage> &env_map);
+    ImageBasedLighting(const RHIResourceRef<RHIImage> &env_map, std::shared_ptr<const Image2DCube> env_map_cpu);
 
     ~ImageBasedLighting();
 
     void InitRenderResources(RHIContext *ctx, const RenderConfig &config);
 
-    [[nodiscard]] bool NeedUpdate() const
-    {
-        return (ibl_diffuse_pass_ && !ibl_diffuse_pass_->IsReady()) ||
-               (ibl_specular_pass_ && !ibl_specular_pass_->IsReady()) || (ibl_brdf_pass_ && !ibl_brdf_pass_->IsReady());
-    }
+    [[nodiscard]] bool NeedUpdate() const;
 
     void CookOnTheFly(const RenderConfig &config);
 
-    [[nodiscard]] RHIResourceRef<RHIImage> GetDiffuseMap() const
-    {
-        return ibl_diffuse_pass_ ? ibl_diffuse_pass_->GetResource() : nullptr;
-    }
+    [[nodiscard]] RHIResourceRef<RHIImage> GetDiffuseMap() const;
 
-    [[nodiscard]] RHIResourceRef<RHIImage> GetSpecularMap() const
-    {
-        return ibl_specular_pass_ ? ibl_specular_pass_->GetResource() : nullptr;
-    }
+    [[nodiscard]] RHIResourceRef<RHIImage> GetSpecularMap() const;
 
-    [[nodiscard]] RHIResourceRef<RHIImage> GetBRDFMap() const
-    {
-        return ibl_brdf_pass_ ? ibl_brdf_pass_->GetResource() : nullptr;
-    }
+    [[nodiscard]] RHIResourceRef<RHIImage> GetBRDFMap() const;
 
     auto &OnRenderResourceChange()
     {
@@ -47,7 +43,18 @@ public:
 private:
     [[nodiscard]] unsigned GetAdaptiveCookStepBudget(const RenderConfig &config);
 
+    void RequestCpuCook(std::unique_ptr<CookJob> brdf_job, std::unique_ptr<CookJob> diffuse_job,
+                        std::unique_ptr<CookJob> specular_job);
+
     RHIResourceRef<RHIImage> env_map_;
+
+    std::shared_ptr<const Image2DCube> env_map_cpu_;
+
+    std::vector<CookHandle> cook_handles_;
+
+    std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
+
+    bool cpu_cook_pending_ = false;
 
     std::unique_ptr<IBLPass> ibl_diffuse_pass_;
     std::unique_ptr<IBLPass> ibl_specular_pass_;
@@ -59,4 +66,4 @@ private:
 
     Event render_resource_change_event_;
 };
-}; // namespace sparkle
+} // namespace sparkle

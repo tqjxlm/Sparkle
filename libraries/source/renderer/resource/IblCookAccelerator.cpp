@@ -1,0 +1,57 @@
+#include "renderer/resource/IblCookAccelerator.h"
+
+#include "core/Exception.h"
+#include "core/cook/CookJob.h"
+#include "renderer/pass/IBLBrdfPass.h"
+#include "renderer/pass/IBLDiffusePass.h"
+#include "renderer/pass/IBLSpecularPass.h"
+#include "renderer/resource/IblBrdfCookJob.h"
+#include "renderer/resource/IblEnvCookJobs.h"
+#include "rhi/RHI.h"
+
+namespace sparkle
+{
+namespace
+{
+CookJobResult DrivePassToCompletion(RHIContext *rhi, std::unique_ptr<IBLPass> pass, const RenderConfig &config)
+{
+    std::vector<char> payload;
+    pass->SetArtifactReadyCallback([&payload](std::vector<char> result) { payload = std::move(result); });
+    pass->InitRenderResources(config);
+
+    constexpr unsigned SamplesPerDispatch = 64;
+    while (!pass->IsReady())
+    {
+        rhi->BeginFrame();
+        pass->CookOnTheFly(config, SamplesPerDispatch);
+        rhi->EndFrame();
+    }
+    rhi->WaitForDeviceIdle();
+    return payload.empty() ? CookJobResult::Failure() : CookJobResult::Success(std::move(payload));
+}
+} // namespace
+
+CookJobResult IblCookAccelerator::TryCook(const CookJob &job, RHIContext *rhi, const RenderConfig &config)
+{
+    ASSERT(rhi);
+
+    if (dynamic_cast<const IblBrdfCookJob *>(&job) != nullptr)
+    {
+        return DrivePassToCompletion(rhi, std::make_unique<IBLBrdfPass>(rhi), config);
+    }
+
+    if (const auto *diffuse = dynamic_cast<const IblDiffuseCookJob *>(&job))
+    {
+        auto env_rhi = rhi->CreateTextureCube(diffuse->env_map_.get(), diffuse->GetSourceName());
+        return DrivePassToCompletion(rhi, std::make_unique<IBLDiffusePass>(rhi, env_rhi), config);
+    }
+
+    if (const auto *specular = dynamic_cast<const IblSpecularCookJob *>(&job))
+    {
+        auto env_rhi = rhi->CreateTextureCube(specular->env_map_.get(), specular->GetSourceName());
+        return DrivePassToCompletion(rhi, std::make_unique<IBLSpecularPass>(rhi, env_rhi), config);
+    }
+
+    return CookJobResult::Unsupported();
+}
+} // namespace sparkle

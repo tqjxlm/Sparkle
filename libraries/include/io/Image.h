@@ -3,6 +3,7 @@
 #include "core/math/Utilities.h"
 #include "io/ImageTypes.h"
 
+#include <atomic>
 #include <vector>
 
 namespace sparkle
@@ -287,11 +288,18 @@ public:
         return faces_[0]->GetFormat();
     }
 
+    // content identity over all face pixels, dimensions and format. cached on first call;
+    // faces must not change afterwards
+    [[nodiscard]] uint32_t GetContentHash() const;
+
     [[nodiscard]] Vector3 Sample(const Vector3 &direction) const;
 
 private:
     std::array<std::unique_ptr<Image2D>, 6> faces_;
 
     std::string name_ = "Image2DCube";
+
+    mutable std::atomic<uint32_t> content_hash_{0};
+    mutable std::atomic<bool> content_hash_valid_{false};
 };
 } // namespace sparkle

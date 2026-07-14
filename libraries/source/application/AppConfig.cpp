@@ -20,6 +20,7 @@ static ConfigValue<bool> config_load_last_session("load_last_session",
                                                   "app", false);
 static ConfigValue<bool> config_headless("headless", "run without creating a window (not supported on iOS)", "app",
                                          false);
+static ConfigValue<bool> config_cook("cook", "cook all content for the bundled cook list, then exit", "app", false);
 
 #if ENABLE_TEST_CASES
 static ConfigValue<std::string> config_test_case("test_case", "name of test case to run on scene load", "app", "");
@@ -52,6 +53,7 @@ void AppConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_render_thread, render_thread);
     ConfigCollectionHelper::RegisterConfig(this, config_load_last_session, load_last_session);
     ConfigCollectionHelper::RegisterConfig(this, config_headless, headless);
+    ConfigCollectionHelper::RegisterConfig(this, config_cook, cook_mode);
 
 #if ENABLE_TEST_CASES
     ConfigCollectionHelper::RegisterConfig(this, config_test_case, test_case);

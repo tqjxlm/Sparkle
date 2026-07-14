@@ -30,19 +30,48 @@ TaskDispatcher::TaskDispatcher(unsigned int max_parallism)
 
 void TaskDispatcher::RunInDedicatedThread(std::function<void()> &&task)
 {
+    auto done = std::make_shared<std::atomic<bool>>(false);
+
     std::scoped_lock<std::mutex> lock(dedicated_mutex_);
-    dedicated_threads_.emplace_back(std::move(task));
+
+    // reap finished threads so long sessions do not accumulate them
+    std::erase_if(dedicated_threads_, [](DedicatedThread &entry) {
+        if (!entry.done->load())
+        {
+            return false;
+        }
+        entry.thread.join();
+        return true;
+    });
+
+    dedicated_threads_.push_back({.thread = std::thread([run = std::move(task), done]() {
+                                      run();
+                                      done->store(true);
+                                  }),
+                                  .done = done});
 }
 
 TaskDispatcher::~TaskDispatcher()
 {
     // dedicated threads may still be blocked on pool futures and enqueue tasks as they
-    // finish, so join them while the pool and the monitor are alive
+    // finish, so join them while the pool and the monitor are alive. joining outside the
+    // lock lets a dedicated task spawn another one during shutdown without deadlocking;
+    // loop until no new threads appear
+    while (true)
     {
-        std::scoped_lock<std::mutex> lock(dedicated_mutex_);
-        for (auto &thread : dedicated_threads_)
+        std::vector<DedicatedThread> draining;
         {
-            thread.join();
+            std::scoped_lock<std::mutex> lock(dedicated_mutex_);
+            if (dedicated_threads_.empty())
+            {
+                break;
+            }
+            draining.swap(dedicated_threads_);
+        }
+
+        for (auto &entry : draining)
+        {
+            entry.thread.join();
         }
     }
 

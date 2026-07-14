@@ -1,18 +1,190 @@
 #include "scene/component/light/SkyLight.h"
 
-#include "core/FileManager.h"
+#include <crc32.h>
+
+#include <atomic>
+
 #include "core/Logger.h"
-#include "core/Timer.h"
+#include "core/cook/Cooker.h"
 #include "core/math/Utilities.h"
 #include "core/task/TaskManager.h"
 #include "io/Image.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
+#include "renderer/resource/IblSettings.h"
 #include "scene/Scene.h"
+#include <filesystem>
 
 namespace sparkle
 {
 constexpr unsigned CubeMapSize = 1024;
+constexpr Scalar MaxSkyBrightness = 100.f;
+
+namespace
+{
+class SkyLightCookJob : public CookJob
+{
+public:
+    static constexpr const char *Type = "skylight";
+    static constexpr uint32_t Version = 1;
+
+    SkyLightCookJob(std::shared_ptr<const Image2D> sky_map, std::string source_name)
+        : sky_map_(std::move(sky_map)), source_name_(std::move(source_name))
+    {
+        CRC32 hasher;
+        hasher.add(sky_map_->GetRawData(), sky_map_->GetStorageSize());
+        const std::array<uint32_t, 3> meta{sky_map_->GetWidth(), sky_map_->GetHeight(),
+                                           static_cast<uint32_t>(sky_map_->GetFormat())};
+        hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
+        hasher.getHash(reinterpret_cast<unsigned char *>(&source_hash_));
+    }
+
+    [[nodiscard]] const char *GetType() const override
+    {
+        return Type;
+    }
+
+    [[nodiscard]] uint32_t GetVersion() const override
+    {
+        return Version;
+    }
+
+    [[nodiscard]] std::string GetSourceName() const override
+    {
+        return source_name_;
+    }
+
+    [[nodiscard]] uint32_t GetSourceHash() const override
+    {
+        return source_hash_;
+    }
+
+    [[nodiscard]] float GetProgress() const override
+    {
+        return static_cast<float>(cooked_row_count_.load()) / (CubeMapSize * Image2DCube::FaceId::Count);
+    }
+
+    [[nodiscard]] CookJobResult Execute() override;
+
+private:
+    std::shared_ptr<const Image2D> sky_map_;
+
+    std::string source_name_;
+
+    uint32_t source_hash_ = 0;
+
+    std::atomic<uint32_t> cooked_row_count_ = 0;
+};
+
+CookJobResult SkyLightCookJob::Execute()
+{
+    Image2DCube cube_map(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16, sky_map_->GetName() + "_CubeMap");
+
+    std::array<Scalar, Image2DCube::FaceId::Count> max_brightness_per_face;
+    std::array<Vector3, Image2DCube::FaceId::Count> max_brightness_dir_per_face;
+    std::array<Vector3, Image2DCube::FaceId::Count> subtracted_color_per_face;
+
+    std::ranges::fill(max_brightness_per_face, 0.f);
+    std::ranges::fill(max_brightness_dir_per_face, Zeros);
+    std::ranges::fill(subtracted_color_per_face, Zeros);
+
+    std::vector<std::shared_ptr<TaskFuture<void>>> cube_map_tasks(Image2DCube::FaceId::Count);
+
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
+    {
+        auto face_id = static_cast<Image2DCube::FaceId>(id);
+        auto &this_face = cube_map.GetFace(face_id);
+
+        cube_map_tasks[id] = TaskManager::RunInWorkerThread([this, face_id, &this_face, &max_brightness_per_face,
+                                                             &max_brightness_dir_per_face,
+                                                             &subtracted_color_per_face]() {
+            for (unsigned i = 0; i < CubeMapSize; i++)
+            {
+                for (unsigned j = 0; j < CubeMapSize; j++)
+                {
+                    auto u = (static_cast<Scalar>(i) + 0.5f) / static_cast<Scalar>(CubeMapSize) * 2.f - 1.f;
+                    auto v = (static_cast<Scalar>(j) + 0.5f) / static_cast<Scalar>(CubeMapSize) * 2.f - 1.f;
+
+                    Vector3 direction = Image2DCube::TextureCoordinateToDirection(face_id, u, v);
+
+                    Vector2 eq_uv = utilities::CartesianToEquirectangular(direction);
+                    Vector3 color = sky_map_->Sample(eq_uv);
+
+                    this_face.SetPixel(i, j, color);
+
+                    auto brightness = color.norm();
+
+                    if (brightness > max_brightness_per_face[face_id])
+                    {
+                        max_brightness_per_face[face_id] = brightness;
+                        max_brightness_dir_per_face[face_id] = direction;
+                    }
+
+                    // in order to support explicit directional lighting for rasterization-based rendering,
+                    // we subtract some color when cooking IBL and use it as the directional light.
+                    if (brightness > IblSettings::MaxEnvironmentBrightness)
+                    {
+                        // TODO(tqjxlm): MaxBrightness is not analytically correct.
+                        Vector3 subtracted_color = utilities::ClampLength(color, MaxSkyBrightness) -
+                                                   utilities::ClampLength(color, IblSettings::MaxEnvironmentBrightness);
+
+                        constexpr float Numerator = 4.f * (1.f / CubeMapSize) * (1.f / CubeMapSize);
+                        float solid_angle = Numerator / std::pow(1 + u * u + v * v, 1.5f);
+
+                        subtracted_color_per_face[face_id] += subtracted_color * solid_angle;
+                    }
+                }
+
+                cooked_row_count_++;
+            }
+        });
+    }
+
+    TaskManager::OnAll(cube_map_tasks)->Wait();
+
+    Scalar max_brightness = 0.f;
+    Vector3 max_brightness_dir;
+    Vector3 sun_brightness = Zeros;
+    for (unsigned i = 0; i < Image2DCube::FaceId::Count; i++)
+    {
+        if (max_brightness_per_face[i] > max_brightness)
+        {
+            max_brightness = max_brightness_per_face[i];
+            max_brightness_dir = max_brightness_dir_per_face[i];
+        }
+
+        sun_brightness += subtracted_color_per_face[i];
+    }
+
+    Eigen::Quaternion<Scalar> q = Eigen::Quaternion<Scalar>::FromTwoVectors(Front, max_brightness_dir);
+
+    Vector3 sun_direction = q.toRotationMatrix().canonicalEulerAngles(0, 1, 2);
+
+    Log(Info, "sky map cook ok. max brightness {}. max brightness direction {}. sun brightness {}", max_brightness,
+        utilities::VectorToString(utilities::ToDegree(sun_direction)), utilities::VectorToString(sun_brightness));
+
+    const size_t face_size = CubeMapSize * CubeMapSize * GetPixelSize(PixelFormat::RGBAFloat16);
+
+    std::vector<char> payload(6 * face_size + 2 * sizeof(float) * 3);
+    char *ptr = payload.data();
+
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
+    {
+        auto face_id = static_cast<Image2DCube::FaceId>(id);
+        const auto &face = cube_map.GetFace(face_id);
+        std::memcpy(ptr, face.GetRawData(), face_size);
+        ptr += face_size;
+    }
+
+    std::memcpy(ptr, sun_brightness.data(), sizeof(float) * 3);
+    ptr += sizeof(float) * 3;
+
+    std::memcpy(ptr, sun_direction.data(), sizeof(float) * 3);
+
+    return CookJobResult::Success(std::move(payload));
+}
+
+} // namespace
 
 SkyLight::SkyLight() = default;
 
@@ -23,17 +195,101 @@ SkyLight::~SkyLight()
 
 void SkyLight::SetSkyMap(const std::string &file_path)
 {
+    cook_handle_.reset();
     sky_map_path_ = file_path;
-    sky_map_ = std::make_unique<Image2D>();
-    if (!sky_map_->LoadFromFile(file_path))
+
+    if (file_path.empty())
     {
-        Log(Error, "failed to load skymap {}. will fall back to sky light", file_path);
-        sky_map_ = nullptr;
-        sky_map_path_.clear();
+        cube_map_.reset();
+
+        if (is_attached_)
+        {
+            TaskManager::RunInRenderThread([this]() {
+                if (GetRenderProxy() != nullptr)
+                {
+                    RecreateRenderProxy();
+                }
+            });
+        }
         return;
     }
 
-    Cook();
+    if (is_attached_)
+    {
+        RequestCook();
+    }
+}
+
+void SkyLight::RequestCook()
+{
+    ASSERT(HasSkyMap());
+
+    auto *scene = node_->GetScene();
+    auto scene_task = scene->RegisterAsyncTask();
+    auto cook_succeeded = std::make_shared<std::atomic<bool>>(false);
+    auto delivery_started = std::make_shared<std::atomic<bool>>(false);
+
+    const auto source_path = sky_map_path_;
+    const auto source_name = std::filesystem::path(source_path).lexically_normal().generic_string();
+    const CookArtifactKey lookup_key{.type = SkyLightCookJob::Type,
+                                     .version = SkyLightCookJob::Version,
+                                     .source_name = source_name,
+                                     .source_hash = std::nullopt};
+
+    cook_handle_ = std::make_unique<CookHandle>(Cooker::Request(
+        lookup_key,
+        [source_path, source_name]() -> std::shared_ptr<CookJob> {
+            auto sky_map = std::make_shared<Image2D>();
+            if (!sky_map->LoadFromFile(source_path))
+            {
+                return nullptr;
+            }
+            return std::make_shared<SkyLightCookJob>(std::move(sky_map), source_name);
+        },
+        [this, source_path, scene_task, cook_succeeded, delivery_started](CookResult result) {
+            delivery_started->store(true);
+            cook_succeeded->store(result.IsSuccess());
+            if (result.HasPayload())
+            {
+                ApplyCookedData(result.payload);
+            }
+            else
+            {
+                Log(Error,
+                    "skymap {} has neither valid cooked content nor a readable source; falling back to a "
+                    "flat sky",
+                    source_path);
+                cube_map_.reset();
+            }
+
+            TaskManager::RunInRenderThread([this]() {
+                // If the proxy does not exist yet, its initial creation already sees the
+                // resolved result.
+                if (GetRenderProxy() != nullptr)
+                {
+                    RecreateRenderProxy();
+                }
+            })
+                ->Then([scene_task, cook_succeeded]() { scene_task->Complete(cook_succeeded->load()); },
+                       TargetThread::Main);
+        }));
+
+    // On cancellation on_ready does not run, so no render application will complete the
+    // scene task. The delivery future still fires and retires that task as failed.
+    cook_handle_->OnDelivered()->Then(
+        [scene_task, delivery_started]() {
+            if (!delivery_started->load())
+            {
+                scene_task->Complete(false);
+            }
+        },
+        TargetThread::Main);
+}
+
+const std::shared_ptr<TaskFuture<>> &SkyLight::OnCooked() const
+{
+    ASSERT(cook_handle_ && cook_handle_->IsValid());
+    return cook_handle_->OnDelivered();
 }
 
 std::unique_ptr<RenderProxy> SkyLight::CreateRenderProxy()
@@ -61,164 +317,27 @@ void SkyLight::OnAttach()
     ASSERT(!node_->GetScene()->GetSkyLight());
 
     node_->GetScene()->SetSkyLight(this);
-}
 
-void SkyLight::Cook()
-{
-    ASSERT(sky_map_);
-
-    if (TryLoadCache())
+    if (HasSkyMap() && !cube_map_)
     {
-        cooked_ = true;
-        return;
-    }
-
-    Log(Info, "Cooking sky map {}", sky_map_->GetName());
-    Timer timer;
-
-    cube_map_ = std::make_unique<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16,
-                                              sky_map_->GetName() + "_CubeMap");
-
-    std::array<Scalar, Image2DCube::FaceId::Count> max_brightness_per_face;
-    std::array<Vector3, Image2DCube::FaceId::Count> max_brightness_dir_per_face;
-    std::array<Vector3, Image2DCube::FaceId::Count> subtracted_color_per_face;
-
-    std::ranges::fill(max_brightness_per_face, 0.f);
-    std::ranges::fill(max_brightness_dir_per_face, Zeros);
-    std::ranges::fill(subtracted_color_per_face, Zeros);
-
-    std::vector<std::shared_ptr<TaskFuture<void>>> cube_map_tasks(Image2DCube::FaceId::Count);
-
-    cooked_row_count_ = 0;
-
-    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
-    {
-        auto face_id = static_cast<Image2DCube::FaceId>(id);
-        auto &this_face = cube_map_->GetFace(face_id);
-
-        cube_map_tasks[id] =
-            TaskManager::RunInWorkerThread([this, face_id, &this_face, &max_brightness_per_face,
-                                            &max_brightness_dir_per_face, &subtracted_color_per_face]() {
-                for (unsigned i = 0; i < CubeMapSize; i++)
-                {
-                    for (unsigned j = 0; j < CubeMapSize; j++)
-                    {
-                        auto u = (static_cast<Scalar>(i) + 0.5f) / static_cast<Scalar>(CubeMapSize) * 2.f - 1.f;
-                        auto v = (static_cast<Scalar>(j) + 0.5f) / static_cast<Scalar>(CubeMapSize) * 2.f - 1.f;
-
-                        Vector3 direction = Image2DCube::TextureCoordinateToDirection(face_id, u, v);
-
-                        Vector2 eq_uv = utilities::CartesianToEquirectangular(direction);
-                        Vector3 color = sky_map_->Sample(eq_uv);
-
-                        this_face.SetPixel(i, j, color);
-
-                        auto brightness = color.norm();
-
-                        if (brightness > max_brightness_per_face[face_id])
-                        {
-                            max_brightness_per_face[face_id] = brightness;
-                            max_brightness_dir_per_face[face_id] = direction;
-                        }
-
-                        // in order to support explicit directional lighting for rasterization-based rendering,
-                        // we subtract some color when cooking IBL and use it as the directional light.
-                        if (brightness > SkyRenderProxy::MaxIBLBrightness)
-                        {
-                            // TODO(tqjxlm): MaxBrightness is not analytically correct.
-                            Vector3 subtracted_color = utilities::ClampLength(color, SkyRenderProxy::MaxBrightness) -
-                                                       utilities::ClampLength(color, SkyRenderProxy::MaxIBLBrightness);
-
-                            constexpr float Numerator = 4.f * (1.f / CubeMapSize) * (1.f / CubeMapSize);
-                            float solid_angle = Numerator / std::pow(1 + u * u + v * v, 1.5f);
-
-                            subtracted_color_per_face[face_id] += subtracted_color * solid_angle;
-                        }
-                    }
-
-                    cooked_row_count_++;
-                }
-            });
-    }
-
-    // kick off the log timer
-    TaskManager::RunInMainThread([this]() { LogCookStatus(); });
-
-    TaskManager::OnAll(cube_map_tasks)->Wait();
-
-    Scalar max_brightness = 0.f;
-    Vector3 max_brightness_dir;
-    sun_brightness_ = Zeros;
-    for (unsigned i = 0; i < Image2DCube::FaceId::Count; i++)
-    {
-        if (max_brightness_per_face[i] > max_brightness)
-        {
-            max_brightness = max_brightness_per_face[i];
-            max_brightness_dir = max_brightness_dir_per_face[i];
-        }
-
-        sun_brightness_ += subtracted_color_per_face[i];
-    }
-
-    Eigen::Quaternion<Scalar> q = Eigen::Quaternion<Scalar>::FromTwoVectors(Front, max_brightness_dir);
-
-    sun_direction_ = q.toRotationMatrix().canonicalEulerAngles(0, 1, 2);
-
-    Log(Info, "sky map cook ok. took time {}s. max brightness {}. max brightness direction {}. sun brightness {}",
-        timer.ElapsedSecond(), max_brightness, utilities::VectorToString(utilities::ToDegree(sun_direction_)),
-        utilities::VectorToString(sun_brightness_));
-
-    cooked_ = true;
-
-    SaveCache();
-}
-
-void SkyLight::LogCookStatus() const
-{
-    // TODO(tqjxlm): it's better to use some kind of repeat timer
-    float progress = static_cast<float>(cooked_row_count_.load()) / (CubeMapSize * Image2DCube::FaceId::Count) * 100.f;
-    Logger::LogToScreen("SkyLight::Cook", fmt::format("Cooking sky map {:.1f}%", progress));
-
-    if (!cooked_)
-    {
-        // keep logging until we are finished
-        TaskManager::RunInMainThread([this]() { LogCookStatus(); }, false);
-    }
-    else
-    {
-        Logger::LogToScreen("SkyLight::Cook", "");
+        RequestCook();
     }
 }
 
-std::string SkyLight::GetCachePath() const
+void SkyLight::ApplyCookedData(const std::vector<char> &payload)
 {
-    return "cached/skylight/" + sky_map_->GetName() + ".cache";
-}
-
-bool SkyLight::TryLoadCache()
-{
-    auto *file_manager = FileManager::GetNativeFileManager();
-    auto file_path = GetCachePath();
-
-    auto data = file_manager->Read(Path::Internal(file_path));
-    if (data.empty())
-    {
-        return false;
-    }
-
     const size_t face_size = CubeMapSize * CubeMapSize * GetPixelSize(PixelFormat::RGBAFloat16);
     const size_t expected_size = 6 * face_size + 2 * sizeof(float) * 3;
 
-    if (data.size() != expected_size)
-    {
-        Log(Warn, "sky light cache size mismatch. loaded {}. expected {}.", data.size(), expected_size);
-        return false;
-    }
+    ASSERT_F(payload.size() == expected_size, "sky light artifact size mismatch. loaded {}. expected {}.",
+             payload.size(), expected_size);
 
-    cube_map_ = std::make_unique<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16,
-                                              sky_map_->GetName() + "_CubeMap");
+    const auto source_name = std::filesystem::path(sky_map_path_).lexically_normal().generic_string();
 
-    const char *ptr = data.data();
+    cube_map_ =
+        std::make_shared<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16, source_name + "_CubeMap");
+
+    const char *ptr = payload.data();
 
     for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
     {
@@ -232,46 +351,5 @@ bool SkyLight::TryLoadCache()
     ptr += sizeof(float) * 3;
 
     std::memcpy(sun_direction_.data(), ptr, sizeof(float) * 3);
-
-    Log(Info, "loaded sky light cache from {}", file_path);
-
-    return true;
 }
-
-void SkyLight::SaveCache() const
-{
-    auto *file_manager = FileManager::GetNativeFileManager();
-    auto file_path = GetCachePath();
-
-    const size_t face_size = CubeMapSize * CubeMapSize * GetPixelSize(PixelFormat::RGBAFloat16);
-    const size_t total_size = 6 * face_size + 2 * sizeof(float) * 3;
-
-    std::vector<char> data(total_size);
-    char *ptr = data.data();
-
-    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
-    {
-        auto face_id = static_cast<Image2DCube::FaceId>(id);
-        const auto &face = cube_map_->GetFace(face_id);
-        std::memcpy(ptr, face.GetRawData(), face_size);
-        ptr += face_size;
-    }
-
-    std::memcpy(ptr, sun_brightness_.data(), sizeof(float) * 3);
-    ptr += sizeof(float) * 3;
-
-    std::memcpy(ptr, sun_direction_.data(), sizeof(float) * 3);
-
-    auto written_path = file_manager->Write(Path::Internal(file_path), data);
-
-    if (written_path.empty())
-    {
-        Log(Error, "failed to save sky light cache: {}", file_path);
-    }
-    else
-    {
-        Log(Info, "saved sky light cache to {}", written_path);
-    }
-}
-
 } // namespace sparkle

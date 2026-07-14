@@ -114,6 +114,11 @@ def test_steps(framework, config, software, headless, pipelines, scene,
                         "cooker_request", common_args),
         ),
         (
+            "scene load failure",
+            app_command(framework, config, software,
+                        "scene_load_failure", common_args),
+        ),
+        (
             "render target pool",
             app_command(framework, config, software,
                         "render_target_pool", common_args),
@@ -124,6 +129,15 @@ def test_steps(framework, config, software, headless, pipelines, scene,
                         "pipeline_switch_pool", common_args),
         ),
     ]
+
+    # parity needs a physical GPU producer; a software rasterizer would compare CPU to CPU
+    if framework == "macos" and not software:
+        steps.append((
+            "ibl parity",
+            app_command(framework, config, software,
+                        "ibl_parity", common_args),
+        ))
+
     return steps
 
 
@@ -155,7 +169,9 @@ def cook_gate(framework, previous_sizes):
         with open(log, errors="replace") as log_file:
             log_file.seek(offset)
             for line in log_file:
-                cooked += "] cooking " in line
+                # cooker_request cooks throwaway fixture artifacts by design
+                cooked += ("] cooking " in line
+                           and "cooking cooker_request_test" not in line)
                 hits += "cook artifact hit" in line
 
     if cooked:
@@ -197,6 +213,8 @@ def parse_args():
                         help="test an existing build without rebuilding")
     parser.add_argument("--require_cooked", action="store_true",
                         help="fail if any test cooks on the fly")
+    parser.add_argument("--case", dest="cases", action="append",
+                        help="run only the named suite steps; repeat to select multiple")
     return parser.parse_known_args()
 
 
@@ -234,6 +252,14 @@ def main():
         other_args=other_args,
         test_python=venv_python(),
     )
+
+    if args.cases:
+        step_names = [name for name, _ in steps]
+        unknown = [case for case in args.cases if case not in step_names]
+        if unknown:
+            print(f"ERROR: unknown --case {unknown}; available: {step_names}")
+            return 1
+        steps = [(name, command) for name, command in steps if name in args.cases]
 
     for name, command in steps:
         results.append(run_step(name, command))

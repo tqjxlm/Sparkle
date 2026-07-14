@@ -17,7 +17,7 @@ Run:  python3 tests/nrd/nrd_motion_test.py [--framework macos] [--skip_build] [-
 import argparse
 import sys
 
-from nrd_common import NUM_FRAMES, load_sweep_frames, lum, run_sweep, static_render_test
+from nrd_common import NUM_FRAMES, load_sweep_frames, lum, render_test_support, run_sweep
 
 NOISE_GATES = {"yaw": 0.02, "pitch": 0.012}
 
@@ -25,7 +25,7 @@ NOISE_GATES = {"yaw": 0.02, "pitch": 0.012}
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--framework", default="macos",
-                        choices=static_render_test.SUPPORTED_FRAMEWORKS)
+                        choices=render_test_support.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--skip_build", action="store_true")
     parser.add_argument("--axis", default="yaw", choices=["yaw", "pitch"])
@@ -43,7 +43,7 @@ def main():
     from numpy.lib.stride_tricks import sliding_window_view
 
     frames = load_sweep_frames(
-        static_render_test.get_screenshot_dir(args.framework))
+        render_test_support.get_screenshot_dir(args.framework))
     lums = lum(frames)
     noise = float(np.mean([sliding_window_view(np.pad(f, 1, mode="edge"), (3, 3)).std(axis=(2, 3)).mean()
                            for f in lums]))

@@ -9,6 +9,7 @@
 namespace sparkle
 {
 class PrimitiveRenderProxy;
+class SkyRenderProxy;
 
 class ForwardRenderer : public Renderer
 {
@@ -63,7 +64,11 @@ private:
     // ray tracing resources
     RHIResourceRef<RHITLAS> tlas_;
 
-    std::unique_ptr<class ImageBasedLighting> ibl_;
+    class ImageBasedLighting *ibl_ = nullptr;
+
+    SkyRenderProxy *bound_sky_proxy_ = nullptr;
+
+    bool ibl_cook_pending_ = false;
 
     RenderConfig::OutputImage output_mode_;
 

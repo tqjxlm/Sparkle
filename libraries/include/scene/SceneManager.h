@@ -11,7 +11,7 @@ class UiManager;
 class SceneManager
 {
 public:
-    [[nodiscard]] static std::shared_ptr<TaskFuture<void>> LoadScene(Scene *scene, const Path &asset_path,
+    [[nodiscard]] static std::shared_ptr<TaskFuture<bool>> LoadScene(Scene *scene, const Path &asset_path,
                                                                      bool need_default_sky, bool need_default_lighting);
 
     static void RemoveLastDebugSphere(Scene *scene);
