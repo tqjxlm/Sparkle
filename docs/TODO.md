@@ -2,9 +2,7 @@
 
 ## CI/CD
 
-* [x] format and style check pipeline
 * [ ] unit test pipeline
-* [x] functional test pipeline
 * [ ] performance test pipeline
 
 ## Path Tracing Renderers
@@ -24,21 +22,17 @@
 ## RHI
 
 * [ ] msaa
-* [x] render target pooling
 * [ ] render graph
 * [ ] subpass
 
 ## IO
 
 * [ ] full USD support (current one is far from complete)
-* [ ] USD export: analytic spheres are exported as tessellated meshes, so ray-traced
-      silhouettes differ after a round trip (see docs/USD.md)
 * [ ] USD export: `.usdz` / `.usdc` output (blocked on tinyusdz's experimental binary writer)
 * [ ] external data loader interface
 
 ## Cook
 
-* [ ] standalone cooker
 * [ ] standalone shader compiler
 * [ ] texture compression
 * [ ] compile ray_trace shaders slang->metal directly and drop the spirv-cross stage.
@@ -71,8 +65,3 @@
       compiled shader (e.g. dead-code-eliminated by slang) crashes with a null dereference in
       `RHIShaderResourceSet::UpdateLayoutHash` during pipeline setup instead of failing with a
       clear error.
-* [ ] the windows Release functional test (Mesa lavapipe, software rendering) can run close to
-      an hour and occasionally kills the job with "the hosted runner lost communication with the
-      server" — lavapipe saturates every core and starves the runner agent. Consider running the
-      app at lower process priority or with a capped thread count in CI, or splitting the
-      functional test into its own job so a flake does not discard a finished build.

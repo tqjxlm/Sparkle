@@ -71,15 +71,19 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 You can try the latest builds on [Github releases](https://github.com/tqjxlm/Sparkle/releases).
 
-For detailed usage of the app, please refer to [docs/Run.md](docs/Run.md);
+For detailed usage of the app, please refer to [docs/Run.md](docs/Run.md).
 
 ## Development Guide
 
-For how to build the project, please refer to [docs/Build.md](docs/Build.md).
-
-For project architecture, please refer to [docs/Architecture.md](docs/Architecture.md).
-
-For the NRD denoiser integration, please refer to [docs/Nrd.md](docs/Nrd.md).
+* [docs/Build.md](docs/Build.md) — dependencies, build commands, IDE setup
+* [docs/Architecture.md](docs/Architecture.md) — key entry points and repository structure
+* [docs/Run.md](docs/Run.md) — config system, storage paths, logs
+* [docs/Test.md](docs/Test.md) — test cases and visual tests
+* [docs/CI.md](docs/CI.md) — CI gates and local validation
+* [docs/Cooking.md](docs/Cooking.md) — build-time asset cooking
+* [docs/USD.md](docs/USD.md) — USD import and export
+* [docs/Nrd.md](docs/Nrd.md) — NRD denoiser integration
+* [docs/RenderingValidation.md](docs/RenderingValidation.md) — rendering validation and debugging methodology
 
 ## Todo List & Known Issues
 

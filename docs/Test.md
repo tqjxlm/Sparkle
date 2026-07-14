@@ -15,59 +15,38 @@
 
 ### Comparing and diffing renders
 
-* Diff against the **ground truth**, not only A/B between two configs. Only the ground truth tells you which side is correct and whether an artifact is feature-specific (e.g. present in `nrd=on` but absent from the raw render).
-* Inspect a **per-pixel signed difference** (where one image is brighter vs darker), **zoom to 1:1** on suspect regions, and for edges take **scanline profiles** across the boundary. Thin, high-frequency artifacts — silhouette halos, fringes, ringing, fireflies — are only 1–3 px wide and **average to ≈zero under any whole-image/region mean or low-pass-blurred diff** (an edge band cancels because it straddles the bright overshoot and the adjacent dark side). Never use a blurred or region-averaged diff as the **detector**; use averages only to **quantify** what the eye has already found.
-* A passing aggregate metric (FLIP, mean error) does **not** mean the images match — it is a low-pass over the error map and hides spatially concentrated / structural errors. Inspect the worst tiles and the silhouettes explicitly before declaring a match.
+How to compare a render against the ground truth — signed per-pixel diffs, 1:1 crops, scanline profiles, and why aggregate metrics (FLIP / PSNR) or blurred diffs must never be the detector — is methodology, covered in [RenderingValidation.md](RenderingValidation.md).
 
 ## Python Test Scripts
 
 * When possible, always use python scripts to perform tests.
 * Add Python test dependencies to `tests/requirements.txt`.
-* `dev/run_tests.py` is the single general test orchestrator. Do not add another
-  script that builds or sequences the general test suite.
-* Focused test implementations, evaluators, and reusable test helpers belong under
-  `tests/`, next to the feature they validate.
-* If Python is not sufficient, combine a focused script under `tests/` with the
-  TestCase system below.
+* `dev/run_tests.py` is the single general test orchestrator. Do not add another script that builds or sequences the general test suite.
+* Focused test implementations, evaluators, and reusable test helpers belong under `tests/`, next to the feature they validate.
+* If Python is not sufficient, combine a focused script under `tests/` with the TestCase system below.
 
 ## Test Orchestration
 
-`dev/run_tests.py` runs the Python unit tests first, builds once, runs both
-screenshot pipelines, evaluates their ground truth, runs the USD round trip, and
-executes cooker, failed-scene-resource, and render-target pool TestCases. The preflight
-tests fail fast; the application suite runs to completion and reports all failures
-together.
+`dev/run_tests.py` runs the Python unit tests as a fail-fast preflight, builds once, runs both screenshot pipelines (forward and deferred) and evaluates them against the ground truth, runs the USD round trip, and executes the `cooker_request`, `scene_load_failure`, `render_target_pool` and `pipeline_switch_pool` test cases; on the macos framework with a physical GPU it also runs `ibl_parity`. The application suite runs to completion and reports all failures together.
 
 ```bash
 python3 dev/run_tests.py --framework macos --config Release --headless
 python3 dev/run_tests.py --framework glfw --config Release --headless
 ```
 
-Use `--pipeline <name>` to focus screenshot coverage while developing; repeat the
-option for multiple pipelines. Use `--skip_build` only when the intended binary is
-already built. CI additionally uses `--software --require_cooked` to run the
-packaged Windows build under Lavapipe and reject runtime cooking.
+Use `--pipeline <name>` to focus screenshot coverage while developing; repeat the option for multiple pipelines. Use `--skip_build` only when the intended binary is already built. CI additionally uses `--software --require_cooked` to run the packaged Windows build under Lavapipe and reject runtime cooking.
 
-The static-render evaluator lives at
-[`tests/screenshot/static_render_test.py`](../tests/screenshot/static_render_test.py), and
-the USD evaluator lives at
-[`tests/usd/usd_roundtrip_test.py`](../tests/usd/usd_roundtrip_test.py). They own
-specialized assertions; they do not orchestrate the general suite. Shared framework,
-dependency and image mechanics live in
-[`tests/rendering/render_test_support.py`](../tests/rendering/render_test_support.py),
-so one evaluator never serves as another evaluator's utility layer.
+The static-render evaluator lives at [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py), and the USD evaluator lives at [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py). They own specialized assertions; they do not orchestrate the general suite. Shared framework, dependency and image mechanics live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py), so one evaluator never serves as another evaluator's utility layer.
 
 ## TestCase System
 
 * A `TestCase` is a C++ class that runs inside the app after the scene finishes loading.
 * Before render and RHI config init, the selected test case may override config values via `OnEnforceConfigs()`.
-* Each frame, `AppFramework` calls `Tick()`. When `Tick()` returns `Pass` or `Fail` the app
-exits with code `0` or `1` respectively.
+* Each frame, `AppFramework` calls `Tick()`. When `Tick()` returns `Pass` or `Fail` the app exits with code `0` or `1` respectively.
 
 ### Build
 
-TestCase support is compiled in by default (`ENABLE_TEST_CASES=1`).
-Use `--strip_test` to exclude it from the binary for production builds:
+TestCase support is compiled in by default (`ENABLE_TEST_CASES=1`). Use `--strip_test` to exclude it from the binary for production builds:
 
 ```bash
 # Build without TestCase support (production)
@@ -85,11 +64,9 @@ python3 build.py --framework [glfw, macos] --run --test_case smoke --headless tr
 echo "Exit code: $?"
 ```
 
-The `--test_case <name>` argument is passed straight through to the app's config system.
-Any other cvars (e.g. `--scene`, `--pipeline`) work alongside it as normal.
+The `--test_case <name>` argument is passed straight through to the app's config system. Any other cvars (e.g. `--scene`, `--pipeline`) work alongside it as normal.
 
-Use `--test_timeout <frames>` to set a frame budget for the test. If the test does not
-finish within the given number of frames it is reported as `Fail`. Default is `0` (no limit).
+Use `--test_timeout <frames>` to set a frame budget for the test. If the test does not finish within the given number of frames it is reported as `Fail`. Default is `0` (no limit).
 
 ### Exit Codes
 
@@ -106,8 +83,7 @@ finish within the given number of frames it is reported as `Fail`. Default is `0
 3. If the test needs fixed runtime config, optionally override `OnEnforceConfigs()`.
 4. Register with `TestCaseRegistrar<T>` using a unique name string.
 
-The registered name is injected into the test instance and available via
-`TestCase::GetName()`, so log messages do not need to duplicate it manually.
+The registered name is injected into the test instance and available via `TestCase::GetName()`, so log messages do not need to duplicate it manually.
 
 ```cpp
 // tests/my_feature/MyFeatureTest.cpp
@@ -148,9 +124,7 @@ python3 build.py --framework macos --run --test_case my_feature
 
 ### Naming Rules
 
-Test case names (the string passed to `TestCaseRegistrar`) must be unique across all
-`.cpp` files under `tests/`. Duplicate names are detected at startup and logged as an
-error; the first registration wins.
+Test case names (the string passed to `TestCaseRegistrar`) must be unique across all `.cpp` files under `tests/`. Duplicate names are detected at startup and logged as an error; the first registration wins.
 
 ## Built-in Test Cases
 
@@ -161,6 +135,10 @@ error; the first registration wins.
 | `multi_frame_screenshot` | [tests/screenshot/MultiFrameScreenshotTest.cpp](../tests/screenshot/MultiFrameScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots optionally, captures five, then passes. Used by functional tests and visual QA for temporal analysis. |
 | `usd_round_trip`         | [tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)                               | Renders the loaded scene, exports it to USD, loads the exported file back and renders it again. Driven by [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py), which FLIP-compares the two screenshots. See [USD.md](USD.md). |
 | `cooker_request`         | [tests/cook/CookerRequestTest.cpp](../tests/cook/CookerRequestTest.cpp)                           | Verifies logical and relocated-content cache hits share main-thread delivery, avoid source construction on an exact hit, and avoid recooking identical relocated content without exporting cache metadata to the requester. |
+| `ibl_parity`             | [tests/cook/IblParityTest.cpp](../tests/cook/IblParityTest.cpp)                                   | Gates the CPU IBL cook jobs against their GPU producers: deletes the internal IBL artifacts, lets the GPU cook them, runs the CPU jobs and compares payloads. Needs a physical GPU; part of the macos suite. See [Cooking.md](Cooking.md). |
 | `scene_load_failure`     | [tests/scene/SceneLoadFailureTest.cpp](../tests/scene/SceneLoadFailureTest.cpp)                   | Verifies a missing authored sky resource preserves its path, produces no invalid cube, reports scene async failure, and finishes render-side application before the scene settles. |
 | `render_target_pool`     | [tests/rhi/RenderTargetPoolTest.cpp](../tests/rhi/RenderTargetPoolTest.cpp)                       | Exercises `RHIRenderTargetPool` on the render thread: distinct targets while held, reuse of a freed target after the GPU safety delay, manual release of free targets via `ReleaseUnused`. |
 | `pipeline_switch_pool`   | [tests/rhi/PipelineSwitchPoolTest.cpp](../tests/rhi/PipelineSwitchPoolTest.cpp)                   | Enforces the forward pipeline, switches at runtime to gpu (or deferred without hardware ray tracing) and back, and asserts the returning forward renderer reuses a pooled render target. |
+| `nrd_probe`              | [tests/nrd/NrdProbeTest.mm](../tests/nrd/NrdProbeTest.mm)                                         | Compiles every cooked ReBLUR pipeline to a PSO through the production cooked-shader loader and `MetalNrdBackend`, proving the GPU supports the SIMD/quad-group ops ReBLUR uses. Apple platforms only. See [Nrd.md](Nrd.md). |
+| `denoiser_sweep`         | [tests/nrd/DenoiserSweepTest.cpp](../tests/nrd/DenoiserSweepTest.cpp)                             | Captures consecutive frames under a configurable camera sweep (yaw / pitch / static) for temporal analysis; driven by [tests/nrd/run_nrd_gates.py](../tests/nrd/run_nrd_gates.py). See [Nrd.md](Nrd.md). |
+| `nrd_runtime_toggle`     | [tests/nrd/NrdRuntimeToggleTest.cpp](../tests/nrd/NrdRuntimeToggleTest.cpp)                       | Guards enabling NRD at runtime: one arm switches pipeline and enables NRD mid-accumulation (recycled-memory repro), the other enables it on an already-converged frame. |

@@ -1,6 +1,6 @@
 # Rendering Validation & Debugging Methodology
 
-How to validate a rendering feature so correctness bugs do not slip past green metrics, and how to debug image artifacts efficiently. Read alongside [Test.md](Test.md) (how to capture/diff images) and the *Visual Debugging Methodology* in [../AGENTS.md](../AGENTS.md).
+How to validate a rendering feature so correctness bugs do not slip past green metrics, and how to debug image artifacts efficiently. Read alongside [Test.md](Test.md) (how to capture screenshots and run visual tests).
 
 ## The core principle: a proxy is not ground truth
 
@@ -13,7 +13,7 @@ Almost every hard-to-find rendering bug is the same mistake: **a proxy was trust
 | a `--debug_mode` view                  | the raw buffer value                       | tonemapped / display-scaled / saturated (a raw 0.5 can read ~0.8)                                                                                                                                                                                                                      |
 | a default arg (e.g. omitted `--scene`) | the scene you think you rendered           | silently loads something else (or nothing)                                                                                                                                                                                                                                             |
 | a low-passed / region-mean diff        | the real per-pixel error field             | averages thin artifacts (halos, fringes) to ~0                                                                                                                                                                                                                                         |
-| % of pixels affected / mean deviation  | how perceptually bad the error is          | area- and magnitude-weighted, so it is blind to **high-frequency localized** error: a sharp halo/contour/firefly the eye fixates on can be <1% of pixels yet the single most objectionable thing on screen, while a smooth low-frequency shift many times larger in area reads as fine |
+| % of pixels affected / mean deviation  | how perceptually bad the error is          | area- and magnitude-weighted, so blind to high-frequency localized error (see checklist #8)                                                                                                                                                                                            |
 | an imported algorithm's assumption     | its behaviour in *your* context            | the invariant held in its source regime, not here                                                                                                                                                                                                                                      |
 
 Bugs hide where the proxy and reality part ways. You find them only by checking the proxy against the real thing **at the resolution of the failure mode**.
@@ -31,8 +31,6 @@ If you do compute a *supporting* number, design it to match the artifact's natur
 * If it is **localized**, restrict to a band derived from the **geometry G-buffer** (depth/normal discontinuity), *not* luma edges (luma "edges" leak surface texture and flood the mask).
 * Always compare against an **independent ground truth**.
 
-(Origin 2026-06-29: asked for "a quantitative way to know it's fixed", I substituted a bespoke metric for the agreed visual gate — the confirmed halo overlays. The metric reported "−46%, success" while those overlays still plainly showed the artifact; the fix was reverted. The gate was always **eliminate the highlighted pixels in the agreed overlays**. I should also have *argued* that the quantitative request violated semantic-first rather than complying. Note the gate overlays must themselves be clean — a candidate built on luma edges was dropped because it leaked floor texture.)
-
 ## Validation checklist (for any rendering feature)
 
 1. **Derive acceptance from failure modes, not one global score.** Enumerate how the feature can go wrong (over-blur / detail loss, ghosting, halos, fireflies, bias, banding) and attach a metric that is *sensitive to each*: per-pixel **signed diff vs ground truth**, **detail/high-frequency preservation** (local std/HF ratio vs the reference), **worst-tile**, **edge-band** checks. Whole-image FLIP/PSNR are necessary but never sufficient — they cannot see what they average out.
@@ -48,4 +46,4 @@ If you do compute a *supporting* number, design it to match the artifact's natur
 
 * **Inspect intermediate passes, not just the final image.** Output a pass's input/output to the render target (e.g. via a `--debug_mode` flag) and read it headlessly. Don't debug a multi-pass pipeline only from its end-to-end frame.
 * **To read a non-texture value** (a shader variable, a buffer channel), write it full-screen from the shader and screenshot it — but remember these views are **tonemapped** (a raw 0.5 reads ~0.8): disable tonemapping or invert the curve, and scale the value so it isn't saturated, or you will misread it.
-* **Diff at the resolution of the failure**: per-pixel signed diff vs ground truth (red=brighter / blue=darker), zoomed 1:1 crops on suspect regions, and scanline profiles across edges. See the *Comparing and diffing renders* section of [Test.md](Test.md) for the mechanics.
+* **Diff at the resolution of the failure**: per-pixel signed diff vs ground truth (red=brighter / blue=darker), zoomed 1:1 crops on suspect regions, and scanline profiles across edges. Diff against the ground truth, not only A/B between two configs — only the ground truth tells you which side is wrong and whether an artifact is feature-specific (e.g. present with `nrd=on`, absent from the raw render). Thin 1–3 px artifacts (halos, fringes, ringing) average to ≈zero under any whole-image or low-pass-blurred diff, so never use a blurred or region-averaged diff as the detector.
