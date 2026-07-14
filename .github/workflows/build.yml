@@ -10,42 +10,38 @@ on:
 
 # stages: build (every product in parallel, the heavy stage) -> cook (macos-release, on
 # the macos runners' real Metal GPU) -> release (every product: inject the cooked content
-# and re-sign) -> test (the test table in the test job decides which released products run
-# the suite and with what coverage). a cell waits only for the shared cook and its own
-# product's upstream cell, never other products': the stage -> cook edges are real needs
-# edges, while the edge to the product's own build (for release cells) or release (for
-# test cells) cannot be a needs, since needs cannot target a single matrix cell — it is an
-# await-by-name instead (.github/actions/wait-for-job). the macos-release build is the one
-# standalone job, because cook's needs edge must target it.
+# and re-sign) -> test (the test table decides which released products run the suite and
+# with what coverage). a cell waits only for the shared cook and its own product's
+# upstream cell, never other products': the stage -> cook edges are real needs edges,
+# while the edge to the product's own build (for release cells) or release (for test
+# cells) cannot be a needs, since needs cannot target a single matrix cell — it is an
+# await-by-name instead (.github/actions/wait-for-job). the macos-release build is the
+# one standalone job, because cook's needs edge must target it. the three matrices come
+# from one product table: the plan node computes them with dev/ci_matrix.py.
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      release: ${{ steps.plan.outputs.release }}
+      test: ${{ steps.plan.outputs.test }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Compute matrices
+        id: plan
+        shell: bash
+        run: python3 dev/ci_matrix.py --build_types '${{ inputs.build_type }}' >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-        framework: [android, glfw, macos, ios]
-        build_type: ${{ fromJSON(format('[{0}]', inputs.build_type)) }}
-        exclude:
-          - os: windows-latest
-            framework: macos
-          - os: windows-latest
-            framework: android
-          - os: windows-latest
-            framework: ios
-          # built by the standalone job cook's needs edge targets
-          - os: macos-latest
-            framework: macos
-            build_type: Release
-          - os: ubuntu-latest
-            framework: macos
-          - os: ubuntu-latest
-            framework: ios
-          - os: ubuntu-latest
-            framework: glfw
-          - os: macos-latest
-            framework: android
+        include: ${{ fromJSON(needs.plan.outputs.build) }}
       max-parallel: 16
 
     steps:
@@ -131,31 +127,14 @@ jobs:
           path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
 
   release:
-    needs: cook
+    needs: [plan, cook]
     # apple signing needs a macos runner; injection elsewhere is zip surgery, ubuntu starts fastest
     runs-on: ${{ (matrix.framework == 'macos' || matrix.framework == 'ios') && 'macos-latest' || 'ubuntu-latest' }}
 
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-        framework: [android, glfw, macos, ios]
-        build_type: ${{ fromJSON(format('[{0}]', inputs.build_type)) }}
-        exclude:
-          - os: windows-latest
-            framework: macos
-          - os: windows-latest
-            framework: android
-          - os: windows-latest
-            framework: ios
-          - os: ubuntu-latest
-            framework: macos
-          - os: ubuntu-latest
-            framework: ios
-          - os: ubuntu-latest
-            framework: glfw
-          - os: macos-latest
-            framework: android
+        include: ${{ fromJSON(needs.plan.outputs.release) }}
 
     steps:
       - name: Checkout code
@@ -189,32 +168,15 @@ jobs:
 
   test:
     name: test (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
-    needs: cook
+    needs: [plan, cook]
+    # a build_type selection can leave the test table empty, and GitHub rejects empty matrices
+    if: needs.plan.outputs.test != '[]'
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
-      # the test table: which released products run the aggregate suite, and with what
-      # coverage. a product absent from the table ships untested (no runner can drive it yet)
       matrix:
-        include:
-          # no GPU on hosted windows runners: software vulkan via lavapipe, which can
-          # take the suite close to an hour (see TODO.md), hence the generous timeout
-          - os: windows-latest
-            framework: glfw
-            build_type: Release
-            suite_args: --software --headless --require_cooked
-            suite_timeout: 120
-            screenshots: build_system/glfw/output/build/generated/screenshots/
-          # physical Metal GPU (the runner class the cook stage relies on). its
-          # virtualized device exposes no ray tracing, so the gpu path-tracing pipeline
-          # (and NRD) silently falls back to forward and cannot be tested here
-          - os: macos-latest
-            framework: macos
-            build_type: Release
-            suite_args: --headless --require_cooked
-            suite_timeout: 60
-            screenshots: ~/Documents/sparkle/screenshots/
+        include: ${{ fromJSON(needs.plan.outputs.test) }}
 
     steps:
       - name: Checkout code

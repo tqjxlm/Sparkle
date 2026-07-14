@@ -14,7 +14,9 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes it as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
 * **release**: every product: injects the cooked content into each build product and re-signs where injection breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: a test table (the `include` matrix of the test job) decides which released products run the aggregate suite and with what coverage. Currently enabled: windows-release under lavapipe, and macos-release on the runner's physical Metal GPU. Both run with `--require_cooked`. A product absent from the table ships untested — no runner can drive it yet.
+* **test**: a test table decides which released products run the aggregate suite and with what coverage. Currently enabled: windows-release under lavapipe, and macos-release on the runner's physical Metal GPU. Both run with `--require_cooked`. A product absent from the table ships untested — no runner can drive it yet.
+
+All three matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the test table — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.
 
 A cell waits only for the shared cook and its own product's upstream cell, never other products'. The release and test matrices carry a real `needs` edge to cook; the edge to the product's own build (for a release cell) or release (for a test cell) cannot be a `needs` (GitHub cannot target a single matrix cell), so it is an await-by-name through the run's job list — the shared [wait-for-job](../.github/actions/wait-for-job/action.yml) action. The awaits start only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. The one standalone job is the macos-release build, which cook's `needs` edge must target.
 
@@ -94,7 +96,6 @@ python3 dev/run_tests.py --framework macos --config Release --skip_build \
 ```
 
 The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate and the NRD gate suite (see [Nrd.md](Nrd.md)) would be vacuous and stay local-only. Enabling them is a test-table change away if a runner with ray tracing (e.g. self-hosted) ever appears.
-
 
 ## Screenshot Ground Truth
 
