@@ -25,7 +25,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # the android build (SDK/NDK + gradle + two CMake variants) can exhaust the ~14 GB free on
+    # the android build (SDK/NDK + gradle + native CMake build) can exhaust the ~14 GB free on
     # hosted ubuntu runners; drop preinstalled toolchains this project never uses (~45 GB)
     - name: Free Disk Space (Linux)
       if: runner.os == 'Linux'
@@ -53,6 +53,10 @@ runs:
         appstore-key-id: ${{ inputs.ios-appstore-key-id }}
         appstore-private-key: ${{ inputs.ios-appstore-private-key }}
 
+    - name: Reset compiler cache stats
+      shell: bash
+      run: ccache --zero-stats
+
     # dependency downloads (CMake FetchContent) happen during the configure and are the one phase
     # that fails on transient network errors (e.g. GitHub 504s); retry it cheaply so the full
     # build step never pays for a flaky download. android's CMake configure only runs inside the
@@ -73,6 +77,13 @@ runs:
       env:
         SPARKLE_BUILD_JOBS: 8
       run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --archive ${{ steps.setup-environment.outputs.build-args }}
+
+    - name: Check Android task graph
+      if: inputs.framework == 'android' && inputs.build-type == 'Debug'
+      shell: bash
+      env:
+        SPARKLE_ANDROID_GRADLE_TEST: 1
+      run: python3 -m unittest tests.build_system.test_android_gradle
 
     # hit rate should approach 100% for PRs that touch few files; a cold cache shows all misses
     - name: Compiler cache stats

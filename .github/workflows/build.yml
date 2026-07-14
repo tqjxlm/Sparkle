@@ -8,44 +8,40 @@ on:
         type: string
         default: '"Debug","Release"'
 
-# stages: build (every product in parallel, the heavy stage) -> cook (macos-release, the
-# only node with a real Metal GPU) -> release (inject the cooked content into each build
-# product and re-sign) -> test (windows-release). a release waits only for its own build
-# and the shared cook, never other products' builds: release -> cook is a needs edge, and
-# each release cell awaits its own build by job name, since needs cannot target a single
-# matrix cell. products with dependants of their own (cook needs macos-release, test needs
-# windows-release) are standalone jobs so those edges are addressable.
+# stages: build (every product in parallel, the heavy stage) -> cook (macos-release, on
+# the macos runners' real Metal GPU) -> release (every product: inject the cooked content
+# and re-sign) -> test (the test table decides which released products run the suite and
+# with what coverage). a cell waits only for the shared cook and its own product's
+# upstream cell, never other products': the stage -> cook edges are real needs edges,
+# while the edge to the product's own build (for release cells) or release (for test
+# cells) cannot be a needs, since needs cannot target a single matrix cell — it is an
+# await-by-name instead (.github/actions/wait-for-job). the macos-release build is the
+# one standalone job, because cook's needs edge must target it. the three matrices come
+# from one product table: the plan node computes them with dev/ci_matrix.py.
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      release: ${{ steps.plan.outputs.release }}
+      test: ${{ steps.plan.outputs.test }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Compute matrices
+        id: plan
+        shell: bash
+        run: python3 dev/ci_matrix.py --build_types '${{ inputs.build_type }}' >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-        framework: [android, glfw, macos, ios]
-        build_type: ${{ fromJSON(format('[{0}]', inputs.build_type)) }}
-        exclude:
-          - os: windows-latest
-            framework: macos
-          - os: windows-latest
-            framework: android
-          - os: windows-latest
-            framework: ios
-          - os: windows-latest
-            framework: glfw
-            build_type: Release
-          - os: macos-latest
-            framework: macos
-            build_type: Release
-          - os: ubuntu-latest
-            framework: macos
-          - os: ubuntu-latest
-            framework: ios
-          - os: ubuntu-latest
-            framework: glfw
-          - os: macos-latest
-            framework: android
+        include: ${{ fromJSON(needs.plan.outputs.build) }}
       max-parallel: 16
 
     steps:
@@ -78,21 +74,6 @@ jobs:
         with:
           framework: macos
           os: macos-latest
-          build-type: Release
-
-  build-windows-release:
-    name: build (windows-latest, glfw, Release)
-    if: contains(inputs.build_type, 'Release')
-    runs-on: windows-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Platform
-        uses: ./.github/actions/build-platform
-        with:
-          framework: glfw
-          os: windows-latest
           build-type: Release
 
   cook:
@@ -146,35 +127,14 @@ jobs:
           path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
 
   release:
-    needs: cook
+    needs: [plan, cook]
     # apple signing needs a macos runner; injection elsewhere is zip surgery, ubuntu starts fastest
     runs-on: ${{ (matrix.framework == 'macos' || matrix.framework == 'ios') && 'macos-latest' || 'ubuntu-latest' }}
 
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-        framework: [android, glfw, macos, ios]
-        build_type: ${{ fromJSON(format('[{0}]', inputs.build_type)) }}
-        exclude:
-          - os: windows-latest
-            framework: macos
-          - os: windows-latest
-            framework: android
-          - os: windows-latest
-            framework: ios
-          # released by the standalone release node the test stage waits for
-          - os: windows-latest
-            framework: glfw
-            build_type: Release
-          - os: ubuntu-latest
-            framework: macos
-          - os: ubuntu-latest
-            framework: ios
-          - os: ubuntu-latest
-            framework: glfw
-          - os: macos-latest
-            framework: android
+        include: ${{ fromJSON(needs.plan.outputs.release) }}
 
     steps:
       - name: Checkout code
@@ -184,21 +144,9 @@ jobs:
       # is a job-name await. it only ever waits while few macos builds remain (cook, a
       # macos build, is already done), so waiting cells cannot starve the build queue
       - name: Wait for this product's build
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          job_name="build (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})"
-          for _ in $(seq 1 90); do
-            conclusion=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
-              --jq "[.jobs[] | select(.name | endswith(\"$job_name\")) | .conclusion // \"\"][0]")
-            case "$conclusion" in
-              success) exit 0 ;;
-              failure|cancelled|timed_out|skipped) echo "$job_name concluded: $conclusion"; exit 1 ;;
-              *) sleep 40 ;;
-            esac
-          done
-          echo "timed out waiting for $job_name"; exit 1
+        uses: ./.github/actions/wait-for-job
+        with:
+          job-name: build (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
 
       - name: Release Platform
         uses: ./.github/actions/release-platform
@@ -218,54 +166,84 @@ jobs:
           ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
           ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
-  release-windows-release:
-    name: release (windows-latest, glfw, Release)
-    needs: [build-windows-release, cook]
-    # zip surgery only, no windows toolchain needed; ubuntu starts fastest on the test path
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Release Platform
-        uses: ./.github/actions/release-platform
-        with:
-          framework: glfw
-          os: windows-latest
-          build-type: Release
-
   test:
-    name: test (windows-latest, glfw, Release)
-    needs: release-windows-release
-    runs-on: windows-latest
+    name: test (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
+    needs: [plan, cook]
+    # a build_type selection can leave the test table empty, and GitHub rejects empty matrices
+    if: needs.plan.outputs.test != '[]'
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.test) }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # same await-by-name edge the release cells use for their builds: a test cell
+      # waits only for its own product's release, never other products'
+      - name: Wait for this product's release
+        uses: ./.github/actions/wait-for-job
+        with:
+          job-name: release (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
+
+      # the suite drives the app through build.py, which needs the build prerequisites
+      - name: Setup Environment
+        if: matrix.framework == 'macos'
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: ${{ matrix.framework }}
+          os: ${{ matrix.os }}
+
+      - name: Setup Mesa Lavapipe
+        if: matrix.os == 'windows-latest'
+        uses: ./.github/actions/setup-mesa
 
       # the release package already carries the cooked content in its packed resources
       - name: Download app
         uses: actions/download-artifact@v4
         with:
-          name: release-glfw-windows-latest-Release
-          path: build_system/glfw/product
+          name: release-${{ matrix.framework }}-${{ matrix.os }}-${{ matrix.build_type }}
+          path: build_system/${{ matrix.framework }}/product
 
-      - name: Extract app
-        shell: bash
-        run: python3 -m zipfile -e build_system/glfw/product/windows-glfw-Release.zip build_system/glfw/output/
-
-      - name: Setup Mesa Lavapipe
-        uses: ./.github/actions/setup-mesa
-
-      - name: Run Tests
+      - name: Extract app (glfw)
+        if: matrix.framework == 'glfw'
         shell: bash
         run: >-
-          python3 dev/run_tests.py --framework glfw --config Release --skip_build
-          --software --headless --require_cooked
+          python3 -m zipfile -e build_system/glfw/product/windows-glfw-${{ matrix.build_type }}.zip
+          build_system/glfw/output/
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app (macos)
+        if: matrix.framework == 'macos'
+        shell: bash
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-${{ matrix.build_type }}.zip build_system/macos/output/build/
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: ${{ matrix.suite_timeout }}
+        shell: bash
+        run: >-
+          python3 dev/run_tests.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }}
+          --skip_build ${{ matrix.suite_args }}
+
+      - name: Dump app logs
+        if: failure() && matrix.framework == 'macos'
+        shell: bash
+        run: |
+          echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          echo "=== crash reports ==="
+          sleep 10
+          for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
 
       - name: Upload Test Screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-screenshots-glfw-windows
-          path: build_system/glfw/output/build/generated/screenshots/
+          name: test-screenshots-${{ matrix.framework }}-${{ matrix.os }}
+          path: ${{ matrix.screenshots }}
 

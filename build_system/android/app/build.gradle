@@ -133,8 +133,6 @@ tasks.register('copyAssets', Copy) {
         }
     }
 
-    dependsOn(lintVitalAnalyzeRelease)
-    dependsOn(generateReleaseLintVitalReportModel)
     dependsOn(generateAssetManifests)
 
     inputs.dir "${rootProject.projectDir}/output/assets"
@@ -143,15 +141,29 @@ tasks.register('copyAssets', Copy) {
 
 // make sure copyAssets runs before the mergeAssets task and after the externalNativeBuild task
 android.applicationVariants.configureEach { variant ->
-    // generateAssetManifests must run after native build (which copies resources)
-    tasks.named("generateAssetManifests").configure {
-        dependsOn tasks.named("externalNativeBuild${variant.name.capitalize()}")
+    def variantName = variant.name.capitalize()
+    def nativeBuild = tasks.named("externalNativeBuild${variantName}")
+    def generateManifests = tasks.named("generateAssetManifests")
+    def copyAssets = tasks.named("copyAssets")
+
+    generateManifests.configure {
+        mustRunAfter nativeBuild
     }
-    tasks.named("copyAssets").configure {
-       dependsOn tasks.named("externalNativeBuild${variant.name.capitalize()}")
+    copyAssets.configure {
+        mustRunAfter nativeBuild
     }
-    tasks.named("merge${variant.name.capitalize()}Assets").configure {
-        dependsOn tasks.named("copyAssets")
+    if (variantName == "Release") {
+        // release lint reads the generated assets copied into the main source set
+        tasks.named("generateReleaseLintVitalReportModel").configure {
+            mustRunAfter copyAssets
+        }
+        tasks.named("lintVitalAnalyzeRelease").configure {
+            mustRunAfter copyAssets
+        }
+    }
+    tasks.named("merge${variantName}Assets").configure {
+        dependsOn nativeBuild
+        dependsOn copyAssets
     }
 }
 
@@ -160,4 +172,3 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'androidx.games:games-activity:4.0.0'
 }
-
