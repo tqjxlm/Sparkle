@@ -6,6 +6,8 @@
 
 namespace sparkle
 {
+class SkyRenderProxy;
+
 class DeferredRenderer : public Renderer
 {
 public:
@@ -53,7 +55,11 @@ private:
     // copy screen_color to the backbuffer, probably converting float16 to sRGB
     std::unique_ptr<class ScreenQuadPass> present_pass_;
 
-    std::unique_ptr<class ImageBasedLighting> ibl_;
+    class ImageBasedLighting *ibl_ = nullptr;
+
+    SkyRenderProxy *bound_sky_proxy_ = nullptr;
+
+    bool ibl_cook_pending_ = false;
 
     RenderConfig::OutputImage output_mode_;
 };

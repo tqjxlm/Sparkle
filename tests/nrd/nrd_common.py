@@ -10,8 +10,8 @@ import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "screenshot"))
-import static_render_test  # noqa: E402,F401
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "rendering"))
+import render_test_support  # noqa: E402,F401
 
 NUM_FRAMES = 16  # must match DenoiserSweepTest.cpp NumFrames
 

@@ -407,7 +407,7 @@ tinyusdz::Prim ExportDirectionalLight(const DirectionalLight &light)
 std::optional<tinyusdz::Prim> ExportSkyLight(ExportContext &ctx, const SkyLight &light)
 {
     const auto &sky_map_path = light.GetSkyMapPath();
-    if (sky_map_path.empty() || !light.GetSkyMap())
+    if (sky_map_path.empty())
     {
         // procedural sky: color only
         tinyusdz::DomeLight dome_light;

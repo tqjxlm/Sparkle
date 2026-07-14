@@ -14,6 +14,11 @@ int main(int argc, char *argv[])
 
     app.SetNativeView(&view);
 
+    if (app.IsCookMode())
+    {
+        return app.RunCookMode();
+    }
+
     // now we have a native view for presenting, fully init the app
     if (!app.Init())
     {

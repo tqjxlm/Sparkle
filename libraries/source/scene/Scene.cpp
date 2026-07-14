@@ -16,10 +16,47 @@
 
 namespace sparkle
 {
-
-Scene::Scene() : root_node_(std::make_unique<SceneNode>(this, "SceneRoot"))
+struct SceneAsyncTask::State
 {
-    render_proxy_ = CreateRenderProxy();
+    std::atomic<int32_t> pending_tasks{0};
+    std::atomic<bool> succeeded{true};
+    std::atomic<bool> active{true};
+};
+
+SceneAsyncTask::SceneAsyncTask(std::shared_ptr<State> state) : state_(std::move(state))
+{
+}
+
+SceneAsyncTask::~SceneAsyncTask()
+{
+    Complete(false);
+}
+
+void SceneAsyncTask::Complete(bool succeeded)
+{
+    if (completed_.exchange(true))
+    {
+        return;
+    }
+
+    if (!succeeded)
+    {
+        state_->succeeded.store(false);
+    }
+
+    const auto previous = state_->pending_tasks.fetch_sub(1);
+    ASSERT(previous > 0);
+}
+
+bool SceneAsyncTask::IsActive() const
+{
+    return state_->active.load();
+}
+
+Scene::Scene()
+    : render_proxy_(CreateRenderProxy()), root_node_(std::make_unique<SceneNode>(this, "SceneRoot")),
+      async_state_(std::make_shared<SceneAsyncTask::State>())
+{
 }
 
 Scene::~Scene()
@@ -150,8 +187,31 @@ bool Scene::BoxCollides(const PrimitiveComponent *primitive) const
     });
 }
 
+std::shared_ptr<SceneAsyncTask> Scene::RegisterAsyncTask()
+{
+    if (async_state_->pending_tasks.fetch_add(1) == 0)
+    {
+        async_state_->succeeded.store(true);
+    }
+    return std::shared_ptr<SceneAsyncTask>(new SceneAsyncTask(async_state_));
+}
+
+bool Scene::HasPendingAsyncTasks() const
+{
+    return async_state_->pending_tasks.load() > 0;
+}
+
+bool Scene::DidAsyncTasksSucceed() const
+{
+    ASSERT(!HasPendingAsyncTasks());
+    return async_state_->succeeded.load();
+}
+
 void Scene::Cleanup()
 {
+    async_state_->active.store(false);
+    async_state_ = std::make_shared<SceneAsyncTask::State>();
+
     root_node_ = std::make_unique<SceneNode>(this, "SceneRoot");
     sky_light_ = nullptr;
     directional_light_ = nullptr;

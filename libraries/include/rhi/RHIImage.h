@@ -8,6 +8,8 @@
 #include "rhi/RHIImageView.h"
 #include "rhi/RHIMemory.h"
 
+#include <vector>
+
 namespace sparkle
 {
 enum class RHIImageLayout : uint8_t
@@ -181,9 +183,8 @@ public:
 
 #pragma region IO
 
-    std::string SaveToFile(const std::string &file_path, RHIContext *rhi);
-
-    bool LoadFromFile(const std::string &file_path);
+    // reads back the full image (all faces and mips) into cpu memory. waits for device idle.
+    [[nodiscard]] std::vector<char> ReadToMemory(RHIContext *rhi);
 
 #pragma endregion
 

@@ -1,6 +1,7 @@
 #include "renderer/pass/IBLBrdfPass.h"
 
 #include "renderer/pass/ClearTexturePass.h"
+#include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
 #include <algorithm>
@@ -37,8 +38,8 @@ IBLBrdfPass::~IBLBrdfPass() = default;
 RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_write)
 {
     RHIImage::Attribute output_attribute;
-    output_attribute.width = IblMapSize;
-    output_attribute.height = IblMapSize;
+    output_attribute.width = IblSettings::BrdfMapSize;
+    output_attribute.height = IblSettings::BrdfMapSize;
 
     if (for_cooking)
     {
@@ -69,12 +70,7 @@ RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_
 
 void IBLBrdfPass::InitRenderResources(const RenderConfig &config)
 {
-    TryLoad();
-
-    if (IsReady())
-    {
-        return;
-    }
+    PrepareForCooking();
 
     clear_target_ = rhi_->CreateRenderTarget({}, ibl_image_, nullptr, "IBLClearPassRenderTarget");
 
@@ -147,8 +143,4 @@ void IBLBrdfPass::Render()
     rhi_->EndComputePass(compute_pass_);
 }
 
-std::string IBLBrdfPass::GetCachePath() const
-{
-    return "cached/ibl/brdf.ibl";
-}
 } // namespace sparkle

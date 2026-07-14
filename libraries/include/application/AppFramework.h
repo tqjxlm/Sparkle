@@ -60,6 +60,15 @@ public:
 
     bool Init();
 
+    [[nodiscard]] bool IsCookMode() const
+    {
+        return app_config_.cook_mode;
+    }
+
+    // cook everything the bundled cook list needs and return the process exit code.
+    // requires InitCore; may use an available RHI as an accelerator but creates no renderer
+    int RunCookMode();
+
     bool MainLoop();
 
     void Cleanup();
@@ -196,7 +205,7 @@ private:
 
     std::shared_ptr<ThreadTaskQueue> pending_tasks_;
 
-    std::shared_ptr<TaskFuture<void>> scene_load_task_;
+    std::shared_ptr<TaskFuture<bool>> scene_load_task_;
 
     bool core_initialized_ = false;
     bool initialized_ = false;

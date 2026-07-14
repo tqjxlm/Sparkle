@@ -34,8 +34,9 @@
 
 `dev/run_tests.py` runs the Python unit tests first, builds once, runs both
 screenshot pipelines, evaluates their ground truth, runs the USD round trip, and
-executes the cooker and render-target pool TestCases. The preflight tests fail fast;
-the application suite runs to completion and reports all failures together.
+executes cooker, failed-scene-resource, and render-target pool TestCases. The preflight
+tests fail fast; the application suite runs to completion and reports all failures
+together.
 
 ```bash
 python3 dev/run_tests.py --framework macos --config Release --headless
@@ -51,7 +52,10 @@ The static-render evaluator lives at
 [`tests/screenshot/static_render_test.py`](../tests/screenshot/static_render_test.py), and
 the USD evaluator lives at
 [`tests/usd/usd_roundtrip_test.py`](../tests/usd/usd_roundtrip_test.py). They own
-specialized assertions; they do not orchestrate the general suite.
+specialized assertions; they do not orchestrate the general suite. Shared framework,
+dependency and image mechanics live in
+[`tests/rendering/render_test_support.py`](../tests/rendering/render_test_support.py),
+so one evaluator never serves as another evaluator's utility layer.
 
 ## TestCase System
 
@@ -156,5 +160,7 @@ error; the first registration wins.
 | `screenshot`             | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp)                     | Waits for renderer ready, clears all existing screenshots optionally, captures one, then passes. Used by functional tests and visual QA.                        |
 | `multi_frame_screenshot` | [tests/screenshot/MultiFrameScreenshotTest.cpp](../tests/screenshot/MultiFrameScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots optionally, captures five, then passes. Used by functional tests and visual QA for temporal analysis. |
 | `usd_round_trip`         | [tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)                               | Renders the loaded scene, exports it to USD, loads the exported file back and renders it again. Driven by [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py), which FLIP-compares the two screenshots. See [USD.md](USD.md). |
+| `cooker_request`         | [tests/cook/CookerRequestTest.cpp](../tests/cook/CookerRequestTest.cpp)                           | Verifies logical and relocated-content cache hits share main-thread delivery, avoid source construction on an exact hit, and avoid recooking identical relocated content without exporting cache metadata to the requester. |
+| `scene_load_failure`     | [tests/scene/SceneLoadFailureTest.cpp](../tests/scene/SceneLoadFailureTest.cpp)                   | Verifies a missing authored sky resource preserves its path, produces no invalid cube, reports scene async failure, and finishes render-side application before the scene settles. |
 | `render_target_pool`     | [tests/rhi/RenderTargetPoolTest.cpp](../tests/rhi/RenderTargetPoolTest.cpp)                       | Exercises `RHIRenderTargetPool` on the render thread: distinct targets while held, reuse of a freed target after the GPU safety delay, manual release of free targets via `ReleaseUnused`. |
 | `pipeline_switch_pool`   | [tests/rhi/PipelineSwitchPoolTest.cpp](../tests/rhi/PipelineSwitchPoolTest.cpp)                   | Enforces the forward pipeline, switches at runtime to gpu (or deferred without hardware ray tracing) and back, and asserts the returning forward renderer reuses a pooled render target. |

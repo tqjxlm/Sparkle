@@ -13,7 +13,10 @@
 #include <stb_image_write.h>
 #pragma clang diagnostic pop
 
+#include <crc32.h>
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -327,5 +330,29 @@ Vector3 Image2DCube::Sample(const Vector3 &direction) const
 
     DirectionToTextureCoordinate(direction, uv, face_id);
     return GetFace(face_id).Sample(uv);
+}
+
+uint32_t Image2DCube::GetContentHash() const
+{
+    if (content_hash_valid_.load(std::memory_order_acquire))
+    {
+        return content_hash_.load(std::memory_order_relaxed);
+    }
+
+    // concurrent first calls redundantly compute the same value, which is benign
+    CRC32 hasher;
+    for (const auto &face : faces_)
+    {
+        hasher.add(face->GetRawData(), face->GetStorageSize());
+    }
+    const std::array<uint32_t, 3> meta{GetWidth(), GetHeight(), static_cast<uint32_t>(GetFormat())};
+    hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
+
+    uint32_t hash = 0;
+    hasher.getHash(reinterpret_cast<unsigned char *>(&hash));
+
+    content_hash_.store(hash, std::memory_order_relaxed);
+    content_hash_valid_.store(true, std::memory_order_release);
+    return hash;
 }
 } // namespace sparkle

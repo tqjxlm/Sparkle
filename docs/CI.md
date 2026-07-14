@@ -78,7 +78,7 @@ python3 dev/check_tidy.py                    # check all first-party sources
 `dev/run_tests.py` is the single general test orchestrator. It runs the Python unit
 tests as a fail-fast preflight, builds once, then runs the forward and deferred
 screenshot comparisons, USD round-trip validation, and the `cooker_request`,
-`render_target_pool`, and `pipeline_switch_pool` in-process test cases. The
+`scene_load_failure`, `render_target_pool`, and `pipeline_switch_pool` in-process test cases. The
 application suite runs to completion and reports all failures together.
 
 The CI test job runs the released Windows + GLFW package in Release mode, headless,

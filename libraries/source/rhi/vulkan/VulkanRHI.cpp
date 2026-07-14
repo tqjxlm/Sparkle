@@ -146,6 +146,13 @@ bool VulkanRHI::SupportsHardwareRayTracing()
     return context->SupportsHardwareRayTracing();
 }
 
+bool VulkanRHI::HasPhysicalGpu()
+{
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &properties);
+    return properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU;
+}
+
 uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const
 {
     return context->GetMinBufferOffsetAlignment();

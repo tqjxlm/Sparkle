@@ -4,7 +4,9 @@
 
 #include <BS_thread_pool.hpp>
 
+#include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <queue>
 
@@ -61,7 +63,22 @@ public:
 
     void RunInDedicatedThread(std::function<void()> &&task);
 
+    // drains the queue of a named thread; must be called on that thread
+    void RunQueuedTasks(ThreadName thread)
+    {
+        if (auto queue = task_queues_[thread].lock())
+        {
+            queue->RunAll();
+        }
+    }
+
 private:
+    struct DedicatedThread
+    {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+
     void DispatchPendingTasks();
 
     std::queue<PendingTask> pending_tasks_;
@@ -70,7 +87,7 @@ private:
 
     std::unique_ptr<BS::light_thread_pool> worker_thread_pool_;
 
-    std::vector<std::thread> dedicated_threads_;
+    std::vector<DedicatedThread> dedicated_threads_;
 
     std::mutex dedicated_mutex_;
 

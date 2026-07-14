@@ -121,13 +121,12 @@ void DeferredRenderer::Render()
                                                                             .before_stage = RHIPipelineStage::Bottom});
     }
 
-    if (ibl_ && ibl_->NeedUpdate())
+    if (ibl_cook_pending_)
     {
-        ibl_->CookOnTheFly(render_config_);
-
         if (!ibl_->NeedUpdate())
         {
             UnregisterAsyncTask();
+            ibl_cook_pending_ = false;
         }
     }
 
@@ -221,7 +220,7 @@ bool DeferredRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
         debug_output_pass_ = nullptr;
         return true;
     case RenderConfig::OutputImage::IBLBrdfTexture:
-        if (!ibl_ || !ibl_->GetBRDFMap())
+        if (ibl_ == nullptr || !ibl_->GetBRDFMap())
         {
             return false;
         }
@@ -229,7 +228,7 @@ bool DeferredRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
             PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, ibl_->GetBRDFMap(), screen_color_rt_);
         return true;
     case RenderConfig::OutputImage::IBLDiffuseMap:
-        if (!ibl_ || !ibl_->GetDiffuseMap())
+        if (ibl_ == nullptr || !ibl_->GetDiffuseMap())
         {
             return false;
         }
@@ -237,7 +236,7 @@ bool DeferredRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)
         sky_box_pass_->OverrideSkyMap(ibl_->GetDiffuseMap());
         return true;
     case RenderConfig::OutputImage::IBLSpecularMap:
-        if (!ibl_ || !ibl_->GetSpecularMap())
+        if (ibl_ == nullptr || !ibl_->GetSpecularMap())
         {
             return false;
         }
@@ -314,8 +313,32 @@ void DeferredRenderer::HandleSceneChanges()
     }
 
     auto *sky_proxy = scene_render_proxy_->GetSkyLight();
+    if (sky_proxy != nullptr && !sky_proxy->GetSkyMap())
+    {
+        sky_proxy = nullptr;
+    }
 
-    if ((sky_proxy != nullptr) && sky_proxy->GetSkyMap())
+    if (bound_sky_proxy_ != sky_proxy)
+    {
+        if (ibl_cook_pending_)
+        {
+            UnregisterAsyncTask();
+            ibl_cook_pending_ = false;
+        }
+
+        bound_sky_proxy_ = sky_proxy;
+        sky_box_pass_.reset();
+        ibl_ = sky_proxy ? sky_proxy->GetImageBasedLighting() : nullptr;
+        directional_lighting_pass_->SetIBL(ibl_);
+
+        if (ibl_ && ibl_->NeedUpdate())
+        {
+            RegisterAsyncTask();
+            ibl_cook_pending_ = true;
+        }
+    }
+
+    if (sky_proxy)
     {
         directional_lighting_pass_->SetSkyLight(sky_proxy);
 
@@ -325,37 +348,10 @@ void DeferredRenderer::HandleSceneChanges()
                 PipelinePass::Create<SkyBoxPass>(render_config_, rhi_, sky_proxy, scene_color_, scene_depth_);
             sky_box_pass_->InitRenderResources(render_config_);
         }
-
-        if (!ibl_)
-        {
-            if (render_config_.use_diffuse_ibl || render_config_.use_specular_ibl)
-            {
-                ibl_ = std::make_unique<ImageBasedLighting>(sky_proxy->GetSkyMap());
-                ibl_->InitRenderResources(rhi_, render_config_);
-
-                if (ibl_->NeedUpdate())
-                {
-                    RegisterAsyncTask();
-                }
-
-                directional_lighting_pass_->SetIBL(ibl_.get());
-            }
-        }
     }
     else
     {
         directional_lighting_pass_->SetSkyLight(nullptr);
-
-        if (sky_box_pass_)
-        {
-            sky_box_pass_.reset();
-        }
-
-        if (ibl_)
-        {
-            ibl_.reset();
-            directional_lighting_pass_->SetIBL(nullptr);
-        }
     }
 }
 } // namespace sparkle

@@ -18,11 +18,8 @@ public:
     void Render() override;
 
 protected:
-    [[nodiscard]] std::string GetCachePath() const override;
-
     RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write) override;
 
 private:
-    static constexpr int IblMapSize = 512;
 };
 } // namespace sparkle

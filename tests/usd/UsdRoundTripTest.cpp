@@ -135,6 +135,7 @@ public:
             // early Cleanup() frees them mid-flight.
             if (frame_ >= SceneSettleFrames && render_framework->IsReadyForAutoScreenshot())
             {
+                scene_task_succeeded_ = true;
                 scene_task_ = BuildTestScene(app.GetScene());
                 next_stage_ = Stage::WaitOriginalRender;
                 stage_ = Stage::WaitSceneTasks;
@@ -146,6 +147,11 @@ public:
             if (scene_task_->IsReady() && !app.GetScene()->HasPendingAsyncTasks())
             {
                 scene_task_.reset();
+                if (!scene_task_succeeded_)
+                {
+                    Log(Error, "UsdRoundTripTest: scene load failed");
+                    return Result::Fail;
+                }
                 settle_frame_ = frame_ + SceneSettleFrames;
                 stage_ = next_stage_;
             }
@@ -169,7 +175,8 @@ public:
                 }
 
                 // the exported file carries its own sky, lights and camera. no defaults wanted.
-                scene_task_ = SceneManager::LoadScene(app.GetScene(), Path::Internal(ExportedScenePath), false, false);
+                scene_task_ = SceneManager::LoadScene(app.GetScene(), Path::Internal(ExportedScenePath), false, false)
+                                  ->Then([this](bool succeeded) { scene_task_succeeded_ = succeeded; });
                 next_stage_ = Stage::WaitReimportedRender;
                 stage_ = Stage::WaitSceneTasks;
             }
@@ -213,6 +220,8 @@ private:
 
     std::shared_ptr<ScreenshotRequest> screenshot_;
     std::shared_ptr<TaskFuture<void>> scene_task_;
+
+    bool scene_task_succeeded_ = true;
 
     uint32_t settle_frame_ = 0;
 };

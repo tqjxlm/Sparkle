@@ -16,7 +16,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "screenshot"))
-import static_render_test  # noqa: E402  (reuses screenshot/image helpers)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "rendering"))
+import render_test_support  # noqa: E402
+import static_render_reference  # noqa: E402
 
 ORIGINAL_NAME = "usd_round_trip_original.png"
 REIMPORTED_NAME = "usd_round_trip_reimported.png"
@@ -30,7 +32,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Run the USD round-trip test case and compare original vs reimported renders.")
     parser.add_argument("--framework", required=True,
-                        choices=static_render_test.SUPPORTED_FRAMEWORKS)
+                        choices=render_test_support.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--pipeline", default="forward")
     parser.add_argument("--scene")
     parser.add_argument("--headless", action="store_true")
@@ -63,7 +65,7 @@ def build_and_run(args, other_args):
 
 
 def find_screenshots(framework):
-    screenshot_dir = static_render_test.get_screenshot_dir(framework)
+    screenshot_dir = render_test_support.get_screenshot_dir(framework)
     paths = [os.path.join(screenshot_dir, name)
              for name in (ORIGINAL_NAME, REIMPORTED_NAME)]
     for path in paths:
@@ -75,7 +77,7 @@ def find_screenshots(framework):
 
 
 def main():
-    static_render_test.install_dependencies()
+    render_test_support.install_dependencies()
     args, unknown_args = parse_args()
 
     if not args.skip_run:
@@ -89,15 +91,15 @@ def main():
         print(f"No ground truth for custom scene {args.scene}, skipping ground truth check.", flush=True)
     else:
         print("Downloading ground truth...", flush=True)
-        ground_truth = static_render_test.download_ground_truth(
-            args.framework, static_render_test.DEFAULT_SCENE, args.pipeline)
-        gt_flip = static_render_test.compare_images(ground_truth, original)
-        if gt_flip > static_render_test.FLIP_THRESHOLD:
+        ground_truth = static_render_reference.download_ground_truth(
+            args.framework, static_render_reference.DEFAULT_SCENE, args.pipeline)
+        gt_flip = render_test_support.compare_images(ground_truth, original)
+        if gt_flip > static_render_reference.FLIP_THRESHOLD:
             print(f"FAIL: original render vs ground truth mean FLIP error "
-                  f"{gt_flip:.4f} > {static_render_test.FLIP_THRESHOLD}")
+                  f"{gt_flip:.4f} > {static_render_reference.FLIP_THRESHOLD}")
             return 1
 
-    round_trip_flip = static_render_test.compare_images(original, reimported)
+    round_trip_flip = render_test_support.compare_images(original, reimported)
     if round_trip_flip <= FLIP_THRESHOLD:
         print("PASS", flush=True)
         return 0
