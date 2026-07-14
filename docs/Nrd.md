@@ -63,7 +63,7 @@ ReBLUR's capped history re-blends fresh noise forever, so a static view would sh
 
 ## Tests
 
-[tests/nrd/run_nrd_gates.py](../tests/nrd/run_nrd_gates.py) is the one-command suite, run locally before pushing and by the CI macos-release test node (the hosted macos runners' Apple Silicon GPUs support Metal ray tracing; no other CI runner has hardware ray tracing): converged flicker, firefly, motion noise (yaw + pitch arms). The probe run requires the app's `effective pipeline: Gpu` log marker — on GPUs without hardware ray tracing the app silently falls back to forward rendering and still exits 0, so exit codes alone prove nothing. Motion gates assert all captures are pairwise distinct (a frozen/black capture sequence otherwise passes statistical thresholds). `--test_case nrd_probe` checks that every ReBLUR pipeline compiles to a PSO through the production MetalNrdBackend path.
+[tests/nrd/run_nrd_gates.py](../tests/nrd/run_nrd_gates.py) is the one-command suite, run locally before pushing (no CI runner has hardware ray tracing — the hosted macos runners have a physical Apple Silicon GPU, but their paravirtualized Metal device reports `supportsRaytracing == false`): converged flicker, firefly, motion noise (yaw + pitch arms). The probe run requires the app's `effective pipeline: Gpu` log marker — on GPUs without hardware ray tracing the app silently falls back to forward rendering and still exits 0, so exit codes alone prove nothing. Motion gates assert all captures are pairwise distinct (a frozen/black capture sequence otherwise passes statistical thresholds). `--test_case nrd_probe` checks that every ReBLUR pipeline compiles to a PSO through the production MetalNrdBackend path.
 
 ## Platform support
 

@@ -14,7 +14,7 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes it as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
 * **release**: every product: injects the cooked content into each build product and re-signs where injection breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: a test table (the `include` matrix of the test job) decides which released products run the aggregate suite and with what coverage. Currently enabled: windows-release under lavapipe, and macos-release on the runner's physical Metal GPU, which additionally covers the gpu path-tracing pipeline and the NRD gate suite. Both run with `--require_cooked`. A product absent from the table ships untested — no runner can drive it yet.
+* **test**: a test table (the `include` matrix of the test job) decides which released products run the aggregate suite and with what coverage. Currently enabled: windows-release under lavapipe, and macos-release on the runner's physical Metal GPU. Both run with `--require_cooked`. A product absent from the table ships untested — no runner can drive it yet.
 
 A cell waits only for the shared cook and its own product's upstream cell, never other products'. The release and test matrices carry a real `needs` edge to cook; the edge to the product's own build (for a release cell) or release (for a test cell) cannot be a `needs` (GitHub cannot target a single matrix cell), so it is an await-by-name through the run's job list — the shared [wait-for-job](../.github/actions/wait-for-job/action.yml) action. The awaits start only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. The one standalone job is the macos-release build, which cook's `needs` edge must target.
 
@@ -86,13 +86,15 @@ python3 dev/run_tests.py --framework glfw --config Release --skip_build \
   --software --headless --require_cooked
 ```
 
-The macOS package runs on the runner's physical Metal GPU, which supports ray tracing, so the suite adds the gpu path-tracing pipeline and the job then runs the NRD gate suite (see [Nrd.md](Nrd.md)):
+The macOS package runs the forward and deferred pipelines on the runner's physical Metal GPU:
 
 ```bash
 python3 dev/run_tests.py --framework macos --config Release --skip_build \
-  --headless --require_cooked --pipeline forward --pipeline deferred --pipeline gpu
-python3 tests/nrd/run_nrd_gates.py --skip_build
+  --headless --require_cooked
 ```
+
+The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate and the NRD gate suite (see [Nrd.md](Nrd.md)) would be vacuous and stay local-only. Enabling them is a test-table change away if a runner with ray tracing (e.g. self-hosted) ever appears.
+
 
 ## Screenshot Ground Truth
 

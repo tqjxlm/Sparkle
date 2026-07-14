@@ -205,19 +205,16 @@ jobs:
             build_type: Release
             suite_args: --software --headless --require_cooked
             suite_timeout: 120
-            nrd: false
             screenshots: build_system/glfw/output/build/generated/screenshots/
-          # physical Metal GPU (the runner class the cook stage relies on): also covers
-          # the gpu path-tracing pipeline and the NRD gates, which lavapipe cannot run
+          # physical Metal GPU (the runner class the cook stage relies on). its
+          # virtualized device exposes no ray tracing, so the gpu path-tracing pipeline
+          # (and NRD) silently falls back to forward and cannot be tested here
           - os: macos-latest
             framework: macos
             build_type: Release
-            suite_args: --headless --require_cooked --pipeline forward --pipeline deferred --pipeline gpu
+            suite_args: --headless --require_cooked
             suite_timeout: 60
-            nrd: true
-            screenshots: |
-              ~/Documents/sparkle/screenshots/
-              tmp/nrd_diff/
+            screenshots: ~/Documents/sparkle/screenshots/
 
     steps:
       - name: Checkout code
@@ -271,12 +268,6 @@ jobs:
         run: >-
           python3 dev/run_tests.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }}
           --skip_build ${{ matrix.suite_args }}
-
-      - name: Run NRD Gates
-        if: matrix.nrd
-        timeout-minutes: 60
-        shell: bash
-        run: python3 tests/nrd/run_nrd_gates.py --framework ${{ matrix.framework }} --skip_build
 
       - name: Dump app logs
         if: failure() && matrix.framework == 'macos'
