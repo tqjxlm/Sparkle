@@ -12,6 +12,87 @@ from build_system.prerequisites import find_cmake, find_and_set_vulkan_sdk, find
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
 
+STAGES = ("build", "cook", "package")
+
+# the cooker lives in the sparkle binary; cross-compiled frameworks cook through the host
+# framework's binary, and linux has no supported framework that could provide one
+COOK_FRAMEWORKS = ("glfw", "macos")
+
+if platform.system() == "Darwin":
+    HOST_COOK_FRAMEWORK = "macos"
+elif platform.system() == "Windows":
+    HOST_COOK_FRAMEWORK = "glfw"
+else:
+    HOST_COOK_FRAMEWORK = None
+
+BINARY_PATH = {
+    "glfw": os.path.join("build_system", "glfw", "output", "build",
+                         "sparkle.exe" if platform.system() == "Windows" else "sparkle"),
+    "macos": os.path.join("build_system", "macos", "output", "build",
+                          "sparkle.app", "Contents", "MacOS", "sparkle"),
+}
+
+# where a host cook run leaves its artifacts (the app's internal storage)
+COOKED_OUTPUT_DIR = {
+    "glfw": os.path.join("build_system", "glfw", "output", "build", "generated", "cooked"),
+    "macos": os.path.join("build_system", "macos", "output", "build",
+                          "sparkle.app", "Contents", "SharedSupport", "cooked"),
+}
+
+
+def cooker_framework(framework):
+    """The framework whose binary executes the cook: itself when host-runnable,
+    otherwise the host framework (artifacts are shared across targets). None when
+    this host cannot produce a cooker binary."""
+    return framework if framework in COOK_FRAMEWORKS else HOST_COOK_FRAMEWORK
+
+
+def default_cooked_dir(framework):
+    """Where the package stage finds cooked content by default: the host cooker's
+    output. None when this host cannot cook, anchored to the repo root otherwise
+    because builders may chdir during build."""
+    cooker = cooker_framework(framework)
+    return os.path.join(SCRIPTPATH, COOKED_OUTPUT_DIR[cooker]) if cooker else None
+
+
+def resolve_stages(stage_args, skip_build, cook, archive, framework):
+    """Stage selection: explicit --stage wins, then legacy flags; the default is
+    build + cook (cooked content is always wanted; hosts that cannot cook for the
+    target build without it)."""
+    if stage_args:
+        selected = set()
+        for stage in stage_args:
+            selected |= set(STAGES) if stage == "all" else {stage}
+    elif skip_build or cook or archive:
+        selected = set()
+        if not skip_build:
+            selected.add("build")
+        if cook:
+            selected.add("cook")
+        if archive:
+            selected.add("package")
+    else:
+        selected = {"build"}
+        if cooker_framework(framework) is not None:
+            selected.add("cook")
+    return [stage for stage in STAGES if stage in selected]
+
+
+def validate_stages(stages, framework):
+    """Stages never run an upstream stage implicitly: missing inputs fail fast."""
+    if "cook" in stages:
+        cooker = cooker_framework(framework)
+        if cooker is None:
+            raise RuntimeError(
+                f"this host cannot cook for '{framework}': no supported framework produces a"
+                " cooker binary on it; cook on macOS or Windows and pass --cooked when packaging")
+        binary_exists = os.path.exists(os.path.join(SCRIPTPATH, BINARY_PATH[cooker]))
+        # building a cross-compiled framework never produces the cooker binary
+        if not binary_exists and (cooker != framework or "build" not in stages):
+            raise RuntimeError(
+                f"cooking for '{framework}' runs the {cooker} binary, which is missing at"
+                f" {BINARY_PATH[cooker]}; build it first: python3 build.py --framework {cooker}")
+
 
 def construct_additional_cmake_options(parsed_args, cmake_args=None):
     profile_settings = "-DENABLE_PROFILER=ON" if parsed_args.profile else "-DENABLE_PROFILER=OFF"
@@ -36,8 +117,16 @@ def parse_args(args=None):
                         choices=["glfw", "macos", "ios", "android"], help="Build framework")
     parser.add_argument("--config", default="Debug",
                         choices=["Release", "Debug"], help="Build configuration")
+    parser.add_argument("--stage", action="append",
+                        choices=["build", "cook", "package", "all"],
+                        help="Pipeline stage(s) to run in canonical order build -> cook -> package;"
+                        " repeat to select multiple. Default: build + cook. Cross-compiled"
+                        " frameworks cook through the host framework's binary")
     parser.add_argument("--archive", action="store_true",
-                        help="Archive the app for distribution")
+                        help="Alias for the package stage (build + package)")
+    parser.add_argument("--cooked",
+                        help="Cooked content directory for the package stage"
+                        " (default: this framework's own cook output)")
     parser.add_argument("--asan", action="store_true",
                         help="Enable AddressSanitizer")
     parser.add_argument("--profile", action="store_true",
@@ -51,7 +140,7 @@ def parse_args(args=None):
     parser.add_argument("--clangd", action="store_true",
                         help="Generate compile_commands.json for clangd")
     parser.add_argument("--cook", action="store_true",
-                        help="run the built binary in cook mode to produce cooked content")
+                        help="Alias for the cook stage (build + cook; with --skip_build: cook only)")
     parser.add_argument("--run", action="store_true",
                         help="Run the built executable after building")
     parser.add_argument("--skip_build", action="store_true",
@@ -72,14 +161,14 @@ def parse_args(args=None):
     return {
         "framework": parsed_args.framework,
         "config": parsed_args.config,
-        "archive": parsed_args.archive,
+        "stages": resolve_stages(parsed_args.stage, parsed_args.skip_build,
+                                 parsed_args.cook, parsed_args.archive, parsed_args.framework),
         "run": parsed_args.run,
-        "cook": parsed_args.cook,
+        "cooked": parsed_args.cooked,
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
         "generate_only": parsed_args.generate_only,
         "configure_only": parsed_args.configure_only,
-        "skip_build": parsed_args.skip_build,
         "clangd": parsed_args.clangd,
         "clean": parsed_args.clean,
         "apple_auto_sign": parsed_args.apple_auto_sign,
@@ -124,6 +213,22 @@ def setup():
     print("Setup complete.")
 
 
+def product_name(framework, config, extension):
+    """Products are named by target. glfw is the one framework whose target is the host's
+    own desktop OS, so only there the host system is part of the target identity."""
+    if framework == "glfw":
+        if platform.system() == "Windows":
+            system_name = "windows"
+        elif platform.system() == "Linux":
+            system_name = "linux"
+        elif platform.system() == "Darwin":
+            system_name = "macos"
+        else:
+            raise RuntimeError(f"Unsupported platform: {platform.system()}")
+        return f"{system_name}-glfw-{config}{extension}"
+    return f"{framework}-{config}{extension}"
+
+
 def copy_build_products(product_archive_path, args):
     """Copy build products to the product directory for the specified framework."""
     product_dir = os.path.join(
@@ -131,16 +236,8 @@ def copy_build_products(product_archive_path, args):
 
     os.makedirs(product_dir, exist_ok=True)
 
-    if platform.system() == "Windows":
-        system_name = "windows"
-    elif platform.system() == "Linux":
-        system_name = "linux"
-    elif platform.system() == "Darwin":
-        system_name = "macos"
-    else:
-        raise RuntimeError(f"Unsupported platform: {platform.system()}")
     extension = ''.join(Path(product_archive_path).suffixes)
-    product_final_name = f"{system_name}-{args['framework']}-{args['config']}{extension}"
+    product_final_name = product_name(args['framework'], args['config'], extension)
 
     product_final_path = os.path.join(product_dir, product_final_name)
 
@@ -149,6 +246,22 @@ def copy_build_products(product_archive_path, args):
 
     shutil.copy(product_archive_path, product_final_path)
     print(f"Build products copied to {product_final_path}")
+    return product_final_path
+
+
+def package_project(builder, args):
+    sys.path.insert(0, os.path.join(SCRIPTPATH, "dev"))
+    from inject_cooked import PackagingError, package_cooked
+
+    print("Archiving...")
+    archive_path = builder.archive(args)
+    product_path = copy_build_products(archive_path, args)
+
+    cooked_dir = args["cooked"] or default_cooked_dir(args["framework"])
+    try:
+        package_cooked(product_path, args["framework"], cooked_dir)
+    except PackagingError as error:
+        raise RuntimeError(f"package stage failed: {error}") from error
 
 
 def build_project(args):
@@ -161,35 +274,45 @@ def build_project(args):
     if args["clangd"]:
         print("Configuring...")
         builder.configure_for_clangd(args)
-    elif args["generate_only"]:
+        return
+    if args["generate_only"]:
         print("Generating project...")
         builder.generate_project(args)
-    elif args["configure_only"]:
+        return
+    if args["configure_only"]:
         print("Configuring...")
         builder.configure_only(args)
+        return
+
+    stages = args["stages"]
+    validate_stages(stages, args["framework"])
+
+    if "build" in stages:
+        print("Building...")
+        builder.build(args)
     else:
-        if args["skip_build"]:
-            print("Skipping build.")
-        else:
-            print("Building...")
-            builder.build(args)
+        print("Skipping build.")
 
-        if args["archive"]:
-            print("Archiving...")
-            archive_path = builder.archive(args)
-            copy_build_products(archive_path, args)
+    if "cook" in stages:
+        cooker = cooker_framework(args["framework"])
+        print(f"Cooking with the {cooker} binary...")
+        cook_args = dict(args)
+        cook_args["framework"] = cooker
+        cook_args["unknown_args"] = ["--cook", "true",
+                                     "--log_path", "logs/cook.log"] + args["unknown_args"]
+        cook_builder = builder if cooker == args["framework"] else create_builder(cooker)
+        exit_code = cook_builder.run(cook_args)
+        if exit_code is not None and exit_code != 0:
+            sys.exit(exit_code)
 
-        if args["cook"]:
-            print("Cooking...")
-            args["unknown_args"] = ["--cook", "true"] + args["unknown_args"]
-            exit_code = builder.run(args)
-            if exit_code is not None and exit_code != 0:
-                sys.exit(exit_code)
-        elif args["run"]:
-            print("Running...")
-            exit_code = builder.run(args)
-            if exit_code is not None and exit_code != 0:
-                sys.exit(exit_code)
+    if "package" in stages:
+        package_project(builder, args)
+
+    if args["run"]:
+        print("Running...")
+        exit_code = builder.run(args)
+        if exit_code is not None and exit_code != 0:
+            sys.exit(exit_code)
 
 
 def main():

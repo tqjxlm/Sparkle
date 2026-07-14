@@ -24,7 +24,9 @@ class UiManager;
 class Logger
 {
 public:
-    Logger();
+    // a non-empty dedicated_log_path (relative to external storage) replaces the default
+    // rotating log files, so e.g. a cook run does not overwrite the last app run's log
+    explicit Logger(const std::string &dedicated_log_path = {});
 
     ~Logger();
 

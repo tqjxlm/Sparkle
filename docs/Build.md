@@ -166,10 +166,36 @@ python3 build.py --framework=<framework> [build-options] [run-options]
 * `macos` - Native MacOS application
 * `ios` - iOS application
 
+**Build support matrix:**
+
+The host machine (where build.py runs) and the target framework (what is built, cooked and packaged) are independent concepts — a target may happen to match the host's platform. Ideally every host could produce every target; toolchain limits constrain it to:
+
+| target \ host    | macOS | Windows | Linux |
+| ---------------- | ----- | ------- | ----- |
+| `glfw`           | ✔     | ✔       | ✗     |
+| `macos`          | ✔     | ✗       | ✗     |
+| `ios`            | ✔     | ✗       | ✗     |
+| `android`        | ✔     | ✔       | ✔     |
+
+* `macos`/`ios` need Xcode, so they build only on a macOS host. `glfw` always targets the host's own desktop OS (there is no cross-OS desktop build), so a Windows glfw package can only come from a Windows host.
+* The cook stage runs on any host through the host's own framework binary (`macos` on macOS, `glfw` on Windows) regardless of the target — cooked content is target-independent. A Linux host can build for android but cannot cook for it: no supported framework produces a cooker binary on Linux, so android there defaults to build only and packages cooked content produced elsewhere (`--cooked`).
+* Product archives are named by target (`android-Release.apk`, `macos-Release.zip`); only glfw carries the host system in its name (`windows-glfw-Release.zip`), because its target is the host's own desktop OS.
+
+**Pipeline stages:**
+
+The pipeline is three stages, selected with `--stage` (repeatable) and run in canonical order build → cook → package. The default is build + cook for every framework: cooked content is always wanted, and a warm cook costs only artifact lookups, so the plain `build.py --config Release --run` loop runs against cooked content. `--stage all` produces a complete distributable locally: a built app, cooked content (see [Cooking.md](Cooking.md)), and a product archive with the cooked content injected at the platform resource root.
+
+* Each stage is idempotent through its own cache (incremental compile, hit-or-cook artifacts, archive from current inputs) and fails fast when an input from an earlier stage is missing — it never runs an upstream stage implicitly.
+* Cooked content is shared across targets, and the cooker lives in the sparkle binary — so cooking for a cross-compiled framework (`android`, `ios`) executes the host framework's binary (`macos` on a Mac, `glfw` elsewhere) and fails with a hint if that binary is not built yet. The package stage picks the cooked content up from the host cooker's output automatically (`--cooked <dir>` overrides).
+* The cook stage logs to its own file (`logs/cook.log` under the app's external log directory) via the app's `--log_path` argument, so a later `--run` never overwrites the cook log. `--log_path` is honored by desktop builds only.
+* `package` strips the app's internal runtime state from the archive and warns when no cooked content is available. That package still works: each cook job falls back to raw assets and cooks at runtime — the fallback is per job, never a packaging policy.
+* `--archive` and `--cook` remain as stage aliases: `--archive` = build+package, `--cook` = build+cook, and `--skip_build` drops the build stage.
+
 **Common build options:**
 
 * `--config=Release` - Release build (default: Debug).
-* `--archive` - Archive the app for distribution. Not required if you test the build locally. The archived app is located in `build_system/<framework>/product`.
+* `--stage=<build|cook|package|all>` - Select pipeline stage(s), see above.
+* `--archive` - Archive the app for distribution (alias for the package stage). Not required if you test the build locally. The archived app is located in `build_system/<framework>/product`.
 * `--generate_only` - Generate IDE project files without building.
 * `--clangd` - Generate compile_commands.json for clangd intellisense support.
 * `--profile` - Enable Tracy profiler.
