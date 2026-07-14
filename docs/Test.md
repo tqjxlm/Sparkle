@@ -34,7 +34,7 @@ python3 dev/run_tests.py --framework macos --config Release --headless
 python3 dev/run_tests.py --framework glfw --config Release --headless
 ```
 
-Use `--pipeline <name>` to focus screenshot coverage while developing; repeat the option for multiple pipelines. Use `--skip_build` only when the intended binary is already built. CI additionally uses `--software --require_cooked` to run the packaged Windows build under Lavapipe and reject runtime cooking.
+Use `--pipeline <name>` to focus screenshot coverage while developing; repeat the option for multiple pipelines. Use `--skip_build` only when the intended binary is already built. CI runs the packaged Windows build under Lavapipe with `--software --require_cooked`, and the packaged macOS build on a physical Metal GPU with `--require_cooked` plus the gpu pipeline and the NRD gates; `--require_cooked` rejects runtime cooking. See [CI.md](CI.md) for the exact commands.
 
 The static-render evaluator lives at [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py), and the USD evaluator lives at [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py). They own specialized assertions; they do not orchestrate the general suite. Shared framework, dependency and image mechanics live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py), so one evaluator never serves as another evaluator's utility layer.
 

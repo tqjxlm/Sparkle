@@ -8,13 +8,15 @@ on:
         type: string
         default: '"Debug","Release"'
 
-# stages: build (every product in parallel, the heavy stage) -> cook (macos-release, the
-# only node with a real Metal GPU) -> release (inject the cooked content into each build
-# product and re-sign) -> test (windows-release). a release waits only for its own build
-# and the shared cook, never other products' builds: release -> cook is a needs edge, and
-# each release cell awaits its own build by job name, since needs cannot target a single
-# matrix cell. products with dependants of their own (cook needs macos-release, test needs
-# windows-release) are standalone jobs so those edges are addressable.
+# stages: build (every product in parallel, the heavy stage) -> cook (macos-release, on
+# the macos runners' real Metal GPU) -> release (inject the cooked content into each build
+# product and re-sign) -> test (windows-release under software Vulkan; macos-release on the
+# Metal GPU, which additionally covers the gpu path-tracing pipeline and the NRD gates).
+# a release waits only for its own build and the shared cook, never other products' builds:
+# release -> cook is a needs edge, and each release cell awaits its own build by job name,
+# since needs cannot target a single matrix cell. products with dependants of their own
+# (cook needs the macos-release build, each test node needs its product's release) are
+# standalone jobs so those edges are addressable.
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -163,9 +165,12 @@ jobs:
             framework: android
           - os: windows-latest
             framework: ios
-          # released by the standalone release node the test stage waits for
+          # released by the standalone release nodes the test stage waits for
           - os: windows-latest
             framework: glfw
+            build_type: Release
+          - os: macos-latest
+            framework: macos
             build_type: Release
           - os: ubuntu-latest
             framework: macos
@@ -234,7 +239,29 @@ jobs:
           os: windows-latest
           build-type: Release
 
-  test:
+  release-macos-release:
+    name: release (macos-latest, macos, Release)
+    needs: [build-macos-release, cook]
+    # apple signing needs a macos runner
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: macos
+          os: macos-latest
+          build-type: Release
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+
+  test-windows-release:
     name: test (windows-latest, glfw, Release)
     needs: release-windows-release
     runs-on: windows-latest
@@ -268,4 +295,67 @@ jobs:
         with:
           name: test-screenshots-glfw-windows
           path: build_system/glfw/output/build/generated/screenshots/
+
+  test-macos-release:
+    name: test (macos-latest, macos, Release)
+    needs: release-macos-release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # the suite drives the app through build.py, which needs the build prerequisites
+      - name: Setup Environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: macos
+          os: macos-latest
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v4
+        with:
+          name: release-macos-macos-latest-Release
+          path: build_system/macos/product
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
+
+      # this runner class has a physical Metal GPU (it is what the cook stage relies on), so
+      # the suite also covers the gpu path-tracing pipeline, which lavapipe cannot run.
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 60
+        shell: bash
+        run: >-
+          python3 dev/run_tests.py --framework macos --config Release --skip_build
+          --headless --require_cooked
+          --pipeline forward --pipeline deferred --pipeline gpu
+
+      - name: Run NRD Gates
+        timeout-minutes: 60
+        shell: bash
+        run: python3 tests/nrd/run_nrd_gates.py --skip_build
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          echo "=== crash reports ==="
+          sleep 10
+          for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-screenshots-macos
+          path: |
+            ~/Documents/sparkle/screenshots/
+            tmp/nrd_diff/
 

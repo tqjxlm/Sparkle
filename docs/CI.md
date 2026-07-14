@@ -14,9 +14,9 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes it as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
 * **release**: injects the cooked content into each build product and re-signs where injection breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: pulls the released windows package and runs the aggregate suite under lavapipe with `--require_cooked`.
+* **test**: pulls each released test package and runs the aggregate suite with `--require_cooked` — the windows package under lavapipe, and the macos package on the runner's physical Metal GPU, which additionally covers the gpu path-tracing pipeline and the NRD gate suite.
 
-A release waits only for its own build and the shared cook, never other products' builds. The release matrix carries a real `needs` edge to cook; the edge to the product's own build cannot be a `needs` (GitHub cannot target a single matrix cell), so each release cell awaits its build job's conclusion by name through the run's job list. The await starts only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. Products with dependants of their own stay standalone jobs so those edges remain addressable: cook needs the macos-release build, and the test stage needs the windows-release release node.
+A release waits only for its own build and the shared cook, never other products' builds. The release matrix carries a real `needs` edge to cook; the edge to the product's own build cannot be a `needs` (GitHub cannot target a single matrix cell), so each release cell awaits its build job's conclusion by name through the run's job list. The await starts only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. Products with dependants of their own stay standalone jobs so those edges remain addressable: cook needs the macos-release build, and each test node needs its product's release node (windows-release and macos-release).
 
 ## Local Validation Gates
 
@@ -77,11 +77,21 @@ python3 dev/check_tidy.py                    # check all first-party sources
 
 ## Aggregate Test Suite
 
-`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. The CI test job runs the released Windows + GLFW package in Release mode, headless, under [Mesa Lavapipe](https://github.com/pal1000/mesa-dist-win). It also enables `--require_cooked`, which fails if a test cooks an asset at runtime instead of using the package's cooked content:
+`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against two released packages, both in Release mode, headless, and with `--require_cooked`, which fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl parity` is excluded under that flag: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
+
+The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000/mesa-dist-win):
 
 ```bash
 python3 dev/run_tests.py --framework glfw --config Release --skip_build \
   --software --headless --require_cooked
+```
+
+The macOS package runs on the runner's physical Metal GPU, which supports ray tracing, so the suite adds the gpu path-tracing pipeline and the job then runs the NRD gate suite (see [Nrd.md](Nrd.md)):
+
+```bash
+python3 dev/run_tests.py --framework macos --config Release --skip_build \
+  --headless --require_cooked --pipeline forward --pipeline deferred --pipeline gpu
+python3 tests/nrd/run_nrd_gates.py --skip_build
 ```
 
 ## Screenshot Ground Truth
