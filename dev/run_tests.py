@@ -51,7 +51,7 @@ def app_command(framework, config, software, test_case, test_args):
 
 
 def test_steps(framework, config, software, headless, pipelines, scene,
-               other_args, test_python):
+               other_args, test_python, require_cooked):
     common_args = ["--headless", "true"] if headless else []
     steps = []
     ground_truth_scene = os.path.splitext(os.path.basename(scene))[0] if scene else None
@@ -130,8 +130,9 @@ def test_steps(framework, config, software, headless, pipelines, scene,
         ),
     ]
 
-    # parity needs a physical GPU producer; a software rasterizer would compare CPU to CPU
-    if framework == "macos" and not software:
+    # parity needs a physical GPU producer (a software rasterizer would compare CPU to
+    # CPU), and its deliberate artifact recook would trip the --require_cooked gate
+    if framework == "macos" and not software and not require_cooked:
         steps.append((
             "ibl parity",
             app_command(framework, config, software,
@@ -251,6 +252,7 @@ def main():
         scene=args.scene,
         other_args=other_args,
         test_python=venv_python(),
+        require_cooked=args.require_cooked,
     )
 
     if args.cases:

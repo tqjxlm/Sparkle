@@ -76,6 +76,7 @@ class RunTestsCommandTest(unittest.TestCase):
             scene=None,
             other_args=[],
             test_python="test-python",
+            require_cooked=False,
         )
 
         commands = [command for _, command in steps]
@@ -94,6 +95,7 @@ class RunTestsCommandTest(unittest.TestCase):
             scene=None,
             other_args=[],
             test_python="test-python",
+            require_cooked=False,
         )
 
         self.assertIn("scene load failure", dict(steps))
@@ -109,6 +111,7 @@ class RunTestsCommandTest(unittest.TestCase):
             scene=scene,
             other_args=[],
             test_python="test-python",
+            require_cooked=False,
         )
         commands = dict(steps)
 
@@ -169,7 +172,7 @@ class RunTestsCommandTest(unittest.TestCase):
         self.assertTrue(passed)
 
     def test_ibl_parity_runs_only_on_a_physical_gpu_framework(self):
-        def suite(framework, software):
+        def suite(framework, software, require_cooked=False):
             return dict(run_tests.test_steps(
                 framework=framework,
                 config="Release",
@@ -179,11 +182,15 @@ class RunTestsCommandTest(unittest.TestCase):
                 scene=None,
                 other_args=[],
                 test_python="test-python",
+                require_cooked=require_cooked,
             ))
 
         self.assertIn("ibl parity", suite("macos", software=False))
         self.assertNotIn("ibl parity", suite("glfw", software=True))
         self.assertNotIn("ibl parity", suite("glfw", software=False))
+        # its deliberate artifact recook would trip the --require_cooked gate
+        self.assertNotIn("ibl parity", suite(
+            "macos", software=False, require_cooked=True))
 
 
 if __name__ == "__main__":

@@ -23,8 +23,9 @@ runs:
       with:
         path: |
           ./build_cache
-        key: ${{ inputs.os }}-${{ inputs.framework }}-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
+        key: ${{ inputs.os }}-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
         restore-keys: |
+          ${{ inputs.os }}-build_cache-
           ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
 
     # app/build and build are deliberately NOT cached: they are multi-GB intermediates that
