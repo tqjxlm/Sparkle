@@ -1,10 +1,11 @@
 #pragma once
 
+#include "core/task/TaskFuture.h"
 #include "scene/component/light/LightSource.h"
 
 namespace sparkle
 {
-class Image2D;
+class CookHandle;
 class Image2DCube;
 
 class SkyLight : public LightSourceComponent
@@ -27,9 +28,9 @@ public:
 
     void SetSkyMap(const std::string &file_path);
 
-    [[nodiscard]] const Image2D *GetSkyMap() const
+    [[nodiscard]] bool HasSkyMap() const
     {
-        return sky_map_.get();
+        return !sky_map_path_.empty();
     }
 
     // the file path passed to SetSkyMap. empty if no sky map is set.
@@ -40,22 +41,24 @@ public:
 
     void OnAttach() override;
 
-    [[nodiscard]] bool IsCooked() const
+    [[nodiscard]] const std::shared_ptr<Image2DCube> &GetCubeMap() const
     {
-        return cooked_;
+        return cube_map_;
     }
 
-    void Cook();
+    // Ready on the main thread once the sky map artifact was applied or resolution failed.
+    // Only valid after a sky map light is attached.
+    [[nodiscard]] const std::shared_ptr<TaskFuture<>> &OnCooked() const;
 
     [[nodiscard]] Vector3 GetSunBrightness() const
     {
-        ASSERT(cooked_);
+        ASSERT(cube_map_);
         return sun_brightness_;
     }
 
     [[nodiscard]] Vector3 GetSunDirection() const
     {
-        ASSERT(cooked_);
+        ASSERT(cube_map_);
         return sun_direction_;
     }
 
@@ -63,26 +66,17 @@ protected:
     std::unique_ptr<RenderProxy> CreateRenderProxy() override;
 
 private:
-    void LogCookStatus() const;
+    void RequestCook();
 
-    [[nodiscard]] std::string GetCachePath() const;
-
-    bool TryLoadCache();
-
-    void SaveCache() const;
+    void ApplyCookedData(const std::vector<char> &payload);
 
     Vector3 color_ = Vector3(0.5f, 0.7f, 1.0f);
 
-    std::unique_ptr<Image2D> sky_map_;
-
     std::string sky_map_path_;
 
-    std::unique_ptr<Image2D> specular_map_;
+    std::shared_ptr<Image2DCube> cube_map_;
 
-    std::unique_ptr<Image2DCube> cube_map_;
-
-    bool cooked_ = false;
-    std::atomic<int32_t> cooked_row_count_ = 0;
+    std::unique_ptr<CookHandle> cook_handle_;
 
     Vector3 sun_brightness_ = Ones;
 

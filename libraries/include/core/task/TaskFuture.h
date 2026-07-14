@@ -158,6 +158,14 @@ public:
         return future_.wait_for(std::chrono::nanoseconds(0)) == std::future_status::ready;
     }
 
+    template <typename Value = ReturnType>
+        requires(!std::is_void_v<Value>)
+    [[nodiscard]] const Value &Get() const
+    {
+        ASSERT(IsReady());
+        return future_.get();
+    }
+
 private:
     template <typename TaskFunc> void DispatchOrEnqueueTask(TaskFunc &&task, ThreadName thread_name)
     {

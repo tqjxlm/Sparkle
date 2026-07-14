@@ -11,9 +11,9 @@ IBLPass::IBLPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &env_map) : Pip
 
 IBLPass::~IBLPass() = default;
 
-void IBLPass::Save()
+void IBLPass::Finalize()
 {
-    ASSERT(is_ready_);
+    ASSERT(!is_ready_);
 
     auto cooked_ibl_image = ibl_image_;
     ibl_image_ = CreateIBLMap(false, true);
@@ -32,45 +32,42 @@ void IBLPass::Save()
 
     rhi_->SubmitCommandBuffer();
 
-    auto file_path = GetCachePath();
+    is_ready_ = true;
 
-    auto written_path = ibl_image_->SaveToFile(file_path, rhi_);
-
-    if (written_path.empty())
+    if (artifact_ready_callback_)
     {
-        Log(Error, "failed to save ibl cache: {}", file_path);
-    }
-    else
-    {
-        Log(Info, "saved ibl cache with size {}kB: {}", ibl_image_->GetStorageSize() / 1024, written_path);
+        artifact_ready_callback_(ibl_image_->ReadToMemory(rhi_));
     }
 }
 
-void IBLPass::TryLoad()
+void IBLPass::PrepareForCooking()
 {
+    ASSERT(!is_ready_ && !ibl_image_);
+    ibl_image_ = CreateIBLMap(true, true);
+}
+
+bool IBLPass::ApplyArtifact(const std::vector<char> &payload)
+{
+    ASSERT(!is_ready_);
+
+    // A cache miss may have left ibl_image_ in the cooking format; artifacts use the
+    // compact resource layout.
     ibl_image_ = CreateIBLMap(false, false);
 
-    auto file_path = GetCachePath();
-
-    if (ibl_image_->LoadFromFile(file_path))
+    if (payload.size() != ibl_image_->GetStorageSize())
     {
-        Log(Info, "loaded ibl cache from {}", file_path);
-
-        is_ready_ = true;
-
-        return;
+        ibl_image_ = nullptr;
+        return false;
     }
 
-    Log(Info, "failed to load valid ibl cache, will generate at runtime to {}", file_path);
+    ibl_image_->Upload(reinterpret_cast<const uint8_t *>(payload.data()));
 
-    // recreate the image with cooking support
-    ibl_image_ = CreateIBLMap(true, true);
+    is_ready_ = true;
+    return true;
 }
 
 void IBLPass::Complete()
 {
-    rhi_->EnqueueEndOfFrameTasks([this]() { Save(); });
-
-    is_ready_ = true;
+    rhi_->EnqueueEndOfFrameTasks([this]() { Finalize(); });
 }
 } // namespace sparkle

@@ -2,9 +2,12 @@
 
 #include "renderer/pass/PipelinePass.h"
 
+#include "renderer/resource/IblSettings.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHIPIpelineState.h"
+
+#include <functional>
 
 namespace sparkle
 {
@@ -31,14 +34,23 @@ public:
 
     virtual void CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch) = 0;
 
+    // Consume a payload produced by the matching CPU cook job. Render thread only.
+    // Returns false when the payload does not match this pass's resource layout.
+    bool ApplyArtifact(const std::vector<char> &payload);
+
+    // Receives the compact payload after GPU generation. Persistence belongs to the
+    // derived-resource coordinator or cook job, never to the GPU pass.
+    void SetArtifactReadyCallback(std::function<void(std::vector<char>)> callback)
+    {
+        artifact_ready_callback_ = std::move(callback);
+    }
+
 protected:
     void Complete();
 
-    void TryLoad();
+    void PrepareForCooking();
 
     virtual RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write) = 0;
-
-    [[nodiscard]] virtual std::string GetCachePath() const = 0;
 
     RHIResourceRef<RHIImage> ibl_image_;
 
@@ -57,13 +69,13 @@ protected:
     RHIResourceRef<RHIBuffer> cs_ub_;
 
     unsigned sample_count_ = 0;
-    unsigned target_sample_count_ = 2048;
-
-    static constexpr uint8_t MipLevelCount = 5;
+    unsigned target_sample_count_ = IblSettings::TargetSampleCount;
 
 private:
-    void Save();
+    void Finalize();
 
     bool is_ready_ = false;
+
+    std::function<void(std::vector<char>)> artifact_ready_callback_;
 };
 } // namespace sparkle

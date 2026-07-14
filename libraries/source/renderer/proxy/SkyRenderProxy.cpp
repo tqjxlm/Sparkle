@@ -2,6 +2,7 @@
 
 #include "core/math/Ray.h"
 #include "io/Image.h"
+#include "renderer/resource/ImageBasedLighting.h"
 #include "rhi/RHI.h"
 
 namespace sparkle
@@ -11,13 +12,36 @@ SkyRenderProxy::SkyRenderProxy(std::shared_ptr<const Image2DCube> sky_map) : sky
 {
 }
 
+SkyRenderProxy::~SkyRenderProxy() = default;
+
+void SkyRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera, const RenderConfig &config)
+{
+    LightRenderProxy::Update(rhi, camera, config);
+
+    if (image_based_lighting_ && image_based_lighting_->NeedUpdate())
+    {
+        image_based_lighting_->CookOnTheFly(config);
+    }
+}
+
 void SkyRenderProxy::InitRenderResources(RHIContext *rhi, const RenderConfig &config)
 {
     LightRenderProxy::InitRenderResources(rhi, config);
 
-    if (sky_map_raw_ != nullptr)
+    sky_map_ = nullptr;
+    image_based_lighting_.reset();
+
+    if (sky_map_raw_)
     {
-        sky_map_ = rhi->CreateTextureCube(sky_map_raw_.get(), "SkyMap_" + sky_map_raw_->GetName());
+        sky_map_ = rhi->CreateTextureCube(sky_map_raw_.get(), sky_map_raw_->GetName());
+
+        const bool raster_ibl =
+            config.pipeline == RenderConfig::Pipeline::Forward || config.pipeline == RenderConfig::Pipeline::Deferred;
+        if (raster_ibl && (config.use_diffuse_ibl || config.use_specular_ibl))
+        {
+            image_based_lighting_ = std::make_unique<ImageBasedLighting>(sky_map_, sky_map_raw_);
+            image_based_lighting_->InitRenderResources(rhi, config);
+        }
     }
 
     ubo_.has_sky_map = sky_map_ ? 1 : 0;

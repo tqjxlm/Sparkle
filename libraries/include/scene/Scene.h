@@ -3,6 +3,7 @@
 #include "core/Exception.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -16,6 +17,31 @@ class SceneRenderProxy;
 class Material;
 class DirectionalLight;
 class SkyLight;
+
+// A generation-safe scene task. Cleanup retires the current generation, so a late
+// completion cannot decrement or fail the next scene loaded into the same Scene.
+class SceneAsyncTask
+{
+public:
+    ~SceneAsyncTask();
+
+    SceneAsyncTask(const SceneAsyncTask &) = delete;
+    SceneAsyncTask &operator=(const SceneAsyncTask &) = delete;
+
+    void Complete(bool succeeded);
+
+    [[nodiscard]] bool IsActive() const;
+
+private:
+    struct State;
+
+    explicit SceneAsyncTask(std::shared_ptr<State> state);
+
+    std::shared_ptr<State> state_;
+    std::atomic<bool> completed_{false};
+
+    friend class Scene;
+};
 
 class Scene
 {
@@ -83,21 +109,11 @@ public:
 
 #pragma region Async Task Tracking
 
-    void RegisterAsyncTask()
-    {
-        pending_async_tasks_.fetch_add(1);
-    }
+    [[nodiscard]] std::shared_ptr<SceneAsyncTask> RegisterAsyncTask();
 
-    void UnregisterAsyncTask()
-    {
-        auto prev = pending_async_tasks_.fetch_sub(1);
-        ASSERT(prev > 0);
-    }
+    [[nodiscard]] bool HasPendingAsyncTasks() const;
 
-    [[nodiscard]] bool HasPendingAsyncTasks() const
-    {
-        return pending_async_tasks_.load() > 0;
-    }
+    [[nodiscard]] bool DidAsyncTasksSucceed() const;
 
 #pragma endregion
 
@@ -119,6 +135,6 @@ private:
     // only one sky light will take effect. new sky light overrides the existing one.
     SkyLight *sky_light_ = nullptr;
 
-    std::atomic<int32_t> pending_async_tasks_{0};
+    std::shared_ptr<SceneAsyncTask::State> async_state_;
 };
 } // namespace sparkle

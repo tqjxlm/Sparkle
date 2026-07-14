@@ -13,10 +13,14 @@
 #include "core/Profiler.h"
 #include "core/task/TaskManager.h"
 #include "renderer/nrd/NrdConfig.h"
+#include "renderer/resource/IblCookAccelerator.h"
+#include "renderer/resource/IblCookPlan.h"
 #include "rhi/RHI.h"
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
 #include "scene/component/camera/CameraComponent.h"
+#include "scene/component/light/SkyLight.h"
+#include "scene/cook/SceneCooker.h"
 #include "scene/material/MaterialManager.h"
 
 #if ENABLE_TEST_CASES
@@ -91,6 +95,11 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     config_manager.LoadAll();
 
     app_config_.Init();
+
+    if (app_config_.cook_mode)
+    {
+        app_config_.headless = true;
+    }
 
 #if ENABLE_TEST_CASES
     if (!app_config_.test_case.empty())
@@ -227,6 +236,80 @@ bool AppFramework::Init()
     Log(Info, "Init success. Main loop started");
 
     return true;
+}
+
+int AppFramework::RunCookMode()
+{
+    ASSERT_F(core_initialized_, "Core is not initialized. Call InitCore first");
+
+    // an RHI is only an accelerator here: no render framework, and the main thread acts as
+    // the render thread so GPU work runs inline
+    if (view_)
+    {
+        view_->InitGUI(this);
+
+        rhi_ = RHIContext::CreateRHI(rhi_config_);
+        std::string rhi_error;
+        if (rhi_ && rhi_->InitRHI(view_, rhi_error))
+        {
+            rhi_->InitRenderResources();
+            render_config_.SetupBackend(rhi_.get(), view_);
+            ThreadManager::RegisterRenderThread();
+            Log(Info, "cook mode with RHI. physical gpu: {}", rhi_->HasPhysicalGpu());
+        }
+        else
+        {
+            Log(Info, "cook mode without RHI. {}", rhi_error);
+            rhi_ = nullptr;
+        }
+    }
+
+    SceneCooker::JobAccelerator accelerator;
+    if (rhi_ && rhi_->HasPhysicalGpu())
+    {
+        accelerator = [this](const CookJob &job) {
+            return IblCookAccelerator::TryCook(job, rhi_.get(), render_config_);
+        };
+    }
+
+    const SceneCooker::JobPlan job_plan{.collect_scene_independent_jobs =
+                                            [](std::vector<std::unique_ptr<CookJob>> &jobs) {
+                                                IblCookPlan::CollectSceneIndependentJobs(jobs);
+                                                return true;
+                                            },
+                                        .collect_scene_jobs =
+                                            [](const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
+                                                const auto *sky_light = scene.GetSkyLight();
+                                                if (sky_light == nullptr)
+                                                {
+                                                    return true;
+                                                }
+
+                                                const auto &environment = sky_light->GetCubeMap();
+                                                if (!environment)
+                                                {
+                                                    return !sky_light->HasSkyMap();
+                                                }
+
+                                                IblCookPlan::CollectEnvironmentJobs(environment, jobs);
+                                                return true;
+                                            }};
+
+    auto exit_code = SceneCooker::Run(app_config_.scene, job_plan, accelerator);
+
+    if (rhi_)
+    {
+        rhi_->WaitForDeviceIdle();
+        rhi_->Cleanup();
+        rhi_ = nullptr;
+    }
+
+    // Cleanup() is for fully-initialized apps; tear down the core-only state here
+    task_manager_ = nullptr;
+    FileManager::DestroyNativeFileManager();
+
+    Log(Info, "App exit gracefully.");
+    return exit_code;
 }
 
 static void DrawVerticalIconTabs(const std::vector<VerticalIconTab> &tabs, unsigned &current_tab)
@@ -392,9 +475,17 @@ bool AppFramework::MainLoop()
 
     if (scene_load_task_ && scene_load_task_->IsReady())
     {
+        const bool scene_loaded = scene_load_task_->Get();
         scene_load_task_.reset();
         scene_file_loaded_ = true;
-        Log(Info, "Scene file loaded");
+        if (scene_loaded)
+        {
+            Log(Info, "Scene file loaded");
+        }
+        else
+        {
+            Log(Error, "Scene file failed to load");
+        }
     }
 
     if (scene_file_loaded_ && !scene_async_tasks_completed_ && !main_scene_->HasPendingAsyncTasks())

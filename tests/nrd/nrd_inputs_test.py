@@ -26,7 +26,7 @@ import os
 import shutil
 import sys
 
-from nrd_common import load_image, lum, run_test_case, static_render_test  # noqa: E402
+from nrd_common import load_image, lum, render_test_support, run_test_case  # noqa: E402
 
 
 def stats_of(path):
@@ -91,7 +91,7 @@ CHECKS = {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--framework", default="macos",
-                        choices=static_render_test.SUPPORTED_FRAMEWORKS)
+                        choices=render_test_support.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--spp", type=int, default=16)
     parser.add_argument("--views", default=",".join(CHECKS.keys()))
     parser.add_argument("--headless", action="store_true")
@@ -99,7 +99,7 @@ def main():
     args = parser.parse_args()
 
     out_dir = os.path.join(
-        static_render_test.get_screenshot_dir(args.framework), "nrd_inputs")
+        render_test_support.get_screenshot_dir(args.framework), "nrd_inputs")
     os.makedirs(out_dir, exist_ok=True)
 
     skip_build = args.skip_build
@@ -115,7 +115,7 @@ def main():
         )
         skip_build = True  # one build is enough for all views
 
-        shot = static_render_test.find_screenshot(args.framework)
+        shot = render_test_support.find_screenshot(args.framework)
         dst = os.path.join(out_dir, f"{view}.png")
         shutil.copy(shot, dst)
 

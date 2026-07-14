@@ -1,7 +1,7 @@
 #include "renderer/pass/IBLSpecularPass.h"
 
 #include "renderer/pass/ClearTexturePass.h"
-#include "renderer/proxy/SkyRenderProxy.h"
+#include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
 #include <algorithm>
@@ -38,12 +38,7 @@ IBLSpecularPass::~IBLSpecularPass() = default;
 
 void IBLSpecularPass::InitRenderResources(const RenderConfig &)
 {
-    TryLoad();
-
-    if (IsReady())
-    {
-        return;
-    }
+    PrepareForCooking();
 
     compute_shader_ = rhi_->CreateShader<IBLSpecularMapComputeShader>();
 
@@ -74,7 +69,7 @@ void IBLSpecularPass::CookOnTheFly(const RenderConfig &config, unsigned samples_
 
     if (sample_count_ == 0 && current_caching_level_ == 0)
     {
-        for (uint8_t level = 0u; level < MipLevelCount; level++)
+        for (uint8_t level = 0u; level < IblSettings::SpecularMipLevelCount; level++)
         {
             for (uint8_t face = 0u; face < 6; face++)
             {
@@ -95,8 +90,8 @@ void IBLSpecularPass::CookOnTheFly(const RenderConfig &config, unsigned samples_
             Vector2Int(ibl_image_->GetWidth(current_caching_level_), ibl_image_->GetHeight(current_caching_level_)),
         .max_sample = target_sample_count_,
         .time_seed = sample_count_ + 1u,
-        .roughness = 1.f / (MipLevelCount - 1) * current_caching_level_,
-        .max_brightness = SkyRenderProxy::MaxIBLBrightness,
+        .roughness = 1.f / (IblSettings::SpecularMipLevelCount - 1) * current_caching_level_,
+        .max_brightness = IblSettings::MaxEnvironmentBrightness,
         .sample_batch = batch_size,
     };
     cs_ub_->Upload(rhi_, &ubo);
@@ -109,7 +104,7 @@ void IBLSpecularPass::CookOnTheFly(const RenderConfig &config, unsigned samples_
     {
         Log(Info, "Finished caching ibl specular level {}", current_caching_level_);
 
-        if (current_caching_level_ + 1 == MipLevelCount)
+        if (current_caching_level_ + 1 == IblSettings::SpecularMipLevelCount)
         {
             Complete();
             Logger::LogToScreen("IBLSpecular", "");
@@ -130,10 +125,11 @@ void IBLSpecularPass::CookOnTheFly(const RenderConfig &config, unsigned samples_
 RHIResourceRef<RHIImage> IBLSpecularPass::CreateIBLMap(bool for_cooking, bool allow_write)
 {
     RHIImage::Attribute output_attribute;
-    output_attribute.width = static_cast<uint32_t>(IblMapSize * (static_cast<float>(env_map_->GetAttributes().width) /
-                                                                 static_cast<float>(env_map_->GetAttributes().height)));
-    output_attribute.height = IblMapSize;
-    output_attribute.mip_levels = MipLevelCount;
+    output_attribute.width =
+        static_cast<uint32_t>(IblSettings::SpecularMapSize * (static_cast<float>(env_map_->GetAttributes().width) /
+                                                              static_cast<float>(env_map_->GetAttributes().height)));
+    output_attribute.height = IblSettings::SpecularMapSize;
+    output_attribute.mip_levels = IblSettings::SpecularMipLevelCount;
 
     if (for_cooking)
     {
@@ -159,15 +155,10 @@ RHIResourceRef<RHIImage> IBLSpecularPass::CreateIBLMap(bool for_cooking, bool al
                                 .filtering_method_min = RHISampler::FilteringMethod::Linear,
                                 .filtering_method_mag = RHISampler::FilteringMethod::Linear,
                                 .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                                .max_lod = (MipLevelCount - 1),
+                                .max_lod = (IblSettings::SpecularMipLevelCount - 1),
                                 .enable_anisotropy = false};
 
     return rhi_->CreateImage(output_attribute, env_map_->GetName() + "_specular");
-}
-
-std::string IBLSpecularPass::GetCachePath() const
-{
-    return "cached/ibl/" + env_map_->GetName() + "_specular.ibl";
 }
 
 void IBLSpecularPass::StartCacheLevel(uint8_t level)

@@ -173,9 +173,11 @@ void MetalImage::Upload(const uint8_t *data)
 
     unsigned num_layers = attributes_.type == RHIImage::ImageType::Image2DCube ? 6 : 1;
 
-    for (auto layer = 0u; layer < num_layers; layer++)
+    // mip-major with layers inside, matching VulkanImage: full-image payloads (e.g. cook
+    // artifacts) must mean the same bytes on every backend
+    for (int mip_level = 0; mip_level < attributes_.mip_levels; mip_level++)
     {
-        for (int mip_level = 0; mip_level < attributes_.mip_levels; mip_level++)
+        for (auto layer = 0u; layer < num_layers; layer++)
         {
             MTLRegion region = {{0, 0, 0}, {GetWidth(mip_level), GetHeight(mip_level), 1}};
 
@@ -184,7 +186,7 @@ void MetalImage::Upload(const uint8_t *data)
                               slice:layer
                           withBytes:(data + copied_bytes)
                         bytesPerRow:GetBytesPerRow(mip_level)
-                      bytesPerImage:GetStorageSizePerLayer()];
+                      bytesPerImage:GetStorageSize(mip_level)];
 
             copied_bytes += GetStorageSize(mip_level);
         }
@@ -254,9 +256,10 @@ void MetalImage::CopyToBuffer(const RHIBuffer *buffer) const
 
     unsigned num_layers = attributes_.type == RHIImage::ImageType::Image2DCube ? 6 : 1;
 
-    for (auto layer = 0u; layer < num_layers; layer++)
+    // mip-major with layers inside, matching VulkanImage (see Upload)
+    for (auto mip_level = 0u; mip_level < attributes_.mip_levels; mip_level++)
     {
-        for (auto mip_level = 0u; mip_level < attributes_.mip_levels; mip_level++)
+        for (auto layer = 0u; layer < num_layers; layer++)
         {
             [command_encoder copyFromTexture:texture_
                                  sourceSlice:layer

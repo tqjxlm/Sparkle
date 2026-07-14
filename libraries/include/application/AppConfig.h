@@ -27,6 +27,7 @@ struct AppConfig : public ConfigCollection
     bool render_thread;
     bool load_last_session;
     bool headless;
+    bool cook_mode;
 
 #if ENABLE_TEST_CASES
     std::string test_case;

@@ -50,6 +50,8 @@ def parse_args(args=None):
                         help="Run the build's configure step (fetches dependencies) without building")
     parser.add_argument("--clangd", action="store_true",
                         help="Generate compile_commands.json for clangd")
+    parser.add_argument("--cook", action="store_true",
+                        help="run the built binary in cook mode to produce cooked content")
     parser.add_argument("--run", action="store_true",
                         help="Run the built executable after building")
     parser.add_argument("--skip_build", action="store_true",
@@ -72,6 +74,7 @@ def parse_args(args=None):
         "config": parsed_args.config,
         "archive": parsed_args.archive,
         "run": parsed_args.run,
+        "cook": parsed_args.cook,
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
         "generate_only": parsed_args.generate_only,
@@ -176,7 +179,13 @@ def build_project(args):
             archive_path = builder.archive(args)
             copy_build_products(archive_path, args)
 
-        if args["run"]:
+        if args["cook"]:
+            print("Cooking...")
+            args["unknown_args"] = ["--cook", "true"] + args["unknown_args"]
+            exit_code = builder.run(args)
+            if exit_code is not None and exit_code != 0:
+                sys.exit(exit_code)
+        elif args["run"]:
             print("Running...")
             exit_code = builder.run(args)
             if exit_code is not None and exit_code != 0:

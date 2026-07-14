@@ -397,7 +397,12 @@ void SessionManager::DrawUi(Scene *scene, bool need_default_sky, bool need_defau
         {
             const auto scene_path = GetSceneConfigValue();
             SceneManager::LoadScene(scene, Path::Resource(scene_path), need_default_sky, need_default_lighting)
-                ->Then([scene, this]() { ApplyCamera(scene->GetMainCamera()); });
+                ->Then([scene, this](bool succeeded) {
+                    if (succeeded)
+                    {
+                        ApplyCamera(scene->GetMainCamera());
+                    }
+                });
         }
     }
 

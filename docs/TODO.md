@@ -59,6 +59,14 @@
 
 ## Known Issues
 
+* [ ] scene replacement has no render-command lifetime fence. Calling
+      `SceneManager::LoadScene` while commands for the previous scene generation are
+      still queued can invoke a destroyed component; independently destroying a scene
+      with renderable components can leave removal commands holding its dead
+      `SceneRenderProxy`. Loader callbacks also lack a generation token, so an older
+      load can mutate the replacement scene. Scene/component teardown needs
+      generation-owned render commands or an explicit drain-before-destroy contract;
+      load completion must then use the same generation boundary.
 * [ ] a shader resource declared in a C++ `USE_SHADER_RESOURCE` table but absent from the
       compiled shader (e.g. dead-code-eliminated by slang) crashes with a null dereference in
       `RHIShaderResourceSet::UpdateLayoutHash` during pipeline setup instead of failing with a

@@ -1,7 +1,7 @@
 #include "renderer/pass/IBLDiffusePass.h"
 
 #include "renderer/pass/ClearTexturePass.h"
-#include "renderer/proxy/SkyRenderProxy.h"
+#include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
 #include <algorithm>
@@ -38,9 +38,10 @@ IBLDiffusePass::~IBLDiffusePass() = default;
 RHIResourceRef<RHIImage> IBLDiffusePass::CreateIBLMap(bool for_cooking, bool allow_write)
 {
     RHIImage::Attribute output_attribute;
-    output_attribute.width = static_cast<uint32_t>(IblMapSize * (static_cast<float>(env_map_->GetAttributes().width) /
-                                                                 static_cast<float>(env_map_->GetAttributes().height)));
-    output_attribute.height = IblMapSize;
+    output_attribute.width =
+        static_cast<uint32_t>(IblSettings::DiffuseMapSize * (static_cast<float>(env_map_->GetAttributes().width) /
+                                                             static_cast<float>(env_map_->GetAttributes().height)));
+    output_attribute.height = IblSettings::DiffuseMapSize;
 
     if (for_cooking)
     {
@@ -73,12 +74,7 @@ RHIResourceRef<RHIImage> IBLDiffusePass::CreateIBLMap(bool for_cooking, bool all
 
 void IBLDiffusePass::InitRenderResources(const RenderConfig &)
 {
-    TryLoad();
-
-    if (IsReady())
-    {
-        return;
-    }
+    PrepareForCooking();
 
     compute_shader_ = rhi_->CreateShader<IBLDiffuseMapComputeShader>();
 
@@ -128,7 +124,7 @@ void IBLDiffusePass::CookOnTheFly(const RenderConfig &config, unsigned samples_p
         .resolution = Vector2Int(ibl_image_->GetWidth(0), ibl_image_->GetHeight(0)),
         .max_sample = target_sample_count_,
         .time_seed = sample_count_ + 1u,
-        .max_brightness = SkyRenderProxy::MaxIBLBrightness,
+        .max_brightness = IblSettings::MaxEnvironmentBrightness,
         .sample_batch = batch_size,
     };
     cs_ub_->Upload(rhi_, &ubo);
@@ -158,8 +154,4 @@ void IBLDiffusePass::Render()
     rhi_->EndComputePass(compute_pass_);
 }
 
-std::string IBLDiffusePass::GetCachePath() const
-{
-    return "cached/ibl/" + env_map_->GetName() + "_diffuse.ibl";
-}
 } // namespace sparkle

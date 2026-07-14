@@ -26,11 +26,11 @@ bool IsTrueValue(const char *value)
            strcmp(value, "ON") == 0;
 }
 
-bool ShouldRunHeadless(int argc, const char *argv[])
+bool HasFlag(int argc, const char *argv[], const char *flag)
 {
     for (int i = 1; i < argc; i++)
     {
-        if (strcmp(argv[i], "--headless") != 0)
+        if (strcmp(argv[i], flag) != 0)
         {
             continue;
         }
@@ -55,7 +55,21 @@ bool ShouldRunHeadless(int argc, const char *argv[])
 
 int main(int argc, const char *argv[])
 {
-    if (ShouldRunHeadless(argc, argv))
+    // both must be decided before NSApplicationMain: neither path may touch AppKit
+    if (HasFlag(argc, argv, "--cook"))
+    {
+        @autoreleasepool
+        {
+            sparkle::AppleNativeView view;
+
+            sparkle::AppFramework app;
+            app.InitCore(argc, argv);
+            app.SetNativeView(&view);
+            return app.RunCookMode();
+        }
+    }
+
+    if (HasFlag(argc, argv, "--headless"))
     {
         @autoreleasepool
         {
@@ -76,7 +90,11 @@ int main(int argc, const char *argv[])
             }
 
             app.Cleanup();
+#if ENABLE_TEST_CASES
+            return app.GetExitCode();
+#else
             return 0;
+#endif
         }
     }
 

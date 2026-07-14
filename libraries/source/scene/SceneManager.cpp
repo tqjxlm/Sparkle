@@ -110,21 +110,21 @@ static std::shared_ptr<OrbitCameraComponent> CreateDefaultCamera()
     return std::make_shared<OrbitCameraComponent>(camera_attribute);
 }
 
-static std::shared_ptr<TaskFuture<>> LoadSceneFromFile(Scene *scene, const Path &path)
+static std::shared_ptr<TaskFuture<bool>> LoadSceneFromFile(Scene *scene, const Path &path)
 {
     return SceneDataFactory::Load(path, scene)->Then([scene, path](const std::shared_ptr<SceneNode> &node) {
         if (node)
         {
             scene->GetRootNode()->AddChild(node);
+            return true;
         }
-        else
-        {
-            Log(Error, "failed to load model {}", path.path.string());
-        }
+
+        Log(Error, "failed to load model {}", path.path.string());
+        return false;
     });
 }
 
-std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky,
+std::shared_ptr<TaskFuture<bool>> SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky,
                                                           bool need_default_lighting)
 {
     PROFILE_SCOPE_LOG("SceneManager::LoadScene");
@@ -148,7 +148,7 @@ std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Pa
     scene->SetMainCamera(main_camera);
     scene->GetRootNode()->AddChild(camera_node);
 
-    std::shared_ptr<TaskFuture<>> load_task;
+    std::shared_ptr<TaskFuture<bool>> load_task;
     if (!asset_path.IsValid() || asset_path.path.empty())
     {
         // No scene path given (the `scene` cvar defaults to empty) => load the packaged TestScene.
@@ -166,7 +166,7 @@ std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Pa
         scene->GetRootNode()->SetName(asset_path.path.parent_path().string());
     }
 
-    return load_task->Then([scene, need_default_sky, need_default_lighting]() {
+    return load_task->Then([scene, need_default_sky, need_default_lighting](bool succeeded) {
         if (need_default_lighting && !scene->GetDirectionalLight())
         {
             SceneManager::AddDefaultDirectionalLight(scene);
@@ -176,6 +176,8 @@ std::shared_ptr<TaskFuture<void>> SceneManager::LoadScene(Scene *scene, const Pa
         {
             SceneManager::AddDefaultSky(scene)->Forget();
         }
+
+        return succeeded;
     });
 }
 
@@ -190,11 +192,14 @@ void SceneManager::RemoveLastDebugSphere(Scene *scene)
 std::shared_ptr<TaskFuture<void>> SceneManager::AddDefaultSky(Scene *scene)
 {
     auto [sky_light_node, sky_light] = MakeNodeWithComponent<SkyLight>(scene, nullptr, "DefaultSky");
-    scene->RegisterAsyncTask();
+    auto scene_task = scene->RegisterAsyncTask();
     return TaskManager::RunInWorkerThread([sky_light]() { sky_light->SetSkyMap(DefaultSkyMapFile); })
-        ->Then([scene, sky_light_node]() {
-            scene->GetRootNode()->AddChild(sky_light_node);
-            scene->UnregisterAsyncTask();
+        ->Then([scene, sky_light_node, scene_task]() {
+            if (scene_task->IsActive())
+            {
+                scene->GetRootNode()->AddChild(sky_light_node);
+            }
+            scene_task->Complete(true);
         });
 }
 
@@ -210,10 +215,26 @@ void SceneManager::AddDefaultDirectionalLight(Scene *scene)
 
     if (auto *sky_light = scene->GetSkyLight())
     {
-        if (sky_light->GetSkyMap())
+        if (sky_light->HasSkyMap())
         {
-            dir_light->SetColor(sky_light->GetSunBrightness());
-            dir_light_node->SetTransform(Zeros, sky_light->GetSunDirection());
+            // the sun is extracted by the async sky cook. weak captures guard against the
+            // scene being cleaned up before delivery; the sky is re-looked-up through the
+            // scene because it lives in the same generation as the captured light.
+            sky_light->OnCooked()->Then(
+                [scene, weak_node = std::weak_ptr<SceneNode>(dir_light_node),
+                 weak_light = std::weak_ptr<DirectionalLight>(dir_light)]() {
+                    auto node = weak_node.lock();
+                    auto light = weak_light.lock();
+                    auto *sky = scene->GetSkyLight();
+                    if (!node || !light || (sky == nullptr) || !sky->GetCubeMap())
+                    {
+                        return;
+                    }
+
+                    light->SetColor(sky->GetSunBrightness());
+                    node->SetTransform(Zeros, sky->GetSunDirection());
+                },
+                TargetThread::Main);
         }
     }
 }

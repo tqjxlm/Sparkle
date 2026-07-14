@@ -20,6 +20,11 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
+    bool HasPhysicalGpu() override
+    {
+        return true;
+    }
+
     void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 
