@@ -12,8 +12,8 @@
 [.github/workflows/build.yml](../.github/workflows/build.yml) runs four stages:
 
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
-* **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes it as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
-* **release**: every product: injects the cooked content into each build product and re-signs where injection breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
+* **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes the assembled content image as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
+* **release**: every product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
 * **test**: a test table decides which released products run the aggregate suite and with what coverage. Currently enabled: windows-release under lavapipe, and macos-release on the runner's physical Metal GPU. Both run with `--require_cooked`. A product absent from the table ships untested — no runner can drive it yet.
 
 All three matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the test table — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.

@@ -9,8 +9,8 @@ on:
         default: '"Debug","Release"'
 
 # stages: build (every product in parallel, the heavy stage) -> cook (macos-release, on
-# the macos runners' real Metal GPU) -> release (every product: inject the cooked content
-# and re-sign) -> test (the test table decides which released products run the suite and
+# the macos runners' real Metal GPU) -> release (every product: swap in the cooked
+# content image and re-sign) -> test (the test table decides which released products run the suite and
 # with what coverage). a cell waits only for the shared cook and its own product's
 # upstream cell, never other products': the stage -> cook edges are real needs edges,
 # while the edge to the product's own build (for release cells) or release (for test
@@ -118,13 +118,13 @@ jobs:
             exit 1
           fi
           kill $WATCHDOG 2>/dev/null || true
-          test -f build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked/manifest.json
+          test -f build_system/macos/output/cooked_image/cooked/manifest.json
 
-      - name: Upload cooked artifacts
+      - name: Upload cooked content image
         uses: actions/upload-artifact@v4
         with:
           name: cooked-shared
-          path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
+          path: build_system/macos/output/cooked_image
 
   release:
     needs: [plan, cook]

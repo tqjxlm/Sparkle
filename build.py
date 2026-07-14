@@ -18,6 +18,10 @@ STAGES = ("build", "cook", "package")
 # framework's binary, and linux has no supported framework that could provide one
 COOK_FRAMEWORKS = ("glfw", "macos")
 
+# device targets run from an installed package, so cooked content can only reach them
+# through the package stage; desktop runs read the cook output from the build tree directly
+DEVICE_FRAMEWORKS = ("android", "ios")
+
 if platform.system() == "Darwin":
     HOST_COOK_FRAMEWORK = "macos"
 elif platform.system() == "Windows":
@@ -39,6 +43,11 @@ COOKED_OUTPUT_DIR = {
                           "sparkle.app", "Contents", "SharedSupport", "cooked"),
 }
 
+COOKED_IMAGE_DIR = {
+    "glfw": os.path.join("build_system", "glfw", "output", "cooked_image"),
+    "macos": os.path.join("build_system", "macos", "output", "cooked_image"),
+}
+
 
 def cooker_framework(framework):
     """The framework whose binary executes the cook: itself when host-runnable,
@@ -47,18 +56,31 @@ def cooker_framework(framework):
     return framework if framework in COOK_FRAMEWORKS else HOST_COOK_FRAMEWORK
 
 
-def default_cooked_dir(framework):
-    """Where the package stage finds cooked content by default: the host cooker's
-    output. None when this host cannot cook, anchored to the repo root otherwise
-    because builders may chdir during build."""
+def default_cooked_image_dir(framework):
+    """Where the package stage finds the cooked content image by default: the host
+    cooker's assembled image. None when this host cannot cook, anchored to the repo
+    root otherwise because builders may chdir during build."""
     cooker = cooker_framework(framework)
-    return os.path.join(SCRIPTPATH, COOKED_OUTPUT_DIR[cooker]) if cooker else None
+    return os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker]) if cooker else None
+
+
+def assemble_cooked_image(cooker):
+    """The cook stage's product: a self-contained content image holding every raw
+    asset passed through plus the cooked artifacts. The package stage swaps a
+    product's packed content for this directory."""
+    image_dir = os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker])
+    shutil.rmtree(image_dir, ignore_errors=True)
+    shutil.copytree(os.path.join(SCRIPTPATH, "resources", "packed"), image_dir)
+    shutil.copytree(os.path.join(SCRIPTPATH, COOKED_OUTPUT_DIR[cooker]),
+                    os.path.join(image_dir, "cooked"))
+    print(f"Assembled cooked content image at {image_dir}")
 
 
 def resolve_stages(stage_args, skip_build, cook, archive, framework):
     """Stage selection: explicit --stage wins, then legacy flags; the default is
     build + cook (cooked content is always wanted; hosts that cannot cook for the
-    target build without it)."""
+    target build without it), plus package for device frameworks (a device only
+    receives cooked content through its installed package)."""
     if stage_args:
         selected = set()
         for stage in stage_args:
@@ -75,6 +97,8 @@ def resolve_stages(stage_args, skip_build, cook, archive, framework):
         selected = {"build"}
         if cooker_framework(framework) is not None:
             selected.add("cook")
+        if framework in DEVICE_FRAMEWORKS:
+            selected.add("package")
     return [stage for stage in STAGES if stage in selected]
 
 
@@ -125,8 +149,8 @@ def parse_args(args=None):
     parser.add_argument("--archive", action="store_true",
                         help="Alias for the package stage (build + package)")
     parser.add_argument("--cooked",
-                        help="Cooked content directory for the package stage"
-                        " (default: this framework's own cook output)")
+                        help="Cooked content image directory for the package stage"
+                        " (default: the host cooker's assembled image)")
     parser.add_argument("--asan", action="store_true",
                         help="Enable AddressSanitizer")
     parser.add_argument("--profile", action="store_true",
@@ -251,17 +275,21 @@ def copy_build_products(product_archive_path, args):
 
 def package_project(builder, args):
     sys.path.insert(0, os.path.join(SCRIPTPATH, "dev"))
-    from inject_cooked import PackagingError, package_cooked
+    from package_cooked import PackagingError, package_cooked
 
     print("Archiving...")
     archive_path = builder.archive(args)
     product_path = copy_build_products(archive_path, args)
 
-    cooked_dir = args["cooked"] or default_cooked_dir(args["framework"])
+    image_dir = args["cooked"] or default_cooked_image_dir(args["framework"])
     try:
-        package_cooked(product_path, args["framework"], cooked_dir)
+        placed = package_cooked(product_path, args["framework"], image_dir)
     except PackagingError as error:
         raise RuntimeError(f"package stage failed: {error}") from error
+
+    if placed:
+        builder.resign_package(product_path)
+    args["product_path"] = product_path
 
 
 def build_project(args):
@@ -304,6 +332,7 @@ def build_project(args):
         exit_code = cook_builder.run(cook_args)
         if exit_code is not None and exit_code != 0:
             sys.exit(exit_code)
+        assemble_cooked_image(cooker)
 
     if "package" in stages:
         package_project(builder, args)

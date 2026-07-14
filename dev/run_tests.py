@@ -157,6 +157,9 @@ def snapshot_logs(framework):
 
 
 def cook_gate(framework, previous_sizes):
+    sys.path.insert(0, os.path.join(REPO, "dev"))
+    from cook_log import count_cook_activity
+
     logs = glob.glob(log_pattern(framework))
     if not logs:
         return False, "no app logs found"
@@ -169,11 +172,9 @@ def cook_gate(framework, previous_sizes):
             offset = 0
         with open(log, errors="replace") as log_file:
             log_file.seek(offset)
-            for line in log_file:
-                # cooker_request cooks throwaway fixture artifacts by design
-                cooked += ("] cooking " in line
-                           and "cooking cooker_request_test" not in line)
-                hits += "cook artifact hit" in line
+            log_hits, log_cooked = count_cook_activity(log_file)
+            hits += log_hits
+            cooked += log_cooked
 
     if cooked:
         return False, f"{cooked} on-the-fly cook(s): the packaged cooked content was not used"
