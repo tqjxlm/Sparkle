@@ -14,12 +14,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 
 namespace sparkle
 {
 Logger *Logger::instance_ = nullptr;
 
-Logger::Logger()
+Logger::Logger(const std::string &dedicated_log_path)
 {
     ASSERT(!instance_);
 
@@ -27,26 +28,42 @@ Logger::Logger()
 
     logger_ = std::make_shared<spdlog::logger>("default");
 
-    FileManager::GetNativeFileManager()->TryCreateDirectory(Path::External("logs"));
-
+    if (!dedicated_log_path.empty())
     {
-        namespace ch = std::chrono;
-        auto time_stamp = std::format("{:%Y_%m_%d_%H_%M_%S}", ch::floor<ch::seconds>(ch::system_clock::now()));
+        const auto parent = std::filesystem::path(dedicated_log_path).parent_path();
+        if (!parent.empty())
+        {
+            FileManager::GetNativeFileManager()->TryCreateDirectory(Path::External(parent.string()));
+        }
 
-        auto log_file_path_relative = std::format("logs/output_{}.log", time_stamp);
-        auto log_file_path = Path::External(log_file_path_relative).Resolved().string();
+        auto log_file_path = Path::External(dedicated_log_path).Resolved().string();
 
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path, true);
         logger_->sinks().push_back(file_sink);
     }
-
-    // TODO(tqjxlm): copy the file instead of writing to two files at runtime
+    else
     {
-        auto log_file_path_relative = std::string("logs/output.log");
-        auto log_file_path = Path::External(log_file_path_relative).Resolved().string();
+        FileManager::GetNativeFileManager()->TryCreateDirectory(Path::External("logs"));
 
-        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path, true);
-        logger_->sinks().push_back(file_sink);
+        {
+            namespace ch = std::chrono;
+            auto time_stamp = std::format("{:%Y_%m_%d_%H_%M_%S}", ch::floor<ch::seconds>(ch::system_clock::now()));
+
+            auto log_file_path_relative = std::format("logs/output_{}.log", time_stamp);
+            auto log_file_path = Path::External(log_file_path_relative).Resolved().string();
+
+            auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path, true);
+            logger_->sinks().push_back(file_sink);
+        }
+
+        // TODO(tqjxlm): copy the file instead of writing to two files at runtime
+        {
+            auto log_file_path_relative = std::string("logs/output.log");
+            auto log_file_path = Path::External(log_file_path_relative).Resolved().string();
+
+            auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path, true);
+            logger_->sinks().push_back(file_sink);
+        }
     }
 
     auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();

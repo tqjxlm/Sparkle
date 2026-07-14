@@ -7,6 +7,17 @@
 * All PRs are required to pass CI before merging.
 * The required gates are formatting, clang-tidy, the platform build matrix, cooking and package assembly, and the aggregate test suite. Performance testing is not yet automated.
 
+## Pipeline Graph
+
+[.github/workflows/build.yml](../.github/workflows/build.yml) runs four stages:
+
+* **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
+* **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes it as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
+* **release**: injects the cooked content into each build product and re-signs where injection breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
+* **test**: pulls the released windows package and runs the aggregate suite under lavapipe with `--require_cooked`.
+
+A release waits only for its own build and the shared cook, never other products' builds. The release matrix carries a real `needs` edge to cook; the edge to the product's own build cannot be a `needs` (GitHub cannot target a single matrix cell), so each release cell awaits its build job's conclusion by name through the run's job list. The await starts only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. Products with dependants of their own stay standalone jobs so those edges remain addressable: cook needs the macos-release build, and the test stage needs the windows-release release node.
+
 ## Local Validation Gates
 
 Run the same validation classes locally in fail-fast order. The cheap, deterministic

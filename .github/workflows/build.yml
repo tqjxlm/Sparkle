@@ -1,4 +1,4 @@
-name: Build
+name: Pipeline
 
 on:
   workflow_call:
@@ -8,6 +8,13 @@ on:
         type: string
         default: '"Debug","Release"'
 
+# stages: build (every product in parallel, the heavy stage) -> cook (macos-release, the
+# only node with a real Metal GPU) -> release (inject the cooked content into each build
+# product and re-sign) -> test (windows-release). a release waits only for its own build
+# and the shared cook, never other products' builds: release -> cook is a needs edge, and
+# each release cell awaits its own build by job name, since needs cannot target a single
+# matrix cell. products with dependants of their own (cook needs macos-release, test needs
+# windows-release) are standalone jobs so those edges are addressable.
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -25,6 +32,12 @@ jobs:
             framework: android
           - os: windows-latest
             framework: ios
+          - os: windows-latest
+            framework: glfw
+            build_type: Release
+          - os: macos-latest
+            framework: macos
+            build_type: Release
           - os: ubuntu-latest
             framework: macos
           - os: ubuntu-latest
@@ -39,83 +52,220 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # the android build (SDK/NDK + gradle + two CMake variants) can exhaust the ~14 GB free on
-      # hosted ubuntu runners; drop preinstalled toolchains this project never uses (~45 GB)
-      - name: Free Disk Space (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /opt/ghc /usr/share/swift /opt/hostedtoolcache/CodeQL
-          df -h /
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: ${{ matrix.framework }}
+          os: ${{ matrix.os }}
+          build-type: ${{ matrix.build_type }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  build-macos-release:
+    name: build (macos-latest, macos, Release)
+    if: contains(inputs.build_type, 'Release')
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: macos
+          os: macos-latest
+          build-type: Release
+
+  build-windows-release:
+    name: build (windows-latest, glfw, Release)
+    if: contains(inputs.build_type, 'Release')
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: glfw
+          os: windows-latest
+          build-type: Release
+
+  cook:
+    name: cook (macos-latest, macos, Release)
+    needs: build-macos-release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Setup Environment
         id: setup-environment
         uses: ./.github/actions/setup-environment
         with:
+          framework: macos
+          os: macos-latest
+
+      - name: Download build product
+        uses: actions/download-artifact@v4
+        with:
+          name: build-macos-macos-latest-Release
+          path: build_system/macos/product
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
+
+      - name: Cook
+        shell: bash
+        run: |
+          # a hung app never fails the step on its own; kill it so the diagnostics below run
+          ( sleep 900 && echo "cook watchdog fired" && pkill -f sparkle.app/Contents/MacOS/sparkle ) &
+          WATCHDOG=$!
+          if ! python3 build.py --framework macos --config Release --stage cook ${{ steps.setup-environment.outputs.build-args }}; then
+            kill $WATCHDOG 2>/dev/null || true
+            echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+            echo "=== crash reports ==="
+            sleep 10
+            for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+            exit 1
+          fi
+          kill $WATCHDOG 2>/dev/null || true
+          test -f build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked/manifest.json
+
+      - name: Upload cooked artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cooked-shared
+          path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
+
+  release:
+    needs: cook
+    # apple signing needs a macos runner; injection elsewhere is zip surgery, ubuntu starts fastest
+    runs-on: ${{ (matrix.framework == 'macos' || matrix.framework == 'ios') && 'macos-latest' || 'ubuntu-latest' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+        framework: [android, glfw, macos, ios]
+        build_type: ${{ fromJSON(format('[{0}]', inputs.build_type)) }}
+        exclude:
+          - os: windows-latest
+            framework: macos
+          - os: windows-latest
+            framework: android
+          - os: windows-latest
+            framework: ios
+          # released by the standalone release node the test stage waits for
+          - os: windows-latest
+            framework: glfw
+            build_type: Release
+          - os: ubuntu-latest
+            framework: macos
+          - os: ubuntu-latest
+            framework: ios
+          - os: ubuntu-latest
+            framework: glfw
+          - os: macos-latest
+            framework: android
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # needs cannot target a single matrix cell, so the edge to this product's own build
+      # is a job-name await. it only ever waits while few macos builds remain (cook, a
+      # macos build, is already done), so waiting cells cannot starve the build queue
+      - name: Wait for this product's build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          job_name="build (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})"
+          for _ in $(seq 1 90); do
+            conclusion=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
+              --jq "[.jobs[] | select(.name | endswith(\"$job_name\")) | .conclusion // \"\"][0]")
+            case "$conclusion" in
+              success) exit 0 ;;
+              failure|cancelled|timed_out|skipped) echo "$job_name concluded: $conclusion"; exit 1 ;;
+              *) sleep 40 ;;
+            esac
+          done
+          echo "timed out waiting for $job_name"; exit 1
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
           framework: ${{ matrix.framework }}
           os: ${{ matrix.os }}
           build-type: ${{ matrix.build_type }}
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
-      - name: Setup Signing Certificates (iOS)
-        if: matrix.framework == 'ios'
-        uses: ./.github/actions/setup-certs-ios
+  release-windows-release:
+    name: release (windows-latest, glfw, Release)
+    needs: [build-windows-release, cook]
+    # zip surgery only, no windows toolchain needed; ubuntu starts fastest on the test path
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
         with:
-          certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
-          certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
-          team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
-          appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
-          appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
-          appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          framework: glfw
+          os: windows-latest
+          build-type: Release
 
-      # dependency downloads (CMake FetchContent) happen during the configure and are the one phase
-      # that fails on transient network errors (e.g. GitHub 504s); retry it cheaply so the full
-      # build step never pays for a flaky download. android's CMake configure only runs inside the
-      # gradle build, so there is nothing to prefetch there.
-      - name: Configure
-        if: matrix.framework != 'android'
+  test:
+    name: test (windows-latest, glfw, Release)
+    needs: release-windows-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v4
+        with:
+          name: release-glfw-windows-latest-Release
+          path: build_system/glfw/product
+
+      - name: Extract app
         shell: bash
-        run: |
-          for attempt in 1 2 3; do
-            python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --configure_only ${{ steps.setup-environment.outputs.build-args }} && exit 0
-            echo "configure attempt ${attempt} failed"
-            sleep 20
-          done
-          exit 1
+        run: python3 -m zipfile -e build_system/glfw/product/windows-glfw-Release.zip build_system/glfw/output/
 
-      # hosted runners have ~4 vcpus and 16GB; the default -j64 on windows oversubscribes them
-      # badly enough that the runner agent can starve and drop off ("runner lost communication")
-      - name: Build
+      - name: Setup Mesa Lavapipe
+        uses: ./.github/actions/setup-mesa
+
+      - name: Run Tests
         shell: bash
-        env:
-          SPARKLE_BUILD_JOBS: 8
-        run: python3 build.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }} --archive ${{ steps.setup-environment.outputs.build-args }}
+        run: >-
+          python3 dev/run_tests.py --framework glfw --config Release --skip_build
+          --software --headless --require_cooked
 
-      # hit rate should approach 100% for PRs that touch few files; a cold cache shows all misses
-      - name: Compiler cache stats
+      - name: Upload Test Screenshot
         if: always()
-        shell: bash
-        run: ccache -s || true
-
-      - name: Archive App Bundle (macOS)
-        if: matrix.framework == 'macos'
-        uses: ./.github/actions/archive-macos
-        with:
-          certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-          signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
-          notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
-          team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
-          app-path: build_system/${{ matrix.framework }}/product/${{ matrix.framework }}-macos-${{ matrix.build_type }}.zip
-
-      - name: Functional Test
-        uses: ./.github/actions/functional-test
-        with:
-          framework: ${{ matrix.framework }}
-          os: ${{ matrix.os }}
-          build_type: ${{ matrix.build_type }}
-
-      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.framework }}-${{ matrix.os }}-${{ matrix.build_type }}
-          path: build_system/${{ matrix.framework }}/product
+          name: test-screenshots-glfw-windows
+          path: build_system/glfw/output/build/generated/screenshots/
+

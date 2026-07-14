@@ -31,6 +31,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <cstring>
+
 namespace
 {
 struct VerticalIconTab
@@ -81,7 +83,20 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
 {
     CoreStates::Instance().SetAppState(CoreStates::AppState::Init);
 
-    logger_ = std::make_unique<Logger>();
+    // parsed from raw argv: the logger exists before the config system, and desktop builds
+    // are the only ones whose log location a caller (e.g. the cook stage) can direct
+    std::string dedicated_log_path;
+#if FRAMEWORK_GLFW || FRAMEWORK_MACOS
+    for (int i = 1; i + 1 < argc; i++)
+    {
+        if (std::strcmp(argv[i], "--log_path") == 0)
+        {
+            dedicated_log_path = argv[i + 1];
+        }
+    }
+#endif
+
+    logger_ = std::make_unique<Logger>(dedicated_log_path);
 
     // after this point, we can use LN_LOG
     Log(Info, "Program started");
