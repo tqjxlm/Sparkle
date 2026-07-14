@@ -28,6 +28,45 @@ def get_app_path():
     return os.path.join(get_output_dir(), "sparkle.app")
 
 
+def signing_identity(app_path):
+    """The identity that signed the bundle, or None for unsigned/ad-hoc bundles."""
+    result = subprocess.run(["codesign", "-dvv", app_path],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    for line in result.stderr.splitlines():
+        if line.startswith("Authority="):
+            return line.split("=", 1)[1]
+    return None
+
+
+def extract_ipa(ipa_path, destination):
+    """ditto, not python zipfile: extraction must preserve the executable bit."""
+    robust_rmtree(destination)
+    os.makedirs(destination)
+    subprocess.run(["ditto", "-x", "-k", ipa_path, destination], check=True)
+    return os.path.join(destination, "Payload", "sparkle.app")
+
+
+def resign_ipa(ipa_path):
+    """Injection invalidates the app bundle's code seal; re-sign with the
+    identity that signed the build. An unsigned bundle stays unsigned - it was
+    never device-installable in the first place."""
+    work_dir = os.path.join(SCRIPTPATH, "output", "resign")
+    app_path = extract_ipa(ipa_path, work_dir)
+
+    identity = signing_identity(app_path)
+    if identity is None:
+        print(f"WARNING: {ipa_path} is not signed with an identity; skipping re-sign")
+        return
+
+    subprocess.run(["codesign", "--force", "--sign", identity,
+                    "--preserve-metadata=entitlements", app_path], check=True)
+    os.remove(ipa_path)
+    subprocess.run(["ditto", "-c", "-k", work_dir, ipa_path], check=True)
+    print(f"re-signed {ipa_path} with identity: {identity}")
+
+
 def run_on_device(app_path):
     # Install and run on device using xcrun devicectl
     try:
@@ -201,12 +240,21 @@ class IosBuilder(FrameworkBuilder):
 
         return archive_path
 
+    def resign_package(self, package_path):
+        resign_ipa(package_path)
+
     def run(self, args):
         """Run the built project."""
-        app_path = get_app_path()
+        product_path = args.get("product_path")
+        if product_path:
+            app_path = extract_ipa(product_path, os.path.join(SCRIPTPATH, "output", "deploy"))
+        else:
+            app_path = get_app_path()
+            print("Installing the raw build output; without the package stage"
+                  " it carries no cooked content and the device cooks on the fly.")
 
         if not os.path.exists(app_path):
             raise RuntimeError(f"App bundle not found at expected location: {app_path}")
 
-        print(f"\nBuilt app bundle is available at: {app_path}")
+        print(f"\nApp bundle to deploy: {app_path}")
         run_on_device(app_path)
