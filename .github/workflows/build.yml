@@ -11,12 +11,12 @@ on:
 # stages: build (every product in parallel, the heavy stage) -> cook (macos-release, on
 # the macos runners' real Metal GPU) -> release (every product: inject the cooked content
 # and re-sign) -> test (the test table in the test job decides which released products run
-# the suite and with what coverage). a release waits only for its own build and the shared
-# cook, never other products' builds: release -> cook is a needs edge, and each release
-# cell awaits its own build by job name, since needs cannot target a single matrix cell.
-# the macos-release build is the one standalone job, because cook's needs edge must target
-# it. the test matrix instead carries a single needs edge to the whole release stage:
-# releases are quick and uniform, so per-cell await plumbing is not worth it there.
+# the suite and with what coverage). a cell waits only for the shared cook and its own
+# product's upstream cell, never other products': the stage -> cook edges are real needs
+# edges, while the edge to the product's own build (for release cells) or release (for
+# test cells) cannot be a needs, since needs cannot target a single matrix cell — it is an
+# await-by-name instead (.github/actions/wait-for-job). the macos-release build is the one
+# standalone job, because cook's needs edge must target it.
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -165,21 +165,9 @@ jobs:
       # is a job-name await. it only ever waits while few macos builds remain (cook, a
       # macos build, is already done), so waiting cells cannot starve the build queue
       - name: Wait for this product's build
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          job_name="build (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})"
-          for _ in $(seq 1 90); do
-            conclusion=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
-              --jq "[.jobs[] | select(.name | endswith(\"$job_name\")) | .conclusion // \"\"][0]")
-            case "$conclusion" in
-              success) exit 0 ;;
-              failure|cancelled|timed_out|skipped) echo "$job_name concluded: $conclusion"; exit 1 ;;
-              *) sleep 40 ;;
-            esac
-          done
-          echo "timed out waiting for $job_name"; exit 1
+        uses: ./.github/actions/wait-for-job
+        with:
+          job-name: build (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
 
       - name: Release Platform
         uses: ./.github/actions/release-platform
@@ -201,7 +189,7 @@ jobs:
 
   test:
     name: test (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
-    needs: release
+    needs: cook
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -234,6 +222,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # same await-by-name edge the release cells use for their builds: a test cell
+      # waits only for its own product's release, never other products'
+      - name: Wait for this product's release
+        uses: ./.github/actions/wait-for-job
+        with:
+          job-name: release (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
 
       # the suite drives the app through build.py, which needs the build prerequisites
       - name: Setup Environment
