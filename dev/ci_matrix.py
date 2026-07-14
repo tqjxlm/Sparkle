@@ -5,7 +5,8 @@ product set: build, release and test. GitHub cannot share a matrix definition
 between jobs, so this script is the single source of truth: the plan job runs it
 once and downstream jobs consume the JSON through fromJSON().
 
-Prints one GITHUB_OUTPUT line per matrix: build=..., release=..., test=...
+By default, prints one GITHUB_OUTPUT line per matrix: build=..., release=...,
+test=.... Pass --summary to print the corresponding Markdown dependency table.
 """
 
 import argparse
@@ -63,14 +64,85 @@ def matrices(build_types):
     return {"build": build, "release": release, "test": test}
 
 
+def _job_name(stage, cell):
+    return f"{stage} ({cell['os']}, {cell['framework']}, {cell['build_type']})"
+
+
+def _cell_key(cell):
+    return cell["os"], cell["framework"], cell["build_type"]
+
+
+def summary(build_types):
+    """Render the logical per-product gates shown in the workflow-run summary."""
+    plan = matrices(build_types)
+    tested = {_cell_key(cell) for cell in plan["test"]}
+    release_selected = "Release" in build_types
+    cook = "cook (macos-latest, macos, Release)"
+
+    lines = [
+        "## Pipeline dependencies",
+        "",
+        "`native needs` delays job scheduling and appears in GitHub's "
+        "visualization graph. `script poll` is enforced by "
+        "`.github/actions/wait-for-job` after the downstream job starts; "
+        "it does not create a graph edge.",
+        "",
+        "Matrix-data dependencies on `plan` are omitted; this table shows "
+        "product execution and artifact gates.",
+        "",
+        f"Shared cook: `{_job_name('build', STANDALONE_BUILDS[0])}` -> "
+        f"`{cook}` (`native needs`).",
+        "",
+    ]
+
+    if not release_selected:
+        lines.extend([
+            "`Release` is not selected. The macOS Release build, shared cook "
+            "and release are skipped; only the Debug build matrix runs.",
+            "",
+        ])
+
+    lines.extend([
+        "| OS | Framework | Build type | Release gates | Test gates |",
+        "| --- | --- | --- | --- | --- |",
+    ])
+
+    for cell in plan["release"]:
+        if release_selected:
+            release_gates = (f"`{cook}` (`native needs`) + "
+                             f"`{_job_name('build', cell)}` (`script poll`)")
+        else:
+            release_gates = "skipped with shared cook"
+
+        if _cell_key(cell) in tested:
+            test_gates = (f"`{cook}` (`native needs`) + "
+                          f"`{_job_name('release', cell)}` (`script poll`)")
+        else:
+            test_gates = "not scheduled"
+
+        lines.append(
+            f"| {cell['os']} | {cell['framework']} | {cell['build_type']} | "
+            f"{release_gates} | {test_gates} |"
+        )
+
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build_types", required=True,
                         help="the workflow's build_type input: a JSON list body"
                         " such as '\"Debug\",\"Release\"'")
+    parser.add_argument("--summary", action="store_true",
+                        help="print a Markdown dependency summary")
     args = parser.parse_args()
 
-    for name, matrix in matrices(json.loads(f"[{args.build_types}]")).items():
+    build_types = json.loads(f"[{args.build_types}]")
+    if args.summary:
+        print(summary(build_types))
+        return
+
+    for name, matrix in matrices(build_types).items():
         print(f"{name}={json.dumps(matrix)}")
 
 

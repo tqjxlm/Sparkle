@@ -20,6 +20,8 @@ All three matrices derive from one product table: a cheap plan node runs [dev/ci
 
 A cell waits only for the shared cook and its own product's upstream cell, never other products'. The release and test matrices carry a real `needs` edge to cook; the edge to the product's own build (for a release cell) or release (for a test cell) cannot be a `needs` (GitHub cannot target a single matrix cell), so it is an await-by-name through the run's job list — the shared [wait-for-job](../.github/actions/wait-for-job/action.yml) action. The awaits start only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. The one standalone job is the macos-release build, which cook's `needs` edge must target.
 
+The plan job publishes the same per-cell map in the workflow-run summary. A `native needs` gate delays job scheduling and appears in GitHub's visualization graph. A `script poll` gate is enforced by the downstream job's `wait-for-job` step after that job starts, so it documents the logical dependency without implying a GitHub graph edge.
+
 ## Local Validation Gates
 
 Run the same validation classes locally in fail-fast order. The cheap, deterministic checks go first so they reject a change before a build or render test spends time:

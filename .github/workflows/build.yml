@@ -17,7 +17,8 @@ on:
 # cells) cannot be a needs, since needs cannot target a single matrix cell — it is an
 # await-by-name instead (.github/actions/wait-for-job). the macos-release build is the
 # one standalone job, because cook's needs edge must target it. the three matrices come
-# from one product table: the plan node computes them with dev/ci_matrix.py.
+# from one product table: the plan node computes them with dev/ci_matrix.py and writes
+# the same logical per-cell dependency map to the workflow-run summary.
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -33,6 +34,10 @@ jobs:
         id: plan
         shell: bash
         run: python3 dev/ci_matrix.py --build_types '${{ inputs.build_type }}' >> "$GITHUB_OUTPUT"
+
+      - name: Summarize dependencies
+        shell: bash
+        run: python3 dev/ci_matrix.py --build_types '${{ inputs.build_type }}' --summary >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: plan
@@ -246,4 +251,3 @@ jobs:
         with:
           name: test-screenshots-${{ matrix.framework }}-${{ matrix.os }}
           path: ${{ matrix.screenshots }}
-
