@@ -25,11 +25,6 @@ public:
         UpdateTransform();
     }
 
-    void SetCenter(const Vector3 &center)
-    {
-        center_ = center;
-    }
-
     [[nodiscard]] float GetYaw() const
     {
         return yaw_;
