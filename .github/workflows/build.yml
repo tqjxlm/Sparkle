@@ -235,6 +235,11 @@ jobs:
       - name: Run Tests
         timeout-minutes: ${{ matrix.suite_timeout }}
         shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
         run: >-
           python3 dev/run_tests.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }}
           --skip_build ${{ matrix.suite_args }}
