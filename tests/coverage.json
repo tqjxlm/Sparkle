@@ -21,5 +21,16 @@
         "render_target_pool",
         "pipeline_switch_pool",
         "ibl_parity"
+    ],
+    "macos-glfw-release": [
+        "forward_render_static",
+        "deferred_render_static",
+        "camera_nudge_return",
+        "usd_round_trip",
+        "input_injection",
+        "cooker_request",
+        "scene_load_failure",
+        "render_target_pool",
+        "pipeline_switch_pool"
     ]
 }

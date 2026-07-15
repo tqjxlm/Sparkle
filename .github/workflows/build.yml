@@ -191,7 +191,7 @@ jobs:
 
       # the suite drives the app through build.py, which needs the build prerequisites
       - name: Setup Environment
-        if: matrix.framework == 'macos'
+        if: matrix.os == 'macos-latest'
         uses: ./.github/actions/setup-environment
         with:
           framework: ${{ matrix.framework }}
@@ -208,12 +208,20 @@ jobs:
           name: release-${{ matrix.framework }}-${{ matrix.os }}-${{ matrix.build_type }}
           path: build_system/${{ matrix.framework }}/product
 
-      - name: Extract app (glfw)
-        if: matrix.framework == 'glfw'
+      - name: Extract app (glfw, windows)
+        if: matrix.framework == 'glfw' && matrix.os == 'windows-latest'
         shell: bash
         run: >-
           python3 -m zipfile -e build_system/glfw/product/windows-glfw-${{ matrix.build_type }}.zip
           build_system/glfw/output/
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app (glfw, macos)
+        if: matrix.framework == 'glfw' && matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          ditto -x -k build_system/glfw/product/macos-glfw-${{ matrix.build_type }}.zip build_system/glfw/output/
 
       # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
       - name: Extract app (macos)
@@ -232,10 +240,12 @@ jobs:
           --skip_build ${{ matrix.suite_args }}
 
       - name: Dump app logs
-        if: failure() && matrix.framework == 'macos'
+        if: failure() && matrix.os == 'macos-latest'
         shell: bash
         run: |
-          echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
           echo "=== crash reports ==="
           sleep 10
           for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
