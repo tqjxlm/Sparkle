@@ -14,7 +14,7 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes the assembled content image as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
 * **release**: every product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage file ([tests/coverage.json](../tests/coverage.json), see [Test.md](Test.md)) decides which released products run the aggregate suite and which registry cases they run; the plan node derives the test matrix from it. Currently enabled: windows-release under lavapipe, and macos-release on the runner's physical Metal GPU. Both run with `--require_cooked`. A product absent from the coverage file ships untested — no runner can drive it yet.
+* **test**: the coverage file ([tests/coverage.json](../tests/coverage.json), see [Test.md](Test.md)) decides which released products run the aggregate suite and which registry cases they run; the plan node derives the test matrix from it. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, and macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK. All run with `--require_cooked`. A product absent from the coverage file ships untested — no runner can drive it yet.
 
 All three matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the per-triplet suite invocations, and derives the test rows from [tests/coverage.json](../tests/coverage.json) — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.
 
@@ -79,7 +79,7 @@ python3 dev/check_tidy.py                    # check all first-party sources
 
 ## Aggregate Test Suite
 
-`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against two released packages, both in Release mode, headless, and with `--require_cooked`, which fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl_parity` is excluded under that flag: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
+`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against three released packages, all in Release mode, headless, and with `--require_cooked`, which fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl_parity` is excluded under that flag: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
 
 The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000/mesa-dist-win):
 
@@ -92,6 +92,13 @@ The macOS package runs the forward and deferred pipelines on the runner's physic
 
 ```bash
 python3 dev/run_tests.py --framework macos --config Release --skip_build \
+  --headless --require_cooked
+```
+
+The macOS + GLFW package runs the same Vulkan backend as Windows, but on the runner's physical Metal GPU through MoltenVK:
+
+```bash
+python3 dev/run_tests.py --framework glfw --config Release --skip_build \
   --headless --require_cooked
 ```
 

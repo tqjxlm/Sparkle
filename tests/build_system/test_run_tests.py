@@ -180,7 +180,7 @@ class RunTestsCommandTest(unittest.TestCase):
         self.assertIsNone(select(cases=["no_such_case"]))
 
     def test_uncovered_triplet_is_rejected(self):
-        self.assertIsNone(select(triplet="macos-glfw-release"))
+        self.assertIsNone(select(triplet="macos-glfw-debug"))
 
 
 if __name__ == "__main__":
