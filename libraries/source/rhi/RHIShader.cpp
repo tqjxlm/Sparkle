@@ -22,13 +22,13 @@ void RHIShaderResourceTable::Initialize()
     {
         const auto *decl = resource->GetReflection();
 
-        ASSERT(decl->set != UINT_MAX);
-
         auto set = decl->set;
         auto slot = decl->slot;
-        if (slot == UINT_MAX)
+        if (set == UINT_MAX || slot == UINT_MAX)
         {
             // reflection could not locate this resource in the compiled shader (e.g. optimized out)
+            Log(Warn, "shader resource {} is not found in the compiled shader. it may have been optimized out.",
+                decl->name);
             continue;
         }
         if (resource_sets_.size() < set + 1)
@@ -52,6 +52,12 @@ void RHIShaderResourceSet::UpdateResourceHash() const
     {
         const auto *binding = bindings_[slot];
         ASSERT_F(binding, "hole at binding slot {}: shader bindings must be dense per set", slot);
+        if (!binding->GetResource())
+        {
+            Log(Error, "no resource bound to shader resource {}. did you forget to call BindResource?",
+                binding->GetReflection()->name);
+            DumpAndAbort();
+        }
         HashCombine(resource_hash_, binding->GetResource()->GetId());
     }
 
@@ -78,11 +84,17 @@ void RHIShaderResourceSet::UpdateLayoutHash()
 
     ASSERT(!bindings_.empty());
 
-    // NOLINTNEXTLINE(modernize-loop-convert): slot is used by the assert, which is compiled out in Release
     for (auto slot = 0u; slot < bindings_.size(); slot++)
     {
         auto *binding = bindings_[slot];
-        ASSERT_F(binding, "hole at binding slot {}: shader bindings must be dense per set", slot);
+        if (!binding)
+        {
+            Log(Error,
+                "hole at binding slot {}: shader bindings must be dense per set. a resource declared in C++ is "
+                "probably missing from the compiled shader. see warnings above for its name.",
+                slot);
+            DumpAndAbort();
+        }
         HashCombine(hasher, binding->GetReflection()->GetHash());
     }
 
@@ -106,7 +118,14 @@ void RHIShaderResourceBinding::BindResource(RHIResource *resource, bool rebind)
 
     if (resource_ != resource || rebind)
     {
-        ASSERT_F(parent_set_, "Do not bind resources before PSO compilation.");
+        if (!parent_set_)
+        {
+            Log(Error,
+                "cannot bind resource {} to shader resource {}: it belongs to no compiled pipeline. either it is "
+                "bound before PSO compilation or it is missing from the compiled shader (e.g. optimized out).",
+                resource ? resource->GetName() : "<null>", decl_->name);
+            DumpAndAbort();
+        }
         parent_set_->MarkResourceDirty();
     }
 
