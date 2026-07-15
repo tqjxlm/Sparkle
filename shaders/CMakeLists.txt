@@ -68,7 +68,9 @@ endforeach(SLANG)
 # ray_trace shaders still go slang->spirv->spirv-cross->metal: slang cannot emit valid MSL
 # for multiple unsized bindless arrays yet. its MSL also does not bake a vertex y-flip,
 # so the metal RHI flips the viewport instead (see MetalRenderPass).
-if (MACOS OR IOS)
+# the branch follows the graphics backend, not the host OS: a glfw build on a macOS host
+# targets Vulkan and needs the SPIR-V outputs below.
+if (ENABLE_METAL)
     set(ALL_MTL_OUTPUTS)
 
     if (IOS)
