@@ -29,6 +29,15 @@ CookJobResult DrivePassToCompletion(RHIContext *rhi, std::unique_ptr<IBLPass> pa
     rhi->WaitForDeviceIdle();
     return payload.empty() ? CookJobResult::Failure() : CookJobResult::Success(std::move(payload));
 }
+
+// cook jobs run outside any frame, so the upload needs an explicit command buffer scope
+RHIResourceRef<RHIImage> CreateEnvironmentMap(RHIContext *rhi, const Image2DCube *env_map, const std::string &name)
+{
+    rhi->BeginCommandBuffer();
+    auto env_rhi = rhi->CreateTextureCube(env_map, name);
+    rhi->SubmitCommandBuffer();
+    return env_rhi;
+}
 } // namespace
 
 CookJobResult IblCookAccelerator::TryCook(const CookJob &job, RHIContext *rhi, const RenderConfig &config)
@@ -42,13 +51,13 @@ CookJobResult IblCookAccelerator::TryCook(const CookJob &job, RHIContext *rhi, c
 
     if (const auto *diffuse = dynamic_cast<const IblDiffuseCookJob *>(&job))
     {
-        auto env_rhi = rhi->CreateTextureCube(diffuse->env_map_.get(), diffuse->GetSourceName());
+        auto env_rhi = CreateEnvironmentMap(rhi, diffuse->env_map_.get(), diffuse->GetSourceName());
         return DrivePassToCompletion(rhi, std::make_unique<IBLDiffusePass>(rhi, env_rhi), config);
     }
 
     if (const auto *specular = dynamic_cast<const IblSpecularCookJob *>(&job))
     {
-        auto env_rhi = rhi->CreateTextureCube(specular->env_map_.get(), specular->GetSourceName());
+        auto env_rhi = CreateEnvironmentMap(rhi, specular->env_map_.get(), specular->GetSourceName());
         return DrivePassToCompletion(rhi, std::make_unique<IBLSpecularPass>(rhi, env_rhi), config);
     }
 
