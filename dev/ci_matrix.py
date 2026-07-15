@@ -10,6 +10,7 @@ Prints one GITHUB_OUTPUT line per matrix: build=..., release=..., test=...
 
 import argparse
 import json
+import os
 
 # every product CI ships: the target framework and the runner that builds it
 PRODUCTS = (
@@ -25,15 +26,11 @@ STANDALONE_BUILDS = (
     {"os": "macos-latest", "framework": "macos", "build_type": "Release"},
 )
 
-# the test table: which released products run the aggregate suite, and with what
-# coverage. a product absent from the table ships untested (no runner can drive it yet)
-TESTS = (
+# must hold every tests/coverage.json triplet: that file decides who runs the suite
+TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
     # take the suite close to an hour (see TODO.md), hence the generous timeout
-    {
-        "os": "windows-latest",
-        "framework": "glfw",
-        "build_type": "Release",
+    "windows-glfw-release": {
         "suite_args": "--software --headless --require_cooked",
         "suite_timeout": 120,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
@@ -41,15 +38,25 @@ TESTS = (
     # physical Metal GPU (the runner class the cook stage relies on). its
     # virtualized device exposes no ray tracing, so the gpu path-tracing pipeline
     # (and NRD) silently falls back to forward and cannot be tested here
-    {
-        "os": "macos-latest",
-        "framework": "macos",
-        "build_type": "Release",
+    "macos-macos-release": {
         "suite_args": "--headless --require_cooked",
         "suite_timeout": 60,
         "screenshots": "~/Documents/sparkle/screenshots/",
     },
-)
+}
+
+
+def covered_triplets():
+    coverage_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "tests", "coverage.json")
+    with open(coverage_path) as coverage_file:
+        return list(json.load(coverage_file))
+
+
+def test_cell(triplet):
+    host, framework, config = triplet.split("-")
+    return dict({"os": f"{host}-latest", "framework": framework,
+                 "build_type": config.capitalize()}, **TEST_RUNNERS[triplet])
 
 
 def matrices(build_types):
@@ -59,7 +66,8 @@ def matrices(build_types):
     release = [dict(product, build_type=build_type)
                for product in PRODUCTS for build_type in build_types]
     build = [cell for cell in release if cell not in STANDALONE_BUILDS]
-    test = [dict(row) for row in TESTS if row["build_type"] in build_types]
+    test = [cell for cell in map(test_cell, covered_triplets())
+            if cell["build_type"] in build_types]
     return {"build": build, "release": release, "test": test}
 
 

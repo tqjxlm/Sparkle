@@ -1,0 +1,119 @@
+[
+    {
+        "name": "forward_render_static",
+        "test_case": "screenshot",
+        "description": "Still frame of the loaded scene on the forward pipeline, FLIP-compared against the published ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "forward"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "deferred_render_static",
+        "test_case": "screenshot",
+        "description": "Still frame of the loaded scene on the deferred pipeline, FLIP-compared against the published ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "deferred"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "gpu_render_static",
+        "test_case": "screenshot",
+        "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Needs hardware ray tracing, which no hosted runner exposes, so it stays local-only.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "gpu"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "cpu_render_static",
+        "test_case": "screenshot",
+        "description": "Still frame on the cpu path-tracing pipeline, FLIP-compared against the published ground truth. Too slow for CI runners, so it stays local-only.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "cpu"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "camera_nudge_return",
+        "test_case": "camera_nudge_return",
+        "description": "Camera drag-out-and-return round trip; the evaluator FLIP-compares the before and after screenshots.",
+        "app_args": ["--clear_screenshots", "true"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/camera/camera_nudge_test.py",
+            "args": ["--framework", "{framework}", "--skip_run"]
+        }
+    },
+    {
+        "name": "usd_round_trip",
+        "test_case": "usd_round_trip",
+        "description": "Render, export to USD, reload and re-render; the evaluator FLIP-compares the two screenshots.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/usd/usd_roundtrip_test.py",
+            "args": ["--framework", "{framework}", "--skip_run"],
+            "scene_args": ["--scene", "{scene}"]
+        }
+    },
+    {
+        "name": "input_injection",
+        "test_case": "input_injection",
+        "description": "Synthetic mouse and touch sequences through InputManager::Push."
+    },
+    {
+        "name": "cooker_request",
+        "test_case": "cooker_request",
+        "description": "Cooker cache-hit delivery and relocated-content contracts."
+    },
+    {
+        "name": "scene_load_failure",
+        "test_case": "scene_load_failure",
+        "description": "Scene async failure propagation for a missing authored sky resource."
+    },
+    {
+        "name": "render_target_pool",
+        "test_case": "render_target_pool",
+        "description": "RHIRenderTargetPool reuse and release semantics on the render thread."
+    },
+    {
+        "name": "pipeline_switch_pool",
+        "test_case": "pipeline_switch_pool",
+        "description": "Runtime pipeline switch and pooled render-target reuse."
+    },
+    {
+        "name": "ibl_parity",
+        "test_case": "ibl_parity",
+        "description": "CPU IBL cook jobs compared against their GPU producers. Needs a physical GPU; its deliberate artifact recook is incompatible with --require_cooked, so CI never runs it.",
+        "recooks": true
+    },
+    {
+        "name": "smoke",
+        "test_case": "smoke",
+        "description": "Init and scene-load sanity check."
+    },
+    {
+        "name": "nrd_probe",
+        "test_case": "nrd_probe",
+        "description": "Cooked ReBLUR pipelines compile to PSOs on the current GPU. Apple platforms only."
+    },
+    {
+        "name": "nrd_runtime_toggle",
+        "test_case": "nrd_runtime_toggle",
+        "description": "Runtime NRD enable during and after accumulation."
+    }
+]
