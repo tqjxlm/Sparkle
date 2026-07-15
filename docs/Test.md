@@ -38,7 +38,7 @@ A case carries:
 
 ## Test Coverage
 
-[tests/coverage.json](../tests/coverage.json) assigns each CI triplet (`host-framework-config`, e.g. `macos-macos-release`) the registry cases it must run, in execution order. This file decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from it, so covering a new triplet means adding its case picks here and its suite invocation to `TEST_RUNNERS` in `ci_matrix.py`. A triplet absent from the file ships untested — currently only `macos-macos-release` and `windows-glfw-release` have capable runners. Registry cases picked by no triplet are development-only and run via `--case`.
+[tests/coverage.json](../tests/coverage.json) assigns each CI triplet (`host-framework-config`, e.g. `macos-macos-release`) the registry cases it must run, in execution order. This file decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from it, so covering a new triplet means adding its case picks here and its suite invocation to `TEST_RUNNERS` in `ci_matrix.py`. A triplet absent from the file ships untested — currently only `macos-macos-release`, `macos-glfw-release` and `windows-glfw-release` have capable runners. Registry cases picked by no triplet are development-only and run via `--case`.
 
 Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators, and coverage that picks existing registry cases for triplets `ci_matrix.py` can run.
 
@@ -51,7 +51,7 @@ python3 dev/run_tests.py --framework macos --config Release --headless
 python3 dev/run_tests.py --framework glfw --config Release --software --headless   # on Windows
 ```
 
-Use `--case <name>` (repeatable) to run registry cases by name regardless of coverage — e.g. `--case forward_render_static` to focus one pipeline, or `--case gpu_render_static` for a development-only case. Use `--skip_build` only when the intended binary is already built. CI runs the packaged Windows build under Lavapipe with `--software --require_cooked`, and the packaged macOS build on a physical Metal GPU with `--require_cooked`, which rejects runtime cooking. See [CI.md](CI.md) for the exact commands and why the gpu pipeline stays local-only.
+Use `--case <name>` (repeatable) to run registry cases by name regardless of coverage — e.g. `--case forward_render_static` to focus one pipeline, or `--case gpu_render_static` for a development-only case. Use `--skip_build` only when the intended binary is already built. CI runs the packaged Windows build under Lavapipe with `--software --require_cooked`, and the packaged macOS builds (both the macos framework and the glfw/Vulkan one via MoltenVK) on a physical Metal GPU with `--require_cooked`, which rejects runtime cooking. See [CI.md](CI.md) for the exact commands and why the gpu pipeline stays local-only.
 
 The static-render evaluator lives at [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py), and the USD evaluator lives at [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py). They own specialized assertions; they do not orchestrate the general suite. Shared framework, dependency and image mechanics live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py), so one evaluator never serves as another evaluator's utility layer.
 

@@ -43,6 +43,13 @@ TEST_RUNNERS = {
         "suite_timeout": 60,
         "screenshots": "~/Documents/sparkle/screenshots/",
     },
+    # the Vulkan backend on a real GPU (via MoltenVK), which windows-glfw only
+    # exercises through software rasterization
+    "macos-glfw-release": {
+        "suite_args": "--headless --require_cooked",
+        "suite_timeout": 60,
+        "screenshots": "build_system/glfw/output/build/generated/screenshots/",
+    },
 }
 
 
