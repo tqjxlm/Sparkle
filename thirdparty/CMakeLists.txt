@@ -40,8 +40,7 @@ elseif (MACOS)
     FILE(GLOB IMGUI_SOURCES
         imgui/backends/imgui_impl_metal.mm
         imgui/backends/imgui_impl_metal.h
-        imgui/backends/imgui_impl_osx.mm
-        imgui/backends/imgui_impl_osx.h
+        #macos feeds imgui through InputManager and needs no platform backend
     )
 elseif (IOS)
     FILE(GLOB IMGUI_SOURCES

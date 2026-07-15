@@ -17,60 +17,17 @@
 
 namespace sparkle
 {
-static AppFramework::ClickButton GetClickButton(int button)
-{
-    switch (button)
-    {
-    case GLFW_MOUSE_BUTTON_LEFT:
-        return AppFramework::ClickButton::PrimaryLeft;
-    case GLFW_MOUSE_BUTTON_RIGHT:
-        return AppFramework::ClickButton::SecondaryRight;
-    default:
-        UnImplemented(button);
-    }
-    return AppFramework::ClickButton::Count;
-}
-
-static AppFramework::KeyAction GetKeyAction(int action)
-{
-    switch (action)
-    {
-    case GLFW_PRESS:
-        return AppFramework::KeyAction::Press;
-    case GLFW_RELEASE:
-        return AppFramework::KeyAction::Release;
-    default:
-        UnImplemented(action);
-    }
-    return AppFramework::KeyAction::Count;
-}
-
-static AppFramework::KeyboardModifier GetKeyboardModifier(uint32_t mod)
-{
-    switch (mod)
-    {
-    case GLFW_MOD_CONTROL:
-        return AppFramework::KeyboardModifier::Control;
-    case GLFW_RELEASE:
-        return AppFramework::KeyboardModifier::Shift;
-    default:
-        UnImplemented(mod);
-    }
-    return AppFramework::KeyboardModifier::Count;
-}
-
 static uint32_t GetKeyboardModifiers(int mods)
 {
     uint32_t modifiers = 0;
-    for (auto i = 0; i < 32; i++)
+    if (mods & GLFW_MOD_CONTROL)
     {
-        uint32_t mod = 1u << i;
-        if (static_cast<uint32_t>(mods) & mod)
-        {
-            modifiers |= static_cast<uint32_t>(GetKeyboardModifier(mod));
-        }
+        modifiers |= static_cast<uint32_t>(KeyboardModifier::Control);
     }
-
+    if (mods & GLFW_MOD_SHIFT)
+    {
+        modifiers |= static_cast<uint32_t>(KeyboardModifier::Shift);
+    }
     return modifiers;
 }
 
@@ -99,7 +56,10 @@ void GLFWNativeView::InitUiSystem()
         return;
     }
 
-    ImGui_ImplGlfw_InitForVulkan(view_, true);
+    // pointer input reaches imgui through InputManager. the backend is initialized without
+    // callbacks: key/char/focus/enter are chained to it below, and it keeps handling cursor
+    // shapes and clipboard.
+    ImGui_ImplGlfw_InitForVulkan(view_, false);
 }
 
 void GLFWNativeView::ShutdownUiSystem()
@@ -197,9 +157,12 @@ void GLFWNativeView::InitGUI(AppFramework *app)
     glfwSetWindowUserPointer(view_, app);
     glfwSetFramebufferSizeCallback(view_, FrameBufferResizeCallback);
     glfwSetKeyCallback(view_, KeyboardCallback);
+    glfwSetCharCallback(view_, CharCallback);
     glfwSetMouseButtonCallback(view_, MouseButtonCallback);
     glfwSetScrollCallback(view_, ScrollCallback);
     glfwSetCursorPosCallback(view_, CursorPositionCallback);
+    glfwSetWindowFocusCallback(view_, WindowFocusCallback);
+    glfwSetCursorEnterCallback(view_, CursorEnterCallback);
     if (!app->GetRHIConfig().use_vsync)
     {
         glfwSwapInterval(0);
@@ -208,14 +171,34 @@ void GLFWNativeView::InitGUI(AppFramework *app)
 
 void GLFWNativeView::MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
 {
+    ClickButton click_button;
+    switch (button)
+    {
+    case GLFW_MOUSE_BUTTON_LEFT:
+        click_button = ClickButton::PrimaryLeft;
+        break;
+    case GLFW_MOUSE_BUTTON_RIGHT:
+        click_button = ClickButton::SecondaryRight;
+        break;
+    default:
+        return;
+    }
+
+    double x_pos;
+    double y_pos;
+    glfwGetCursorPos(window, &x_pos, &y_pos);
+
     auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
-    app->MouseButtonCallback(GetClickButton(button), GetKeyAction(action), GetKeyboardModifiers(mods));
+    app->PushInputEvent(PointerEvent{.action = action == GLFW_PRESS ? PointerAction::Down : PointerAction::Up,
+                                     .button = click_button,
+                                     .modifiers = GetKeyboardModifiers(mods),
+                                     .position = Vector2(static_cast<float>(x_pos), static_cast<float>(y_pos))});
 }
 
 void GLFWNativeView::ScrollCallback(GLFWwindow *window, double xoffset, double yoffset)
 {
     auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
-    app->ScrollCallback(xoffset, yoffset);
+    app->PushInputEvent(ScrollEvent{.delta = Vector2(static_cast<float>(xoffset), static_cast<float>(yoffset))});
 }
 
 void GLFWNativeView::FrameBufferResizeCallback(GLFWwindow *window, int width, int height)
@@ -227,15 +210,39 @@ void GLFWNativeView::FrameBufferResizeCallback(GLFWwindow *window, int width, in
 void GLFWNativeView::CursorPositionCallback(GLFWwindow *window, double xPos, double yPos)
 {
     auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
-    app->CursorPositionCallback(xPos, yPos);
+    app->PushInputEvent(PointerEvent{.action = PointerAction::Move,
+                                     .position = Vector2(static_cast<float>(xPos), static_cast<float>(yPos))});
 }
 
-void GLFWNativeView::KeyboardCallback(GLFWwindow *window, int key, int /*scancode*/, int action, int mods)
+void GLFWNativeView::KeyboardCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
-    auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
-    bool is_shift = mods == GLFW_MOD_SHIFT;
+    // keys go to imgui through its own backend to get the full key table, including text navigation
+    ImGui_ImplGlfw_KeyCallback(window, key, scancode, action, mods);
 
-    app->KeyboardCallback(key, GetKeyAction(action), is_shift);
+    if (action == GLFW_REPEAT)
+    {
+        return;
+    }
+
+    auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
+    app->PushInputEvent(KeyEvent{.key = key,
+                                 .action = action == GLFW_PRESS ? KeyAction::Press : KeyAction::Release,
+                                 .modifiers = GetKeyboardModifiers(mods)});
+}
+
+void GLFWNativeView::CharCallback(GLFWwindow *window, unsigned int codepoint)
+{
+    ImGui_ImplGlfw_CharCallback(window, codepoint);
+}
+
+void GLFWNativeView::WindowFocusCallback(GLFWwindow *window, int focused)
+{
+    ImGui_ImplGlfw_WindowFocusCallback(window, focused);
+}
+
+void GLFWNativeView::CursorEnterCallback(GLFWwindow *window, int entered)
+{
+    ImGui_ImplGlfw_CursorEnterCallback(window, entered);
 }
 
 void GLFWNativeView::Cleanup()

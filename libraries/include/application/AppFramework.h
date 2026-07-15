@@ -5,6 +5,7 @@
 #endif
 
 #include "application/AppConfig.h"
+#include "application/InputEvents.h"
 #include "core/Timer.h"
 #include "core/math/Types.h"
 #include "core/task/TaskFuture.h"
@@ -21,6 +22,7 @@ class RenderFramework;
 class CameraComponent;
 class RHIContext;
 class UiManager;
+class InputManager;
 class Logger;
 class TaskManager;
 class MaterialManager;
@@ -31,27 +33,6 @@ struct ThreadTaskQueue;
 class AppFramework
 {
 public:
-    enum class ClickButton : uint8_t
-    {
-        PrimaryLeft,
-        SecondaryRight,
-        Count
-    };
-
-    enum class KeyAction : uint8_t
-    {
-        Press,
-        Release,
-        Count
-    };
-
-    enum class KeyboardModifier
-    {
-        Control = 1u << 0,
-        Shift = 1u << 1,
-        Count = 0x7fffffff
-    };
-
     AppFramework();
 
     ~AppFramework();
@@ -80,17 +61,6 @@ public:
     [[nodiscard]] Scene *GetScene() const
     {
         return main_scene_.get();
-    }
-
-    [[nodiscard]] Vector2 GetLastClickPoint() const
-    {
-        return {last_x_, last_y_};
-    }
-
-    void SetLastClickPoint(float last_x, float last_y)
-    {
-        last_x_ = last_x;
-        last_y_ = last_y;
     }
 
     [[nodiscard]] const AppConfig &GetAppConfig() const
@@ -128,14 +98,21 @@ public:
         return render_framework_.get();
     }
 
-    void ResetInputEvents();
+    void PushInputEvent(const InputEvent &event);
+
+    [[nodiscard]] InputManager *GetInputManager() const
+    {
+        return input_manager_.get();
+    }
+
+    [[nodiscard]] bool IsControlPanelVisible() const
+    {
+        return show_control_panel_;
+    }
+
     void FrameBufferResizeCallback(int width, int height) const;
-    void CursorPositionCallback(double xPos, double yPos);
-    void MouseButtonCallback(ClickButton button, KeyAction action, uint32_t mods);
-    void ClickCallback();
-    void ScrollCallback(double xoffset, double yoffset);
-    void KeyboardCallback(int key, KeyAction action, bool shift_on);
     void CaptureNextFrames(int count);
+    void ResetInputEvents();
 
 #if ENABLE_TEST_CASES
     [[nodiscard]] int GetExitCode() const
@@ -145,16 +122,8 @@ public:
 #endif
 
 private:
-    enum class MouseInputType : uint8_t
-    {
-        Move,
-        Press,
-        Release,
-        Scroll
-    };
-
-    bool ShouldConsumeSceneMouseInput(MouseInputType input_type, double x, double y, bool has_pointer_position);
-    void CancelScenePointerInteraction();
+    void SetupInputHandlers();
+    void HandleSceneKey(const KeyEvent &event);
 
     void AdvanceFrame(float main_thread_time);
 
@@ -170,6 +139,7 @@ private:
     std::unique_ptr<Scene> main_scene_;
     std::unique_ptr<RHIContext> rhi_;
     std::unique_ptr<UiManager> ui_manager_;
+    std::unique_ptr<InputManager> input_manager_;
     std::unique_ptr<SessionManager> session_manager_;
 
     // core singleton
@@ -187,21 +157,13 @@ private:
     float last_second_main_thread_time_ = 0.f;
     TimerCaller frame_rate_monitor_;
 
-    // event handler
-    bool current_pressing_ = false;
-    bool ui_mouse_sequence_active_ = false;
-    float last_x_ = -1.f;
-    float last_y_ = -1.f;
-    Timer click_timer_;
-    Timer double_click_timer_;
-    Timer double_click_cooldown_;
-
     // all configs are managed by this class and broadcast to other threads
     AppConfig app_config_;
     RenderConfig render_config_;
     RHIConfig rhi_config_;
 
     std::unique_ptr<EventSubscription> renderer_created_subscription_;
+    std::vector<std::unique_ptr<EventSubscription>> input_subscriptions_;
 
     std::shared_ptr<ThreadTaskQueue> pending_tasks_;
 

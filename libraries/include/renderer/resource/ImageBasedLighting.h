@@ -64,6 +64,6 @@ private:
     unsigned cook_steps_per_frame_ = 2;
     uint8_t next_cook_pass_index_ = 0;
 
-    Event render_resource_change_event_;
+    Event<> render_resource_change_event_;
 };
 } // namespace sparkle

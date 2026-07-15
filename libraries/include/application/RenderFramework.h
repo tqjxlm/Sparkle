@@ -141,7 +141,7 @@ private:
     float last_second_render_thread_time_ = 0.f;
     float last_second_gpu_time_ = 0.f;
 
-    Event renderer_created_event_;
+    Event<> renderer_created_event_;
 
     TimerCaller frame_rate_monitor_;
 

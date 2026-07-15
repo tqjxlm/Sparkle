@@ -3,133 +3,111 @@
 #import "iOSView.h"
 
 #include "application/AppFramework.h"
-#include "core/Exception.h"
+#include "application/InputEvents.h"
 
 #include <UIKit/UIKit.h>
 
-@implementation iOSView
+// stable small ids per active UITouch, as required by PointerEvent
+static constexpr int MaxTouchSlots = 8;
 
-- (CGPoint)scaledLocationInAppCoordinates:(CGPoint)location
+@implementation iOSView
 {
-    const auto &render_config = app_->GetRenderConfig();
+    UITouch *__weak touch_slots_[MaxTouchSlots];
+}
+
+// ui space on ios is render-target pixels, matching io.DisplaySize
+- (sparkle::Vector2)uiPointFromTouch:(UITouch *)touch
+{
+    const CGPoint location = [touch locationInView:self];
     const CGSize view_size = self.bounds.size;
-    if (view_size.width <= 0.f || view_size.height <= 0.f)
+    if (view_size.width <= 0.0 || view_size.height <= 0.0)
     {
-        return location;
+        return {static_cast<float>(location.x), static_cast<float>(location.y)};
     }
 
+    const auto &render_config = app_->GetRenderConfig();
     const double scale_x = static_cast<double>(render_config.image_width) / static_cast<double>(view_size.width);
     const double scale_y = static_cast<double>(render_config.image_height) / static_cast<double>(view_size.height);
-    return CGPointMake(location.x * scale_x, location.y * scale_y);
+    return {static_cast<float>(location.x * scale_x), static_cast<float>(location.y * scale_y)};
 }
 
 - (void)didMoveToWindow
 {
     [super didMoveToWindow];
 
+    self.multipleTouchEnabled = YES;
+
     [self initApp];
+}
 
+- (int)slotForTouch:(UITouch *)touch assignIfMissing:(BOOL)assign
+{
+    for (int i = 0; i < MaxTouchSlots; i++)
     {
-        UIPinchGestureRecognizer *recognizer =
-            [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handlePinch:)];
-        recognizer.name = @"scene_pinch";
-        recognizer.delegate = self;
-        [self addGestureRecognizer:recognizer];
+        if (touch_slots_[i] == touch)
+        {
+            return i;
+        }
     }
 
+    if (!assign)
     {
-        UITapGestureRecognizer *recognizer = [[UITapGestureRecognizer alloc] initWithTarget:self
-                                                                                     action:@selector(handleTap:)];
-        recognizer.name = @"scene_tap";
-        recognizer.delegate = self;
-        [self addGestureRecognizer:recognizer];
+        return -1;
     }
 
+    for (int i = 0; i < MaxTouchSlots; i++)
     {
-        UITapGestureRecognizer *recognizer =
-            [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleFourFingersTap:)];
-        recognizer.name = @"scene_four_fingers_tap";
-        recognizer.delegate = self;
-        [recognizer setNumberOfTouchesRequired:4];
-        [self addGestureRecognizer:recognizer];
+        if (!touch_slots_[i])
+        {
+            touch_slots_[i] = touch;
+            return i;
+        }
     }
 
+    return -1;
+}
+
+- (void)pushTouches:(NSSet<UITouch *> *)touches action:(sparkle::PointerAction)action
+{
+    for (UITouch *touch in touches)
     {
-        UIPanGestureRecognizer *recognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self
-                                                                                     action:@selector(handlePan:)];
-        recognizer.name = @"scene_pan";
-        recognizer.delegate = self;
-        [recognizer setMaximumNumberOfTouches:1];
-        [self addGestureRecognizer:recognizer];
+        const BOOL is_begin = action == sparkle::PointerAction::Down;
+        const int slot = [self slotForTouch:touch assignIfMissing:is_begin];
+        if (slot < 0)
+        {
+            continue;
+        }
+
+        if (action == sparkle::PointerAction::Up || action == sparkle::PointerAction::Cancel)
+        {
+            touch_slots_[slot] = nil;
+        }
+
+        app_->PushInputEvent(sparkle::PointerEvent{.device = sparkle::PointerDevice::Touch,
+                                                   .action = action,
+                                                   .id = static_cast<uint8_t>(slot),
+                                                   .position = [self uiPointFromTouch:touch]});
     }
 }
 
-- (void)handlePinch:(UIPinchGestureRecognizer *)recognizer
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
-    const float sensitivity = 10.f;
-
-    if (recognizer.state == UIGestureRecognizerStateBegan || recognizer.state == UIGestureRecognizerStateChanged)
-    {
-        CGFloat offset = (recognizer.scale - 1) * sensitivity;
-        app_->ScrollCallback(-offset, -offset);
-
-        // Reset the scale factor to 1 to allow incremental scaling
-        recognizer.scale = 1.0;
-    }
+    [self pushTouches:touches action:sparkle::PointerAction::Down];
 }
 
-- (void)handleTap:(UITapGestureRecognizer *)recognizer
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
-    if (recognizer.state == UIGestureRecognizerStateRecognized)
-    {
-        auto location = [recognizer locationInView:self];
-        auto scaled_location = [self scaledLocationInAppCoordinates:location];
-        app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
-                                  sparkle::AppFramework::KeyAction::Press, 0);
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
-                                  sparkle::AppFramework::KeyAction::Release, 0);
-    }
+    [self pushTouches:touches action:sparkle::PointerAction::Move];
 }
 
-- (void)handleFourFingersTap:(UITapGestureRecognizer *)recognizer
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
-    if (recognizer.state == UIGestureRecognizerStateRecognized)
-    {
-        app_->CaptureNextFrames(1);
-    }
+    [self pushTouches:touches action:sparkle::PointerAction::Up];
 }
 
-- (void)handlePan:(UIPanGestureRecognizer *)recognizer
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
-    auto location = [recognizer locationInView:self];
-    auto scaled_location = [self scaledLocationInAppCoordinates:location];
-    switch (recognizer.state)
-    {
-    case UIGestureRecognizerStateBegan:
-        app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
-                                  sparkle::AppFramework::KeyAction::Press, 0);
-        break;
-    case UIGestureRecognizerStateChanged:
-        app_->CursorPositionCallback(scaled_location.x, scaled_location.y);
-        break;
-    case UIGestureRecognizerStateEnded:
-        app_->MouseButtonCallback(sparkle::AppFramework::ClickButton::PrimaryLeft,
-                                  sparkle::AppFramework::KeyAction::Release, 0);
-        break;
-    default:
-        break;
-    }
-}
-
-// Delegate method to allow simultaneous gestures
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
-    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
-{
-    (void)gestureRecognizer;
-    (void)otherGestureRecognizer;
-    return YES;
+    [self pushTouches:touches action:sparkle::PointerAction::Cancel];
 }
 
 @end

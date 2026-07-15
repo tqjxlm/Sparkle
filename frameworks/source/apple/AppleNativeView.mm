@@ -9,12 +9,9 @@
 #include "application/AppFramework.h"
 #include "core/Logger.h"
 
-#if FRAMEWORK_MACOS
-#import <imgui_impl_osx.h>
-#endif
-#if FRAMEWORK_IOS
-#import "../ios/imgui_impl_ios.h"
-#endif
+#include <algorithm>
+
+#import <imgui.h>
 
 namespace sparkle
 {
@@ -48,36 +45,14 @@ void AppleNativeView::Tick()
 {
 }
 
+// apple platforms have no imgui platform backend: input reaches imgui through
+// InputManager, and TickUiSystem provides the per-frame io fields a backend would.
 void AppleNativeView::InitUiSystem()
 {
-    if (headless_)
-    {
-        return;
-    }
-
-#if FRAMEWORK_MACOS
-    ImGui_ImplOSX_Init(view_);
-#elif FRAMEWORK_IOS
-    ImGui_ImplIOS_Init(view_);
-#else
-#error
-#endif
 }
 
 void AppleNativeView::ShutdownUiSystem()
 {
-    if (headless_)
-    {
-        return;
-    }
-
-#if FRAMEWORK_MACOS
-    ImGui_ImplOSX_Shutdown();
-#elif FRAMEWORK_IOS
-    ImGui_ImplIOS_Shutdown();
-#else
-#error
-#endif
 }
 
 void AppleNativeView::TickUiSystem()
@@ -87,15 +62,22 @@ void AppleNativeView::TickUiSystem()
         return;
     }
 
-#if FRAMEWORK_MACOS
-    ImGui_ImplOSX_NewFrame(view_);
-#elif FRAMEWORK_IOS
-    ImGui_ImplIOS_NewFrame(view_);
-#else
-#error
-#endif
-
     ImGuiIO &io = ImGui::GetIO();
+
+    // ui space: window points on macos, render-target pixels on ios. the drawable is
+    // native resolution and larger than the render target, so it must not be used here:
+    // laying out against it shrinks the whole ui by the resolution ratio.
+#if FRAMEWORK_MACOS
+    auto bounds_size = [view_ bounds].size;
+    io.DisplaySize = ImVec2(static_cast<float>(bounds_size.width), static_cast<float>(bounds_size.height));
+#else
+    const auto &render_config = app_->GetRenderConfig();
+    io.DisplaySize =
+        ImVec2(static_cast<float>(render_config.image_width), static_cast<float>(render_config.image_height));
+#endif
+    io.DeltaTime = std::max(ui_frame_timer_.ElapsedSecond(), 1e-4f);
+    ui_frame_timer_.Reset();
+
     io.DisplayFramebufferScale = ImVec2(1, 1);
 }
 

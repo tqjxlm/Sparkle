@@ -1,5 +1,6 @@
 #include "application/AppFramework.h"
 
+#include "application/InputManager.h"
 #include "application/NativeKeyboard.h"
 #include "application/NativeView.h"
 #include "application/RenderFramework.h"
@@ -195,6 +196,9 @@ bool AppFramework::Init()
         {
             ui_manager_ = std::make_unique<UiManager>(view_);
         }
+
+        input_manager_ = std::make_unique<InputManager>(app_config_, ui_manager_.get());
+        SetupInputHandlers();
     }
 
     {
@@ -479,13 +483,14 @@ bool AppFramework::MainLoop()
     {
         PROFILE_SCOPE("MainLoop tick native view");
 
-        // TODO(tqjxlm): use an event system instead of direct callbacks
         view_->Tick();
 
         if (view_->ShouldClose())
         {
             return true;
         }
+
+        input_manager_->DispatchPendingEvents();
     }
 
     if (scene_load_task_ && scene_load_task_->IsReady())
@@ -629,6 +634,9 @@ void AppFramework::Cleanup()
     {
         Log(Debug, "Clean up core components");
 
+        input_subscriptions_.clear();
+        input_manager_ = nullptr;
+
         if (view_)
         {
             view_->Cleanup();
@@ -662,84 +670,88 @@ void AppFramework::Cleanup()
 void AppFramework::DebugNextFrame()
 {
     auto scale = view_->GetWindowScale();
-    TaskManager::RunInRenderThread([this, scale]() {
-        render_framework_->SetDebugPoint(last_x_ * scale.x(),
-                                         static_cast<float>(render_config_.image_height) - last_y_ * scale.y());
+    auto pointer = input_manager_->GetPointerPosition();
+    TaskManager::RunInRenderThread([this, scale, pointer]() {
+        render_framework_->SetDebugPoint(pointer.x() * scale.x(),
+                                         static_cast<float>(render_config_.image_height) - pointer.y() * scale.y());
     });
+}
+
+void AppFramework::PushInputEvent(const InputEvent &event)
+{
+    if (input_manager_)
+    {
+        input_manager_->Push(event);
+    }
+}
+
+void AppFramework::SetupInputHandlers()
+{
+    input_subscriptions_.push_back(input_manager_->OnScenePointer().Subscribe([this](const PointerEvent &event) {
+        switch (event.action)
+        {
+        case PointerAction::Down:
+            if (event.button == ClickButton::SecondaryRight ||
+                (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Control)))
+            {
+                DebugNextFrame();
+            }
+            else if (event.button == ClickButton::PrimaryLeft)
+            {
+                if (auto *camera = GetMainCamera())
+                {
+                    camera->OnPointerDown();
+                }
+            }
+            break;
+        case PointerAction::Up:
+        case PointerAction::Cancel:
+            if (event.button == ClickButton::PrimaryLeft)
+            {
+                if (auto *camera = GetMainCamera())
+                {
+                    camera->OnPointerUp();
+                }
+            }
+            break;
+        default:
+            break;
+        }
+    }));
+
+    input_subscriptions_.push_back(input_manager_->OnSceneDrag().Subscribe([this](Vector2 delta) {
+        if (auto *camera = GetMainCamera())
+        {
+            camera->OnPointerMove(delta.y(), -delta.x());
+        }
+    }));
+
+    input_subscriptions_.push_back(input_manager_->OnSceneZoom().Subscribe([this](float amount) {
+        if (auto *camera = GetMainCamera())
+        {
+            camera->OnScroll(amount);
+        }
+    }));
+
+    input_subscriptions_.push_back(input_manager_->OnSceneDoubleTap().Subscribe(
+        [this](uint8_t /*finger_count*/) { show_control_panel_ = !show_control_panel_; }));
+
+    input_subscriptions_.push_back(input_manager_->OnSceneTap().Subscribe([this](uint8_t finger_count) {
+        if (finger_count == 4)
+        {
+            CaptureNextFrames(1);
+        }
+    }));
+
+    input_subscriptions_.push_back(
+        input_manager_->OnSceneKey().Subscribe([this](const KeyEvent &event) { HandleSceneKey(event); }));
 }
 
 void AppFramework::ResetInputEvents()
 {
-    current_pressing_ = false;
-    ui_mouse_sequence_active_ = false;
-    last_x_ = -1;
-    last_y_ = -1;
-}
-
-bool AppFramework::ShouldConsumeSceneMouseInput(MouseInputType input_type, double x, double y,
-                                                bool has_pointer_position)
-{
-    if (!ui_manager_)
+    if (input_manager_)
     {
-        return false;
-    }
-
-    const bool pointer_over_ui =
-        has_pointer_position && ui_manager_->IsPointerOverUi(static_cast<float>(x), static_cast<float>(y));
-    const bool ui_wants_mouse = ui_manager_->IsHandlingMouseEvent();
-    const bool ui_interacting = ui_wants_mouse || pointer_over_ui || ui_mouse_sequence_active_;
-
-    if (input_type == MouseInputType::Press)
-    {
-        ui_mouse_sequence_active_ = ui_wants_mouse || pointer_over_ui;
-        return ui_mouse_sequence_active_;
-    }
-
-    if (input_type == MouseInputType::Release)
-    {
-        const bool consume_release = ui_interacting;
-        ui_mouse_sequence_active_ = false;
-        return consume_release;
-    }
-
-    return ui_interacting;
-}
-
-void AppFramework::CancelScenePointerInteraction()
-{
-    if (!current_pressing_)
-    {
-        return;
-    }
-
-    if (auto *camera = GetMainCamera())
-    {
-        camera->OnPointerUp();
-    }
-
-    current_pressing_ = false;
-}
-
-void AppFramework::CursorPositionCallback(double xPos, double yPos)
-{
-    const auto last_point = GetLastClickPoint();
-    SetLastClickPoint(static_cast<float>(xPos), static_cast<float>(yPos));
-
-    if (ShouldConsumeSceneMouseInput(MouseInputType::Move, xPos, yPos, true))
-    {
-        CancelScenePointerInteraction();
-        return;
-    }
-
-    auto *camera = GetMainCamera();
-    if (!camera)
-    {
-        return;
-    }
-
-    if (current_pressing_ && last_point.x() >= 0.f && last_point.y() >= 0.f)
-    {
-        camera->OnPointerMove(static_cast<float>(yPos) - last_point.y(), last_point.x() - static_cast<float>(xPos));
+        input_manager_->Reset();
     }
 }
 
@@ -753,117 +765,25 @@ void AppFramework::FrameBufferResizeCallback(int width, int height) const
     });
 }
 
-void AppFramework::ScrollCallback(double /*xoffset*/, double yoffset)
+void AppFramework::HandleSceneKey(const KeyEvent &event)
 {
-    const bool has_pointer_position = last_x_ >= 0.f && last_y_ >= 0.f;
-    if (ShouldConsumeSceneMouseInput(MouseInputType::Scroll, static_cast<double>(last_x_), static_cast<double>(last_y_),
-                                     has_pointer_position))
-    {
-        return;
-    }
-
     auto *camera = GetMainCamera();
     if (!camera)
     {
         return;
     }
 
-    camera->OnScroll(static_cast<float>(app_config_.platform == AppConfig::NativePlatform::MacOS ? -yoffset : yoffset));
-}
+    const auto action = event.action;
+    const bool shift_on = (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Shift)) != 0;
 
-void AppFramework::MouseButtonCallback(ClickButton button, KeyAction action, uint32_t mods)
-{
-    MouseInputType input_type = MouseInputType::Move;
-    if (button == ClickButton::PrimaryLeft)
+    int key = event.key;
+#if FRAMEWORK_MACOS
+    // support keyboards with no escape key
+    if (static_cast<NativeKeyboard>(key) == NativeKeyboard::KeyDelete)
     {
-        input_type = action == KeyAction::Press ? MouseInputType::Press : MouseInputType::Release;
+        key = static_cast<int>(NativeKeyboard::KeyEscape);
     }
-
-    const bool has_pointer_position = last_x_ >= 0.f && last_y_ >= 0.f;
-    if (ShouldConsumeSceneMouseInput(input_type, static_cast<double>(last_x_), static_cast<double>(last_y_),
-                                     has_pointer_position))
-    {
-        CancelScenePointerInteraction();
-        return;
-    }
-
-    auto *camera = GetMainCamera();
-    if (!camera)
-    {
-        return;
-    }
-
-    if (button == ClickButton::PrimaryLeft)
-    {
-        if (action == KeyAction::Release)
-        {
-            if (!current_pressing_)
-            {
-                return;
-            }
-            current_pressing_ = false;
-            camera->OnPointerUp();
-
-            static const unsigned ClickThresholdMS = 200;
-            if (click_timer_.ElapsedMilliSecond() < ClickThresholdMS)
-            {
-                ClickCallback();
-            }
-        }
-        else if (action == KeyAction::Press)
-        {
-            if (mods & static_cast<uint32_t>(KeyboardModifier::Control))
-            {
-                DebugNextFrame();
-                return;
-            }
-            current_pressing_ = true;
-            camera->OnPointerDown();
-
-            click_timer_.Reset();
-        }
-    }
-
-    if (button == ClickButton::SecondaryRight)
-    {
-        if (action == KeyAction::Press)
-        {
-            DebugNextFrame();
-            return;
-        }
-    }
-}
-
-void AppFramework::ClickCallback()
-{
-    static const unsigned DoubleClickThresholdMS = 300;
-    static const unsigned DoubleClickCooldownMS = 300;
-
-    if (double_click_timer_.ElapsedMilliSecond() < DoubleClickThresholdMS)
-    {
-        if (double_click_cooldown_.ElapsedMilliSecond() > DoubleClickCooldownMS)
-        {
-            show_control_panel_ = !show_control_panel_;
-
-            double_click_cooldown_.Reset();
-        }
-    }
-
-    double_click_timer_.Reset();
-}
-
-void AppFramework::KeyboardCallback(int key, KeyAction action, bool shift_on)
-{
-    if (ui_manager_ && ui_manager_->IsHanldingKeyboradEvent())
-    {
-        return;
-    }
-
-    auto *camera = GetMainCamera();
-    if (!camera)
-    {
-        return;
-    }
+#endif
 
     switch (static_cast<NativeKeyboard>(key))
     {

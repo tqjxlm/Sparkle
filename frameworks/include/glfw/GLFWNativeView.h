@@ -39,9 +39,15 @@ private:
 
     static void KeyboardCallback(GLFWwindow *window, int key, int scancode, int action, int mods);
 
+    static void CharCallback(GLFWwindow *window, unsigned int codepoint);
+
     static void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods);
 
     static void ScrollCallback(GLFWwindow *window, double xoffset, double yoffset);
+
+    static void WindowFocusCallback(GLFWwindow *window, int focused);
+
+    static void CursorEnterCallback(GLFWwindow *window, int entered);
 
     GLFWwindow *view_ = nullptr;
     bool headless_ = false;
