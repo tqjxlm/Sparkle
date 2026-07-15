@@ -285,10 +285,16 @@ void MetalPipelineState::BindResources(id<MTLCommandEncoder> encoder, RHIShaderS
         // binding has been rewritten according to shader reflection
         auto binding_point = binding->GetReflection()->slot;
 
-        if (binding_point < 0)
+        if (binding_point == UINT_MAX)
         {
-            Log(Warn, "shader resource not bound {} at binding {}", resource->GetName(), binding_point);
+            // optimized out of the compiled shader; Initialize() has warned about it
             continue;
+        }
+
+        if (!resource)
+        {
+            Log(Error, "no resource bound to shader resource {}. did you forget to call BindResource?", name);
+            DumpAndAbort();
         }
 
         if (binding->IsBindless())
