@@ -282,6 +282,12 @@ bool VulkanContext::Init()
 
 void VulkanContext::Cleanup()
 {
+    // safe to free unconditionally: the RHI waits for device idle before cleanup
+    while (!pending_command_buffer_resources_.empty())
+    {
+        pending_command_buffer_resources_.pop();
+    }
+
     vmaDestroyAllocator(allocator_);
 
     vkDestroyCommandPool(device_, command_pool_, nullptr);
@@ -630,7 +636,10 @@ void VulkanContext::BeginCommandBuffer()
     ASSERT_F(temporary_command_buffer_ == nullptr,
              "A temporary command buffer is active, should not begin another one");
 
-    temporary_command_buffer_ = new OneShotCommandBufferScope;
+    // resources released in this scope land in the current frame slot's deferred-deletion
+    // bucket, which empties at the next BeginFrame regardless of this scope's own fence;
+    // block that frame on the fence so the deletions stay safe
+    temporary_command_buffer_ = new OneShotCommandBufferScope(false, true);
     current_command_buffer_ = temporary_command_buffer_->GetCommandBuffer();
 }
 
