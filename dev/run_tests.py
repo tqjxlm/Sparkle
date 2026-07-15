@@ -129,6 +129,11 @@ def test_steps(framework, config, software, headless, pipelines, scene,
             round_trip_compare,
         ),
         (
+            "input injection",
+            app_command(framework, config, software,
+                        "input_injection", common_args),
+        ),
+        (
             "cooker request",
             app_command(framework, config, software,
                         "cooker_request", common_args),

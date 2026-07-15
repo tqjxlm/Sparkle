@@ -4,7 +4,7 @@
 
 #import "apple/MetalView.h"
 
-@interface iOSView : MetalView <UIGestureRecognizerDelegate>
+@interface iOSView : MetalView
 
 @end
 

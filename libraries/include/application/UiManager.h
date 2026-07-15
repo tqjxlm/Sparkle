@@ -31,7 +31,7 @@ public:
     bool IsHandlingMouseEvent();
     bool IsPointerOverUi(float x, float y);
 
-    bool IsHanldingKeyboradEvent();
+    bool IsHandlingKeyboardEvent();
 
     // request to draw a ui window that will be called in render thread.
     // you are responsible to handle thread safety.

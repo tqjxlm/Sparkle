@@ -1,4 +1,5 @@
 #include "application/AppFramework.h"
+#include "application/InputEvents.h"
 #include "application/RenderFramework.h"
 #include "application/TestCase.h"
 
@@ -70,11 +71,11 @@ private:
         constexpr float StartY = 360.f;
         constexpr float NudgePixels = 20.f;
 
-        app.CursorPositionCallback(StartX, StartY);
-        app.MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Press, 0);
-        app.CursorPositionCallback(StartX + NudgePixels, StartY + NudgePixels);
-        app.CursorPositionCallback(StartX, StartY);
-        app.MouseButtonCallback(AppFramework::ClickButton::PrimaryLeft, AppFramework::KeyAction::Release, 0);
+        app.PushInputEvent(PointerEvent{.action = PointerAction::Down, .position = {StartX, StartY}});
+        app.PushInputEvent(
+            PointerEvent{.action = PointerAction::Move, .position = {StartX + NudgePixels, StartY + NudgePixels}});
+        app.PushInputEvent(PointerEvent{.action = PointerAction::Move, .position = {StartX, StartY}});
+        app.PushInputEvent(PointerEvent{.action = PointerAction::Up, .position = {StartX, StartY}});
     }
 
     enum class Stage : uint8_t

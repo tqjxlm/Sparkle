@@ -3,6 +3,7 @@
 #if FRAMEWORK_APPLE
 
 #include "application/NativeView.h"
+#include "core/Timer.h"
 
 #include "apple/MetalView.h"
 
@@ -44,6 +45,8 @@ private:
     int headless_width_ = 0;
     int headless_height_ = 0;
     MetalView *view_ = nullptr;
+
+    Timer ui_frame_timer_;
 };
 } // namespace sparkle
 #endif

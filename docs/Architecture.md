@@ -15,6 +15,7 @@
 | `ConfigManager`   | [libraries/include/core/ConfigManager.h](../libraries/include/core/ConfigManager.h)                 | Config system registry (cvar registration)  |
 | `MaterialManager` | [libraries/include/scene/material/](../libraries/include/scene/material/)                           | Material lifecycle and lookup               |
 | `SessionManager`  | [libraries/include/application/SessionManager.h](../libraries/include/application/SessionManager.h) | Save/load session state                     |
+| `InputManager`    | [libraries/include/application/InputManager.h](../libraries/include/application/InputManager.h)     | Input event pipeline, see [Input.md](Input.md)  |
 
 ## Build System Architecture
 
