@@ -80,6 +80,17 @@ def test_steps(framework, config, software, headless, pipelines, scene,
             compare_command += ["--scene", ground_truth_scene]
         steps.append((f"compare ({pipeline})", compare_command))
 
+    camera_args = ["--clear_screenshots", "true"] + common_args
+    camera_compare = [
+        test_python,
+        "tests/camera/camera_nudge_test.py",
+        "--framework",
+        framework,
+        "--skip_run",
+    ]
+    if scene:
+        camera_args += ["--scene", scene]
+
     usd_args = ["--clear_screenshots", "true",
                 "--pipeline", "forward"] + common_args
     round_trip_compare = [
@@ -94,6 +105,15 @@ def test_steps(framework, config, software, headless, pipelines, scene,
         round_trip_compare += ["--scene", scene]
 
     steps += [
+        (
+            "camera nudge",
+            app_command(framework, config, software,
+                        "camera_nudge_return", camera_args),
+        ),
+        (
+            "compare (camera nudge)",
+            camera_compare,
+        ),
         (
             "usd round trip",
             app_command(
