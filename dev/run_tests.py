@@ -1,19 +1,25 @@
-"""Build once and run the complete desktop validation suite.
+"""Build once and run the coverage-selected desktop validation suite.
 
-The suite owns application orchestration. Individual Python files under tests/ evaluate
-specialized outputs, such as screenshot and USD round-trip comparisons.
+tests/registry.json registers the runnable cases: each names a C++ TestCase, the
+exact arguments to run it with, and an optional Python evaluator. tests/coverage.json
+assigns each CI triplet (host-framework-config) the registry cases it must run. The
+suite runs the current triplet's assignment; --case runs registry cases by name
+regardless of coverage.
 """
 
 import argparse
 import glob
+import json
 import os
 import subprocess
 import sys
 import venv
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REGISTRY = os.path.join(REPO, "tests", "registry.json")
+COVERAGE = os.path.join(REPO, "tests", "coverage.json")
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
-DEFAULT_PIPELINES = ("forward", "deferred")
+HOST_NAMES = {"darwin": "macos", "win32": "windows"}
 
 
 def venv_python():
@@ -50,119 +56,58 @@ def app_command(framework, config, software, test_case, test_args):
     return command + ["--test_case", test_case] + list(test_args)
 
 
-def test_steps(framework, config, software, headless, pipelines, scene,
-               other_args, test_python, require_cooked):
+def load_registry():
+    with open(REGISTRY) as registry_file:
+        return json.load(registry_file)
+
+
+def load_coverage():
+    with open(COVERAGE) as coverage_file:
+        return json.load(coverage_file)
+
+
+def current_triplet(framework, config):
+    host = HOST_NAMES.get(sys.platform, "linux")
+    return f"{host}-{framework}-{config.lower()}"
+
+
+def covered_cases(registry, coverage, triplet):
+    by_name = {case["name"]: case for case in registry}
+    return [by_name[name] for name in coverage.get(triplet, [])]
+
+
+def expand(template_args, context):
+    return [arg.format(**context) for arg in template_args]
+
+
+def test_steps(cases, framework, config, software, headless, scene,
+               other_args, test_python):
+    context = {
+        "framework": framework,
+        "scene": scene,
+        "scene_stem": os.path.splitext(os.path.basename(scene))[0] if scene else None,
+    }
     common_args = ["--headless", "true"] if headless else []
     steps = []
-    ground_truth_scene = os.path.splitext(os.path.basename(scene))[0] if scene else None
 
-    for pipeline in pipelines:
-        screenshot_args = ["--clear_screenshots", "true",
-                           "--pipeline", pipeline]
+    for case in cases:
+        app_args = expand(case.get("app_args", []), context)
         if scene:
-            screenshot_args += ["--scene", scene]
-        screenshot_args += common_args + list(other_args)
+            app_args += expand(case.get("scene_args", []), context)
+        app_args += common_args + list(other_args)
         steps.append((
-            f"screenshot ({pipeline})",
+            case["name"],
             app_command(framework, config, software,
-                        "screenshot", screenshot_args),
+                        case["test_case"], app_args),
         ))
 
-        compare_command = [
-            test_python,
-            "tests/screenshot/static_render_test.py",
-            "--framework",
-            framework,
-            "--pipeline",
-            pipeline,
-        ]
-        if ground_truth_scene:
-            compare_command += ["--scene", ground_truth_scene]
-        steps.append((f"compare ({pipeline})", compare_command))
-
-    camera_args = ["--clear_screenshots", "true"] + common_args
-    camera_compare = [
-        test_python,
-        "tests/camera/camera_nudge_test.py",
-        "--framework",
-        framework,
-        "--skip_run",
-    ]
-    if scene:
-        camera_args += ["--scene", scene]
-
-    usd_args = ["--clear_screenshots", "true",
-                "--pipeline", "forward"] + common_args
-    round_trip_compare = [
-        test_python,
-        "tests/usd/usd_roundtrip_test.py",
-        "--framework",
-        framework,
-        "--skip_run",
-    ]
-    if scene:
-        usd_args += ["--scene", scene]
-        round_trip_compare += ["--scene", scene]
-
-    steps += [
-        (
-            "camera nudge",
-            app_command(framework, config, software,
-                        "camera_nudge_return", camera_args),
-        ),
-        (
-            "compare (camera nudge)",
-            camera_compare,
-        ),
-        (
-            "usd round trip",
-            app_command(
-                framework,
-                config,
-                software,
-                "usd_round_trip",
-                usd_args,
-            ),
-        ),
-        (
-            "compare (round trip)",
-            round_trip_compare,
-        ),
-        (
-            "input injection",
-            app_command(framework, config, software,
-                        "input_injection", common_args),
-        ),
-        (
-            "cooker request",
-            app_command(framework, config, software,
-                        "cooker_request", common_args),
-        ),
-        (
-            "scene load failure",
-            app_command(framework, config, software,
-                        "scene_load_failure", common_args),
-        ),
-        (
-            "render target pool",
-            app_command(framework, config, software,
-                        "render_target_pool", common_args),
-        ),
-        (
-            "pipeline switch pool",
-            app_command(framework, config, software,
-                        "pipeline_switch_pool", common_args),
-        ),
-    ]
-
-    # parity needs a physical GPU producer (a software rasterizer would compare CPU to
-    # CPU), and its deliberate artifact recook would trip the --require_cooked gate
-    if framework == "macos" and not software and not require_cooked:
-        steps.append((
-            "ibl parity",
-            app_command(framework, config, software,
-                        "ibl_parity", common_args),
-        ))
+        evaluator = case.get("evaluator")
+        if evaluator:
+            command = [test_python, evaluator["script"]]
+            command += expand(evaluator["args"], context)
+            if scene:
+                command += expand(evaluator.get("scene_args", []), context)
+            steps.append((f"{case['name']} (compare)", command))
 
     return steps
 
@@ -227,9 +172,6 @@ def parse_args():
                         choices=SUPPORTED_FRAMEWORKS)
     parser.add_argument("--config", default="Release",
                         choices=("Debug", "Release"))
-    parser.add_argument("--pipeline", dest="pipelines", action="append",
-                        choices=("forward", "deferred", "gpu", "cpu"),
-                        help="screenshot pipeline to test; repeat to test multiple pipelines")
     parser.add_argument("--scene",
                         help="scene file path; its filename selects screenshot ground truth")
     parser.add_argument("--software", action="store_true",
@@ -241,14 +183,48 @@ def parse_args():
     parser.add_argument("--require_cooked", action="store_true",
                         help="fail if any test cooks on the fly")
     parser.add_argument("--case", dest="cases", action="append",
-                        help="run only the named suite steps; repeat to select multiple")
+                        help="run only the named registry cases regardless of coverage;"
+                        " repeat to select multiple")
     return parser.parse_known_args()
+
+
+def select_cases(registry, coverage, args):
+    if args.cases:
+        known = [case["name"] for case in registry]
+        unknown = [case for case in args.cases if case not in known]
+        if unknown:
+            print(f"ERROR: unknown --case {unknown}; available: {known}")
+            return None
+        cases = [case for case in registry if case["name"] in args.cases]
+    else:
+        triplet = current_triplet(args.framework, args.config)
+        cases = covered_cases(registry, coverage, triplet)
+        if not cases:
+            print(f"ERROR: triplet {triplet} has no coverage;"
+                  f" covered: {list(coverage)}; use --case to run registry cases explicitly")
+            return None
+        print(f"=== triplet {triplet}: {[case['name'] for case in cases]}")
+
+    if args.require_cooked:
+        recooking = [case["name"] for case in cases if case.get("recooks")]
+        if recooking:
+            print(f"skipping {recooking}: their deliberate recook would trip the cook gate")
+            cases = [case for case in cases if not case.get("recooks")]
+
+    if not cases:
+        print("ERROR: no test cases left to run")
+        return None
+    return cases
 
 
 def main():
     args, other_args = parse_args()
     if args.software and args.framework != "glfw":
         print("ERROR: --software is only supported with --framework glfw")
+        return 1
+
+    cases = select_cases(load_registry(), load_coverage(), args)
+    if cases is None:
         return 1
 
     results = []
@@ -268,26 +244,16 @@ def main():
             return 1
 
     previous_log_sizes = snapshot_logs(args.framework)
-    pipelines = args.pipelines or list(DEFAULT_PIPELINES)
     steps = test_steps(
+        cases=cases,
         framework=args.framework,
         config=args.config,
         software=args.software,
         headless=args.headless,
-        pipelines=pipelines,
         scene=args.scene,
         other_args=other_args,
         test_python=venv_python(),
-        require_cooked=args.require_cooked,
     )
-
-    if args.cases:
-        step_names = [name for name, _ in steps]
-        unknown = [case for case in args.cases if case not in step_names]
-        if unknown:
-            print(f"ERROR: unknown --case {unknown}; available: {step_names}")
-            return 1
-        steps = [(name, command) for name, command in steps if name in args.cases]
 
     for name, command in steps:
         results.append(run_step(name, command))

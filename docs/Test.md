@@ -25,16 +25,33 @@ How to compare a render against the ground truth — signed per-pixel diffs, 1:1
 * Focused test implementations, evaluators, and reusable test helpers belong under `tests/`, next to the feature they validate.
 * If Python is not sufficient, combine a focused script under `tests/` with the TestCase system below.
 
+## Test Registry
+
+[tests/registry.json](../tests/registry.json) lists the runnable suite cases. Versatile test cases (e.g. `screenshot`) never appear here bare; each entry pins one to specific arguments (e.g. `forward_render_static` is `screenshot` with `--pipeline forward` plus its ground-truth evaluator), so a case name always identifies one exact, reproducible run.
+
+A case carries:
+
+* `test_case`: the C++ `TestCase` it runs.
+* `app_args` / `scene_args`: cvar arguments for the app run; `scene_args` apply only when the suite is given `--scene`. `{framework}`, `{scene}` and `{scene_stem}` expand at run time.
+* `evaluator`: an optional Python script (with its own `args` / `scene_args`) that judges the app output afterwards.
+* `recooks`: marks a case whose deliberate runtime cook is incompatible with `--require_cooked`; the suite drops it under that flag.
+
+## Test Coverage
+
+[tests/coverage.json](../tests/coverage.json) assigns each CI triplet (`host-framework-config`, e.g. `macos-macos-release`) the registry cases it must run, in execution order. This file decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from it, so covering a new triplet means adding its case picks here and its suite invocation to `TEST_RUNNERS` in `ci_matrix.py`. A triplet absent from the file ships untested — currently only `macos-macos-release` and `windows-glfw-release` have capable runners. Registry cases picked by no triplet are development-only and run via `--case`.
+
+Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators, and coverage that picks existing registry cases for triplets `ci_matrix.py` can run.
+
 ## Test Orchestration
 
-`dev/run_tests.py` runs the Python unit tests as a fail-fast preflight, builds once, runs both screenshot pipelines (forward and deferred) and evaluates them against the ground truth, runs the camera nudge round trip and the USD round trip, and executes the `input_injection`, `cooker_request`, `scene_load_failure`, `render_target_pool` and `pipeline_switch_pool` test cases; on the macos framework with a physical GPU it also runs `ibl_parity`. The application suite runs to completion and reports all failures together.
+`dev/run_tests.py` runs the Python unit tests as a fail-fast preflight, builds once, then derives the current triplet from the host OS and the `--framework` / `--config` arguments and runs the cases [tests/coverage.json](../tests/coverage.json) assigns to it. The application suite runs to completion and reports all failures together.
 
 ```bash
 python3 dev/run_tests.py --framework macos --config Release --headless
-python3 dev/run_tests.py --framework glfw --config Release --headless
+python3 dev/run_tests.py --framework glfw --config Release --software --headless   # on Windows
 ```
 
-Use `--pipeline <name>` to focus screenshot coverage while developing; repeat the option for multiple pipelines. Use `--skip_build` only when the intended binary is already built. CI runs the packaged Windows build under Lavapipe with `--software --require_cooked`, and the packaged macOS build on a physical Metal GPU with `--require_cooked`, which rejects runtime cooking. See [CI.md](CI.md) for the exact commands and why the gpu pipeline stays local-only.
+Use `--case <name>` (repeatable) to run registry cases by name regardless of coverage — e.g. `--case forward_render_static` to focus one pipeline, or `--case gpu_render_static` for a development-only case. Use `--skip_build` only when the intended binary is already built. CI runs the packaged Windows build under Lavapipe with `--software --require_cooked`, and the packaged macOS build on a physical Metal GPU with `--require_cooked`, which rejects runtime cooking. See [CI.md](CI.md) for the exact commands and why the gpu pipeline stays local-only.
 
 The static-render evaluator lives at [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py), and the USD evaluator lives at [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py). They own specialized assertions; they do not orchestrate the general suite. Shared framework, dependency and image mechanics live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py), so one evaluator never serves as another evaluator's utility layer.
 
@@ -82,6 +99,7 @@ Use `--test_timeout <frames>` to set a frame budget for the test. If the test do
 2. Subclass `sparkle::TestCase` and implement `OnTick()`.
 3. If the test needs fixed runtime config, optionally override `OnEnforceConfigs()`.
 4. Register with `TestCaseRegistrar<T>` using a unique name string.
+5. If the suite should run it, add a [tests/registry.json](../tests/registry.json) entry with the exact arguments and pick it in [tests/coverage.json](../tests/coverage.json) for the triplets that must run it. Development-only cases need no coverage pick; without a registry entry either, they still run directly via `--test_case`.
 
 The registered name is injected into the test instance and available via `TestCase::GetName()`, so log messages do not need to duplicate it manually.
 
@@ -128,19 +146,4 @@ Test case names (the string passed to `TestCaseRegistrar`) must be unique across
 
 ## Built-in Test Cases
 
-| Name                     | File                                                                                              | What it does                                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `smoke`                  | [tests/smoke/SmokeTest.cpp](../tests/smoke/SmokeTest.cpp)                                         | Waits 2 frames then returns `Pass`. Verifies the full init and scene-load pipeline.                                                                             |
-| `screenshot`             | [tests/screenshot/ScreenshotTest.cpp](../tests/screenshot/ScreenshotTest.cpp)                     | Waits for renderer ready, clears all existing screenshots optionally, captures one, then passes. Used by functional tests and visual QA.                        |
-| `multi_frame_screenshot` | [tests/screenshot/MultiFrameScreenshotTest.cpp](../tests/screenshot/MultiFrameScreenshotTest.cpp) | Waits for renderer ready, clears all existing screenshots optionally, captures five, then passes. Used by functional tests and visual QA for temporal analysis. |
-| `camera_nudge_return`    | [tests/camera/CameraNudgeReturnTest.cpp](../tests/camera/CameraNudgeReturnTest.cpp)               | Screenshots the loaded scene, drags the camera out and back to its starting point through the mouse input path, then screenshots again. Driven by [tests/camera/camera_nudge_test.py](../tests/camera/camera_nudge_test.py), which FLIP-compares the two screenshots. Enforces the forward pipeline. |
-| `input_injection`        | [tests/input/InputInjectionTest.cpp](../tests/input/InputInjectionTest.cpp)                       | Injects synthetic mouse and touch sequences through `InputManager::Push` and asserts camera posture, control-panel state and config flags. Covers drag, scroll, double-click, keys, touch drag, pinch and multi-finger taps. |
-| `usd_round_trip`         | [tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)                               | Renders the loaded scene, exports it to USD, loads the exported file back and renders it again. Driven by [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py), which FLIP-compares the two screenshots. See [USD.md](USD.md). |
-| `cooker_request`         | [tests/cook/CookerRequestTest.cpp](../tests/cook/CookerRequestTest.cpp)                           | Verifies logical and relocated-content cache hits share main-thread delivery, avoid source construction on an exact hit, and avoid recooking identical relocated content without exporting cache metadata to the requester. |
-| `ibl_parity`             | [tests/cook/IblParityTest.cpp](../tests/cook/IblParityTest.cpp)                                   | Gates the CPU IBL cook jobs against their GPU producers: deletes the internal IBL artifacts, lets the GPU cook them, runs the CPU jobs and compares payloads. Needs a physical GPU; part of the macos suite. See [Cooking.md](Cooking.md). |
-| `scene_load_failure`     | [tests/scene/SceneLoadFailureTest.cpp](../tests/scene/SceneLoadFailureTest.cpp)                   | Verifies a missing authored sky resource preserves its path, produces no invalid cube, reports scene async failure, and finishes render-side application before the scene settles. |
-| `render_target_pool`     | [tests/rhi/RenderTargetPoolTest.cpp](../tests/rhi/RenderTargetPoolTest.cpp)                       | Exercises `RHIRenderTargetPool` on the render thread: distinct targets while held, reuse of a freed target after the GPU safety delay, manual release of free targets via `ReleaseUnused`. |
-| `pipeline_switch_pool`   | [tests/rhi/PipelineSwitchPoolTest.cpp](../tests/rhi/PipelineSwitchPoolTest.cpp)                   | Enforces the forward pipeline, switches at runtime to gpu (or deferred without hardware ray tracing) and back, and asserts the returning forward renderer reuses a pooled render target. |
-| `nrd_probe`              | [tests/nrd/NrdProbeTest.mm](../tests/nrd/NrdProbeTest.mm)                                         | Compiles every cooked ReBLUR pipeline to a PSO through the production cooked-shader loader and `MetalNrdBackend`, proving the GPU supports the SIMD/quad-group ops ReBLUR uses. Apple platforms only. See [Nrd.md](Nrd.md). |
-| `denoiser_sweep`         | [tests/nrd/DenoiserSweepTest.cpp](../tests/nrd/DenoiserSweepTest.cpp)                             | Captures consecutive frames under a configurable camera sweep (yaw / pitch / static) for temporal analysis; driven by [tests/nrd/run_nrd_gates.py](../tests/nrd/run_nrd_gates.py). See [Nrd.md](Nrd.md). |
-| `nrd_runtime_toggle`     | [tests/nrd/NrdRuntimeToggleTest.cpp](../tests/nrd/NrdRuntimeToggleTest.cpp)                       | Guards enabling NRD at runtime: one arm switches pipeline and enables NRD mid-accumulation (recycled-memory repro), the other enables it on an already-converged frame. |
+Test cases self-register by name: search `tests/` for `TestCaseRegistrar` to enumerate them. The suite-runnable ones live in [tests/registry.json](../tests/registry.json) with their CI assignment in [tests/coverage.json](../tests/coverage.json) (see [Test Registry](#test-registry)); purely development-facing cases (e.g. `multi_frame_screenshot`, `denoiser_sweep`) are documented with the feature they serve.

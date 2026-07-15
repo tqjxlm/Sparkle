@@ -10,8 +10,8 @@ on:
 
 # stages: build (every product in parallel, the heavy stage) -> cook (macos-release, on
 # the macos runners' real Metal GPU) -> release (every product: swap in the cooked
-# content image and re-sign) -> test (the test table decides which released products run the suite and
-# with what coverage). a cell waits only for the shared cook and its own product's
+# content image and re-sign) -> test (tests/coverage.json decides which released products
+# run the suite and with which cases). a cell waits only for the shared cook and its own product's
 # upstream cell, never other products': the stage -> cook edges are real needs edges,
 # while the edge to the product's own build (for release cells) or release (for test
 # cells) cannot be a needs, since needs cannot target a single matrix cell — it is an
