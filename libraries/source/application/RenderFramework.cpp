@@ -99,9 +99,12 @@ void RenderFramework::RenderThreadMain()
     }
 
     // discard all remaining tasks as we are going to exit
-    while (!tasks_per_frame_.empty())
     {
-        tasks_per_frame_.pop();
+        std::unique_lock<std::mutex> lock(task_queue_mutex_);
+        while (!tasks_per_frame_.empty())
+        {
+            tasks_per_frame_.pop();
+        }
     }
     end_of_frame_signal_.notify_all();
 
