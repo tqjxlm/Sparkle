@@ -34,13 +34,15 @@ void OrbitCameraComponent::SetupFromTransform()
     const auto &transform = GetTransform();
 
     const Vector3 position = transform.GetTranslation();
-    const Vector3 forward = transform.TransformDirection(Front);
+
+    // camera nodes store the world-to-camera rotation, so the world-space forward needs the inverse
+    const Vector3 forward = transform.GetRotation().conjugate() * Front;
 
     // yaw: project forward onto XY plane and get angle with Y axis
-    yaw_ = utilities::ToDegree(-std::atan2(forward.x(), forward.y()));
+    yaw_ = utilities::ToDegree(std::atan2(forward.x(), forward.y()));
 
     // pitch: angle between forward and XY plane
-    pitch_ = utilities::ToDegree(-std::asin(-forward.z()));
+    pitch_ = utilities::ToDegree(-std::asin(forward.z()));
 
     // the transform alone cannot tell where the orbit center is.
     // assume the camera focuses on it, which holds for every camera set up via Setup().

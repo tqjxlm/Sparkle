@@ -567,43 +567,7 @@ static std::shared_ptr<SceneNode> LoadScene(const Path &asset_root, const tinyus
         .render_scene = render_scene,
     };
 
-    auto root_node = LoadNode(render_scene.nodes[render_scene.default_root_node], ctx);
-
-    // TODO(tqjxlm): support multiple cameras
-    auto *main_camera = static_cast<OrbitCameraComponent *>(scene->GetMainCamera());
-
-    AABB total_bound;
-    std::vector<SceneNode *> nodes_to_visit;
-    nodes_to_visit.push_back(root_node.get());
-    while (!nodes_to_visit.empty())
-    {
-        std::vector<SceneNode *> next_nodes;
-        for (auto *node : nodes_to_visit)
-        {
-            for (const auto &component : node->GetComponents())
-            {
-                if (total_bound.IsValid())
-                {
-                    total_bound += component->GetWorldBoundingBox();
-                }
-                else
-                {
-                    total_bound = component->GetWorldBoundingBox();
-                }
-            }
-
-            for (const auto &child : node->GetChildren())
-            {
-                next_nodes.push_back(child.get());
-            }
-        }
-
-        std::swap(nodes_to_visit, next_nodes);
-    }
-
-    main_camera->SetCenter(total_bound.Center());
-
-    return root_node;
+    return LoadNode(render_scene.nodes[render_scene.default_root_node], ctx);
 }
 
 std::shared_ptr<SceneNode> USDLoader::Load(Scene *scene)
