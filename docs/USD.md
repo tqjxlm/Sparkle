@@ -65,6 +65,6 @@ To regenerate it after changing `BuildTestScene`, the exporter or the loader:
 
 1. Run the round-trip test (above). It validates the procedural scene against the ground truth and writes the export to `usd_export/scene.usda` in internal storage (`build/generated/usd_export/` under the glfw output directory, `sparkle.app/Contents/SharedSupport/usd_export/` for macos).
 2. Copy `usd_export/scene.usda` over `resources/packed/TestScene.usda` and replace each `textures/...` asset path with the corresponding packaged file (the sky map under `skymap/`, the glTF textures under `models/`).
-3. Run `dev/run_tests.py --pipeline forward` without `--scene` to confirm the packaged scene still matches the ground truth.
+3. Run `dev/run_tests.py --case forward_render_static` without `--scene` to confirm the packaged scene still matches the ground truth.
 
 Since `SpherePrimitive` bakes to a triangle mesh on export, ray-traced pipelines render the packaged scene's spheres as tessellated meshes instead of analytic spheres.

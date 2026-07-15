@@ -1,6 +1,9 @@
 """Tests for the repository test-suite orchestrator."""
 
+import argparse
+import contextlib
 import importlib.util
+import io
 import os
 import sys
 import tempfile
@@ -13,6 +16,30 @@ SPEC = importlib.util.spec_from_file_location(
 run_tests = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = run_tests
 SPEC.loader.exec_module(run_tests)
+
+REGISTRY = run_tests.load_registry()
+COVERAGE = run_tests.load_coverage()
+
+
+def suite_steps(triplet, scene=None):
+    return run_tests.test_steps(
+        cases=run_tests.covered_cases(REGISTRY, COVERAGE, triplet),
+        framework=triplet.split("-")[1],
+        config="Release",
+        software=False,
+        headless=True,
+        scene=scene,
+        other_args=[],
+        test_python="test-python",
+    )
+
+
+def select(cases=None, require_cooked=False, triplet="macos-macos-release"):
+    args = argparse.Namespace(cases=cases, framework="macos", config="Release",
+                              require_cooked=require_cooked)
+    with patch.object(run_tests, "current_triplet", return_value=triplet), \
+            contextlib.redirect_stdout(io.StringIO()):
+        return run_tests.select_cases(REGISTRY, COVERAGE, args)
 
 
 class RunTestsCommandTest(unittest.TestCase):
@@ -67,17 +94,7 @@ class RunTestsCommandTest(unittest.TestCase):
         ])
 
     def test_suite_uses_test_owned_static_render_comparator(self):
-        steps = run_tests.test_steps(
-            framework="glfw",
-            config="Release",
-            software=True,
-            headless=True,
-            pipelines=["forward", "deferred"],
-            scene=None,
-            other_args=[],
-            test_python="test-python",
-            require_cooked=False,
-        )
+        steps = suite_steps("windows-glfw-release")
 
         commands = [command for _, command in steps]
         flattened = "\n".join(" ".join(command) for command in commands)
@@ -86,40 +103,17 @@ class RunTestsCommandTest(unittest.TestCase):
         self.assertNotIn("functional_test.py", flattened)
 
     def test_suite_checks_scene_load_failure_propagation(self):
-        steps = run_tests.test_steps(
-            framework="macos",
-            config="Release",
-            software=False,
-            headless=True,
-            pipelines=["forward"],
-            scene=None,
-            other_args=[],
-            test_python="test-python",
-            require_cooked=False,
-        )
-
-        self.assertIn("scene load failure", dict(steps))
+        self.assertIn("scene_load_failure", dict(suite_steps("macos-macos-release")))
 
     def test_custom_scene_path_is_separate_from_its_ground_truth_name(self):
         scene = os.path.join("resources", "custom", "Atrium.usda")
-        steps = run_tests.test_steps(
-            framework="macos",
-            config="Release",
-            software=False,
-            headless=True,
-            pipelines=["forward"],
-            scene=scene,
-            other_args=[],
-            test_python="test-python",
-            require_cooked=False,
-        )
-        commands = dict(steps)
+        commands = dict(suite_steps("macos-macos-release", scene=scene))
 
-        self.assertIn(scene, commands["screenshot (forward)"])
-        self.assertEqual(commands["compare (forward)"][-2:], [
+        self.assertIn(scene, commands["forward_render_static"])
+        self.assertEqual(commands["forward_render_static (compare)"][-2:], [
             "--scene", "Atrium"])
-        self.assertIn(scene, commands["usd round trip"])
-        self.assertEqual(commands["compare (round trip)"][-2:], [
+        self.assertIn(scene, commands["usd_round_trip"])
+        self.assertEqual(commands["usd_round_trip (compare)"][-2:], [
             "--scene", scene])
 
     def test_cook_gate_ignores_log_content_from_before_the_suite(self):
@@ -171,26 +165,22 @@ class RunTestsCommandTest(unittest.TestCase):
 
         self.assertTrue(passed)
 
-    def test_ibl_parity_runs_only_on_a_physical_gpu_framework(self):
-        def suite(framework, software, require_cooked=False):
-            return dict(run_tests.test_steps(
-                framework=framework,
-                config="Release",
-                software=software,
-                headless=True,
-                pipelines=["forward"],
-                scene=None,
-                other_args=[],
-                test_python="test-python",
-                require_cooked=require_cooked,
-            ))
+    def test_ibl_parity_stays_out_of_cook_gated_runs(self):
+        self.assertIn("ibl_parity", COVERAGE["macos-macos-release"])
+        self.assertNotIn("ibl_parity", COVERAGE["windows-glfw-release"])
 
-        self.assertIn("ibl parity", suite("macos", software=False))
-        self.assertNotIn("ibl parity", suite("glfw", software=True))
-        self.assertNotIn("ibl parity", suite("glfw", software=False))
-        # its deliberate artifact recook would trip the --require_cooked gate
-        self.assertNotIn("ibl parity", suite(
-            "macos", software=False, require_cooked=True))
+        names = [case["name"] for case in select(require_cooked=True)]
+        self.assertNotIn("ibl_parity", names)
+        self.assertIn("ibl_parity",
+                      [case["name"] for case in select(require_cooked=False)])
+
+    def test_explicit_case_selection_ignores_coverage(self):
+        self.assertEqual([case["name"] for case in select(cases=["smoke"])],
+                         ["smoke"])
+        self.assertIsNone(select(cases=["no_such_case"]))
+
+    def test_uncovered_triplet_is_rejected(self):
+        self.assertIsNone(select(triplet="macos-glfw-release"))
 
 
 if __name__ == "__main__":
