@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import zipfile
@@ -67,30 +68,38 @@ def resign_ipa(ipa_path):
     print(f"re-signed {ipa_path} with identity: {identity}")
 
 
+def find_ios_device():
+    """Identifier and name of a paired, reachable iOS device, or None. devicectl
+    opens the tunnel on demand at install time, so a paired device that is not
+    actively tethered is still a valid target; only an 'unavailable' tunnel is
+    out of reach."""
+    result = subprocess.run(
+        ["xcrun", "devicectl", "list", "devices", "--json-output", "-"],
+        capture_output=True, text=True, env=os.environ.copy())
+    if result.returncode != 0:
+        raise RuntimeError("Failed to list devices via devicectl.")
+
+    for device in json.loads(result.stdout)["result"]["devices"]:
+        connection = device.get("connectionProperties", {})
+        if device.get("hardwareProperties", {}).get("platform") != "iOS":
+            continue
+        if connection.get("pairingState") != "paired":
+            continue
+        if connection.get("tunnelState") == "unavailable":
+            continue
+        return device["identifier"], device.get("deviceProperties", {}).get("name", "")
+    return None
+
+
 def run_on_device(app_path):
     # Install and run on device using xcrun devicectl
     try:
-        list_devices_cmd = ["xcrun", "devicectl", "list", "devices"]
-        result = subprocess.run(
-            list_devices_cmd, capture_output=True, text=True, env=os.environ.copy())
+        device = find_ios_device()
+        if device is None:
+            raise RuntimeError("No reachable iOS device found. Connect or pair an iOS device and trust this Mac.")
 
-        if result.returncode != 0:
-            raise RuntimeError("Failed to list devices. Make sure a device is connected and trusted.")
-
-        # Parse device output to find connected devices
-        devices = []
-        for line in result.stdout.split('\n'):
-            if ('iPhone' in line or 'iPad' in line) and ('connected' in line):
-                for part in line.split():
-                    if len(part) == 36 and '-' in part:  # Device UDID format
-                        devices.append(part)
-                        break
-
-        if not devices:
-            raise RuntimeError("No iOS devices found. Please connect and trust an iOS device.")
-
-        device_id = devices[0]
-        print(f"\nInstalling app on device: {device_id}")
+        device_id, device_name = device
+        print(f"\nInstalling app on device: {device_name} ({device_id})")
 
         install_cmd = ["xcrun", "devicectl", "device", "install", "app",
                        "--device", device_id, app_path]
@@ -213,6 +222,9 @@ class IosBuilder(FrameworkBuilder):
 
         build_cmd = [args["cmake_executable"], "--build", ".", "--config",
                      args["config"], "--target", "sparkle"]
+
+        if args.get("apple_auto_sign", False):
+            build_cmd += ["--", "-allowProvisioningUpdates"]
 
         output_dir = get_output_dir()
         log_file = os.path.join(output_dir, "build.log")
