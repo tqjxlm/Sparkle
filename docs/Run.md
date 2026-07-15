@@ -1,5 +1,9 @@
 # Run The App
 
+## Launching
+
+Always run the app through `build.py --run` during development for robustness; do not run built binaries directly. See [Build.md](Build.md) for build and run commands.
+
 ## File System
 
 There are three types of files:

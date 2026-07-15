@@ -27,7 +27,6 @@
 
 ## IO
 
-* [ ] full USD support (current one is far from complete)
 * [ ] USD export: `.usdz` / `.usdc` output (blocked on tinyusdz's experimental binary writer)
 * [ ] external data loader interface
 
@@ -49,7 +48,6 @@
 
 * [ ] modularize core libraries
 * [ ] rhi thread
-* [x] event based input handling
 
 ## Known Issues
 

@@ -209,6 +209,11 @@ The pipeline is three stages, selected with `--stage` (repeatable) and run in ca
 * `--help` - Show all usage help.
 * `--run` - Run after building. For mobile builds, it tries to run on a connected device.
 
+### Troubleshooting
+
+* **Android**: Java and NDK are auto-detected from an Android Studio installation; make sure Android Studio is installed.
+* **Shader errors**: Check both the SPIRV compilation and the Metal conversion logs.
+
 ## Work with IDE
 
 Sometimes you want better debugging or intellisense support from IDEs. Follow the instructions below to generate IDE project files.
