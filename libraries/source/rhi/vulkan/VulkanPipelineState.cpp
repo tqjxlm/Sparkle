@@ -369,9 +369,7 @@ void VulkanForwardPipelineState::SetupPipelineLayoutInfo()
 
 void VulkanForwardPipelineState::SetViewportAndScissor()
 {
-    // TODO(tqjxlm): implement state cache to avoid running this every frame
-    vkCmdSetViewport(context->GetCurrentCommandBuffer(), 0, 1, &viewport_);
-    vkCmdSetScissor(context->GetCurrentCommandBuffer(), 0, 1, &scissor_);
+    context->SetViewportAndScissor(viewport_, scissor_);
 }
 
 void VulkanForwardPipelineState::BindBuffers()
@@ -392,8 +390,7 @@ void VulkanForwardPipelineState::BindBuffers()
             offsets.push_back(0);
         }
 
-        vkCmdBindVertexBuffers(context->GetCurrentCommandBuffer(), 0, static_cast<uint32_t>(buffers.size()),
-                               buffers.data(), offsets.data());
+        context->BindVertexBuffers(buffers.data(), offsets.data(), static_cast<uint32_t>(buffers.size()));
     }
 
     if (index_buffer_)
@@ -401,7 +398,7 @@ void VulkanForwardPipelineState::BindBuffers()
         const VkDeviceSize offset = 0;
         auto *rhi_buffer = RHICast<VulkanBuffer>(index_buffer_);
         const auto &buffer = rhi_buffer->GetResourceThisFrame();
-        vkCmdBindIndexBuffer(context->GetCurrentCommandBuffer(), buffer, offset, VK_INDEX_TYPE_UINT32);
+        context->BindIndexBuffer(buffer, offset, VK_INDEX_TYPE_UINT32);
     }
 }
 

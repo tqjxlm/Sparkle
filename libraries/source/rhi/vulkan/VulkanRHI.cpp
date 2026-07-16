@@ -374,7 +374,7 @@ void VulkanRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state,
     const auto &rhi_pipeline = RHICast<VulkanForwardPipelineState>(pipeline_state);
     VkPipeline pipeline = rhi_pipeline->GetPipeline();
 
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    context->BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
     rhi_pipeline->SetViewportAndScissor();
     rhi_pipeline->BindBuffers();
@@ -391,7 +391,7 @@ void VulkanRHI::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline
 
     auto *compute_pipeline = RHICast<VulkanComputePipelineState>(pipeline);
 
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline->GetPipeline());
+    context->BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline->GetPipeline());
 
     compute_pipeline->BindDescriptorSets();
 
