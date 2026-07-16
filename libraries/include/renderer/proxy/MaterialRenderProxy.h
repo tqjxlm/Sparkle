@@ -3,6 +3,10 @@
 #include "io/Material.h"
 #include "rhi/RHIImage.h"
 
+#include <array>
+#include <cstddef>
+#include <type_traits>
+
 namespace sparkle
 {
 class Material;
@@ -41,11 +45,17 @@ public:
         float metallic;
         float roughness;
         float eta;
-        alignas(16) Vector3 baseColor;
-        alignas(16) Vector3 emissiveColor;
+        alignas(16) std::array<float, 3> baseColor;
+        alignas(16) std::array<float, 3> emissiveColor;
 
         explicit MaterialRenderData(const MaterialResource &material);
     };
+
+    static_assert(std::is_standard_layout_v<MaterialRenderData>);
+    static_assert(std::is_trivially_copyable_v<MaterialRenderData>);
+    static_assert(sizeof(MaterialRenderData) == 64);
+    static_assert(offsetof(MaterialRenderData, baseColor) == 32);
+    static_assert(offsetof(MaterialRenderData, emissiveColor) == 48);
 
     [[nodiscard]] MaterialRenderData GetRenderData() const
     {
