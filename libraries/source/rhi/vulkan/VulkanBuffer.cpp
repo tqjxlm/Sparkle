@@ -89,6 +89,19 @@ void VulkanBuffer::CopyToBuffer(const RHIBuffer *buffer) const
 
     vkCmdCopyBuffer(context->GetCurrentCommandBuffer(), GetResourceThisFrame(), dst_buffer->GetResourceThisFrame(), 1,
                     &copy_region);
+
+    VkBufferMemoryBarrier memory_barrier{};
+    memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    memory_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    memory_barrier.buffer = dst_buffer->GetResourceThisFrame();
+    memory_barrier.offset = copy_region.dstOffset;
+    memory_barrier.size = copy_region.size;
+
+    vkCmdPipelineBarrier(context->GetCurrentCommandBuffer(), VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, &memory_barrier, 0, nullptr);
 }
 
 void VulkanBuffer::CopyToImage(const RHIImage *image) const

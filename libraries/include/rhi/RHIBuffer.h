@@ -16,12 +16,13 @@ class RHIImage;
 class RHIBufferSubAllocation
 {
 public:
-    // max size of every dynamic buffer in bytes
+    // default per-frame capacity of a dynamic buffer in bytes
     constexpr static uint32_t DynamicBufferCapacity = 32 * 1024 * 1024;
 
     RHIBufferSubAllocation() = default;
 
-    RHIBufferSubAllocation(unsigned frames_in_flight, unsigned offset, unsigned size, RHIDynamicBuffer *parent);
+    RHIBufferSubAllocation(unsigned frames_in_flight, unsigned offset, unsigned size, unsigned frame_stride,
+                           RHIDynamicBuffer *parent);
 
     void Deallocate();
 
@@ -33,7 +34,7 @@ public:
     [[nodiscard]] unsigned GetOffset(unsigned frame_in_flight) const
     {
         ASSERT(frame_in_flight < UINT_MAX);
-        return offset_ + DynamicBufferCapacity * frame_in_flight;
+        return offset_ + frame_stride_ * frame_in_flight;
     }
 
     [[nodiscard]] RHIResourceRef<RHIBuffer> GetBuffer() const;
@@ -48,6 +49,7 @@ private:
 
     unsigned offset_ = 0;
     unsigned size_ = 0;
+    unsigned frame_stride_ = 0;
     // this address is pre-offseted
     std::vector<void *> cpu_address_;
     RHIDynamicBuffer *parent_ = nullptr;
@@ -76,6 +78,7 @@ public:
         BufferUsage usages;
         RHIMemoryProperty mem_properties;
         bool is_dynamic;
+        uint32_t dynamic_buffer_capacity = RHIBufferSubAllocation::DynamicBufferCapacity;
     };
 
     RHIBuffer(const Attribute &attribute, const std::string &name) : RHIResource(name), attribute_(attribute)
@@ -186,6 +189,7 @@ private:
     RHIResourceRef<RHIBuffer> buffer_;
     unsigned frames_in_flight_;
     uint32_t offset_alignment_;
+    uint32_t capacity_;
 };
 
 class RHIBufferManager
@@ -195,10 +199,14 @@ public:
     {
     }
 
+    [[nodiscard]] bool CanSubAllocateDynamicBuffer(const RHIBuffer::Attribute &attribute) const;
+
     [[nodiscard]] RHIBufferSubAllocation SubAllocateDynamicBuffer(const RHIBuffer::Attribute &attribute);
 
 private:
+    using DynamicBufferKey = std::pair<RHIBuffer::BufferUsage, uint32_t>;
+
     RHIContext *rhi_ = nullptr;
-    std::unordered_map<RHIBuffer::BufferUsage, RHIDynamicBuffer> dynamic_buffers_;
+    std::map<DynamicBufferKey, RHIDynamicBuffer> dynamic_buffers_;
 };
 } // namespace sparkle
