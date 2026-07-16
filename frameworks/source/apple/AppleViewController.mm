@@ -69,13 +69,19 @@
     {
 #if FRAMEWORK_MACOS
 #if ENABLE_TEST_CASES
-        exit(app_->GetExitCode());
+        const int exit_code = app_->GetExitCode();
+#endif
+#endif
+
+        [(MetalView *)view stopApp];
+        app_ = nullptr;
+
+#if FRAMEWORK_MACOS
+#if ENABLE_TEST_CASES
+        exit(exit_code);
 #else
         [[NSApplication sharedApplication] terminate:nil];
 #endif
-#else
-        // TODO(tqjxlm): exit gracefully for other platforms
-        exit(0);
 #endif
     }
     else

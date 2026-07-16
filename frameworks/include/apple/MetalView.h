@@ -18,6 +18,8 @@ class AppleNativeView;
 
 - (void)initApp;
 
+- (void)stopApp;
+
 - (void)waitForNextDrawable;
 
 - (id<CAMetalDrawable>)getNextDrawable;
