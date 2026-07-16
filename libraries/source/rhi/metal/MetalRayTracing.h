@@ -12,7 +12,7 @@ class MetalBLAS : public RHIBLAS
 public:
     using RHIBLAS::RHIBLAS;
 
-    void Build(id<MTLAccelerationStructureCommandEncoder> command_encoder);
+    void Build(id<MTLAccelerationStructureCommandEncoder> command_encoder, id<MTLBuffer> __strong &scratch_buffer);
 
     [[nodiscard]] id<MTLAccelerationStructure> GetAccelerationStructure() const
     {
@@ -43,6 +43,7 @@ private:
     RHIResourceRef<RHIBuffer> blas_descriptor_buffer_;
     id<MTLAccelerationStructure> tlas_;
     NSMutableArray *blas_array_;
+    id<MTLBuffer> scratch_buffer_;
 };
 } // namespace sparkle
 

@@ -7,8 +7,17 @@
 
 namespace sparkle
 {
+static void ResizeScratchBuffer(id<MTLBuffer> __strong &scratch_buffer, NSUInteger required_size)
+{
+    if (!scratch_buffer || scratch_buffer.length < required_size)
+    {
+        scratch_buffer = [context->GetDevice() newBufferWithLength:required_size options:MTLResourceStorageModePrivate];
+    }
+}
+
 static id<MTLAccelerationStructure> NewAccelerationStructureWithDescriptor(
-    MTLAccelerationStructureDescriptor *descriptor, id<MTLAccelerationStructureCommandEncoder> command_encoder)
+    MTLAccelerationStructureDescriptor *descriptor, id<MTLAccelerationStructureCommandEncoder> command_encoder,
+    id<MTLBuffer> __strong &scratch_buffer)
 {
     auto device = context->GetDevice();
 
@@ -20,12 +29,7 @@ static id<MTLAccelerationStructure> NewAccelerationStructureWithDescriptor(
     id<MTLAccelerationStructure> acceleration_structure =
         [device newAccelerationStructureWithSize:accel_sizes.accelerationStructureSize];
 
-    // Allocate scratch space Metal uses to build the acceleration structure.
-    // TODO(tqjxlm): use a shared scratch buffer
-    id<MTLBuffer> scratch_buffer = [device newBufferWithLength:accel_sizes.buildScratchBufferSize
-                                                       options:MTLResourceStorageModePrivate];
-
-    // Create an acceleration structure command encoder.
+    ResizeScratchBuffer(scratch_buffer, accel_sizes.buildScratchBufferSize);
 
     // Schedule the actual acceleration structure build.
     [command_encoder buildAccelerationStructure:acceleration_structure
@@ -60,7 +64,8 @@ static void FillBLASDescriptor(const MetalBLAS *blas, uint32_t primitive_id,
     }
 }
 
-void MetalBLAS::Build(id<MTLAccelerationStructureCommandEncoder> command_encoder)
+void MetalBLAS::Build(id<MTLAccelerationStructureCommandEncoder> command_encoder,
+                      id<MTLBuffer> __strong &scratch_buffer)
 {
     MTLAccelerationStructureTriangleGeometryDescriptor *descriptor =
         [MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
@@ -83,7 +88,7 @@ void MetalBLAS::Build(id<MTLAccelerationStructureCommandEncoder> command_encoder
     accel_descriptor.geometryDescriptors = @[ descriptor ];
 
     // Build the acceleration structure.
-    acceleration_structure_ = NewAccelerationStructureWithDescriptor(accel_descriptor, command_encoder);
+    acceleration_structure_ = NewAccelerationStructureWithDescriptor(accel_descriptor, command_encoder, scratch_buffer);
 
     SetDebugInfo(acceleration_structure_, GetName());
 
@@ -137,7 +142,7 @@ void MetalTLAS::Build()
 
         if (blas->IsDirty())
         {
-            blas->Build(command_encoder);
+            blas->Build(command_encoder, scratch_buffer_);
         }
 
         [blas_array_ addObject:blas->GetAccelerationStructure()];
@@ -154,9 +159,10 @@ void MetalTLAS::Build()
     tlas_descriptor.instancedAccelerationStructures = blas_array_;
     tlas_descriptor.instanceCount = blas_count;
     tlas_descriptor.instanceDescriptorBuffer = RHICast<MetalBuffer>(blas_descriptor_buffer_)->GetResource();
+    tlas_descriptor.usage = MTLAccelerationStructureUsageRefit;
 
     // Create the instance acceleration structure that contains all instances in the scene.
-    tlas_ = NewAccelerationStructureWithDescriptor(tlas_descriptor, command_encoder);
+    tlas_ = NewAccelerationStructureWithDescriptor(tlas_descriptor, command_encoder, scratch_buffer_);
 
     [command_encoder endEncoding];
 
@@ -228,7 +234,7 @@ void MetalTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
 
         if (blas->IsDirty())
         {
-            blas->Build(command_encoder);
+            blas->Build(command_encoder, scratch_buffer_);
         }
 
         [blas_array_ replaceObjectAtIndex:primitive_id withObject:blas->GetAccelerationStructure()];
@@ -243,17 +249,17 @@ void MetalTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
     tlas_descriptor.instancedAccelerationStructures = blas_array_;
     tlas_descriptor.instanceCount = all_blas_.size();
     tlas_descriptor.instanceDescriptorBuffer = RHICast<MetalBuffer>(blas_descriptor_buffer_)->GetResource();
+    tlas_descriptor.usage = MTLAccelerationStructureUsageRefit;
 
     // Query for the sizes needed to store and build the acceleration structure.
     MTLAccelerationStructureSizes accel_sizes = [device accelerationStructureSizesWithDescriptor:tlas_descriptor];
 
-    id<MTLBuffer> scratch_buffer = [device newBufferWithLength:accel_sizes.buildScratchBufferSize
-                                                       options:MTLResourceStorageModePrivate];
+    ResizeScratchBuffer(scratch_buffer_, accel_sizes.refitScratchBufferSize);
 
     [command_encoder refitAccelerationStructure:tlas_
                                      descriptor:tlas_descriptor
                                     destination:tlas_
-                                  scratchBuffer:scratch_buffer
+                                  scratchBuffer:scratch_buffer_
                             scratchBufferOffset:0];
 
     [command_encoder endEncoding];
