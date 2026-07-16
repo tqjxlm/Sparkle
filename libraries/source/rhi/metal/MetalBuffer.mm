@@ -66,7 +66,6 @@ MetalBuffer::MetalBuffer(const RHIBuffer::Attribute &attribute, const std::strin
     else
     {
         const auto &mem_properties = GetMemoryProperty();
-        storage_option_ = GetMetalStorageMode(mem_properties);
         buffer_ = [context->GetDevice() newBufferWithLength:GetSize() options:GetMetalResourceOptions(mem_properties)];
 
         SetDebugInfo(buffer_, GetName());

@@ -23,15 +23,11 @@ public:
     void UnLock() override
     {
 #if FRAMEWORK_MACOS
-        if (storage_option_ == MTLStorageModeManaged)
+        if (buffer_.storageMode == MTLStorageModeManaged)
         {
             [buffer_ didModifyRange:{0, GetSize()}];
         }
-        else
 #endif
-        {
-            // TODO(tqjxlm): handle synchronization for other storage modes
-        }
     }
 
     [[nodiscard]] id<MTLBuffer> GetResource() const;
@@ -40,7 +36,6 @@ public:
 
 private:
     id<MTLBuffer> buffer_;
-    MTLStorageMode storage_option_;
 };
 
 inline MTLStorageMode GetMetalStorageMode(RHIMemoryProperty memory_property)
