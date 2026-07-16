@@ -110,6 +110,11 @@ public:
         return show_control_panel_;
     }
 
+    void SetControlPanelVisible(bool visible)
+    {
+        show_control_panel_ = visible;
+    }
+
     void FrameBufferResizeCallback(int width, int height) const;
     void CaptureNextFrames(int count);
     void ResetInputEvents();

@@ -37,6 +37,10 @@ void VulkanUiHandler::Init()
     if (initialized_)
     {
         ImGui_ImplVulkan_Shutdown();
+
+        // the backend frees its sampler descriptor sets only when it owns the pool. ours outlives
+        // the backend, so reclaim everything or repeated re-inits exhaust it (maxSets is tiny).
+        CHECK_VK_ERROR(vkResetDescriptorPool(context->GetDevice(), descriptor_pool_, 0));
     }
 
     QueueFamilyIndices const indices = FindQueueFamilies(context->GetPhysicalDevice(), context->GetSurface());
