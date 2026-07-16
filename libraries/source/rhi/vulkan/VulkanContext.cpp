@@ -9,7 +9,7 @@
 #include "VulkanSwapChain.h"
 #include "application/NativeView.h"
 
-#ifdef __APPLE__
+#ifdef PLATFORM_MACOS
 #include "core/math/Utilities.h"
 #endif
 
@@ -765,7 +765,7 @@ bool VulkanContext::CreateInstance()
     create_info.pApplicationInfo = &app_info;
     create_info.enabledExtensionCount = static_cast<uint32_t>(instance_extensions_.size());
     create_info.ppEnabledExtensionNames = instance_extensions_.data();
-#ifdef __APPLE__
+#ifdef PLATFORM_MACOS
 #if VK_KHR_portability_enumeration
     create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
@@ -790,7 +790,7 @@ bool VulkanContext::CreateInstance()
         .pSettings = settings,
     };
     create_info.pNext = &layer_settings_create_info;
-#endif //__APPLE__
+#endif // PLATFORM_MACOS
 
     if (enable_validation_)
     {
@@ -977,7 +977,7 @@ void VulkanContext::GetRequiredInstanceExtensions()
         instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
-#ifdef __APPLE__
+#ifdef PLATFORM_MACOS
 #if VK_KHR_portability_enumeration
     // Required on macOS regardless of headless mode, since CreateInstance always
     // sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.
