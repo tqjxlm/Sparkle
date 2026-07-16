@@ -75,6 +75,13 @@ void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneR
     auto *camera = scene->GetCamera();
     auto *dir_light = scene->GetDirectionalLight();
 
+    // scene proxy recreation (e.g. on scene load) replaces the camera proxy and its view buffer
+    if (resources_.camera != camera)
+    {
+        resources_.camera = camera;
+        BindPixelShaderResources();
+    }
+
     const PbrConfig pbr_config{.mode = static_cast<uint32_t>(config.debug_mode),
                                .use_ssao = static_cast<uint32_t>(use_ssao ? 1 : 0),
                                .use_ibl_diffuse = static_cast<uint32_t>(use_diffuse_ibl ? 1 : 0),

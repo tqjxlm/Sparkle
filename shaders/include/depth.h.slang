@@ -8,7 +8,7 @@ float3 GetWorldPositionFromDepth(float depth, float2 uv, View view)
 {
     float4 ndc;
     ndc.x = uv.x * 2.0 - 1.0;
-    ndc.y = 1.0 - uv.y * 2.0;
+    ndc.y = uv.y * 2.0 - 1.0;
     ndc.z = depth;
     ndc.w = 1.0;
 
