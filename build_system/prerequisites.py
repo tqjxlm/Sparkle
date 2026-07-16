@@ -16,6 +16,28 @@ is_windows = platform.system() == "Windows"
 is_macos = platform.system() == "Darwin"
 
 
+def install_with_retry(download_url, download_path, provision, reset=None):
+    """Provision from a cached archive if present; a corrupt archive only fails at provision
+    time, so on failure refresh the cache once and retry."""
+    use_cached = os.path.exists(download_path)
+    if use_cached:
+        print(f"Using cached archive {download_path}.")
+    else:
+        download_file(download_url, download_path)
+
+    try:
+        provision()
+    except Exception as error:
+        if not use_cached:
+            raise
+        print(f"Provisioning from the cached archive failed: {error}. Re-downloading.")
+        os.remove(download_path)
+        if reset:
+            reset()
+        download_file(download_url, download_path)
+        provision()
+
+
 def load_prerequisites_versions():
     """Load version information from prerequisites.json."""
     prerequisites_path = os.path.join(SCRIPTPATH, "..", "prerequisites.json")
@@ -258,81 +280,77 @@ def install_vulkan_sdk(build_cache_dir):
 
     download_path = os.path.join(build_cache_dir, filename)
 
-    print(f"Downloading Vulkan SDK {latest_version} from: {download_url}")
+    def provision():
+        if platform_name == "linux":
+            print("Extracting Vulkan SDK...")
+            extract_archive(download_path, tmp_dir)
 
-    if os.path.exists(download_path):
-        # TODO: check hash
-        print(f"Vulkan SDK {latest_version} already downloaded.")
-    else:
-        download_file(download_url, download_path)
+            extracted_dir = os.path.join(tmp_dir, latest_version)
+            x86_64_dir = os.path.join(extracted_dir, "x86_64")
+            if not os.path.exists(x86_64_dir):
+                raise RuntimeError(
+                    f"Expected x86_64 directory not found in {extracted_dir}")
 
-    if platform_name == "linux":
-        print("Extracting Vulkan SDK...")
-        extract_archive(download_path, tmp_dir)
+            os.makedirs(vulkan_sdk_path, exist_ok=True)
+            for item in os.listdir(x86_64_dir):
+                shutil.copytree(os.path.join(x86_64_dir, item),
+                                os.path.join(vulkan_sdk_path, item))
 
-        extracted_dir = os.path.join(tmp_dir, latest_version)
-        x86_64_dir = os.path.join(extracted_dir, "x86_64")
-        if not os.path.exists(x86_64_dir):
-            raise RuntimeError(
-                f"Expected x86_64 directory not found in {extracted_dir}")
+            vulkan_include = os.path.join(
+                vulkan_sdk_path, "include", "vulkan", "vulkan.h")
+            if not os.path.exists(vulkan_include):
+                raise RuntimeError(
+                    f"Vulkan SDK verification failed: {vulkan_include} not found")
 
-        os.makedirs(vulkan_sdk_path, exist_ok=True)
-        for item in os.listdir(x86_64_dir):
-            shutil.copytree(os.path.join(x86_64_dir, item),
-                            os.path.join(vulkan_sdk_path, item))
+        elif platform_name == "mac":
+            print("Extracting Vulkan SDK...")
+            extract_archive(download_path, tmp_dir)
 
-        vulkan_include = os.path.join(
-            vulkan_sdk_path, "include", "vulkan", "vulkan.h")
-        if not os.path.exists(vulkan_include):
-            raise RuntimeError(
-                f"Vulkan SDK verification failed: {vulkan_include} not found")
+            print("Installing Vulkan SDK core and iOS components...")
+            installer_path = os.path.join(
+                tmp_dir, f"vulkansdk-macOS-{latest_version}.app", "Contents", "MacOS",
+                f"vulkansdk-macOS-{latest_version}")
 
-    elif platform_name == "mac":
-        print("Extracting Vulkan SDK...")
-        extract_archive(download_path, tmp_dir)
+            os.chmod(installer_path, 0o755)
 
-        print("Installing Vulkan SDK core and iOS components...")
-        installer_path = os.path.join(
-            tmp_dir, f"vulkansdk-macOS-{latest_version}.app", "Contents", "MacOS",
-            f"vulkansdk-macOS-{latest_version}")
+            install_cmd = [
+                installer_path, "install", "com.lunarg.vulkan.core",
+                "--root", vulkan_sdk_path,
+                "--accept-licenses", "--default-answer", "--confirm-command"
+            ]
 
-        os.chmod(installer_path, 0o755)
-
-        install_cmd = [
-            installer_path, "install", "com.lunarg.vulkan.core",
-            "--root", vulkan_sdk_path,
-            "--accept-licenses", "--default-answer", "--confirm-command"
-        ]
-
-        print(f"Running installer command: {' '.join(install_cmd)}")
-        result = subprocess.run(install_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Vulkan SDK installation failed: {result.stderr}")
-
-    elif platform_name == "windows":
-        print("Installing Vulkan SDK core...")
-        install_args = [
-            "install", "com.lunarg.vulkan.core",
-            "--root", vulkan_sdk_path,
-            "--accept-licenses", "--default-answer", "--confirm-command"
-        ]
-        install_cmd = [download_path] + install_args
-
-        print(f"Running installer command: {' '.join(install_cmd)}")
-        result = subprocess.run(install_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print("Installation failed. Retrying with administrator privileges...")
-            args_str = subprocess.list2cmdline(install_args)
-            result = subprocess.run([
-                "powershell", "-Command",
-                f"$p = Start-Process -FilePath '{download_path}' -ArgumentList '{args_str}'"
-                f" -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
-            ], capture_output=True, text=True)
+            print(f"Running installer command: {' '.join(install_cmd)}")
+            result = subprocess.run(install_cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 raise RuntimeError(
-                    "Vulkan SDK installation failed even with administrator privileges."
-                    f" stderr: {result.stderr}")
+                    f"Vulkan SDK installation failed: {result.stderr}")
+
+        elif platform_name == "windows":
+            print("Installing Vulkan SDK core...")
+            install_args = [
+                "install", "com.lunarg.vulkan.core",
+                "--root", vulkan_sdk_path,
+                "--accept-licenses", "--default-answer", "--confirm-command"
+            ]
+            install_cmd = [download_path] + install_args
+
+            print(f"Running installer command: {' '.join(install_cmd)}")
+            result = subprocess.run(install_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print("Installation failed. Retrying with administrator privileges...")
+                args_str = subprocess.list2cmdline(install_args)
+                result = subprocess.run([
+                    "powershell", "-Command",
+                    f"$p = Start-Process -FilePath '{download_path}' -ArgumentList '{args_str}'"
+                    f" -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
+                ], capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        "Vulkan SDK installation failed even with administrator privileges."
+                        f" stderr: {result.stderr}")
+
+    install_with_retry(download_url, download_path, provision,
+                       reset=lambda: shutil.rmtree(vulkan_sdk_path, ignore_errors=True))
 
     os.remove(download_path)
 
