@@ -28,7 +28,6 @@ static Mat4x4 MatrixCast(const tinyusdz::value::matrix4d &v)
     {
         for (auto j = 0; j < 4; j++)
         {
-            // TODO(tqjxlm): support double matrix
             eigen_matrix(j, i) = static_cast<Scalar>(v.m[i][j]);
         }
     }

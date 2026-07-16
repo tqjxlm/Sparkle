@@ -200,7 +200,6 @@ bool Image2D::LoadFromFile(const std::string &file_path)
 
 bool Image2D::WriteToFile(const Path &file_path) const
 {
-    // TODO(tqjxlm): async file saving
     std::vector<char> buffer;
     auto *custom_data = static_cast<void *>(&buffer);
 
