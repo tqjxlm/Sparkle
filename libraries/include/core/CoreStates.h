@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 namespace sparkle
@@ -7,7 +8,6 @@ namespace sparkle
 /*
     This class stores essential states of the program that can be accessed by all modules.
     It is designed to remove dependencies between state controllers and state observers.
-    TODO: make it thread-safe effienctly
 */
 class CoreStates
 {
@@ -22,12 +22,12 @@ public:
 
     [[nodiscard]] AppState GetAppState() const
     {
-        return app_state_;
+        return app_state_.load(std::memory_order_acquire);
     }
 
     void SetAppState(AppState new_state)
     {
-        app_state_ = new_state;
+        app_state_.store(new_state, std::memory_order_release);
     }
 
     static CoreStates &Instance()
@@ -42,6 +42,6 @@ public:
     }
 
 private:
-    AppState app_state_ = AppState::Launch;
+    std::atomic<AppState> app_state_{AppState::Launch};
 };
 } // namespace sparkle
