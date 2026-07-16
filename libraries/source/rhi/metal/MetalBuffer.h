@@ -30,7 +30,8 @@ public:
         else
 #endif
         {
-            // TODO(tqjxlm): handle synchronization for other storage modes
+            // shared storage on unified memory needs no explicit synchronization
+            ASSERT(storage_option_ == MTLStorageModeShared);
         }
     }
 
