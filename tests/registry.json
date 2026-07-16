@@ -71,6 +71,11 @@
         }
     },
     {
+        "name": "usd_loader_semantics",
+        "test_case": "usd_loader_semantics",
+        "description": "USD decoded texture color-space and storage semantics."
+    },
+    {
         "name": "input_injection",
         "test_case": "input_injection",
         "description": "Synthetic mouse and touch sequences through InputManager::Push."

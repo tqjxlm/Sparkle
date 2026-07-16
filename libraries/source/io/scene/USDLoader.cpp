@@ -16,6 +16,7 @@
 #include "scene/material/PbrMaterial.h"
 
 #include <filesystem>
+#include <limits>
 #include <tinyusdz.hh>
 #include <tydra/render-data.hh>
 
@@ -127,16 +128,29 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
 
 static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id)
 {
+    if (texture_id >= ctx.render_scene.textures.size())
+    {
+        Log(Error, "USDLoader: texture id is out of range: {}", texture_id);
+        return nullptr;
+    }
+
     // tydra keeps the texture entry but leaves these ids at -1 when it fails to load the image
     auto image_id = ctx.render_scene.textures[texture_id].texture_image_id;
-    if (image_id < 0)
+    if (image_id < 0 || static_cast<size_t>(image_id) >= ctx.render_scene.images.size())
     {
         Log(Error, "USDLoader: texture has no image. texture id: {}", texture_id);
         return nullptr;
     }
 
     const auto &image = ctx.render_scene.images[static_cast<size_t>(image_id)];
-    if (image.buffer_id < 0)
+    if (!image.decoded || image.width <= 0 || image.height <= 0 || image.channels != 4)
+    {
+        Log(Error, "USDLoader: invalid decoded texture image {}: {}x{}, {} channels", image.asset_identifier,
+            image.width, image.height, image.channels);
+        return nullptr;
+    }
+
+    if (image.buffer_id < 0 || static_cast<size_t>(image.buffer_id) >= ctx.render_scene.buffers.size())
     {
         Log(Error, "USDLoader: texture image has no data: {}", image.asset_identifier);
         return nullptr;
@@ -144,19 +158,27 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
 
     const auto &image_data = ctx.render_scene.buffers[static_cast<size_t>(image.buffer_id)];
 
-    // TODO(tqjxlm): support 3 channels and 1 channel textures
-    ASSERT_EQUAL(image.channels, 4);
-
     PixelFormat format = PixelFormat::Count;
     switch (image.assetTexelComponentType)
     {
     case tinyusdz::tydra::ComponentType::UInt8:
     case tinyusdz::tydra::ComponentType::Int8: {
-        // TODO(tqjxlm): sRGB vs Lin_sRGB?
-        bool is_srgb = image.colorSpace == tinyusdz::tydra::ColorSpace::sRGB ||
-                       image.usdColorSpace == tinyusdz::tydra::ColorSpace::Lin_sRGB;
-
-        format = is_srgb ? PixelFormat::R8G8B8A8Srgb : PixelFormat::R8G8B8A8Unorm;
+        switch (image.colorSpace)
+        {
+        case tinyusdz::tydra::ColorSpace::sRGB:
+        case tinyusdz::tydra::ColorSpace::sRGB_Texture:
+            format = PixelFormat::R8G8B8A8Srgb;
+            break;
+        case tinyusdz::tydra::ColorSpace::Lin_sRGB:
+        case tinyusdz::tydra::ColorSpace::Lin_Rec709:
+        case tinyusdz::tydra::ColorSpace::Raw:
+            format = PixelFormat::R8G8B8A8Unorm;
+            break;
+        default:
+            Log(Error, "USDLoader: unsupported 8-bit texture color space {} for {}",
+                tinyusdz::tydra::to_string(image.colorSpace), image.asset_identifier);
+            return nullptr;
+        }
         break;
     }
     case tinyusdz::tydra::ComponentType::Half:
@@ -166,12 +188,31 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
         format = PixelFormat::RGBAFloat;
         break;
     default:
-        UnImplemented(format);
+        Log(Error, "USDLoader: unsupported texture component type {} for {}",
+            tinyusdz::tydra::to_string(image.assetTexelComponentType), image.asset_identifier);
         return nullptr;
     }
 
-    auto texture = std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
-    return texture;
+    const auto width = static_cast<size_t>(image.width);
+    const auto height = static_cast<size_t>(image.height);
+    const auto pixel_size = static_cast<size_t>(GetPixelSize(format));
+    if (width > std::numeric_limits<size_t>::max() / height ||
+        width * height > std::numeric_limits<size_t>::max() / pixel_size)
+    {
+        Log(Error, "USDLoader: texture dimensions overflow storage size: {}", image.asset_identifier);
+        return nullptr;
+    }
+
+    const auto expected_size = width * height * pixel_size;
+    if (image_data.data.size() != expected_size)
+    {
+        Log(Error, "USDLoader: texture data size mismatch for {}: expected {}, got {}", image.asset_identifier,
+            expected_size, image_data.data.size());
+        return nullptr;
+    }
+
+    return std::make_shared<Image2D>(static_cast<unsigned>(width), static_cast<unsigned>(height), format,
+                                     image_data.data);
 }
 
 static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node, const USDLoaderContext &ctx)
