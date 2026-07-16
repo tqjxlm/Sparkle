@@ -61,7 +61,10 @@ void RHIContext::Cleanup()
     // discard unfinished tasks before releasing the resources they may retain
     before_frame_tasks_.clear();
     end_of_frame_tasks_.clear();
-    end_of_render_tasks_.clear();
+    for (auto &tasks : end_of_render_tasks_)
+    {
+        tasks.clear();
+    }
 
     // logical dynamic buffers must return their suballocations while the manager is alive
     FlushDeferredDeletions();
@@ -70,6 +73,11 @@ void RHIContext::Cleanup()
 
     // deleting the manager releases its physical backing buffers
     FlushDeferredDeletions();
+
+    for (auto &tasks : end_of_render_tasks_)
+    {
+        tasks.clear();
+    }
 
     CleanupInternal();
 
