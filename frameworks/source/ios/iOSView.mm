@@ -69,6 +69,11 @@ static constexpr int MaxTouchSlots = 8;
 
 - (void)pushTouches:(NSSet<UITouch *> *)touches action:(sparkle::PointerAction)action
 {
+    if (!app_)
+    {
+        return;
+    }
+
     for (UITouch *touch in touches)
     {
         const BOOL is_begin = action == sparkle::PointerAction::Down;

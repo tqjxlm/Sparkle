@@ -15,10 +15,16 @@
 {
     dispatch_semaphore_t frames_in_flight_semaphore_;
     std::queue<id<CAMetalDrawable>> free_drawables_;
+    BOOL app_stopped_;
 }
 
 - (void)initApp
 {
+    if (app_stopped_ || app_)
+    {
+        return;
+    }
+
 #if FRAMEWORK_MACOS
     auto *delegate = (AppDelegate *)[NSApplication sharedApplication].delegate;
 #elif FRAMEWORK_IOS
@@ -30,9 +36,8 @@
     frames_in_flight_semaphore_ = dispatch_semaphore_create([self getMaxFrameInFlight]);
 
     app_ = [delegate GetAppFramework];
-    auto *native_view = static_cast<sparkle::AppleNativeView *>(app_->GetNativeView());
-
     ASSERT(app_);
+    auto *native_view = static_cast<sparkle::AppleNativeView *>(app_->GetNativeView());
 
     [self setColorPixelFormat:MTLPixelFormatBGRA8Unorm_sRGB];
 
@@ -56,8 +61,30 @@
 #if FRAMEWORK_MACOS
         [NSApp terminate:nil];
 #else
-        exit(0);
+        sparkle::AppFramework::RequestExit();
+        [self stopApp];
 #endif
+    }
+}
+
+- (void)stopApp
+{
+    if (app_stopped_)
+    {
+        return;
+    }
+
+    app_stopped_ = YES;
+    self.paused = YES;
+    self.delegate = nil;
+#if FRAMEWORK_IOS
+    self.userInteractionEnabled = NO;
+#endif
+
+    if (app_)
+    {
+        app_->Cleanup();
+        app_ = nullptr;
     }
 }
 
