@@ -200,8 +200,7 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
                 material_ids.emplace_back(material_id);
             }
 
-            // TODO(tqjxlm): avoid blocking
-            rhi->WaitForDeviceIdle();
+            // the old buffer stays alive via deferred deletion, so in-flight frames are unaffected
             material_id_buffer_->UploadImmediate(material_ids.data());
 
             is_buffer_dirty_ = true;
@@ -256,8 +255,7 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
                 material_parameters.push_back(material->GetRenderData());
             }
 
-            // TODO(tqjxlm): avoid blocking
-            rhi->WaitForDeviceIdle();
+            // the old buffer stays alive via deferred deletion, so in-flight frames are unaffected
             material_parameter_buffer_->UploadImmediate(material_parameters.data());
 
             is_buffer_dirty_ = true;
