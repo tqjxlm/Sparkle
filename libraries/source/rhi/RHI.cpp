@@ -179,6 +179,7 @@ void RHIContext::CheckRHIResourceLeak()
 
 bool RHIContext::BeginFrame()
 {
+    frame_active_ = false;
     frame_memory_.Reset();
 
     std::vector<std::function<void(void)>> tasks;
@@ -192,6 +193,7 @@ bool RHIContext::BeginFrame()
     {
         return false;
     }
+    frame_active_ = true;
 
     is_deleting_deferred_resources_ = true;
     deferred_deletion_[frame_index_].DeleteResources();
@@ -209,6 +211,7 @@ bool RHIContext::BeginFrame()
 void RHIContext::EndFrame()
 {
     EndFrameInternal();
+    frame_active_ = false;
 
     if (!end_of_frame_tasks_.empty())
     {
@@ -267,6 +270,19 @@ void RHIContext::RecreateBuffer(RHIBuffer::Attribute attribute, const std::strin
 
     attribute.size = buffer_size;
     in_out_existing_buffer = CreateBuffer(attribute, name);
+}
+
+RHIResourceRef<RHIBuffer> RHIContext::CreateUploadStagingBuffer(size_t size)
+{
+    constexpr uint32_t UploadStagingBufferCapacity = 4 * 1024 * 1024;
+
+    RHIBuffer::Attribute attribute{.size = size,
+                                   .usages = RHIBuffer::BufferUsage::TransferSrc,
+                                   .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                                   .is_dynamic = false,
+                                   .dynamic_buffer_capacity = UploadStagingBufferCapacity};
+    attribute.is_dynamic = frame_active_ && buffer_manager_->CanSubAllocateDynamicBuffer(attribute);
+    return CreateBuffer(attribute, "UploadStagingBuffer");
 }
 
 void RHIContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass)
@@ -406,6 +422,8 @@ void RHIContext::FlushDeferredDeletions()
 
 void RHIContext::ReleaseRenderResources()
 {
+    frame_active_ = false;
+
     WaitForDeviceIdle();
 
     back_buffer_rt_ = nullptr;

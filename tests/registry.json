@@ -103,7 +103,7 @@
     {
         "name": "dynamic_buffer_reuse",
         "test_case": "dynamic_buffer_reuse",
-        "description": "Dynamic buffer suballocation reuse and adjacent free-range coalescing."
+        "description": "Staged buffer uploads, dynamic suballocation capacity, reuse, and adjacent free-range coalescing."
     },
     {
         "name": "bindless_resize",

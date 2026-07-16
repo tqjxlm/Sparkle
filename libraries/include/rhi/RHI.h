@@ -351,8 +351,13 @@ protected:
     std::vector<FrameStates> frame_stats_;
 
 private:
+    friend class RHIBuffer;
+
+    [[nodiscard]] RHIResourceRef<RHIBuffer> CreateUploadStagingBuffer(size_t size);
+
     unsigned max_frames_in_flight_ = 0;
     unsigned frame_index_ = 0;
+    bool frame_active_ = false;
     bool is_deleting_deferred_resources_ = false;
 
     struct DeferredDeletion
