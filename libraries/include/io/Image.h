@@ -196,11 +196,11 @@ private:
     }
 
     PixelFormat pixel_format_ = PixelFormat::Count;
-    unsigned width_;
-    unsigned height_;
-    unsigned channel_count_;
+    unsigned width_ = 0;
+    unsigned height_ = 0;
+    unsigned channel_count_ = 0;
 
-    Vector2 size_vector_;
+    Vector2 size_vector_ = Vector2::Zero();
 
     std::vector<uint8_t> pixels_;
 

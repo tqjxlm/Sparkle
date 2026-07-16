@@ -104,6 +104,11 @@
         "description": "Cooker cache-hit delivery and relocated-content contracts."
     },
     {
+        "name": "image_io",
+        "test_case": "image_io",
+        "description": "Image file content detection, channel normalization, storage sizing, and synchronous writes."
+    },
+    {
         "name": "scene_load_failure",
         "test_case": "scene_load_failure",
         "description": "Scene async failure propagation for a missing authored sky resource."
