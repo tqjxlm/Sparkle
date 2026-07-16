@@ -132,7 +132,7 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     return all_extension_good;
 }
 
-static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
+static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device, uint32_t &scratch_offset_alignment)
 {
     if (!CheckDeviceExtensionSupport(device, ray_tracing_extensions))
     {
@@ -156,8 +156,9 @@ static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
 
     vkGetPhysicalDeviceProperties2(device, &device_properties);
 
-    Log(Debug, "Acceleration structure buffer alignment {}",
-        acceleration_properties.minAccelerationStructureScratchOffsetAlignment);
+    scratch_offset_alignment = acceleration_properties.minAccelerationStructureScratchOffsetAlignment;
+
+    Log(Debug, "Acceleration structure buffer alignment {}", scratch_offset_alignment);
 
     return acceleration_structure_features.accelerationStructure != 0;
 }
@@ -705,7 +706,8 @@ bool VulkanContext::PickPhysicalDevice()
     for (const auto &device : devices)
     {
         // always enable ray tracing when we can
-        bool can_enable_ray_tracing = DeviceSupportHardwareRayTracing(device);
+        uint32_t scratch_offset_alignment = 1;
+        bool can_enable_ray_tracing = DeviceSupportHardwareRayTracing(device, scratch_offset_alignment);
         if (can_enable_ray_tracing)
         {
             device_extensions_.insert(device_extensions_.end(), ray_tracing_extensions.begin(),
@@ -716,6 +718,7 @@ bool VulkanContext::PickPhysicalDevice()
         {
             physical_device_ = device;
             enable_ray_tracing_ = can_enable_ray_tracing;
+            min_acceleration_structure_scratch_offset_alignment_ = scratch_offset_alignment;
 
             VkPhysicalDeviceProperties device_properties;
             vkGetPhysicalDeviceProperties(physical_device_, &device_properties);

@@ -3,16 +3,91 @@
 #include "VulkanRayTracing.h"
 
 #include "VulkanBuffer.h"
-#include "VulkanCommandBuffer.h"
 #include "VulkanCommon.h"
 #include "VulkanContext.h"
 #include "VulkanDescriptorSet.h"
+#include "core/math/Utilities.h"
 
 namespace sparkle
 {
-void VulkanBLAS::Build()
+namespace
+{
+class RetiredAccelerationStructure
+{
+public:
+    RetiredAccelerationStructure(VkAccelerationStructureKHR acceleration_structure, RHIResourceRef<RHIBuffer> buffer)
+        : acceleration_structure_(acceleration_structure), buffer_(std::move(buffer))
+    {
+    }
+
+    ~RetiredAccelerationStructure()
+    {
+        vkDestroyAccelerationStructureKHR(context->GetDevice(), acceleration_structure_, nullptr);
+        buffer_ = nullptr;
+    }
+
+private:
+    VkAccelerationStructureKHR acceleration_structure_;
+    RHIResourceRef<RHIBuffer> buffer_;
+};
+
+void ResizeScratchBuffer(VkDeviceSize required_size, RHIResourceRef<RHIBuffer> &scratch_buffer)
+{
+    const auto alignment = context->GetMinAccelerationStructureScratchOffsetAlignment();
+    context->GetRHI()->RecreateBuffer(
+        RHIBuffer::Attribute{.size = static_cast<size_t>(required_size) + alignment - 1,
+                             .usages = RHIBuffer::BufferUsage::StorageBuffer | RHIBuffer::BufferUsage::DeviceAddress,
+                             .mem_properties = RHIMemoryProperty::DeviceLocal,
+                             .is_dynamic = false},
+        "AccelerationStructureScratchBuffer", scratch_buffer);
+}
+
+VkDeviceOrHostAddressKHR GetScratchAddress(const RHIResourceRef<RHIBuffer> &scratch_buffer)
+{
+    VkDeviceOrHostAddressKHR address{};
+    const auto buffer_address = RHICast<VulkanBuffer>(scratch_buffer)->GetDeviceAddress().deviceAddress;
+    address.deviceAddress =
+        utilities::AlignAddress(buffer_address, context->GetMinAccelerationStructureScratchOffsetAlignment());
+    return address;
+}
+
+void SynchronizeAccelerationStructureBuild(VkCommandBuffer command_buffer, bool wait_for_shader_reads = false)
+{
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask =
+        VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask =
+        VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+
+    VkPipelineStageFlags source_stages = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    if (wait_for_shader_reads)
+    {
+        source_stages |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    }
+
+    vkCmdPipelineBarrier(command_buffer, source_stages, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1,
+                         &barrier, 0, nullptr, 0, nullptr);
+}
+
+void PublishAccelerationStructureBuild(VkCommandBuffer command_buffer)
+{
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier,
+                         0, nullptr, 0, nullptr);
+}
+} // namespace
+
+void VulkanBLAS::Build(RHIResourceRef<RHIBuffer> &scratch_buffer)
 {
     VkDevice device = context->GetDevice();
+
+    ASSERT(acceleration_structure_ == VK_NULL_HANDLE);
 
     VkAccelerationStructureBuildSizesInfoKHR size_info{};
     size_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
@@ -63,27 +138,17 @@ void VulkanBLAS::Build()
     CHECK_VK_ERROR(
         vkCreateAccelerationStructureKHR(context->GetDevice(), &create_info, nullptr, &acceleration_structure_));
 
-    // the building process need a temporary buffer, i.e. scratch buffer
-    // TODO(tqjxlm): it's expensive to create a buffer for every blas, make a pool instead
-    const VulkanBuffer scratch_buffer(
-        {.size = size_info.buildScratchSize,
-         .usages = RHIBuffer::BufferUsage::StorageBuffer | RHIBuffer::BufferUsage::DeviceAddress,
-         .mem_properties = RHIMemoryProperty::DeviceLocal,
-         .is_dynamic = false},
-        "BLASScratchBuffer");
+    ResizeScratchBuffer(size_info.buildScratchSize, scratch_buffer);
 
-    build_info.scratchData = scratch_buffer.GetDeviceAddress();
+    build_info.scratchData = GetScratchAddress(scratch_buffer);
     build_info.srcAccelerationStructure = VK_NULL_HANDLE;
     build_info.dstAccelerationStructure = acceleration_structure_;
 
     const VkAccelerationStructureBuildRangeInfoKHR *ranges[1] = {&range};
 
-    {
-        // TODO(tqjxlm): use a shared command buffer
-        const OneShotCommandBufferScope command_buffer_scope;
-        VkCommandBuffer command_buffer = command_buffer_scope.GetCommandBuffer();
-        vkCmdBuildAccelerationStructuresKHR(command_buffer, 1, &build_info, ranges);
-    }
+    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
+    SynchronizeAccelerationStructureBuild(command_buffer);
+    vkCmdBuildAccelerationStructuresKHR(command_buffer, 1, &build_info, ranges);
 
     // after build finishes, retrieve its address on device
     VkAccelerationStructureDeviceAddressInfoKHR address_info = {};
@@ -99,21 +164,26 @@ void VulkanBLAS::Build()
 
 VulkanBLAS::~VulkanBLAS()
 {
-    vkDestroyAccelerationStructureKHR(context->GetDevice(), acceleration_structure_, nullptr);
+    if (acceleration_structure_ != VK_NULL_HANDLE)
+    {
+        vkDestroyAccelerationStructureKHR(context->GetDevice(), acceleration_structure_, nullptr);
+    }
 }
 
 VulkanTLAS::~VulkanTLAS()
 {
-    vkDestroyAccelerationStructureKHR(context->GetDevice(), acceleration_structure_, nullptr);
+    if (acceleration_structure_ != VK_NULL_HANDLE)
+    {
+        vkDestroyAccelerationStructureKHR(context->GetDevice(), acceleration_structure_, nullptr);
+    }
 }
 
 void VulkanTLAS::Build()
 {
     const size_t num_meshes = all_blas_.size();
 
-    // create instances for our meshes
-    std::vector<VkAccelerationStructureInstanceKHR> instances;
-    instances.resize(num_meshes);
+    instances_.clear();
+    instances_.reserve(num_meshes);
     for (auto primitive_id = 0u; primitive_id < num_meshes; primitive_id++)
     {
         auto *blas = RHICast<VulkanBLAS>(all_blas_[primitive_id]);
@@ -125,23 +195,15 @@ void VulkanTLAS::Build()
 
         if (blas->IsDirty())
         {
-            blas->Build();
+            blas->Build(scratch_buffer_);
         }
 
-        auto &instance = instances[primitive_id];
+        auto &instance = instances_.emplace_back();
         instance = blas->GetDescriptor();
         instance.instanceCustomIndex = primitive_id;
     }
 
-    context->GetRHI()->RecreateBuffer(
-        RHIBuffer::Attribute{.size = instances.size() * sizeof(VkAccelerationStructureInstanceKHR),
-                             .usages = RHIBuffer::BufferUsage::DeviceAddress |
-                                       RHIBuffer::BufferUsage::AccelerationStructureBuildInput,
-                             .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                             .is_dynamic = false},
-        "TLASInstanceBuffer", instance_buffer_);
-
-    instance_buffer_->UploadImmediate(instances.data());
+    UploadInstanceBuffer();
 
     BuildInternal(true);
 
@@ -151,24 +213,45 @@ void VulkanTLAS::Build()
 
 void VulkanTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
 {
-    auto *instance_data = reinterpret_cast<VkAccelerationStructureInstanceKHR *>(instance_buffer_->Lock());
-
     for (auto primitive_id : instances_to_update)
     {
+        ASSERT(primitive_id < all_blas_.size());
         auto *blas = RHICast<VulkanBLAS>(all_blas_[primitive_id]);
+        ASSERT(blas);
 
         if (blas->IsDirty())
         {
-            blas->Build();
+            blas->Build(scratch_buffer_);
         }
 
-        instance_data[primitive_id] = blas->GetDescriptor();
-        instance_data[primitive_id].instanceCustomIndex = primitive_id;
+        auto instance = std::ranges::find_if(instances_, [primitive_id](const auto &candidate) {
+            return candidate.instanceCustomIndex == primitive_id;
+        });
+        ASSERT(instance != instances_.end());
+
+        *instance = blas->GetDescriptor();
+        instance->instanceCustomIndex = primitive_id;
     }
 
-    instance_buffer_->UnLock();
+    UploadInstanceBuffer();
 
     BuildInternal(false);
+}
+
+void VulkanTLAS::UploadInstanceBuffer()
+{
+    const VkAccelerationStructureInstanceKHR empty_instance{};
+    const size_t buffer_size = std::max(instances_.size(), size_t{1}) * sizeof(VkAccelerationStructureInstanceKHR);
+
+    instance_buffer_ = context->GetRHI()->CreateBuffer(
+        RHIBuffer::Attribute{.size = buffer_size,
+                             .usages = RHIBuffer::BufferUsage::DeviceAddress |
+                                       RHIBuffer::BufferUsage::AccelerationStructureBuildInput,
+                             .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                             .is_dynamic = false},
+        "TLASInstanceBuffer");
+
+    instance_buffer_->UploadImmediate(instances_.empty() ? &empty_instance : instances_.data());
 }
 
 void VulkanTLAS::WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
@@ -202,11 +285,12 @@ void VulkanTLAS::BuildInternal(bool rebuild)
     build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     build_info.mode =
         rebuild ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
-    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
     build_info.geometryCount = 1;
     build_info.pGeometries = &tlas_geo_info;
 
-    const auto num_instances = static_cast<uint32_t>(all_blas_.size());
+    const auto num_instances = static_cast<uint32_t>(instances_.size());
 
     if (rebuild)
     {
@@ -215,38 +299,40 @@ void VulkanTLAS::BuildInternal(bool rebuild)
         vkGetAccelerationStructureBuildSizesKHR(context->GetDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                                 &build_info, &num_instances, &size_info);
 
-        if (acceleration_structure_ != nullptr)
-        {
-            context->GetRHI()->EnqueueEndOfRenderTasks([acceleration_structure = acceleration_structure_]() {
-                vkDestroyAccelerationStructureKHR(context->GetDevice(), acceleration_structure, nullptr);
-            });
-        }
-
-        context->GetRHI()->RecreateBuffer(
+        auto new_buffer = context->GetRHI()->CreateBuffer(
             RHIBuffer::Attribute{.size = size_info.accelerationStructureSize,
                                  .usages = RHIBuffer::BufferUsage::AccelerationStructureStorage,
                                  .mem_properties = RHIMemoryProperty::DeviceLocal,
                                  .is_dynamic = false},
-            "TLASBuffer", buffer_);
+            "TLASBuffer");
 
         VkAccelerationStructureCreateInfoKHR create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
         create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
         create_info.size = size_info.accelerationStructureSize;
-        create_info.buffer = RHICast<VulkanBuffer>(buffer_)->GetResourceThisFrame();
+        create_info.buffer = RHICast<VulkanBuffer>(new_buffer)->GetResourceThisFrame();
 
+        VkAccelerationStructureKHR new_acceleration_structure = VK_NULL_HANDLE;
         CHECK_VK_ERROR(
-            vkCreateAccelerationStructureKHR(context->GetDevice(), &create_info, nullptr, &acceleration_structure_));
+            vkCreateAccelerationStructureKHR(context->GetDevice(), &create_info, nullptr, &new_acceleration_structure));
 
-        context->GetRHI()->RecreateBuffer(RHIBuffer::Attribute{.size = size_info.buildScratchSize,
-                                                               .usages = RHIBuffer::BufferUsage::StorageBuffer |
-                                                                         RHIBuffer::BufferUsage::DeviceAddress,
-                                                               .mem_properties = RHIMemoryProperty::DeviceLocal,
-                                                               .is_dynamic = false},
-                                          "TLASScratchBuffer", scratch_buffer_);
+        if (acceleration_structure_ != VK_NULL_HANDLE)
+        {
+            auto retired_acceleration_structure =
+                std::make_shared<RetiredAccelerationStructure>(acceleration_structure_, std::move(buffer_));
+            context->GetRHI()->EnqueueEndOfRenderTasks(
+                [retired_acceleration_structure = std::move(retired_acceleration_structure)]() mutable {
+                    retired_acceleration_structure = nullptr;
+                });
+        }
+
+        buffer_ = std::move(new_buffer);
+        acceleration_structure_ = new_acceleration_structure;
+
+        ResizeScratchBuffer(std::max(size_info.buildScratchSize, size_info.updateScratchSize), scratch_buffer_);
     }
 
-    build_info.scratchData = RHICast<VulkanBuffer>(scratch_buffer_)->GetDeviceAddress();
+    build_info.scratchData = GetScratchAddress(scratch_buffer_);
     build_info.srcAccelerationStructure = rebuild ? VK_NULL_HANDLE : acceleration_structure_;
     build_info.dstAccelerationStructure = acceleration_structure_;
 
@@ -255,7 +341,10 @@ void VulkanTLAS::BuildInternal(bool rebuild)
 
     const VkAccelerationStructureBuildRangeInfoKHR *ranges[1] = {&range};
 
-    vkCmdBuildAccelerationStructuresKHR(context->GetCurrentCommandBuffer(), 1, &build_info, ranges);
+    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
+    SynchronizeAccelerationStructureBuild(command_buffer, !rebuild);
+    vkCmdBuildAccelerationStructuresKHR(command_buffer, 1, &build_info, ranges);
+    PublishAccelerationStructureBuild(command_buffer);
 }
 } // namespace sparkle
 

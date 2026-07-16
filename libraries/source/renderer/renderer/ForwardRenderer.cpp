@@ -339,6 +339,7 @@ void ForwardRenderer::HandleSceneChanges()
         {
             // structural change, rebuild TLAS
             tlas_->Build();
+            scene_color_pass_->RebindTLAS();
         }
         else if (!primitives_to_update.empty())
         {

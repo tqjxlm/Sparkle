@@ -409,6 +409,18 @@ void ForwardMeshPass::RebindAllShaderResources()
     }
 }
 
+void ForwardMeshPass::RebindTLAS()
+{
+    for (auto &pso : pipeline_states_)
+    {
+        if (pso != nullptr)
+        {
+            auto *resources = pso->GetShaderResource<ForwardRayTracingPixelShader>();
+            resources->topLevelAS().BindResource(resources_.tlas, true);
+        }
+    }
+}
+
 void ForwardMeshPass::Render()
 {
     rhi_->BeginRenderPass(base_pass_);

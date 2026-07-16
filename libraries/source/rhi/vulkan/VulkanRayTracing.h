@@ -16,7 +16,7 @@ public:
 
     ~VulkanBLAS() override;
 
-    void Build();
+    void Build(RHIResourceRef<RHIBuffer> &scratch_buffer);
 
     [[nodiscard]] const VkAccelerationStructureKHR &GetAccelerationStructure() const
     {
@@ -46,8 +46,8 @@ public:
 
 private:
     RHIResourceRef<VulkanBuffer> buffer_;
-    VkAccelerationStructureKHR acceleration_structure_;
-    VkDeviceAddress device_address_;
+    VkAccelerationStructureKHR acceleration_structure_ = VK_NULL_HANDLE;
+    VkDeviceAddress device_address_ = 0;
 };
 
 class VulkanTLAS : public RHITLAS
@@ -72,12 +72,14 @@ public:
                          std::vector<VkWriteDescriptorSet> &out_set_write) const;
 
 private:
+    void UploadInstanceBuffer();
     void BuildInternal(bool rebuild);
 
     RHIResourceRef<RHIBuffer> buffer_;
     RHIResourceRef<RHIBuffer> instance_buffer_;
     RHIResourceRef<RHIBuffer> scratch_buffer_;
-    VkAccelerationStructureKHR acceleration_structure_ = nullptr;
+    std::vector<VkAccelerationStructureInstanceKHR> instances_;
+    VkAccelerationStructureKHR acceleration_structure_ = VK_NULL_HANDLE;
 };
 } // namespace sparkle
 

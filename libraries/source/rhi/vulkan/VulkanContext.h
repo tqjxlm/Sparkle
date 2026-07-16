@@ -84,6 +84,11 @@ public:
         return min_buffer_offset_alignment_;
     }
 
+    [[nodiscard]] uint32_t GetMinAccelerationStructureScratchOffsetAlignment() const
+    {
+        return min_acceleration_structure_scratch_offset_alignment_;
+    }
+
     [[nodiscard]] bool SupportsSubgroupQuadOps() const
     {
         return supports_subgroup_quad_ops_;
@@ -180,6 +185,7 @@ private:
     uint32_t msaa_samples_;
 
     uint32_t min_buffer_offset_alignment_ = 64;
+    uint32_t min_acceleration_structure_scratch_offset_alignment_ = 1;
 
     bool supports_subgroup_quad_ops_ = false;
 

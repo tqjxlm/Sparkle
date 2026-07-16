@@ -37,6 +37,8 @@ public:
 
     void RebindAllShaderResources();
 
+    void RebindTLAS();
+
     void Render() override;
 
 private:
