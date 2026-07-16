@@ -59,6 +59,17 @@
         }
     },
     {
+        "name": "primitive_move",
+        "test_case": "primitive_move",
+        "description": "Moves one mesh between two screenshots; the evaluator requires a visible difference, guarding acceleration structure refits for moved primitives.",
+        "app_args": ["--clear_screenshots", "true"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/scene/primitive_move_test.py",
+            "args": ["--framework", "{framework}", "--skip_run"]
+        }
+    },
+    {
         "name": "usd_round_trip",
         "test_case": "usd_round_trip",
         "description": "Render, export to USD, reload and re-render; the evaluator FLIP-compares the two screenshots.",
