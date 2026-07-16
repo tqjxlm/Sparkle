@@ -16,7 +16,6 @@ CameraComponent::~CameraComponent() = default;
 
 void CameraComponent::SetExposure(float exposure)
 {
-    // TODO(tqjxlm): exposure as in photography terminology
     attribute_.exposure = exposure;
 
     UpdateRenderData();

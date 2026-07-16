@@ -7,13 +7,13 @@ namespace sparkle
 class CameraComponent : public RenderableComponent
 {
 public:
-    // values that have physical meaning (reflects real camera attributes)
+    // Camera lens settings and render exposure.
     struct Attribute
     {
         float focal_length = 0.035f;  // 35mm
         float sensor_height = 0.024f; // full frame
         float aperture = 22.0f;
-        float exposure = 1.f;
+        float exposure = 1.f; // linear scale applied before tone mapping
         float focus_distance = 1.f;
 
         void Print() const;
