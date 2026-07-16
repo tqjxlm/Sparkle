@@ -27,9 +27,6 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 
     rhi->SubmitCommandBuffer();
 
-    rhi->EnqueueEndOfRenderTasks([]() {});
-
-    // TODO(tqjxlm): use a completion callback or execution graph
     rhi->WaitForDeviceIdle();
 
     const char *buffer_data = reinterpret_cast<const char *>(staging_buffer->Lock());
