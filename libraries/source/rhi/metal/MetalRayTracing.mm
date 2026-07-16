@@ -8,7 +8,8 @@
 namespace sparkle
 {
 static id<MTLAccelerationStructure> NewAccelerationStructureWithDescriptor(
-    MTLAccelerationStructureDescriptor *descriptor, id<MTLAccelerationStructureCommandEncoder> command_encoder)
+    MTLAccelerationStructureDescriptor *descriptor, id<MTLAccelerationStructureCommandEncoder> command_encoder,
+    id<MTLBuffer> __strong &scratch_buffer)
 {
     auto device = context->GetDevice();
 
@@ -20,10 +21,12 @@ static id<MTLAccelerationStructure> NewAccelerationStructureWithDescriptor(
     id<MTLAccelerationStructure> acceleration_structure =
         [device newAccelerationStructureWithSize:accel_sizes.accelerationStructureSize];
 
-    // Allocate scratch space Metal uses to build the acceleration structure.
-    // TODO(tqjxlm): use a shared scratch buffer
-    id<MTLBuffer> scratch_buffer = [device newBufferWithLength:accel_sizes.buildScratchBufferSize
-                                                       options:MTLResourceStorageModePrivate];
+    // grow-only per-structure scratch, reused across rebuilds. the command buffer retains it until completion.
+    if (!scratch_buffer || scratch_buffer.length < accel_sizes.buildScratchBufferSize)
+    {
+        scratch_buffer = [device newBufferWithLength:accel_sizes.buildScratchBufferSize
+                                             options:MTLResourceStorageModePrivate];
+    }
 
     // Create an acceleration structure command encoder.
 
@@ -83,7 +86,8 @@ void MetalBLAS::Build(id<MTLAccelerationStructureCommandEncoder> command_encoder
     accel_descriptor.geometryDescriptors = @[ descriptor ];
 
     // Build the acceleration structure.
-    acceleration_structure_ = NewAccelerationStructureWithDescriptor(accel_descriptor, command_encoder);
+    acceleration_structure_ =
+        NewAccelerationStructureWithDescriptor(accel_descriptor, command_encoder, scratch_buffer_);
 
     SetDebugInfo(acceleration_structure_, GetName());
 
@@ -156,7 +160,7 @@ void MetalTLAS::Build()
     tlas_descriptor.instanceDescriptorBuffer = RHICast<MetalBuffer>(blas_descriptor_buffer_)->GetResource();
 
     // Create the instance acceleration structure that contains all instances in the scene.
-    tlas_ = NewAccelerationStructureWithDescriptor(tlas_descriptor, command_encoder);
+    tlas_ = NewAccelerationStructureWithDescriptor(tlas_descriptor, command_encoder, scratch_buffer_);
 
     [command_encoder endEncoding];
 
@@ -247,13 +251,16 @@ void MetalTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
     // Query for the sizes needed to store and build the acceleration structure.
     MTLAccelerationStructureSizes accel_sizes = [device accelerationStructureSizesWithDescriptor:tlas_descriptor];
 
-    id<MTLBuffer> scratch_buffer = [device newBufferWithLength:accel_sizes.buildScratchBufferSize
-                                                       options:MTLResourceStorageModePrivate];
+    if (!scratch_buffer_ || scratch_buffer_.length < accel_sizes.buildScratchBufferSize)
+    {
+        scratch_buffer_ = [device newBufferWithLength:accel_sizes.buildScratchBufferSize
+                                              options:MTLResourceStorageModePrivate];
+    }
 
     [command_encoder refitAccelerationStructure:tlas_
                                      descriptor:tlas_descriptor
                                     destination:tlas_
-                                  scratchBuffer:scratch_buffer
+                                  scratchBuffer:scratch_buffer_
                             scratchBufferOffset:0];
 
     [command_encoder endEncoding];
