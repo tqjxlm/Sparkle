@@ -37,11 +37,9 @@ public:
 
     void Destroy();
 
-    template <class T> std::shared_ptr<T> GetOrCreateMaterial(const MaterialResource &material_resource)
+    template <class T> std::shared_ptr<T> CreateMaterial(const MaterialResource &material_resource)
     {
-        // TODO(tqjxlm): cache and reuse
-        auto new_material = std::make_shared<T>(material_resource);
-        return new_material;
+        return std::make_shared<T>(material_resource);
     }
 
     std::shared_ptr<Material> GetDefaultMaterial()

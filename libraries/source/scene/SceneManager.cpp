@@ -76,13 +76,13 @@ void SceneManager::GenerateRandomSpheres(Scene &scene, unsigned count)
             auto g = sampler::RandomUnit<true>();
             auto b = sampler::RandomUnit<true>();
             Vector3 color = Vector3(r, g, b);
-            material = material_manager.GetOrCreateMaterial<LambertianMaterial>(
-                {.base_color = color, .name = "RandomLambertian"});
+            material =
+                material_manager.CreateMaterial<LambertianMaterial>({.base_color = color, .name = "RandomLambertian"});
         }
         else if (material_type < lambertian_ratio + dieletric_ratio)
         {
             auto eta = sampler::RandomUnit<true>() * 2.f + 1.3f;
-            material = material_manager.GetOrCreateMaterial<DieletricMaterial>(
+            material = material_manager.CreateMaterial<DieletricMaterial>(
                 {.base_color = Ones, .eta = eta, .name = "RandomDieletric"});
         }
         else

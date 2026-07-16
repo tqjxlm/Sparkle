@@ -22,12 +22,12 @@ MaterialManager::MaterialManager()
 {
     metals_.resize(MetalType::COUNT);
 
-    default_material_ = GetOrCreateMaterial<LambertianMaterial>({.base_color = Ones, .name = "DefaultMaterial"});
-    metals_[GOLD] = GetOrCreateMaterial<MetalMaterial>({.base_color = {1.0f, 0.7f, 0.29f}, .name = "Gold"});
-    metals_[IRON] = GetOrCreateMaterial<MetalMaterial>({.base_color = {0.56f, 0.57f, 0.58f}, .name = "Iron"});
-    metals_[BRONZE] = GetOrCreateMaterial<MetalMaterial>({.base_color = {0.95f, 0.64f, 0.54f}, .name = "Bronze"});
-    metals_[ALUMINIUM] = GetOrCreateMaterial<MetalMaterial>({.base_color = {0.92f, 0.92f, 0.92f}, .name = "Aluminium"});
-    metals_[SILVER] = GetOrCreateMaterial<MetalMaterial>({.base_color = {0.95f, 0.93f, 0.88f}, .name = "Silver"});
+    default_material_ = CreateMaterial<LambertianMaterial>({.base_color = Ones, .name = "DefaultMaterial"});
+    metals_[GOLD] = CreateMaterial<MetalMaterial>({.base_color = {1.0f, 0.7f, 0.29f}, .name = "Gold"});
+    metals_[IRON] = CreateMaterial<MetalMaterial>({.base_color = {0.56f, 0.57f, 0.58f}, .name = "Iron"});
+    metals_[BRONZE] = CreateMaterial<MetalMaterial>({.base_color = {0.95f, 0.64f, 0.54f}, .name = "Bronze"});
+    metals_[ALUMINIUM] = CreateMaterial<MetalMaterial>({.base_color = {0.92f, 0.92f, 0.92f}, .name = "Aluminium"});
+    metals_[SILVER] = CreateMaterial<MetalMaterial>({.base_color = {0.95f, 0.93f, 0.88f}, .name = "Silver"});
 }
 
 MaterialManager::~MaterialManager() = default;
