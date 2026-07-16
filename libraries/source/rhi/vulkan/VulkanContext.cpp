@@ -361,11 +361,17 @@ bool VulkanContext::RecreateSurface()
     }
 
     DestroySurface();
-    auto success = rhi_->GetHardwareInterface()->CreateVulkanSurface(instance_, static_cast<void *>(&surface_));
+    const bool success = rhi_->GetHardwareInterface()->CreateVulkanSurface(instance_, static_cast<void *>(&surface_));
+    if (!success)
+    {
+        Log(Info, "Vulkan surface creation deferred until a native window is available");
+        return false;
+    }
+
     ASSERT(surface_);
     Log(Debug, "Vulkan surface created");
 
-    return success;
+    return true;
 }
 
 void VulkanContext::DestroySurface()
@@ -378,7 +384,7 @@ void VulkanContext::DestroySurface()
     }
 }
 
-void VulkanContext::BeginFrame()
+bool VulkanContext::BeginFrame()
 {
     auto frame_index = rhi_->GetFrameIndex();
 
@@ -395,7 +401,12 @@ void VulkanContext::BeginFrame()
         CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
 
         current_command_buffer_ = command_buffers_[frame_index];
-        return;
+        return true;
+    }
+
+    if (!swap_chain_)
+    {
+        return false;
     }
 
     // the per-image fence waits below are not enough when the swap chain holds more images than frames in flight
@@ -408,11 +419,29 @@ void VulkanContext::BeginFrame()
         next_acquire_semaphore_index_ =
             (next_acquire_semaphore_index_ + 1) % image_acquire_semaphores_per_image_.size();
 
-        if (swap_chain_->AcquireImage(acquire_semaphore))
+        const auto acquire_result = swap_chain_->AcquireImage(acquire_semaphore);
+        if (acquire_result == VK_SUCCESS || acquire_result == VK_SUBOPTIMAL_KHR)
         {
             // Store which semaphore we're using for this frame
             acquire_semaphores_in_use_[frame_index] = acquire_semaphore;
             break;
+        }
+
+        if (acquire_result == VK_ERROR_SURFACE_LOST_KHR)
+        {
+            Log(Info, "Vulkan surface lost while acquiring an image. Waiting for a new native window...");
+            return false;
+        }
+
+        if (acquire_result != VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            CHECK_VK_ERROR(acquire_result);
+            return false;
+        }
+
+        if (!rhi_->GetHardwareInterface()->CanRender())
+        {
+            return false;
         }
 
         Log(Info, "swap chain out of date on image acquisition. recreating...");
@@ -439,6 +468,7 @@ void VulkanContext::BeginFrame()
     CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
 
     current_command_buffer_ = command_buffers_[frame_index];
+    return true;
 }
 
 VkResult VulkanContext::EndFrame()

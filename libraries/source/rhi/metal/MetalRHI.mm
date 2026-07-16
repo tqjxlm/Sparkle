@@ -115,9 +115,10 @@ bool MetalRHI::SupportsHardwareRayTracing()
     return context->GetDevice().supportsRaytracing;
 }
 
-void MetalRHI::BeginFrameInternal()
+bool MetalRHI::BeginFrameInternal()
 {
     context->BeginFrame();
+    return true;
 }
 
 void MetalRHI::EndFrameInternal()

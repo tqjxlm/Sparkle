@@ -7,13 +7,7 @@
 
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 
-struct ANativeWindowDeleter
-{
-    void operator()(ANativeWindow *)
-    {
-        // TODO(tqjxlm): it should be released somewhere
-    }
-};
+#include <mutex>
 
 namespace sparkle
 {
@@ -71,7 +65,8 @@ private:
     android_app *app_state_ = nullptr;
     JavaVM *vm_ = nullptr;
     JNIEnv *jni_ = nullptr;
-    std::unique_ptr<ANativeWindow, ANativeWindowDeleter> view_;
+    ANativeWindow *view_ = nullptr;
+    std::mutex view_mutex_;
 
     bool should_close_ = false;
     bool ui_enabled_ = false;

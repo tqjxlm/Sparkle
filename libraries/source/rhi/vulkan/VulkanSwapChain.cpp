@@ -211,26 +211,24 @@ void VulkanSwapChain::Recreate()
     }
 }
 
-bool VulkanSwapChain::AcquireImage(VkSemaphore semaphore)
+VkResult VulkanSwapChain::AcquireImage(VkSemaphore semaphore)
 {
     // Get the next image index from the swap chain
     // Note: this is an async request, the image is not available until the semaphore is ready
     const VkResult result = vkAcquireNextImageKHR(context->GetDevice(), swap_chain_, UINT64_MAX, semaphore,
                                                   VK_NULL_HANDLE, &swap_chain_index_);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
     {
-        return false;
+        return result;
     }
-
-    ASSERT_F(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR, "failed to acquire swap chain image!");
 
     for (auto *rt : regitsered_rt_)
     {
         rt->SyncWithSwapChain();
     }
 
-    return true;
+    return result;
 }
 } // namespace sparkle
 

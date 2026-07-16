@@ -22,7 +22,10 @@ CookJobResult DrivePassToCompletion(RHIContext *rhi, std::unique_ptr<IBLPass> pa
     constexpr unsigned SamplesPerDispatch = 64;
     while (!pass->IsReady())
     {
-        rhi->BeginFrame();
+        if (!rhi->BeginFrame())
+        {
+            return CookJobResult::Failure();
+        }
         pass->CookOnTheFly(config, SamplesPerDispatch);
         rhi->EndFrame();
     }

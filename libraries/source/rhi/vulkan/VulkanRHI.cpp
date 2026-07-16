@@ -44,9 +44,12 @@ void VulkanRHI::CleanupInternal()
     initialization_success_ = false;
 }
 
-void VulkanRHI::BeginFrameInternal()
+bool VulkanRHI::BeginFrameInternal()
 {
-    context->BeginFrame();
+    if (!context->BeginFrame())
+    {
+        return false;
+    }
 
     if (GetConfig().measure_gpu_time)
     {
@@ -58,6 +61,8 @@ void VulkanRHI::BeginFrameInternal()
 
         frame_timers_[frame_index]->Begin();
     }
+
+    return true;
 }
 
 void VulkanRHI::EndFrameInternal()
@@ -68,6 +73,29 @@ void VulkanRHI::EndFrameInternal()
     }
 
     auto result = context->EndFrame();
+
+    if (result == VK_ERROR_SURFACE_LOST_KHR)
+    {
+        Log(Info, "Vulkan surface lost while presenting. Waiting for a new native window...");
+        back_buffer_dirty_ = true;
+        frame_buffer_resized_ = false;
+        return;
+    }
+
+    const bool surface_result =
+        result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR;
+    if (!surface_result)
+    {
+        CHECK_VK_ERROR(result);
+        return;
+    }
+
+    if (!IsHeadless() && !GetHardwareInterface()->CanRender())
+    {
+        back_buffer_dirty_ = true;
+        frame_buffer_resized_ = false;
+        return;
+    }
 
     bool should_recreate_swapchain = !IsHeadless() && (result == VK_ERROR_OUT_OF_DATE_KHR || frame_buffer_resized_);
 
