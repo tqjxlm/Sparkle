@@ -56,7 +56,7 @@ Logger::Logger(const std::string &dedicated_log_path)
             logger_->sinks().push_back(file_sink);
         }
 
-        // TODO(tqjxlm): copy the file instead of writing to two files at runtime
+        // a second live sink keeps output.log current even on crash, when a copy-at-exit would never run
         {
             auto log_file_path_relative = std::string("logs/output.log");
             auto log_file_path = Path::External(log_file_path_relative).Resolved().string();

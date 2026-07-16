@@ -34,7 +34,6 @@ void PrimitiveComponent::OnAttach()
 
     auto *scene = node_->GetScene();
 
-    // TODO(tqjxlm): what if we re-attach a component?
     scene->RegisterPrimitive(this);
 
     // it will need a material to be able to actually render

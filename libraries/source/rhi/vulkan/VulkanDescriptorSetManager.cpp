@@ -234,8 +234,7 @@ VkDescriptorSet VulkanDescriptorSetManager::RequestDescriptorSet(uint32_t resour
         }
         else
         {
-            // get a free descriptor set
-            // TODO(tqjxlm): get the descriptor that needs least effort to update
+            // get a free descriptor set. a smarter pick needs profiling evidence first
             descriptor_index = cache.free_sets.back();
             cache.free_sets.pop_back();
         }
