@@ -6,6 +6,8 @@
 #include "rhi/RHI.h"
 #include "rhi/RHIResourceArray.h"
 
+#include <cstring>
+
 namespace sparkle
 {
 static constexpr unsigned BaseBufferSize = 1024;
@@ -27,7 +29,7 @@ void BindlessManager::InitRenderResources(RHIContext *rhi)
         RHIShaderResourceReflection::ResourceType::StorageBuffer, "BindlessVertexAttributeBufferArray");
 
     material_parameter_buffer_ =
-        rhi->CreateBuffer({.size = sizeof(MaterialRenderProxy) * BaseBufferSize,
+        rhi->CreateBuffer({.size = sizeof(MaterialRenderProxy::MaterialRenderData) * BaseBufferSize,
                            .usages = RHIBuffer::BufferUsage::StorageBuffer,
                            .mem_properties = RHIMemoryProperty::HostCoherent | RHIMemoryProperty::HostVisible,
                            .is_dynamic = false},
@@ -132,16 +134,18 @@ void BindlessManager::UpdatePrimitive(PrimitiveRenderProxy *primitive)
 static bool ResizeBufferIfNeeded(RHIContext *rhi, RHIResourceRef<RHIBuffer> &buffer, size_t element_size,
                                  size_t requested_element_count)
 {
-    if (requested_element_count * element_size <= buffer->GetSize())
+    const auto requested_size = requested_element_count * element_size;
+    if (requested_size <= buffer->GetSize())
     {
         return false;
     }
 
-    buffer = rhi->CreateBuffer({.size = buffer->GetSize() * 2,
-                                .usages = buffer->GetUsage(),
-                                .mem_properties = buffer->GetMemoryProperty(),
-                                .is_dynamic = buffer->IsDynamic()},
-                               buffer->GetName());
+    const auto name = buffer->GetName();
+    rhi->RecreateBuffer({.size = requested_size,
+                         .usages = buffer->GetUsage(),
+                         .mem_properties = buffer->GetMemoryProperty(),
+                         .is_dynamic = buffer->IsDynamic()},
+                        name, buffer);
 
     return true;
 }
@@ -191,17 +195,13 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
         if (ResizeBufferIfNeeded(rhi, material_id_buffer_, sizeof(uint32_t), primitives.size()))
         {
             // full update
-            std::vector<uint32_t> material_ids;
-            material_ids.reserve(primitives.size());
+            std::vector<uint32_t> material_ids(material_id_buffer_->GetSize() / sizeof(uint32_t));
 
-            for (auto *primitive : primitives)
+            for (size_t i = 0; i < primitives.size(); i++)
             {
-                auto material_id = primitive->GetMaterialRenderProxy()->GetRenderIndex();
-                material_ids.emplace_back(material_id);
+                material_ids[i] = primitives[i]->GetMaterialRenderProxy()->GetRenderIndex();
             }
 
-            // TODO(tqjxlm): avoid blocking
-            rhi->WaitForDeviceIdle();
             material_id_buffer_->UploadImmediate(material_ids.data());
 
             is_buffer_dirty_ = true;
@@ -248,16 +248,18 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
                                  material_proxies.size()))
         {
             // full update
-            std::vector<MaterialRenderProxy::MaterialRenderData> material_parameters;
-            material_parameters.reserve(material_proxies.size());
+            std::vector<uint8_t> material_parameters(material_parameter_buffer_->GetSize());
 
-            for (const auto &material : material_proxies)
+            for (size_t i = 0; i < material_proxies.size(); i++)
             {
-                material_parameters.push_back(material->GetRenderData());
+                if (const auto &material = material_proxies[i])
+                {
+                    const auto render_data = material->GetRenderData();
+                    std::memcpy(material_parameters.data() + i * sizeof(render_data), &render_data,
+                                sizeof(render_data));
+                }
             }
 
-            // TODO(tqjxlm): avoid blocking
-            rhi->WaitForDeviceIdle();
             material_parameter_buffer_->UploadImmediate(material_parameters.data());
 
             is_buffer_dirty_ = true;
