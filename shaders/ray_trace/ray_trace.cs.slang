@@ -240,7 +240,7 @@ VertexAttribute GetVertexAttribute(uint instance_id, uint index)
 void GetIntersection(RayDesc ray_desc, RayQuery<CLOSEST_HIT_FLAGS> ray_query, out Intersection intersection)
 {
     const float2 intersection_uv = ray_query.CommittedTriangleBarycentrics();
-    const uint instance_id = ray_query.CommittedInstanceIndex();
+    const uint instance_id = ray_query.CommittedInstanceID();
     const uint triangle_id = ray_query.CommittedPrimitiveIndex();
     const float4x3 inv_transform = ray_query.CommittedWorldToObject4x3();
 
