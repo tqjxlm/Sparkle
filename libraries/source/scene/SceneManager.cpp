@@ -129,7 +129,7 @@ std::shared_ptr<TaskFuture<bool>> SceneManager::LoadScene(Scene *scene, const Pa
 {
     PROFILE_SCOPE_LOG("SceneManager::LoadScene");
 
-    // TODO(tqjxlm): handle pending async tasks
+    // in-flight load/cook tasks racing this teardown are a known issue (docs/TODO.md: scene replacement fence)
 
     Log(Info, "Loading scene... {}", asset_path.path.string());
 
