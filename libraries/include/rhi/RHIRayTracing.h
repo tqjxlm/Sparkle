@@ -80,6 +80,18 @@ public:
         return all_blas_;
     }
 
+    [[nodiscard]] bool HasInstances() const
+    {
+        for (const auto *blas : all_blas_)
+        {
+            if (blas)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
 protected:
     // the array may not be contiguous. do validate when iterating through it.
     std::vector<RHIBLAS *> all_blas_;

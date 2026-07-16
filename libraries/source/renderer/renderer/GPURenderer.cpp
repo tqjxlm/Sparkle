@@ -197,7 +197,7 @@ void GPURenderer::Render()
     }
 
     // base pass: render to texture
-    if (!accumulation_complete && !AccumulationPaused())
+    if (tlas_->HasInstances() && !accumulation_complete && !AccumulationPaused())
     {
         scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
                                     .after_stage = RHIPipelineStage::Top,
@@ -399,7 +399,7 @@ void GPURenderer::Update()
 
     // must match Render()'s dispatch gate: frozen and manually-paused frames skip the trace dispatch
     const bool will_dispatch =
-        !AccumulationPaused() &&
+        tlas_->HasInstances() && !AccumulationPaused() &&
         (camera->NeedClear() || camera->GetCumulatedSampleCount() < render_config_.max_sample_per_pixel);
 
     uint32_t spp = render_config_.sample_per_pixel;
@@ -446,6 +446,7 @@ void GPURenderer::Update()
     {
         seed_counter_ += spp;
         camera->AccumulateSample(spp);
+        last_second_total_spp_ += spp;
     }
 
     if (sky_light)
@@ -467,8 +468,6 @@ void GPURenderer::Update()
     }
 
     tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
-    last_second_total_spp_ += spp;
 
     spp_logger_.Tick();
 
