@@ -152,8 +152,7 @@ private:
     VkQueue graphics_queue_;                            // multiple queues can be bound to the same logical device
     VkQueue present_queue_;                             // multiple queues can be bound to the same logical device
 
-    // synchronization objects. we only care about the graphics queue with one command buffer for now
-    // TODO(tqjxlm): support other types of queues and multiple command buffers
+    // all graphics, compute, and transfer work uses one universal queue
     std::vector<VkFence> queue_finish_fences_;
 
     // due to the fact that we may not acquire image index sequentially, we need to manually assign fences to images

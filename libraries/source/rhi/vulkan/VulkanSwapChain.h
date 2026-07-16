@@ -31,11 +31,13 @@ inline QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_families.data());
 
+    constexpr VkQueueFlags required_flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+
     // find queue families that we need
     for (uint32_t i = 0; i < queue_family_count; i++)
     {
         const auto &queue_family = queue_families[i];
-        if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        if ((queue_family.queueFlags & required_flags) == required_flags)
         {
             indices.graphicsFamily = i;
 
@@ -61,8 +63,6 @@ inline QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
             break;
         }
     }
-
-    ASSERT(indices.IsComplete());
 
     return indices;
 }
