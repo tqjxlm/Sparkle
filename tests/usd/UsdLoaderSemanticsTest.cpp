@@ -5,6 +5,7 @@
 #include "core/Logger.h"
 #include "core/task/TaskManager.h"
 #include "io/Image.h"
+#include "io/Mesh.h"
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
 #include "scene/component/light/DirectionalLight.h"
@@ -47,8 +48,23 @@ public:
             {
                 return Result::Pending;
             }
+            if (!load_task_->Get())
+            {
+                CleanupFixtures();
+                return Result::Fail;
+            }
+            render_barrier_ = TaskManager::RunInRenderThread([] {});
+            stage_ = Stage::WaitForLoadedRenderBarrier;
+            return Result::Pending;
 
-            const bool success = load_task_->Get() && VerifyTextures(app.GetScene()) && VerifyLights(app.GetScene());
+        case Stage::WaitForLoadedRenderBarrier:
+            if (!render_barrier_->IsReady())
+            {
+                return Result::Pending;
+            }
+
+            const bool success =
+                VerifyTextures(app.GetScene()) && VerifyLights(app.GetScene()) && VerifyMeshes(app.GetScene());
             CleanupFixtures();
             return success ? Result::Pass : Result::Fail;
         }
@@ -62,6 +78,7 @@ private:
         InsertRenderBarrier,
         WaitForRenderBarrier,
         WaitForScene,
+        WaitForLoadedRenderBarrier,
     };
 
     static bool WriteFixtures()
@@ -109,9 +126,20 @@ def Xform "Root"
         texCoord2f[] primvars:st = [(0, 0), (1, 0), (0, 1)] (
             interpolation = "vertex"
         )
-        float4[] primvars:tangents = [(1, 0, 0, 1), (1, 0, 0, 1), (1, 0, 0, 1)] (
+        uniform token subdivisionScheme = "none"
+    }
+
+    def Mesh "UntexturedTriangle" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        rel material:binding = </Root/Materials/PlainMaterial>
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1)] (
             interpolation = "vertex"
         )
+        point3f[] points = [(2, 0, 0), (3, 0, 0), (2, 1, 0)]
         uniform token subdivisionScheme = "none"
     }
 
@@ -158,6 +186,20 @@ def Xform "Root"
                 token outputs:surface
             }
         }
+
+        def Material "PlainMaterial"
+        {
+            token outputs:surface.connect = </Root/Materials/PlainMaterial/Surface.outputs:surface>
+
+            def Shader "Surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.5, 0.5, 0.5)
+                float inputs:metallic = 0
+                float inputs:roughness = 1
+                token outputs:surface
+            }
+        }
     }
 }
 )USD";
@@ -167,18 +209,26 @@ def Xform "Root"
         return success;
     }
 
-    static bool VerifyTextures(Scene *scene)
+    static MeshPrimitive *FindMeshPrimitive(Scene *scene, std::string_view name)
     {
-        Material *material = nullptr;
-        scene->GetRootNode()->Traverse([&material](SceneNode *node) {
+        MeshPrimitive *result = nullptr;
+        scene->GetRootNode()->Traverse([name, &result](SceneNode *node) {
             for (const auto &component : node->GetComponents())
             {
-                if (auto *primitive = dynamic_cast<MeshPrimitive *>(component.get()))
+                auto *primitive = dynamic_cast<MeshPrimitive *>(component.get());
+                if (primitive && primitive->GetMeshResource()->name == name)
                 {
-                    material = primitive->GetMaterial();
+                    result = primitive;
                 }
             }
         });
+        return result;
+    }
+
+    static bool VerifyTextures(Scene *scene)
+    {
+        const auto *primitive = FindMeshPrimitive(scene, "TexturedTriangle");
+        Material *material = primitive ? primitive->GetMaterial() : nullptr;
 
         if (!Expect(material != nullptr, "loaded textured mesh material"))
         {
@@ -200,6 +250,40 @@ def Xform "Root"
         success &= Expect(resource.base_color_texture->GetStorageSize() == 4 &&
                               resource.emissive_texture->GetStorageSize() == 4,
                           "decoded RGBA textures have exact storage");
+        return success;
+    }
+
+    static bool VerifyMeshes(Scene *scene)
+    {
+        const auto *textured_primitive = FindMeshPrimitive(scene, "TexturedTriangle");
+        const auto *untextured_primitive = FindMeshPrimitive(scene, "UntexturedTriangle");
+
+        bool success = Expect(textured_primitive != nullptr, "loaded textured mesh");
+        success &= Expect(untextured_primitive != nullptr, "loaded untextured mesh");
+        if (!success)
+        {
+            return false;
+        }
+
+        const auto &textured_mesh = *textured_primitive->GetMeshResource();
+        const auto &untextured_mesh = *untextured_primitive->GetMeshResource();
+        success &= Expect(textured_mesh.Validate() && untextured_mesh.Validate(), "loaded meshes are valid");
+        success &= Expect(textured_mesh.uvs.size() == textured_mesh.vertices.size(), "loaded primary UV set");
+        if (textured_mesh.uvs.size() == textured_mesh.vertices.size())
+        {
+            bool uses_primary_uvs = true;
+            for (size_t i = 0; i < textured_mesh.vertices.size(); i++)
+            {
+                uses_primary_uvs &= textured_mesh.uvs[i].isApprox(
+                    Vector2(textured_mesh.vertices[i].x(), textured_mesh.vertices[i].y()));
+            }
+            success &= Expect(uses_primary_uvs, "selected texture coordinate slot zero");
+        }
+        success &=
+            Expect(textured_mesh.tangents.size() == textured_mesh.vertices.size(), "generated fallback tangents");
+        success &= Expect(untextured_mesh.uvs.empty(), "preserved missing UVs");
+        success &= Expect(untextured_mesh.tangents.size() == untextured_mesh.vertices.size(),
+                          "generated tangents for untextured mesh");
         return success;
     }
 
