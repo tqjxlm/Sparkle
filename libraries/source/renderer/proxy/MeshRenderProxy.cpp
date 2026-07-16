@@ -291,7 +291,6 @@ void MeshRenderProxy::UpdateMatrix(RHIContext *rhi)
 
     if (blas_)
     {
-        // TODO(tqjxlm): support movable blas
         blas_->SetTransform(matrix);
     }
 }

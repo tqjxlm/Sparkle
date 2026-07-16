@@ -209,9 +209,29 @@ void SceneRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera, 
         material->InitRenderResources(rhi, config);
     }
 
+    const auto changes_before_update = primitive_changes_.size();
+
     for (auto &proxy : proxies_)
     {
+        const bool moved = proxy->IsPrimitive() && proxy->IsTransformDirty();
+
         proxy->Update(rhi, camera, config);
+
+        if (moved)
+        {
+            auto *primitive = static_cast<PrimitiveRenderProxy *>(proxy.get());
+            if (primitive->GetPrimitiveIndex() != UINT_MAX)
+            {
+                primitive_changes_.push_back({.type = PrimitiveChangeType::Update,
+                                              .primitive = primitive,
+                                              .to_id = primitive->GetPrimitiveIndex()});
+            }
+        }
+    }
+
+    if (primitive_changes_.size() != changes_before_update)
+    {
+        camera_->MarkPixelDirty();
     }
 
     if (bindless_manager_->IsValid())
@@ -260,10 +280,9 @@ void SceneRenderProxy::UpdateBVH()
             break;
         case PrimitiveChangeType::Remove:
         case PrimitiveChangeType::Move:
+        case PrimitiveChangeType::Update:
             need_bvh_update_ = true;
             break;
-        case PrimitiveChangeType::Update:
-            // TODO(tqjxlm): dynamic primitives
         default:
             UnImplemented(type);
             break;
