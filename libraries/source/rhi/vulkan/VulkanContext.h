@@ -198,7 +198,6 @@ private:
 };
 
 // the life cycle is managed by VulkanRHI
-// TODO(tqjxlm): avoid singleton
 inline std::unique_ptr<VulkanContext> context;
 } // namespace sparkle
 
