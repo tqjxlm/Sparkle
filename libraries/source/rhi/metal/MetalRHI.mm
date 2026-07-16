@@ -101,6 +101,11 @@ RHIResourceRef<RHIImage> MetalRHI::CreateBackBufferColor()
                          .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
     attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
 
+    if (IsHeadless())
+    {
+        return CreateResource<MetalImage>(attribute, "BackBufferColor");
+    }
+
     return CreateResource<MetalImage>(attribute, nullptr, "BackBufferColor");
 }
 
