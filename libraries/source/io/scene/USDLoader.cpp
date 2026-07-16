@@ -270,27 +270,14 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
     ASSERT(!render_mesh.normals.empty());
     CopyAttributeBuffer(render_mesh.normals, mesh->normals);
 
-    if (render_mesh.texcoords.empty())
+    const auto primary_texcoords = render_mesh.texcoords.find(0);
+    if (primary_texcoords != render_mesh.texcoords.end())
     {
-        mesh->uvs.resize(mesh->vertices.size());
-
-        // we will need tangent in the end, so generate in advance
-        mesh->tangents.reserve(mesh->vertices.size());
-        for (auto i = 0u; i < mesh->vertices.size(); i++)
-        {
-            const Vector3 major_axis = utilities::GetPossibleMajorAxis(mesh->normals[i]);
-            mesh->tangents.emplace_back(
-                utilities::ConcatVector(mesh->normals[i].cross(major_axis).cross(mesh->normals[i]), 1.0f));
-        }
+        CopyAttributeBuffer(primary_texcoords->second, mesh->uvs);
     }
-    else
+
+    if (!render_mesh.tangents.empty())
     {
-        // TODO(tqjxlm): support multi-texcoords
-        CopyAttributeBuffer(render_mesh.texcoords.begin()->second, mesh->uvs);
-
-        // if there are texcoords, we assume the mesh has tangents
-        ASSERT(!render_mesh.tangents.empty());
-
         if (render_mesh.tangents.format == tinyusdz::tydra::VertexAttributeFormat::Vec3)
         {
             auto vector_size = render_mesh.tangents.format_size();
@@ -308,6 +295,17 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
         {
             ASSERT_EQUAL(render_mesh.tangents.format, tinyusdz::tydra::VertexAttributeFormat::Vec4);
             CopyAttributeBuffer(render_mesh.tangents, mesh->tangents);
+        }
+    }
+
+    if (mesh->tangents.empty())
+    {
+        mesh->tangents.reserve(mesh->vertices.size());
+        for (size_t i = 0; i < mesh->vertices.size(); i++)
+        {
+            const Vector3 major_axis = utilities::GetPossibleMajorAxis(mesh->normals[i]);
+            mesh->tangents.emplace_back(
+                utilities::ConcatVector(mesh->normals[i].cross(major_axis).cross(mesh->normals[i]), 1.0f));
         }
     }
 

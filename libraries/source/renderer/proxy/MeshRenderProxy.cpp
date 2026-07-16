@@ -241,8 +241,10 @@ void MeshRenderProxy::InitRenderResources(RHIContext *rhi, const RenderConfig &c
 
     for (unsigned i = 0; i < raw_mesh_->GetNumVertices(); i++)
     {
-        attrib_buffer.emplace_back(VertexAttribute{
-            .tangent = raw_mesh_->tangents[i], .normal = raw_mesh_->normals[i], .tex_coord = raw_mesh_->uvs[i]});
+        attrib_buffer.emplace_back(
+            VertexAttribute{.tangent = raw_mesh_->tangents[i],
+                            .normal = raw_mesh_->normals[i],
+                            .tex_coord = raw_mesh_->uvs.empty() ? Vector2::Zero() : raw_mesh_->uvs[i]});
     }
 
     vertex_attrib_buffer_ =

@@ -136,7 +136,7 @@ struct Mesh
     [[nodiscard]] bool Validate() const
     {
         return !vertices.empty() && !indices.empty() && vertices.size() == normals.size() &&
-               vertices.size() == tangents.size() && vertices.size() == uvs.size();
+               vertices.size() == tangents.size() && (uvs.empty() || vertices.size() == uvs.size());
     }
 };
 } // namespace sparkle
