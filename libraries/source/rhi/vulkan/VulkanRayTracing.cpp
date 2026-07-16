@@ -321,8 +321,8 @@ void VulkanTLAS::BuildInternal(bool rebuild)
             auto retired_acceleration_structure =
                 std::make_shared<RetiredAccelerationStructure>(acceleration_structure_, std::move(buffer_));
             context->GetRHI()->EnqueueEndOfRenderTasks(
-                [retired_acceleration_structure = std::move(retired_acceleration_structure)]() mutable {
-                    retired_acceleration_structure = nullptr;
+                [retired_structure = std::move(retired_acceleration_structure)]() mutable {
+                    retired_structure = nullptr;
                 });
         }
 
