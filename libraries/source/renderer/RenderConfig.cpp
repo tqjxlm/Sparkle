@@ -139,7 +139,6 @@ void RenderConfig::Validate()
     if (view_)
     {
         // for mobile platforms, it is always full-screen. we calculate width given height
-        // TODO(tqjxlm): full screen support for desktop platforms
         int back_buffer_width;
         int back_buffer_height;
         view_->GetFrameBufferSize(back_buffer_width, back_buffer_height);
