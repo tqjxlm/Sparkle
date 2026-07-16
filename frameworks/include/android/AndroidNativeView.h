@@ -5,13 +5,14 @@
 #include "application/NativeView.h"
 #include "core/Exception.h"
 
+#include <android/native_window.h>
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 
 struct ANativeWindowDeleter
 {
-    void operator()(ANativeWindow *)
+    void operator()(ANativeWindow *window)
     {
-        // TODO(tqjxlm): it should be released somewhere
+        ANativeWindow_release(window);
     }
 };
 

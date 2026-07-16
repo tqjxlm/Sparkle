@@ -280,6 +280,11 @@ void AndroidNativeView::Reset(android_app *app_state)
 
     ASSERT(jni_);
 
+    if (app_state_->window)
+    {
+        // the glue owns the window; keep it alive across surface teardown
+        ANativeWindow_acquire(app_state_->window);
+    }
     view_.reset(app_state_->window);
 
     is_valid_ = headless_ || view_ != nullptr;
