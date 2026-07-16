@@ -129,8 +129,6 @@ std::shared_ptr<TaskFuture<bool>> SceneManager::LoadScene(Scene *scene, const Pa
 {
     PROFILE_SCOPE_LOG("SceneManager::LoadScene");
 
-    // TODO(tqjxlm): handle pending async tasks
-
     Log(Info, "Loading scene... {}", asset_path.path.string());
 
     UpdateSceneConfig(asset_path);

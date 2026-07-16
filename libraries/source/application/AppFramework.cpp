@@ -854,8 +854,6 @@ void AppFramework::HandleSceneKey(const KeyEvent &event)
 
 void AppFramework::RequestExit()
 {
-    // TODO(tqjxlm): handle pending async tasks
-
     CoreStates::Instance().SetAppState(CoreStates::AppState::Exiting);
 }
 
