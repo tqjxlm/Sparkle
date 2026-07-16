@@ -63,16 +63,15 @@ void VulkanBLAS::Build()
     CHECK_VK_ERROR(
         vkCreateAccelerationStructureKHR(context->GetDevice(), &create_info, nullptr, &acceleration_structure_));
 
-    // the building process need a temporary buffer, i.e. scratch buffer
-    // TODO(tqjxlm): it's expensive to create a buffer for every blas, make a pool instead
-    const VulkanBuffer scratch_buffer(
-        {.size = size_info.buildScratchSize,
-         .usages = RHIBuffer::BufferUsage::StorageBuffer | RHIBuffer::BufferUsage::DeviceAddress,
-         .mem_properties = RHIMemoryProperty::DeviceLocal,
-         .is_dynamic = false},
-        "BLASScratchBuffer");
+    // the build scratch must stay alive until the non-blocking build submit completes, so it lives on the member
+    context->GetRHI()->RecreateBuffer(
+        RHIBuffer::Attribute{.size = size_info.buildScratchSize,
+                             .usages = RHIBuffer::BufferUsage::StorageBuffer | RHIBuffer::BufferUsage::DeviceAddress,
+                             .mem_properties = RHIMemoryProperty::DeviceLocal,
+                             .is_dynamic = false},
+        "BLASScratchBuffer", scratch_buffer_);
 
-    build_info.scratchData = scratch_buffer.GetDeviceAddress();
+    build_info.scratchData = RHICast<VulkanBuffer>(scratch_buffer_)->GetDeviceAddress();
     build_info.srcAccelerationStructure = VK_NULL_HANDLE;
     build_info.dstAccelerationStructure = acceleration_structure_;
 

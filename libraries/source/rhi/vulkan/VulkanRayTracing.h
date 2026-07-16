@@ -46,6 +46,7 @@ public:
 
 private:
     RHIResourceRef<VulkanBuffer> buffer_;
+    RHIResourceRef<RHIBuffer> scratch_buffer_;
     VkAccelerationStructureKHR acceleration_structure_;
     VkDeviceAddress device_address_;
 };
