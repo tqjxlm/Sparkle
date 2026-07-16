@@ -17,9 +17,9 @@ void VulkanDescriptorSet::Bind(VkPipelineBindPoint bind_point, VkPipelineLayout 
 
     auto frame_index = context->GetRHI()->GetFrameIndex();
 
-    vkCmdBindDescriptorSets(context->GetCurrentCommandBuffer(), bind_point, pipeline_layout, id, 1, &descriptor_set_,
-                            static_cast<unsigned int>(dynamic_descriptor_offsets_[frame_index].size()),
-                            dynamic_descriptor_offsets_[frame_index].data());
+    context->BindDescriptorSet(bind_point, pipeline_layout, id, descriptor_set_,
+                               dynamic_descriptor_offsets_[frame_index].data(),
+                               static_cast<uint32_t>(dynamic_descriptor_offsets_[frame_index].size()));
 }
 
 VulkanDescriptorSet::~VulkanDescriptorSet()
