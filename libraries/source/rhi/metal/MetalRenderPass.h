@@ -9,10 +9,7 @@ namespace sparkle
 class MetalRenderPass : public RHIRenderPass
 {
 public:
-    MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name)
-        : RHIRenderPass(attribute, rt, name)
-    {
-    }
+    MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name);
 
     void Begin();
 
@@ -27,6 +24,7 @@ public:
 
 private:
     id<MTLRenderCommandEncoder> render_encoder_;
+    MTLRenderPassDescriptor *descriptor_;
 };
 } // namespace sparkle
 

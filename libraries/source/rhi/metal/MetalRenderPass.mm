@@ -37,6 +37,13 @@ static MTLStoreAction GetMetalStoreAction(RHIRenderPass::StoreOp op)
     return MTLStoreActionDontCare;
 }
 
+MetalRenderPass::MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
+                                 const std::string &name)
+    : RHIRenderPass(attribute, rt, name), render_encoder_(nil),
+      descriptor_([MTLRenderPassDescriptor renderPassDescriptor])
+{
+}
+
 void MetalRenderPass::Begin()
 {
     auto rhi_rt = render_target_.lock();
@@ -66,22 +73,23 @@ void MetalRenderPass::End()
 
 MTLRenderPassDescriptor *MetalRenderPass::GetDescriptor() const
 {
-    // TODO(tqjxlm): cache this
-
-    MTLRenderPassDescriptor *descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-
     auto render_target = render_target_.lock();
+    ASSERT(render_target);
+    const auto mip_level = render_target->GetAttribute().mip_level;
 
     for (auto i = 0u; i < RHIRenderTarget::MaxNumColorImage; ++i)
     {
-        if (!render_target->GetColorImage(i))
+        auto color_image = render_target->GetColorImage(i);
+        auto color_attachment = descriptor_.colorAttachments[i];
+        if (!color_image)
         {
+            color_attachment.texture = nil;
+            color_attachment.level = 0;
             continue;
         }
 
-        auto color_attachment = descriptor.colorAttachments[i];
-        color_attachment.texture = RHICast<MetalImage>(GetRenderTarget()->GetColorImage(i))->GetResource();
-        color_attachment.level = GetRenderTarget()->GetAttribute().mip_level;
+        color_attachment.texture = RHICast<MetalImage>(color_image)->GetResource();
+        color_attachment.level = mip_level;
         color_attachment.loadAction = GetMetalLoadAction(attribute_.color_load_op);
         color_attachment.clearColor = MTLClearColorMake(0, 0, 0, 1);
         color_attachment.storeAction = GetMetalStoreAction(attribute_.color_store_op);
@@ -89,13 +97,18 @@ MTLRenderPassDescriptor *MetalRenderPass::GetDescriptor() const
 
     if (render_target->GetDepthImage())
     {
-        descriptor.depthAttachment.texture = RHICast<MetalImage>(GetRenderTarget()->GetDepthImage())->GetResource();
-        descriptor.depthAttachment.level = GetRenderTarget()->GetAttribute().mip_level;
-        descriptor.depthAttachment.loadAction = GetMetalLoadAction(attribute_.depth_load_op);
-        descriptor.depthAttachment.clearDepth = 1.f;
-        descriptor.depthAttachment.storeAction = GetMetalStoreAction(attribute_.depth_store_op);
+        descriptor_.depthAttachment.texture = RHICast<MetalImage>(render_target->GetDepthImage())->GetResource();
+        descriptor_.depthAttachment.level = mip_level;
+        descriptor_.depthAttachment.loadAction = GetMetalLoadAction(attribute_.depth_load_op);
+        descriptor_.depthAttachment.clearDepth = 1.f;
+        descriptor_.depthAttachment.storeAction = GetMetalStoreAction(attribute_.depth_store_op);
     }
-    return descriptor;
+    else
+    {
+        descriptor_.depthAttachment.texture = nil;
+        descriptor_.depthAttachment.level = 0;
+    }
+    return descriptor_;
 }
 } // namespace sparkle
 
