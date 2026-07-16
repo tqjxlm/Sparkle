@@ -43,6 +43,11 @@ public:
         return transform_;
     }
 
+    [[nodiscard]] bool IsTransformDirty() const
+    {
+        return transform_dirty_;
+    }
+
     [[nodiscard]] bool IsPrimitive() const
     {
         return is_primitive_;

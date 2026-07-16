@@ -50,6 +50,11 @@ public:
 
     ~Scene();
 
+    [[nodiscard]] const std::unordered_set<PrimitiveComponent *> &GetPrimitives() const
+    {
+        return primitives_;
+    }
+
     [[nodiscard]] SceneNode *GetRootNode() const
     {
         return root_node_.get();
