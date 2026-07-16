@@ -96,6 +96,12 @@
         "description": "Scene async failure propagation for a missing authored sky resource."
     },
     {
+        "name": "dynamic_primitive_bvh",
+        "test_case": "dynamic_primitive_bvh",
+        "description": "Dynamic primitive change events, camera invalidation, and CPU/GPU TLAS update semantics.",
+        "app_args": ["--validation", "true"]
+    },
+    {
         "name": "render_target_pool",
         "test_case": "render_target_pool",
         "description": "RHIRenderTargetPool reuse and release semantics on the render thread."

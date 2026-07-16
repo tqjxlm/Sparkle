@@ -63,6 +63,11 @@ public:
         return rhi_dirty_;
     }
 
+    [[nodiscard]] bool IsTransformDirty() const
+    {
+        return transform_dirty_;
+    }
+
     // CAUTION: we do not validate this cast! make sure you know what you are doing.
     template <class T> T *As()
     {

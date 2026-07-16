@@ -198,6 +198,15 @@ void SceneRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera, 
 
     RenderProxy::Update(rhi, camera, config);
 
+    for (auto *primitive : primitives_)
+    {
+        if (!primitive->IsRHIDirty() && primitive->IsTransformDirty())
+        {
+            primitive_changes_.push_back(
+                {.type = PrimitiveChangeType::Update, .primitive = primitive, .to_id = primitive->GetPrimitiveIndex()});
+        }
+    }
+
     // any change to the scene should trigger canvas re-draw since pixel history makes no sense now
     if (!GetPrimitiveChangeList().empty())
     {
@@ -260,10 +269,9 @@ void SceneRenderProxy::UpdateBVH()
             break;
         case PrimitiveChangeType::Remove:
         case PrimitiveChangeType::Move:
+        case PrimitiveChangeType::Update:
             need_bvh_update_ = true;
             break;
-        case PrimitiveChangeType::Update:
-            // TODO(tqjxlm): dynamic primitives
         default:
             UnImplemented(type);
             break;
@@ -274,6 +282,7 @@ void SceneRenderProxy::UpdateBVH()
     {
         tlas_ = std::make_unique<TLAS>(primitives_);
         tlas_->Build();
+        need_bvh_update_ = false;
     }
 }
 
