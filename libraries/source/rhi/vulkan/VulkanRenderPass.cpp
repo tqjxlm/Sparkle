@@ -145,11 +145,14 @@ void VulkanRenderPass::Begin()
 
     auto *command_buffer = context->GetCurrentCommandBuffer();
 
-    VkDebugUtilsLabelEXT debug_label{};
-    debug_label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-    debug_label.pLabelName = GetName().c_str();
+    if (context->IsValidationEnabled())
+    {
+        VkDebugUtilsLabelEXT debug_label{};
+        debug_label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+        debug_label.pLabelName = GetName().c_str();
 
-    vkCmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
+        vkCmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
+    }
 
     context->GetDescriptorSetManager().UpdateDirtyResourceArrays();
 
@@ -237,7 +240,10 @@ void VulkanRenderPass::End()
         image->SetCurrentLayout(attribute_.depth_final_layout, 0, image->GetAttributes().mip_levels);
     }
 
-    vkCmdEndDebugUtilsLabelEXT(command_buffer);
+    if (context->IsValidationEnabled())
+    {
+        vkCmdEndDebugUtilsLabelEXT(command_buffer);
+    }
 }
 
 void VulkanRenderPass::Cleanup()

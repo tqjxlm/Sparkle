@@ -108,6 +108,11 @@ public:
 
     void SetDebugInfo(uint64_t objectHandle, VkObjectType objectType, const char *name);
 
+    [[nodiscard]] bool IsValidationEnabled() const
+    {
+        return enable_validation_;
+    }
+
     void EnqueueCommandBufferResource(OneShotCommandBufferScope::CommandBufferResources &&resources)
     {
         pending_command_buffer_resources_.push(std::move(resources));
