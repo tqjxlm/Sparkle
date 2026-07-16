@@ -10,6 +10,7 @@
         "cooker_request",
         "scene_load_failure",
         "render_target_pool",
+        "dynamic_buffer_reuse",
         "pipeline_switch_pool"
     ],
     "macos-macos-release": [
@@ -23,6 +24,7 @@
         "cooker_request",
         "scene_load_failure",
         "render_target_pool",
+        "dynamic_buffer_reuse",
         "pipeline_switch_pool",
         "ibl_parity"
     ],
@@ -37,6 +39,7 @@
         "cooker_request",
         "scene_load_failure",
         "render_target_pool",
+        "dynamic_buffer_reuse",
         "pipeline_switch_pool"
     ]
 }

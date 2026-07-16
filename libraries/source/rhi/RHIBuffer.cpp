@@ -94,21 +94,39 @@ void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribu
 
     buffer_ =
         rhi->CreateBuffer(dynamic_attribute, "DynamicBuffer" + std::to_string(static_cast<uint32_t>(attribute.usages)));
+
+    free_ranges_.emplace(0, RHIBufferSubAllocation::DynamicBufferCapacity);
+}
+
+bool RHIDynamicBuffer::CanAllocate(unsigned size) const
+{
+    const auto aligned_size = utilities::AlignAddress(size, offset_alignment_);
+    return std::ranges::any_of(free_ranges_,
+                               [aligned_size](const auto &range) { return range.second >= aligned_size; });
 }
 
 RHIBufferSubAllocation RHIDynamicBuffer::Allocate(unsigned size)
 {
-    ASSERT(CanAllocate(size));
+    const auto aligned_size = utilities::AlignAddress(size, offset_alignment_);
+    auto range = std::ranges::find_if(
+        free_ranges_, [aligned_size](const auto &candidate) { return candidate.second >= aligned_size; });
+    ASSERT_F(range != free_ranges_.end(), "Dynamic buffer capacity exceeded by allocation of {} bytes", size);
 
-    RHIBufferSubAllocation sub_allocation(frames_in_flight_, allocated_size_, this);
+    const auto offset = range->first;
+    const auto remaining_size = range->second - aligned_size;
+    free_ranges_.erase(range);
 
-    allocated_size_ = utilities::AlignAddress(allocated_size_ + size, offset_alignment_);
+    if (remaining_size > 0)
+    {
+        free_ranges_.emplace(offset + aligned_size, remaining_size);
+    }
 
-    return sub_allocation;
+    return RHIBufferSubAllocation(frames_in_flight_, offset, aligned_size, this);
 }
 
-RHIBufferSubAllocation::RHIBufferSubAllocation(unsigned frames_in_flight, unsigned offset, RHIDynamicBuffer *parent)
-    : offset_(offset), parent_(parent)
+RHIBufferSubAllocation::RHIBufferSubAllocation(unsigned frames_in_flight, unsigned offset, unsigned size,
+                                               RHIDynamicBuffer *parent)
+    : offset_(offset), size_(size), parent_(parent)
 {
     for (auto i = 0u; i < frames_in_flight; i++)
     {
@@ -146,9 +164,46 @@ RHIResourceRef<RHIBuffer> RHIBufferSubAllocation::GetBuffer() const
     return parent_->GetUnderlyingBuffer();
 }
 
-void RHIDynamicBuffer::Deallocate(RHIBufferSubAllocation &)
+void RHIDynamicBuffer::Deallocate(RHIBufferSubAllocation &allocation)
 {
-    // TODO(tqjxlm): memory management
+    ASSERT(allocation.parent_ == this);
+    ASSERT(allocation.size_ > 0);
+
+    auto offset = allocation.offset_;
+    auto size = allocation.size_;
+    auto next = free_ranges_.lower_bound(offset);
+
+    ASSERT(next == free_ranges_.end() || offset + size <= next->first);
+
+    if (next != free_ranges_.begin())
+    {
+        auto previous = std::prev(next);
+        ASSERT(previous->first + previous->second <= offset);
+
+        if (previous->first + previous->second == offset)
+        {
+            offset = previous->first;
+            size += previous->second;
+            free_ranges_.erase(previous);
+        }
+    }
+
+    if (next != free_ranges_.end() && offset + size == next->first)
+    {
+        size += next->second;
+        free_ranges_.erase(next);
+    }
+
+    const bool inserted = free_ranges_.emplace(offset, size).second;
+    ASSERT(inserted);
+    (void)inserted;
+
+    allocation.size_ = 0;
+}
+
+RHIBuffer::~RHIBuffer()
+{
+    dynamic_allocation_.Deallocate();
 }
 
 void RHIBuffer::UploadImmediate(const void *data)

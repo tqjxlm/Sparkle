@@ -5,6 +5,8 @@
 #include "core/Exception.h"
 #include "rhi/RHIMemory.h"
 
+#include <map>
+
 namespace sparkle
 {
 class RHIDynamicBuffer;
@@ -19,7 +21,7 @@ public:
 
     RHIBufferSubAllocation() = default;
 
-    RHIBufferSubAllocation(unsigned frames_in_flight, unsigned offset, RHIDynamicBuffer *parent);
+    RHIBufferSubAllocation(unsigned frames_in_flight, unsigned offset, unsigned size, RHIDynamicBuffer *parent);
 
     void Deallocate();
 
@@ -42,7 +44,10 @@ public:
     }
 
 private:
-    unsigned offset_;
+    friend class RHIDynamicBuffer;
+
+    unsigned offset_ = 0;
+    unsigned size_ = 0;
     // this address is pre-offseted
     std::vector<void *> cpu_address_;
     RHIDynamicBuffer *parent_ = nullptr;
@@ -76,6 +81,8 @@ public:
     RHIBuffer(const Attribute &attribute, const std::string &name) : RHIResource(name), attribute_(attribute)
     {
     }
+
+    ~RHIBuffer() override;
 
     [[nodiscard]] auto GetSize() const
     {
@@ -167,10 +174,7 @@ public:
 
     void Deallocate(RHIBufferSubAllocation &allocation);
 
-    [[nodiscard]] bool CanAllocate(unsigned size) const
-    {
-        return allocated_size_ + size <= RHIBufferSubAllocation::DynamicBufferCapacity;
-    }
+    [[nodiscard]] bool CanAllocate(unsigned size) const;
 
     [[nodiscard]] auto GetUnderlyingBuffer() const
     {
@@ -178,7 +182,7 @@ public:
     }
 
 private:
-    unsigned allocated_size_;
+    std::map<unsigned, unsigned> free_ranges_;
     RHIResourceRef<RHIBuffer> buffer_;
     unsigned frames_in_flight_;
     uint32_t offset_alignment_;
