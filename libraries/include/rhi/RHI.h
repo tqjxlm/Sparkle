@@ -257,7 +257,12 @@ public:
         end_of_frame_tasks_.emplace_back(std::move(func));
     }
 
-    // TODO(tqjxlm): this should not be public. restrict its use to RHI modules only.
+protected:
+    friend class MetalContext;
+    friend class VulkanBLAS;
+    friend class VulkanRenderTarget;
+    friend class VulkanSwapChain;
+
     template <class T, typename... Args>
         requires std::derived_from<T, RHIResource>
     RHIResourceRef<T> CreateResource(Args &&...args)
@@ -279,6 +284,7 @@ public:
         return resource;
     }
 
+public:
     void DeferResourceDeletion(RHIResource *resource);
 
     void FlushDeferredDeletions();

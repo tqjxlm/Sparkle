@@ -238,7 +238,7 @@ bool VulkanRHI::RecreateSurface()
     return context->RecreateSurface();
 }
 
-static auto CreateBackBufferDepth(VkExtent2D extent)
+RHIResourceRef<RHIImage> VulkanRHI::CreateBackBufferDepth(VkExtent2D extent)
 {
     auto depth_format = FindDepthFormat(context->GetPhysicalDevice());
 
@@ -253,7 +253,7 @@ static auto CreateBackBufferDepth(VkExtent2D extent)
                          .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                          .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 
-    return context->GetRHI()->CreateResource<VulkanImage>(attribute, depth_format, "BackBufferDepth");
+    return CreateResource<VulkanImage>(attribute, depth_format, "BackBufferDepth");
 }
 
 void VulkanRHI::CreateBackBufferRenderTarget()

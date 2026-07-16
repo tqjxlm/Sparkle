@@ -81,7 +81,7 @@ static auto CreateBackBufferDepth(CGSize extent)
                          .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
     attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
 
-    return context->GetRHI()->CreateResource<MetalImage>(attribute, "BackBufferDepth");
+    return context->GetRHI()->CreateImage(attribute, "BackBufferDepth");
 }
 
 void MetalRHI::InitRenderResources()

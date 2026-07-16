@@ -131,6 +131,8 @@ protected:
     RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
 
 private:
+    RHIResourceRef<RHIImage> CreateBackBufferDepth(VkExtent2D extent);
+
     std::vector<RHIResourceRef<RHITimer>> frame_timers_;
 };
 } // namespace sparkle
