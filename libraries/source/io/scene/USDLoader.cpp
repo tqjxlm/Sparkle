@@ -30,7 +30,6 @@ static Mat4x4 MatrixCast(const tinyusdz::value::matrix4d &v)
     {
         for (auto j = 0; j < 4; j++)
         {
-            // TODO(tqjxlm): support double matrix
             eigen_matrix(j, i) = static_cast<Scalar>(v.m[i][j]);
         }
     }
@@ -116,7 +115,6 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
 
     auto camera = std::make_shared<OrbitCameraComponent>(attribute);
 
-    // TODO(tqjxlm): this means we can only have one camera. should support multiple cameras in the future.
     ctx.scene->SetMainCamera(camera);
 
     return camera;
