@@ -27,8 +27,6 @@ void VulkanRenderPass::CreateRenderPass()
     std::vector<VkAttachmentReference> color_attachment_refs;
     std::vector<VkAttachmentReference> resolve_attachment_refs;
 
-    // we treat all color attachments with the same attribute
-    // TODO(tqjxlm): maybe support different attributes for different attachments
     for (auto i = 0u; i < RHIRenderTarget::MaxNumColorImage; i++)
     {
         if (!rhi_rt->GetColorImage(i))

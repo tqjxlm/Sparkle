@@ -209,8 +209,6 @@ void VulkanForwardPipelineState::SetupColorAndDepthAttachments()
             continue;
         }
 
-        // TODO(tqjxlm): different blend state per image
-
         auto &blend_attachment = color_blend_attachments_.emplace_back(VkPipelineColorBlendAttachmentState{});
 
         blend_attachment.colorWriteMask =
