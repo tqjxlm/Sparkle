@@ -9,7 +9,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 GROUND_TRUTH_URL_BASE = "https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle"
 DEFAULT_SCENE = "TestScene"
-FLIP_THRESHOLD = 0.1
+FLIP_THRESHOLD = 0.02
 
 
 def download_ground_truth(framework, scene, pipeline):
