@@ -111,8 +111,7 @@ public:
 
     ~VulkanSwapChain();
 
-    // returns false if the swap chain is out of date; only a full recreation can recover from that
-    [[nodiscard]] bool AcquireImage(VkSemaphore semaphore);
+    [[nodiscard]] VkResult AcquireImage(VkSemaphore semaphore);
 
     void RegisterRenderTarget(VulkanRenderTarget *rt)
     {

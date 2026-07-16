@@ -95,7 +95,7 @@ public:
     void BeginCommandBuffer();
     void SubmitCommandBuffer();
 
-    void BeginFrame();
+    [[nodiscard]] bool BeginFrame();
     VkResult EndFrame();
 
     void Cleanup();

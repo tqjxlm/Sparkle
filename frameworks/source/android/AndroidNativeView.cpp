@@ -83,6 +83,9 @@ void AndroidNativeView::Cleanup()
 
     vm_ = nullptr;
     jni_ = nullptr;
+
+    std::scoped_lock lock(view_mutex_);
+    view_.reset();
 }
 
 void AndroidNativeView::InitGUI(AppFramework *app)
@@ -138,7 +141,8 @@ void AndroidNativeView::GetFrameBufferSize(int &width, int &height)
         return;
     }
 
-    ASSERT(is_valid_);
+    std::scoped_lock lock(view_mutex_);
+    ASSERT(is_valid_.load(std::memory_order_relaxed));
     width = window_width_;
     height = window_height_;
 }
@@ -151,6 +155,8 @@ void AndroidNativeView::GetVulkanRequiredExtensions(std::vector<const char *> &r
 
 bool AndroidNativeView::CreateVulkanSurface(void *in_instance, void *out_surface)
 {
+    std::scoped_lock lock(view_mutex_);
+
     if (!view_)
     {
         return false;
@@ -161,12 +167,15 @@ bool AndroidNativeView::CreateVulkanSurface(void *in_instance, void *out_surface
                                                     .flags = 0,
                                                     .window = view_.get()};
 
-    auto is_success = vkCreateAndroidSurfaceKHR(static_cast<VkInstance>(in_instance), &create_info, nullptr,
-                                                static_cast<VkSurfaceKHR *>(out_surface)) == VK_SUCCESS;
+    const auto result = vkCreateAndroidSurfaceKHR(static_cast<VkInstance>(in_instance), &create_info, nullptr,
+                                                  static_cast<VkSurfaceKHR *>(out_surface));
+    if (result != VK_SUCCESS)
+    {
+        Log(Info, "Android Vulkan surface creation deferred, VkResult = {}", static_cast<int>(result));
+        return false;
+    }
 
-    ASSERT(is_success);
-
-    return is_success;
+    return true;
 }
 
 void AndroidNativeView::InitUiSystem()
@@ -235,8 +244,10 @@ void AndroidNativeView::OnAppCmd(android_app *app_state, int32_t cmd)
         if (rhi && rhi->IsInitialized())
         {
             TaskManager::RunInRenderThread([rhi]() {
-                rhi->RecreateSurface();
-                rhi->RecreateSwapChain();
+                if (rhi->RecreateSurface())
+                {
+                    rhi->RecreateSwapChain();
+                }
             });
         }
 
@@ -251,6 +262,14 @@ void AndroidNativeView::OnAppCmd(android_app *app_state, int32_t cmd)
         if (!native_view->IsHeadless())
         {
             native_view->can_render_ = false;
+        }
+
+        {
+            std::scoped_lock lock(native_view->view_mutex_);
+            native_view->view_.reset();
+            native_view->is_valid_ = native_view->headless_;
+            native_view->window_width_ = 0;
+            native_view->window_height_ = 0;
         }
 
         break;
@@ -285,14 +304,18 @@ void AndroidNativeView::Reset(android_app *app_state)
         // the glue owns the window; keep it alive across surface teardown
         ANativeWindow_acquire(app_state_->window);
     }
-    view_.reset(app_state_->window);
 
-    is_valid_ = headless_ || view_ != nullptr;
-
-    if (is_valid_)
     {
-        window_width_ = ANativeWindow_getWidth(view_.get());
-        window_height_ = ANativeWindow_getHeight(view_.get());
+        std::scoped_lock lock(view_mutex_);
+        view_.reset(app_state_->window);
+
+        is_valid_ = headless_ || view_ != nullptr;
+
+        if (view_)
+        {
+            window_width_ = ANativeWindow_getWidth(view_.get());
+            window_height_ = ANativeWindow_getHeight(view_.get());
+        }
     }
 
     if (ui_enabled_)

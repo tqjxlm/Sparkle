@@ -2,6 +2,7 @@
 
 #include "core/math/Types.h"
 
+#include <atomic>
 #include <memory>
 
 namespace sparkle
@@ -26,12 +27,12 @@ public:
 
     [[nodiscard]] bool CanRender() const
     {
-        return can_render_;
+        return can_render_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] bool IsValid() const
     {
-        return is_valid_;
+        return is_valid_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] virtual bool IsHeadless() const
@@ -87,8 +88,8 @@ public:
 protected:
     Vector2 window_scale_{1.f, 1.f};
     Vector2 gui_scale_{1.f, 1.f};
-    bool can_render_ = false;
-    bool is_valid_ = false;
+    std::atomic<bool> can_render_{false};
+    std::atomic<bool> is_valid_{false};
 
     WindowRotation window_rotation_ = WindowRotation::Portrait;
 

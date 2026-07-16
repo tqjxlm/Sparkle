@@ -102,7 +102,7 @@ public:
         UnImplemented();
     }
 
-    void BeginFrame();
+    [[nodiscard]] bool BeginFrame();
 
     void EndFrame();
 
@@ -306,7 +306,7 @@ protected:
     virtual void EndRenderPassInternal() = 0;
     virtual void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
     virtual void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
-    virtual void BeginFrameInternal() = 0;
+    [[nodiscard]] virtual bool BeginFrameInternal() = 0;
     virtual void EndFrameInternal() = 0;
     virtual void CleanupInternal() = 0;
     virtual RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute,

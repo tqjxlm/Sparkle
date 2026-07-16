@@ -112,7 +112,7 @@ public:
     void WaitForDeviceIdle() override;
 
 protected:
-    void BeginFrameInternal() override;
+    [[nodiscard]] bool BeginFrameInternal() override;
     void EndFrameInternal() override;
 
     void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
