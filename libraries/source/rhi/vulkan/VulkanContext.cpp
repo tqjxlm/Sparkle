@@ -258,6 +258,9 @@ bool VulkanContext::Init()
     {
         return false;
     }
+
+    SetupDebugMessenger();
+
     if (!RecreateSurface())
     {
         return false;
@@ -271,7 +274,6 @@ bool VulkanContext::Init()
         return false;
     }
 
-    SetupDebugMessenger();
     SetupMemoryAllocator();
     CreateCommandPool();
     descriptor_set_manager_->Init();
@@ -861,16 +863,6 @@ bool VulkanContext::CreateLogicalDevice()
 
     create_info.enabledExtensionCount = static_cast<uint32_t>(device_extensions_.size());
     create_info.ppEnabledExtensionNames = device_extensions_.data();
-
-    if (enable_validation_)
-    {
-        create_info.enabledLayerCount = static_cast<uint32_t>(validation_layers_.size());
-        create_info.ppEnabledLayerNames = validation_layers_.data();
-    }
-    else
-    {
-        create_info.enabledLayerCount = 0;
-    }
 
     VkPhysicalDeviceBufferDeviceAddressFeatures enabled_buffer_device_addres_features{};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR enabled_acceleration_structure_features{};
