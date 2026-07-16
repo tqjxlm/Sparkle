@@ -2,6 +2,7 @@
 
 #include "application/AppFramework.h"
 #include "core/Logger.h"
+#include "core/math/Utilities.h"
 #include "core/task/TaskManager.h"
 #include "renderer/BindlessManager.h"
 #include "renderer/proxy/PbrMaterialRenderProxy.h"
@@ -129,9 +130,11 @@ private:
 
         const auto *material_data =
             static_cast<const MaterialRenderProxy::MaterialRenderData *>(material_parameter_buffer->Lock());
-        Expect(material_data[0].metallic == 1.0f &&
-                   material_data[BaseBufferSize].metallic == static_cast<float>(BaseBufferSize + 1) &&
-                   material_data[DenseEntryCount - 1].metallic == static_cast<float>(DenseEntryCount),
+        Expect(utilities::NearlyEqual(material_data[0].metallic, 1.0f) &&
+                   utilities::NearlyEqual(material_data[BaseBufferSize].metallic,
+                                          static_cast<float>(BaseBufferSize + 1)) &&
+                   utilities::NearlyEqual(material_data[DenseEntryCount - 1].metallic,
+                                          static_cast<float>(DenseEntryCount)),
                "material metadata preserves boundary values");
         const auto *material_bytes = reinterpret_cast<const uint8_t *>(material_data);
         Expect(std::all_of(material_bytes + DenseEntryCount * sizeof(*material_data),
@@ -168,8 +171,9 @@ private:
 
         Expect(std::all_of(hole_begin, hole_begin + sizeof(*material_data), [](uint8_t value) { return value == 0; }),
                "removed material slots remain zeroed");
-        Expect(material_data[SparseEntryCount - 1].metallic == static_cast<float>(SparseEntryCount),
-               "sparse material upload preserves later indices");
+        Expect(
+            utilities::NearlyEqual(material_data[SparseEntryCount - 1].metallic, static_cast<float>(SparseEntryCount)),
+            "sparse material upload preserves later indices");
         Expect(std::all_of(material_bytes + SparseEntryCount * sizeof(*material_data),
                            material_bytes + buffer->GetSize(), [](uint8_t value) { return value == 0; }),
                "sparse material upload clears unused capacity");

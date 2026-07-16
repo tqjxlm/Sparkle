@@ -57,7 +57,7 @@ public:
             stage_ = Stage::WaitForLoadedRenderBarrier;
             return Result::Pending;
 
-        case Stage::WaitForLoadedRenderBarrier:
+        case Stage::WaitForLoadedRenderBarrier: {
             if (!render_barrier_->IsReady())
             {
                 return Result::Pending;
@@ -69,7 +69,9 @@ public:
             return success ? Result::Pass : Result::Fail;
         }
 
-        return Result::Fail;
+        default:
+            return Result::Fail;
+        }
     }
 
 private:
