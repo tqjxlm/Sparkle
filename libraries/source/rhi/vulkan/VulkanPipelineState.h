@@ -157,8 +157,6 @@ public:
 
     void CompileInternal() override;
 
-    void SetViewportAndScissor();
-
     void BindBuffers();
 
     void BindDescriptorSets();
@@ -183,8 +181,6 @@ private:
 
     void CreatePipeline();
 
-    void SetupViewport();
-
     void SetupVertexInputInfo();
 
     void SetupInputAssemblyInfo(VkPrimitiveTopology topology);
@@ -201,8 +197,6 @@ private:
 
     VkPipelineVertexInputStateCreateInfo vertex_input_info_;
     VkPipelineInputAssemblyStateCreateInfo input_assembly_;
-    VkViewport viewport_;
-    VkRect2D scissor_;
     VkPipelineRasterizationStateCreateInfo rasterizer_;
     VkPipelineMultisampleStateCreateInfo multisampling_;
 

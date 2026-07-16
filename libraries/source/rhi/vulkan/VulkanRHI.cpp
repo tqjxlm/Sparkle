@@ -404,7 +404,6 @@ void VulkanRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state,
 
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    rhi_pipeline->SetViewportAndScissor();
     rhi_pipeline->BindBuffers();
     rhi_pipeline->BindDescriptorSets();
 

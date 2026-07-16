@@ -7,7 +7,6 @@
 #include "VulkanContext.h"
 #include "VulkanDescriptorSetManager.h"
 #include "VulkanRenderPass.h"
-#include "VulkanRenderTarget.h"
 #include "VulkanShader.h"
 
 namespace sparkle
@@ -305,25 +304,6 @@ void VulkanComputePipelineState::CompileInternal()
     context->SetDebugInfo(reinterpret_cast<uint64_t>(pipeline_), VK_OBJECT_TYPE_PIPELINE, GetName().c_str());
 }
 
-void VulkanForwardPipelineState::SetupViewport()
-{
-    auto *render_target = RHICast<VulkanRenderTarget>(render_pass_->GetRenderTarget());
-
-    ASSERT(render_target);
-
-    viewport_ = {};
-    viewport_.x = 0.0f;
-    viewport_.y = 0.0f;
-    viewport_.width = static_cast<float>(render_target->GetExtent().width);
-    viewport_.height = static_cast<float>(render_target->GetExtent().height);
-    viewport_.minDepth = 0.0f;
-    viewport_.maxDepth = 1.0f;
-
-    scissor_ = {};
-    scissor_.offset = {.x = 0, .y = 0};
-    scissor_.extent = render_target->GetExtent();
-}
-
 void VulkanForwardPipelineState::SetupInputAssemblyInfo(VkPrimitiveTopology topology)
 {
     input_assembly_ = {};
@@ -336,8 +316,6 @@ void VulkanForwardPipelineState::SetupInputAssemblyInfo(VkPrimitiveTopology topo
 
 void VulkanForwardPipelineState::InitPipelineInfo()
 {
-    SetupViewport();
-
     SetupShaderStageInfo();
 
     SetupVertexInputInfo();
@@ -365,13 +343,6 @@ void VulkanForwardPipelineState::SetupPipelineLayoutInfo()
 
     CHECK_VK_ERROR(
         vkCreatePipelineLayout(context->GetDevice(), &pipeline_layout_create_info, nullptr, &pipeline_layout_));
-}
-
-void VulkanForwardPipelineState::SetViewportAndScissor()
-{
-    // TODO(tqjxlm): implement state cache to avoid running this every frame
-    vkCmdSetViewport(context->GetCurrentCommandBuffer(), 0, 1, &viewport_);
-    vkCmdSetScissor(context->GetCurrentCommandBuffer(), 0, 1, &scissor_);
 }
 
 void VulkanForwardPipelineState::BindBuffers()
