@@ -15,6 +15,7 @@
 #include "scene/material/MaterialManager.h"
 #include "scene/material/PbrMaterial.h"
 
+#include <cmath>
 #include <filesystem>
 #include <tinyusdz.hh>
 #include <tydra/render-data.hh>
@@ -33,11 +34,6 @@ static Mat4x4 MatrixCast(const tinyusdz::value::matrix4d &v)
     }
 
     return eigen_matrix;
-}
-
-static Vector3 MatrixCast(const tinyusdz::value::color3f &v)
-{
-    return {v.r, v.g, v.b};
 }
 
 static Vector3 MatrixCast(const std::array<Scalar, 3> &v)
@@ -394,62 +390,64 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
     return mesh_primitive;
 }
 
+static const tinyusdz::tydra::RenderLight *GetRenderLight(const tinyusdz::tydra::Node &node,
+                                                          const USDLoaderContext &ctx,
+                                                          tinyusdz::tydra::RenderLight::Type expected_type)
+{
+    if (node.id < 0 || static_cast<size_t>(node.id) >= ctx.render_scene.lights.size())
+    {
+        Log(Warn, "USDLoader: {} has no converted light data. node: {}", Enum2Str(node.nodeType), node.abs_path);
+        return nullptr;
+    }
+
+    const auto &render_light = ctx.render_scene.lights[static_cast<size_t>(node.id)];
+    if (render_light.type != expected_type)
+    {
+        Log(Warn, "USDLoader: {} has incompatible converted light data. node: {}", Enum2Str(node.nodeType),
+            node.abs_path);
+        return nullptr;
+    }
+
+    return &render_light;
+}
+
+static Vector3 GetLightColor(const tinyusdz::tydra::RenderLight &light)
+{
+    return MatrixCast(light.color) * (light.intensity * std::exp2(light.exposure));
+}
+
 static std::shared_ptr<DirectionalLight> LoadDirectionalLight(const tinyusdz::tydra::Node &node,
                                                               const USDLoaderContext &ctx)
 {
+    const auto *render_light = GetRenderLight(node, ctx, tinyusdz::tydra::RenderLight::Type::Distant);
+    if (!render_light)
+    {
+        return nullptr;
+    }
+
     auto light = std::make_shared<DirectionalLight>();
-
-    // tydra does not convert lights for now. we have to retrieve info from the stage.
-    const auto &prim = ctx.stage.GetPrimAtPath(tinyusdz::Path(node.abs_path, ""));
-    const auto *light_prim = prim.value()->as<tinyusdz::DistantLight>();
-
-    // TODO(tqjxlm): support animated attributes
-    tinyusdz::value::color3f color;
-    light_prim->color.get_value().get(0, &color);
-
-    float intensity = 1.0f;
-    light_prim->intensity.get_value().get(0, &intensity);
-
-    // in our framework, intensity is part of color.
-    light->SetColor(MatrixCast(color) * intensity);
-
+    light->SetColor(GetLightColor(*render_light));
     return light;
 }
 
 static std::shared_ptr<SkyLight> LoadSkyLight(const tinyusdz::tydra::Node &node, const USDLoaderContext &ctx)
 {
-    // tydra does not convert dome lights for now. we have to retrieve info from the stage.
-    const auto &prim = ctx.stage.GetPrimAtPath(tinyusdz::Path(node.abs_path, ""));
-    const auto *light_prim = prim ? prim.value()->as<tinyusdz::DomeLight>() : nullptr;
-    if (!light_prim)
+    const auto *render_light = GetRenderLight(node, ctx, tinyusdz::tydra::RenderLight::Type::Dome);
+    if (!render_light)
     {
-        Log(Warn, "USDLoader: Skipped EnvmapLight that is not a DomeLight. node: {}", node.abs_path);
         return nullptr;
     }
 
-    tinyusdz::value::AssetPath asset_path;
-    if (auto file_attribute = light_prim->file.get_value())
-    {
-        file_attribute.value().get(0, &asset_path);
-    }
-
     auto light = std::make_shared<SkyLight>();
+    light->SetColor(GetLightColor(*render_light));
 
-    if (asset_path.GetAssetPath().empty())
+    if (render_light->textureFile.empty())
     {
-        // procedural sky: color only
-        tinyusdz::value::color3f color;
-        light_prim->color.get_value().get(0, &color);
-
-        float intensity = 1.0f;
-        light_prim->intensity.get_value().get(0, &intensity);
-
-        light->SetColor(MatrixCast(color) * intensity);
         return light;
     }
 
     // the texture path is relative to the USD file
-    auto sky_map_path = (ctx.asset_root.path.parent_path() / asset_path.GetAssetPath()).lexically_normal().string();
+    auto sky_map_path = (ctx.asset_root.path.parent_path() / render_light->textureFile).lexically_normal().string();
 
     light->SetSkyMap(sky_map_path);
 
