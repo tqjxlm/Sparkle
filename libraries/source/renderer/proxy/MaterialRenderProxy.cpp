@@ -8,8 +8,9 @@
 namespace sparkle
 {
 MaterialRenderProxy::MaterialRenderData::MaterialRenderData(const MaterialResource &material)
-    : metallic(material.metallic), roughness(material.roughness), eta(material.eta), baseColor(material.base_color),
-      emissiveColor(material.emissive_color)
+    : metallic(material.metallic), roughness(material.roughness), eta(material.eta),
+      baseColor{material.base_color.x(), material.base_color.y(), material.base_color.z()},
+      emissiveColor{material.emissive_color.x(), material.emissive_color.y(), material.emissive_color.z()}
 {
 }
 
