@@ -6,6 +6,7 @@
         "usd_round_trip",
         "input_injection",
         "cooker_request",
+        "image_io",
         "scene_load_failure",
         "render_target_pool",
         "pipeline_switch_pool"
@@ -17,6 +18,7 @@
         "usd_round_trip",
         "input_injection",
         "cooker_request",
+        "image_io",
         "scene_load_failure",
         "render_target_pool",
         "pipeline_switch_pool",
@@ -29,6 +31,7 @@
         "usd_round_trip",
         "input_injection",
         "cooker_request",
+        "image_io",
         "scene_load_failure",
         "render_target_pool",
         "pipeline_switch_pool"

@@ -20,6 +20,8 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <limits>
+#include <memory>
 
 namespace sparkle
 {
@@ -81,6 +83,11 @@ void ConvertPixelsToRGBA8(const uint8_t *source_data, uint8_t *dest, uint32_t pi
         break;
     }
 }
+
+template <typename T> auto OwnStbiPixels(T *pixels)
+{
+    return std::unique_ptr<T, decltype(&stbi_image_free)>(pixels, stbi_image_free);
+}
 } // namespace
 
 Image2D Image2D::CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format)
@@ -103,7 +110,6 @@ static void WriteImageData(void *context, void *data, int size)
 bool Image2D::LoadFromFile(const std::string &file_path)
 {
     std::filesystem::path fs_file_path(file_path);
-    bool is_hdr = fs_file_path.extension().string() == ".hdr";
 
     auto *file_manager = FileManager::GetNativeFileManager();
 
@@ -119,88 +125,75 @@ bool Image2D::LoadFromFile(const std::string &file_path)
         }
     }
 
-    const int force_channel_count = 4;
-
-    if (is_hdr)
+    if (data.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
     {
-        auto *loaded_pixels =
-            stbi_loadf_from_memory(reinterpret_cast<const unsigned char *>(data.data()), static_cast<int>(data.size()),
-                                   reinterpret_cast<int *>(&width_), reinterpret_cast<int *>(&height_),
-                                   reinterpret_cast<int *>(&channel_count_), force_channel_count);
+        Log(Error, "image file is too large to decode: {}", file_path);
+        return false;
+    }
+
+    const auto *encoded_data = reinterpret_cast<const unsigned char *>(data.data());
+    const auto encoded_size = static_cast<int>(data.size());
+    constexpr int OutputChannelCount = 4;
+
+    int decoded_width = 0;
+    int decoded_height = 0;
+    int source_channel_count = 0;
+    Image2D decoded_image;
+
+    if (stbi_is_hdr_from_memory(encoded_data, encoded_size))
+    {
+        auto loaded_pixels = OwnStbiPixels(stbi_loadf_from_memory(
+            encoded_data, encoded_size, &decoded_width, &decoded_height, &source_channel_count, OutputChannelCount));
         if (!loaded_pixels)
         {
+            const char *reason = stbi_failure_reason();
+            Log(Error, "failed to decode image {}: {}", file_path, reason ? reason : "unknown error");
             return false;
         }
 
-        // TODO(tqjxlm): handle channel count as is without auto padding
-        channel_count_ = force_channel_count;
-
-        // TODO(tqjxlm): detect pixel format
-        pixel_format_ = PixelFormat::RGBAFloat16;
-
-        pixels_.resize(width_ * height_ * GetPixelSize(pixel_format_));
-
-        if (pixel_format_ == PixelFormat::RGBAFloat)
-        {
-            TaskManager::ParallelFor(0u, height_, [this, loaded_pixels](unsigned j) {
-                auto *row_data = AccessRow<float>(j);
-                std::memcpy(row_data, reinterpret_cast<uint8_t *>(loaded_pixels) + j * GetRowByteSize(),
-                            GetRowByteSize());
-            }).wait();
-        }
-        else if (pixel_format_ == PixelFormat::RGBAFloat16)
-        {
-            TaskManager::ParallelFor(0u, height_, [this, loaded_pixels](unsigned j) {
-                Vector4 *row_data = reinterpret_cast<Vector4 *>(loaded_pixels) + j * width_;
-                for (auto i = 0u; i < width_; i++)
-                {
-                    Vector4h pixel_data = row_data[i].cast<Half>();
-                    pixel_data = pixel_data.array().min(std::numeric_limits<Half>::max());
-
-                    SetPixel<Vector4h>(i, j, pixel_data);
-                }
-            }).wait();
-        }
-        else
-        {
-            UnImplemented(pixel_format_);
-        }
+        decoded_image = Image2D(static_cast<unsigned>(decoded_width), static_cast<unsigned>(decoded_height),
+                                PixelFormat::RGBAFloat16);
+        const float half_max = static_cast<float>(std::numeric_limits<Half>::max());
+        TaskManager::ParallelFor(0u, decoded_image.height_,
+                                 [&decoded_image, source = loaded_pixels.get(), half_max](unsigned j) {
+                                     auto *row = decoded_image.AccessRow<Half>(j);
+                                     for (auto i = 0u; i < decoded_image.width_; i++)
+                                     {
+                                         for (auto channel = 0u; channel < OutputChannelCount; channel++)
+                                         {
+                                             const auto value =
+                                                 source[(j * decoded_image.width_ + i) * OutputChannelCount + channel];
+                                             row[i * OutputChannelCount + channel] =
+                                                 static_cast<Half>(std::clamp(value, -half_max, half_max));
+                                         }
+                                     }
+                                 })
+            .wait();
     }
     else
     {
-        auto *loaded_pixels =
-            stbi_load_from_memory(reinterpret_cast<const unsigned char *>(data.data()), static_cast<int>(data.size()),
-                                  reinterpret_cast<int *>(&width_), reinterpret_cast<int *>(&height_),
-                                  reinterpret_cast<int *>(&channel_count_), force_channel_count);
+        auto loaded_pixels = OwnStbiPixels(stbi_load_from_memory(
+            encoded_data, encoded_size, &decoded_width, &decoded_height, &source_channel_count, OutputChannelCount));
         if (!loaded_pixels)
         {
+            const char *reason = stbi_failure_reason();
+            Log(Error, "failed to decode image {}: {}", file_path, reason ? reason : "unknown error");
             return false;
         }
 
-        // TODO(tqjxlm): handle channel count as is without auto padding
-        channel_count_ = force_channel_count;
-
-        // TODO(tqjxlm): detect pixel format. we always assume linear color for now.
-        pixel_format_ = PixelFormat::R8G8B8A8Unorm;
-
-        pixels_.resize(width_ * height_ * channel_count_ * sizeof(float));
-
-        TaskManager::ParallelFor(0u, height_, [this, loaded_pixels](unsigned j) {
-            auto *row_data = AccessRow<uint8_t>(j);
-            std::memcpy(row_data, reinterpret_cast<uint8_t *>(loaded_pixels) + j * GetRowByteSize(), GetRowByteSize());
-        }).wait();
+        decoded_image = Image2D(static_cast<unsigned>(decoded_width), static_cast<unsigned>(decoded_height),
+                                PixelFormat::R8G8B8A8Unorm);
+        std::memcpy(decoded_image.pixels_.data(), loaded_pixels.get(), decoded_image.GetStorageSize());
     }
 
-    size_vector_ = {(width_ - 1), (height_ - 1)};
-
-    name_ = fs_file_path.filename().string();
+    decoded_image.name_ = fs_file_path.filename().string();
+    *this = std::move(decoded_image);
 
     return true;
 }
 
 bool Image2D::WriteToFile(const Path &file_path) const
 {
-    // TODO(tqjxlm): async file saving
     std::vector<char> buffer;
     auto *custom_data = static_cast<void *>(&buffer);
 
