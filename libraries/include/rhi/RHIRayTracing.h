@@ -4,6 +4,7 @@
 
 #include "core/math/Types.h"
 
+#include <algorithm>
 #include <unordered_set>
 
 namespace sparkle
@@ -82,14 +83,7 @@ public:
 
     [[nodiscard]] bool HasInstances() const
     {
-        for (const auto *blas : all_blas_)
-        {
-            if (blas)
-            {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(all_blas_, [](const auto *blas) { return blas != nullptr; });
     }
 
 protected:
