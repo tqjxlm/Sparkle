@@ -7,6 +7,8 @@
 #include "io/Image.h"
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
+#include "scene/component/light/DirectionalLight.h"
+#include "scene/component/light/SkyLight.h"
 #include "scene/component/primitive/MeshPrimitive.h"
 #include "scene/material/Material.h"
 
@@ -46,7 +48,7 @@ public:
                 return Result::Pending;
             }
 
-            const bool success = load_task_->Get() && VerifyTextures(app.GetScene());
+            const bool success = load_task_->Get() && VerifyTextures(app.GetScene()) && VerifyLights(app.GetScene());
             CleanupFixtures();
             return success ? Result::Pass : Result::Fail;
         }
@@ -80,6 +82,19 @@ private:
 
 def Xform "Root"
 {
+    def DistantLight "Sun"
+    {
+        color3f inputs:color = (0.25, 0.5, 0.75)
+        float inputs:exposure = 2
+        float inputs:intensity = 3
+    }
+
+    def DomeLight "Sky"
+    {
+        color3f inputs:color = (0.1, 0.2, 0.3)
+        float inputs:intensity = 2
+    }
+
     def Mesh "TexturedTriangle" (
         prepend apiSchemas = ["MaterialBindingAPI"]
     )
@@ -185,6 +200,24 @@ def Xform "Root"
         success &= Expect(resource.base_color_texture->GetStorageSize() == 4 &&
                               resource.emissive_texture->GetStorageSize() == 4,
                           "decoded RGBA textures have exact storage");
+        return success;
+    }
+
+    static bool VerifyLights(Scene *scene)
+    {
+        const auto *directional_light = scene->GetDirectionalLight();
+        const auto *sky_light = scene->GetSkyLight();
+
+        bool success = Expect(directional_light != nullptr, "loaded distant light");
+        success &= Expect(sky_light != nullptr, "loaded dome light");
+        if (!success)
+        {
+            return false;
+        }
+
+        success &= Expect(directional_light->GetColor().isApprox(Vector3(3.0f, 6.0f, 9.0f)),
+                          "distant light applies intensity and exposure");
+        success &= Expect(sky_light->GetColor().isApprox(Vector3(0.2f, 0.4f, 0.6f)), "dome light applies intensity");
         return success;
     }
 
