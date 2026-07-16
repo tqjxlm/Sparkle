@@ -51,7 +51,7 @@ public:
         return texture_;
     }
 
-    void SetImage(id<MTLTexture> texture);
+    void SetBackBufferImage(id<MTLTexture> texture);
 
 private:
     void CreateSamplerIfNeeded();

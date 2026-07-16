@@ -344,10 +344,8 @@ void MetalSampler::Bind(id<MTLCommandEncoder> encoder, RHIShaderStage stage, uns
     }
 }
 
-void MetalImage::SetImage(id<MTLTexture> texture)
+void MetalImage::SetBackBufferImage(id<MTLTexture> texture)
 {
-    // generally this function should not be called, unless it is a back buffer image
-    // TODO(tqjxlm): there should be a more robust way
     texture_ = texture;
 
     id_dirty_ = true;

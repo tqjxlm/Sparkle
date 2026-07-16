@@ -12,7 +12,7 @@ void MetalContext::SwapBuffer()
 {
     ASSERT(!headless_);
 
-    back_buffer_color_->SetImage(current_drawable_.texture);
+    back_buffer_color_->SetBackBufferImage(current_drawable_.texture);
 }
 
 void MetalContext::CreateBackBuffer()
