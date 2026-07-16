@@ -330,12 +330,15 @@ bool RenderFramework::BeginFrame()
 
     RecreateRendererIfNecessary();
 
-    if (!renderer_)
+    if (!renderer_ || !native_view_->CanRender())
     {
         return false;
     }
 
-    rhi_->BeginFrame();
+    if (!rhi_->BeginFrame())
+    {
+        return false;
+    }
 
     return true;
 }

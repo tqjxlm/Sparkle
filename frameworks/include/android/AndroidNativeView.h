@@ -8,6 +8,8 @@
 #include <android/native_window.h>
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 
+#include <mutex>
+
 struct ANativeWindowDeleter
 {
     void operator()(ANativeWindow *window)
@@ -73,6 +75,7 @@ private:
     JavaVM *vm_ = nullptr;
     JNIEnv *jni_ = nullptr;
     std::unique_ptr<ANativeWindow, ANativeWindowDeleter> view_;
+    std::mutex view_mutex_;
 
     bool should_close_ = false;
     bool ui_enabled_ = false;

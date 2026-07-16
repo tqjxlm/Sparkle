@@ -177,7 +177,7 @@ void RHIContext::CheckRHIResourceLeak()
 #endif
 }
 
-void RHIContext::BeginFrame()
+bool RHIContext::BeginFrame()
 {
     frame_active_ = false;
     frame_memory_.Reset();
@@ -189,7 +189,10 @@ void RHIContext::BeginFrame()
         task();
     }
 
-    BeginFrameInternal();
+    if (!BeginFrameInternal())
+    {
+        return false;
+    }
     frame_active_ = true;
 
     is_deleting_deferred_resources_ = true;
@@ -201,6 +204,8 @@ void RHIContext::BeginFrame()
         task();
     }
     end_of_render_tasks_[frame_index_].clear();
+
+    return true;
 }
 
 void RHIContext::EndFrame()
