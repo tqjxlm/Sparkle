@@ -48,10 +48,7 @@ RHIImage::RHIImage(const Attribute &attributes, const std::string &name) : RHIRe
         ASSERT(attributes_.sampler.address_mode != RHISampler::SamplerAddressMode::Count);
     }
 
-    for (auto i = 0u; i < attributes.mip_levels; i++)
-    {
-        current_layout_[i] = RHIImageLayout::Undefined;
-    }
+    current_layout_.assign(attributes_.mip_levels * GetArrayLayerCount(), attributes_.initial_layout);
 }
 
 RHIImageView::RHIImageView(Attribute attribute, RHIImage *image)

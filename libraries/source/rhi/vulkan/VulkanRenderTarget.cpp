@@ -82,6 +82,8 @@ std::vector<VkImageView> VulkanRenderTarget::GetAttachments(unsigned frame_index
         else
         {
             // use mipmap level specified in render target. only ImageViewType::Image2D should be valid here.
+            ASSERT(attribute_.mip_level < color_image->GetAttributes().mip_levels);
+            ASSERT(attribute_.array_layer < color_image->GetArrayLayerCount());
             color_view = color_images_[i]->GetView(
                 rhi_context, {.base_mip_level = attribute_.mip_level, .base_array_layer = attribute_.array_layer});
         }
@@ -90,7 +92,7 @@ std::vector<VkImageView> VulkanRenderTarget::GetAttachments(unsigned frame_index
 
         if (attribute_.msaa_samples > 1)
         {
-            const auto &msaa_view = msaa_images_[i]->GetView(rhi_context, {.base_mip_level = attribute_.mip_level});
+            const auto &msaa_view = msaa_images_[i]->GetDefaultView(rhi_context);
             attachments.push_back(RHICast<VulkanImageView>(msaa_view)->GetView());
         }
 
@@ -99,7 +101,11 @@ std::vector<VkImageView> VulkanRenderTarget::GetAttachments(unsigned frame_index
 
     if (depth_image_)
     {
-        attachments.push_back(RHICast<VulkanImageView>(depth_image_->GetDefaultView(rhi_context))->GetView());
+        ASSERT(attribute_.mip_level < depth_image_->GetAttributes().mip_levels);
+        ASSERT(attribute_.array_layer < depth_image_->GetArrayLayerCount());
+        const auto &depth_view = depth_image_->GetView(
+            rhi_context, {.base_mip_level = attribute_.mip_level, .base_array_layer = attribute_.array_layer});
+        attachments.push_back(RHICast<VulkanImageView>(depth_view)->GetView());
     }
 
     ASSERT_F(!attachments.empty(), "no attachment for render target: {}", GetName());

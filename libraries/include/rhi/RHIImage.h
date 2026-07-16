@@ -164,9 +164,11 @@ public:
         RHIImageLayout target_layout;
         RHIPipelineStage after_stage;
         RHIPipelineStage before_stage;
-        // by default, all mips are transitioned
+        // A zero count transitions every remaining subresource in that dimension.
         unsigned base_mip = 0;
         unsigned mip_count = 0;
+        unsigned base_array_layer = 0;
+        unsigned array_layer_count = 0;
     };
 
     RHIImage(const Attribute &attributes, const std::string &name);
@@ -244,12 +246,17 @@ public:
 
     [[nodiscard]] uint32_t GetStorageSize() const
     {
+        return GetStorageSizePerLayer() * GetArrayLayerCount();
+    }
+
+    [[nodiscard]] unsigned GetArrayLayerCount() const
+    {
         switch (attributes_.type)
         {
         case ImageType::Image2D:
-            return GetStorageSizePerLayer();
+            return 1;
         case ImageType::Image2DCube:
-            return GetStorageSizePerLayer() * 6;
+            return 6;
         default:
             UnImplemented(attributes_.type);
             return 0;
@@ -280,17 +287,27 @@ public:
 
 #pragma region Layout
 
-    [[nodiscard]] RHIImageLayout GetCurrentLayout(unsigned mip_level) const
+    [[nodiscard]] RHIImageLayout GetCurrentLayout(unsigned mip_level, unsigned array_layer) const
     {
-        return current_layout_[mip_level];
+        ASSERT(mip_level < attributes_.mip_levels);
+        ASSERT(array_layer < GetArrayLayerCount());
+
+        return current_layout_[mip_level * GetArrayLayerCount() + array_layer];
     }
 
     // CAUTION: normally this should not be used. use RHIImage::Transition instead unless you know what you are doing.
-    void SetCurrentLayout(RHIImageLayout layout, unsigned base_mip, unsigned mip_count)
+    void SetCurrentLayout(RHIImageLayout layout, unsigned base_mip, unsigned mip_count, unsigned base_array_layer,
+                          unsigned array_layer_count)
     {
-        for (auto i = 0u; i < mip_count; i++)
+        ASSERT(mip_count > 0 && base_mip + mip_count <= attributes_.mip_levels);
+        ASSERT(array_layer_count > 0 && base_array_layer + array_layer_count <= GetArrayLayerCount());
+
+        for (auto mip = base_mip; mip < base_mip + mip_count; mip++)
         {
-            current_layout_[base_mip + i] = layout;
+            for (auto layer = base_array_layer; layer < base_array_layer + array_layer_count; layer++)
+            {
+                current_layout_[mip * GetArrayLayerCount() + layer] = layout;
+            }
         }
     }
 
@@ -304,7 +321,7 @@ protected:
     std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
 
 private:
-    std::array<RHIImageLayout, 16> current_layout_;
+    std::vector<RHIImageLayout> current_layout_;
     uint32_t bindless_id_ = UINT32_MAX;
 };
 
