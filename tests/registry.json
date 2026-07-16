@@ -111,6 +111,12 @@
         "description": "Bindless material metadata growth, sparse slots, and zero-filled capacity."
     },
     {
+        "name": "vulkan_image_subresources",
+        "test_case": "vulkan_image_subresources",
+        "description": "Vulkan image layout tracking and readback for a selected cube face and mip.",
+        "app_args": ["--validation", "true"]
+    },
+    {
         "name": "pipeline_switch_pool",
         "test_case": "pipeline_switch_pool",
         "description": "Runtime pipeline switch and pooled render-target reuse."

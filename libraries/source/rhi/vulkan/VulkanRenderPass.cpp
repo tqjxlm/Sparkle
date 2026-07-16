@@ -224,6 +224,7 @@ void VulkanRenderPass::End()
     vkCmdEndRenderPass(command_buffer);
 
     auto *rhi_rt = RHICast<VulkanRenderTarget>(GetRenderTarget());
+    const auto &rt_attribute = rhi_rt->GetAttribute();
 
     // layout is managed by explicit transition most of the time, except implicit transition by render passes
     for (const auto &color_image : rhi_rt->GetColorImages())
@@ -231,8 +232,8 @@ void VulkanRenderPass::End()
         if (color_image)
         {
             // set layout manually to keep record
-            // TODO(tqjxlm): record per layer
-            color_image->SetCurrentLayout(attribute_.color_final_layout, 0, color_image->GetAttributes().mip_levels);
+            color_image->SetCurrentLayout(attribute_.color_final_layout, rt_attribute.mip_level, 1,
+                                          rt_attribute.array_layer, 1);
         }
     }
 
@@ -240,7 +241,7 @@ void VulkanRenderPass::End()
     if (auto image = rhi_rt->GetDepthImage())
     {
         // set layout manually to keep record
-        image->SetCurrentLayout(attribute_.depth_final_layout, 0, image->GetAttributes().mip_levels);
+        image->SetCurrentLayout(attribute_.depth_final_layout, rt_attribute.mip_level, 1, rt_attribute.array_layer, 1);
     }
 
     context->EndDebugLabel(command_buffer);

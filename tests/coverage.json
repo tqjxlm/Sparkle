@@ -12,6 +12,7 @@
         "render_target_pool",
         "dynamic_buffer_reuse",
         "bindless_resize",
+        "vulkan_image_subresources",
         "pipeline_switch_pool"
     ],
     "macos-macos-release": [
@@ -43,6 +44,7 @@
         "render_target_pool",
         "dynamic_buffer_reuse",
         "bindless_resize",
+        "vulkan_image_subresources",
         "pipeline_switch_pool"
     ]
 }
