@@ -216,8 +216,7 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
     {
         if (image.channels != 3 && image.channels != 1)
         {
-            Log(Error, "USDLoader: unsupported texture channel count {}: {}", image.channels,
-                image.asset_identifier);
+            Log(Error, "USDLoader: unsupported texture channel count {}: {}", image.channels, image.asset_identifier);
             return nullptr;
         }
 
@@ -273,7 +272,6 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
     if (render_mesh.texcoords.empty())
     {
-        // TODO(tqjxlm): allow empty uv attribute to save some bandwidth
         mesh->uvs.resize(mesh->vertices.size());
 
         // we will need tangent in the end, so generate in advance

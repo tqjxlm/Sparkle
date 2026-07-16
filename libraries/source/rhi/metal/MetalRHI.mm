@@ -107,7 +107,7 @@ bool MetalRHI::SupportsHardwareRayTracing()
 {
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
-    // TODO(tqjxlm): we do not know why ASAN causes memory issues for acceleration structures. disable for now.
+    // root cause unknown: ASAN builds crash in acceleration structure code, so hardware ray tracing stays off
     Log(Warn, "Hardware ray tracing is incompatible with ASAN.");
     return false;
 #endif

@@ -54,7 +54,6 @@ inline VkAccessFlags GetImageAccessFlags(const RHIImage *image, RHIImageLayout l
 
     if (layout == RHIImageLayout::Read)
     {
-        // TODO(tqjxlm): handle subpass read
         return VK_ACCESS_SHADER_READ_BIT;
     }
 
