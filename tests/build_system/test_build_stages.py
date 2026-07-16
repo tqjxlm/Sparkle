@@ -18,27 +18,28 @@ SPEC.loader.exec_module(build_script)
 
 
 class ResolveStagesTest(unittest.TestCase):
-    def resolve(self, stage_args=None, skip_build=False, cook=False, archive=False,
-                framework="macos"):
-        return build_script.resolve_stages(stage_args, skip_build, cook, archive, framework)
+    def resolve(self, stage_args=None, framework="macos"):
+        return build_script.resolve_stages(stage_args, framework)
 
-    def test_default_is_build_and_cook_for_desktop(self):
+    def test_default_is_the_full_pipeline(self):
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", "glfw"):
-            self.assertEqual(self.resolve(framework="macos"), ["build", "cook"])
-            self.assertEqual(self.resolve(framework="glfw"), ["build", "cook"])
-
-    def test_default_includes_package_for_device_frameworks(self):
-        with patch.object(build_script, "HOST_COOK_FRAMEWORK", "glfw"):
+            self.assertEqual(self.resolve(framework="macos"), ["build", "cook", "package"])
+            self.assertEqual(self.resolve(framework="glfw"), ["build", "cook", "package"])
             self.assertEqual(self.resolve(framework="android"), ["build", "cook", "package"])
-            self.assertEqual(self.resolve(framework="ios"), ["build", "cook", "package"])
 
-    def test_default_degrades_to_build_when_the_host_cannot_cook(self):
+    def test_default_drops_cook_when_the_host_cannot_cook(self):
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
             self.assertEqual(self.resolve(framework="android"), ["build", "package"])
-            self.assertEqual(self.resolve(framework="glfw"), ["build", "cook"])
+            # glfw cooks through its own binary regardless of the host
+            self.assertEqual(self.resolve(framework="glfw"), ["build", "cook", "package"])
 
     def test_all_selects_every_stage_in_canonical_order(self):
         self.assertEqual(self.resolve(["all"]), ["build", "cook", "package"])
+
+    def test_explicit_all_never_degrades(self):
+        with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
+            self.assertEqual(self.resolve(["all"], framework="android"),
+                             ["build", "cook", "package"])
 
     def test_explicit_stages_run_in_canonical_order(self):
         self.assertEqual(self.resolve(["package", "build"]), ["build", "package"])
@@ -46,21 +47,6 @@ class ResolveStagesTest(unittest.TestCase):
     def test_explicit_stage_never_implies_upstream(self):
         self.assertEqual(self.resolve(["package"]), ["package"])
         self.assertEqual(self.resolve(["cook"]), ["cook"])
-
-    def test_legacy_archive_means_build_and_package(self):
-        self.assertEqual(self.resolve(archive=True), ["build", "package"])
-
-    def test_legacy_cook_means_build_and_cook(self):
-        self.assertEqual(self.resolve(cook=True), ["build", "cook"])
-
-    def test_legacy_skip_build_cook_means_cook_only(self):
-        self.assertEqual(self.resolve(skip_build=True, cook=True), ["cook"])
-
-    def test_legacy_skip_build_alone_selects_nothing(self):
-        self.assertEqual(self.resolve(skip_build=True), [])
-
-    def test_explicit_stage_overrides_legacy_flags(self):
-        self.assertEqual(self.resolve(["cook"], skip_build=False, archive=True), ["cook"])
 
 
 class ValidateStagesTest(unittest.TestCase):

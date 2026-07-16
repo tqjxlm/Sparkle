@@ -77,7 +77,7 @@ python3 build.py --framework [glfw, macos] --strip_test
 
 ```bash
 # Build & Run the smoke test (exits 0 on pass, 1 on fail)
-python3 build.py --framework [glfw, macos] --run --test_case smoke --headless true
+python3 run.py --framework [glfw, macos] --test_case smoke --headless true
 echo "Exit code: $?"
 ```
 
@@ -137,7 +137,7 @@ static TestCaseRegistrar<MyFeatureTest> my_feature_test_registrar("my_feature");
 Then run it:
 
 ```bash
-python3 build.py --framework macos --run --test_case my_feature
+python3 run.py --framework macos --test_case my_feature
 ```
 
 ### Naming Rules

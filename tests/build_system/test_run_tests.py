@@ -53,7 +53,7 @@ class RunTestsCommandTest(unittest.TestCase):
             ),
         ])
 
-    def test_hardware_run_uses_build_entry_point(self):
+    def test_hardware_run_uses_run_entry_point(self):
         command = run_tests.app_command(
             framework="macos",
             config="Release",
@@ -64,14 +64,13 @@ class RunTestsCommandTest(unittest.TestCase):
 
         self.assertEqual(command[:6], [
             sys.executable,
-            os.path.join(PROJECT_ROOT, "build.py"),
+            os.path.join(PROJECT_ROOT, "run.py"),
             "--framework",
             "macos",
             "--config",
             "Release",
         ])
         self.assertIn("--skip_build", command)
-        self.assertIn("--run", command)
         self.assertEqual(command[-4:], [
             "--test_case", "screenshot", "--pipeline", "forward"])
 

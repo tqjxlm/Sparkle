@@ -2,7 +2,7 @@
 
 ## Launching
 
-Always run the app through `build.py --run` during development for robustness; do not run built binaries directly. See [Build.md](Build.md) for build and run commands.
+Always run the app through `run.py` during development for robustness; do not run built binaries directly. See [Build.md](Build.md) for build and run commands.
 
 ## File System
 

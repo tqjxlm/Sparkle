@@ -38,12 +38,11 @@ def parse_args():
 
 
 def build_and_run(args, other_args):
-    build_py = os.path.join(PROJECT_ROOT, "build.py")
-    run_cmd = [sys.executable, build_py, "--framework", args.framework]
+    run_py = os.path.join(PROJECT_ROOT, "run.py")
+    run_cmd = [sys.executable, run_py, "--framework", args.framework]
     if args.skip_build:
         run_cmd.append("--skip_build")
-    run_cmd += ["--run",
-                "--test_case", "camera_nudge_return",
+    run_cmd += ["--test_case", "camera_nudge_return",
                 "--clear_screenshots", "true"] + other_args
     if args.headless:
         run_cmd += ["--headless", "true"]

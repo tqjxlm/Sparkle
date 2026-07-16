@@ -32,8 +32,10 @@ def venv_python():
 
 
 def build_command(framework, config):
+    # explicit stages: the suite needs a runnable build with cooked content, not a package
     return [sys.executable, os.path.join(REPO, "build.py"),
-            "--framework", framework, "--config", config]
+            "--framework", framework, "--config", config,
+            "--stage", "build", "--stage", "cook"]
 
 
 def preflight_steps():
@@ -51,8 +53,8 @@ def app_command(framework, config, software, test_case, test_args):
         command = [sys.executable, os.path.join(
             REPO, "dev", "run_without_gpu.py")]
     else:
-        command = build_command(framework, config)
-        command += ["--skip_build", "--run"]
+        command = [sys.executable, os.path.join(REPO, "run.py"),
+                   "--framework", framework, "--config", config, "--skip_build"]
     return command + ["--test_case", test_case] + list(test_args)
 
 

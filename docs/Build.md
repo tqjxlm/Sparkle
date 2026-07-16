@@ -128,7 +128,7 @@ python3 build.py --framework glfw --generate_only
 # make an Android APK debug apk and run on a connected device
 $env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.350.0'
 $env:ANDROID_HOME='D:/SDKs/AndroidSDK'
-python3 build.py --framework android --run
+python3 run.py --framework android
 ```
 
 ``` shell
@@ -148,7 +148,7 @@ python3 build.py --framework ios --apple_auto_sign --generate_only
 # make an iOS release build and run on a connected device in ray tracing mode
 export VULKAN_SDK=/Users/username/VulkanSDK/1.4.350.0
 export APPLE_DEVELOPER_TEAM_ID=ABC123DEF4
-python3 build.py --framework ios --apple_auto_sign --run --pipeline gpu
+python3 run.py --framework ios --apple_auto_sign --pipeline gpu
 ```
 
 ### Build via Script
@@ -156,8 +156,11 @@ python3 build.py --framework ios --apple_auto_sign --run --pipeline gpu
 **All platforms:**
 
 ``` shell
-python3 build.py --framework=<framework> [build-options] [run-options]
+python3 build.py --framework=<framework> [build-options]   # pipeline: build, cook, package
+python3 run.py --framework=<framework> [build-options] [app-options]   # build for a run, then launch
 ```
+
+`build.py` is the pipeline: it produces artifacts and never launches the app. `run.py` is the launcher: it runs the stages a launch consumes (build, cook, and for device frameworks package, whose product the run installs), then launches the app, forwarding unrecognized options to it. `run.py --skip_build` launches the existing binary without running any stage.
 
 **Supported frameworks:**
 
@@ -178,26 +181,24 @@ The host machine (where build.py runs) and the target framework (what is built, 
 | `android`        | ✔     | ✔       | ✔     |
 
 * `macos`/`ios` need Xcode, so they build only on a macOS host. `glfw` always targets the host's own desktop OS (there is no cross-OS desktop build), so a Windows glfw package can only come from a Windows host.
-* The cook stage runs on any host through the host's own framework binary (`macos` on macOS, `glfw` on Windows) regardless of the target — cooked content is target-independent. A Linux host can build for android but cannot cook for it: no supported framework produces a cooker binary on Linux, so android there defaults to build only and packages cooked content produced elsewhere (`--cooked`).
+* The cook stage runs on any host through the host's own framework binary (`macos` on macOS, `glfw` on Windows) regardless of the target — cooked content is target-independent. A Linux host can build for android but cannot cook for it: no supported framework produces a cooker binary on Linux, so android there defaults to build + package and packages cooked content produced elsewhere (`--cooked`).
 * Product archives are named by target (`android-Release.apk`, `macos-Release.zip`); only glfw carries the host system in its name (`windows-glfw-Release.zip`), because its target is the host's own desktop OS.
 
 **Pipeline stages:**
 
-The pipeline is three stages, selected with `--stage` (repeatable) and run in canonical order build → cook → package. The default is build + cook, plus package for the device frameworks (`android`, `ios`): cooked content is always wanted, and a warm cook costs only artifact lookups, so the plain `build.py --config Release --run` loop runs against cooked content on every framework. Desktop runs read the cook output from the build tree directly; a device only receives cooked content through its installed package, which is why the device default includes the package stage. `--stage all` produces a complete distributable locally: a built app, cooked content (see [Cooking.md](Cooking.md)), and a product archive whose packed content is the cooked image.
+The pipeline is three stages, selected with `--stage` (repeatable) and run in canonical order build → cook → package. The default is every stage the host supports: a plain `build.py` produces a complete distributable — a built app, cooked content (see [Cooking.md](Cooking.md)), and a product archive whose packed content is the cooked image — minus the cook stage on hosts that cannot produce a cooker binary. Explicit selections (including `--stage all`) never degrade; a missing capability fails fast instead. The development loop is `run.py`, which selects only the stages a launch consumes: build + cook (cooked content is always wanted, and a warm cook costs only artifact lookups; desktop runs read the cook output from the build tree directly), plus package for the device frameworks (`android`, `ios`) because a device only receives cooked content through its installed package.
 
 * Each stage is idempotent through its own cache (incremental compile, hit-or-cook artifacts, archive from current inputs) and fails fast when an input from an earlier stage is missing — it never runs an upstream stage implicitly.
 * Cooked content is shared across targets, and the cooker lives in the sparkle binary — so cooking for a cross-compiled framework (`android`, `ios`) executes the host framework's binary (`macos` on a Mac, `glfw` elsewhere) and fails with a hint if that binary is not built yet. The cook stage assembles its output into a self-contained content image at `build_system/<cooker>/output/cooked_image`, which the package stage picks up automatically (`--cooked <dir>` overrides).
-* The cook stage logs to its own file (`logs/cook.log` under the app's external log directory) via the app's `--log_path` argument, so a later `--run` never overwrites the cook log. `--log_path` is honored by desktop builds only.
+* The cook stage logs to its own file (`logs/cook.log` under the app's external log directory) via the app's `--log_path` argument, so a later run never overwrites the cook log. `--log_path` is honored by desktop builds only.
 * `package` replaces the archive's asset tree with the content image (compiled shaders stay build-owned), strips the app's internal runtime state, and warns when no image is available. That package still works: each cook job falls back to raw assets and cooks at runtime — the fallback is per job, never a packaging policy.
 * Rewriting a signature-sealed package breaks its signature, so the package stage re-signs afterwards: apk with zipalign + apksigner and the debug key gradle signs with, ipa with the identity that signed the build. CI release nodes do the same for their published packages.
-* `--run` on a device framework installs the product package when the package stage ran in the same invocation; with an explicit stage selection that skips packaging, it installs the raw build output, which cooks on the fly. The android run reports the device's cook activity after pulling its log.
-* `--archive` and `--cook` remain as stage aliases: `--archive` = build+package, `--cook` = build+cook, and `--skip_build` drops the build stage.
+* `run.py` on a device framework installs the product package its own package stage produced; with `--skip_build` it installs the raw build output, which cooks on the fly. The android run reports the device's cook activity after pulling its log.
 
 **Common build options:**
 
 * `--config=Release` - Release build (default: Debug).
-* `--stage=<build|cook|package|all>` - Select pipeline stage(s), see above.
-* `--archive` - Archive the app for distribution (alias for the package stage). Not required if you test the build locally. The archived app is located in `build_system/<framework>/product`.
+* `--stage=<build|cook|package|all>` - Select pipeline stage(s), see above (build.py only). The package stage's product archive lands in `build_system/<framework>/product`.
 * `--generate_only` - Generate IDE project files without building.
 * `--clangd` - Generate compile_commands.json for clangd intellisense support.
 * `--profile` - Enable Tracy profiler.
@@ -207,7 +208,7 @@ The pipeline is three stages, selected with `--stage` (repeatable) and run in ca
 * `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)
 * `--cmake-args='...'` - Pass extra arguments to CMake, e.g. `--cmake-args='-DENABLE_LTO=ON'` to enable link time optimization for a distribution build (off by default: it adds minutes of Release link time).
 * `--help` - Show all usage help.
-* `--run` - Run after building. For mobile builds, it tries to run on a connected device.
+* `--skip_build` - (run.py only) Launch the existing binary without running any pipeline stage. For mobile builds, the run installs on a connected device.
 
 ### Troubleshooting
 

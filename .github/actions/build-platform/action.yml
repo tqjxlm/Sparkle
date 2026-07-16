@@ -76,7 +76,7 @@ runs:
       shell: bash
       env:
         SPARKLE_BUILD_JOBS: 8
-      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --archive ${{ steps.setup-environment.outputs.build-args }}
+      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --stage build --stage package ${{ steps.setup-environment.outputs.build-args }}
 
     - name: Check Android task graph
       if: inputs.framework == 'android' && inputs.build-type == 'Debug'
