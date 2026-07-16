@@ -467,7 +467,7 @@ static std::vector<std::shared_ptr<Material>> LoadMaterials(const tinygltf::Mode
 
         raw_material.name = material.name;
 
-        auto material_resource = material_manager.GetOrCreateMaterial<PbrMaterial>(raw_material);
+        auto material_resource = material_manager.CreateMaterial<PbrMaterial>(raw_material);
         material_resources.emplace_back(material_resource);
     }
 

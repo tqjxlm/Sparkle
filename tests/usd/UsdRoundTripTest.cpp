@@ -44,8 +44,8 @@ static std::shared_ptr<TaskFuture<>> BuildTestScene(Scene *scene)
 
     auto &material_manager = MaterialManager::Instance();
 
-    auto white_marble_material = material_manager.GetOrCreateMaterial<LambertianMaterial>({.name = "WhiteMarble"});
-    auto glass_material = material_manager.GetOrCreateMaterial<DieletricMaterial>({.eta = 1.6f, .name = "Glass"});
+    auto white_marble_material = material_manager.CreateMaterial<LambertianMaterial>({.name = "WhiteMarble"});
+    auto glass_material = material_manager.CreateMaterial<DieletricMaterial>({.eta = 1.6f, .name = "Glass"});
 
     {
         auto [node, primitive] = MakeNodeWithComponent<MeshPrimitive>(scene, scene_root, "floor", Mesh::GetUnitCube());
