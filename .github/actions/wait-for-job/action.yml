@@ -14,8 +14,10 @@ runs:
         JOB_NAME: ${{ inputs.job-name }}
       run: |
         for _ in $(seq 1 90); do
+          # a transient API error (e.g. a 503) is "still waiting", never a verdict
           conclusion=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
-            --jq "[.jobs[] | select(.name | endswith(\"$JOB_NAME\")) | .conclusion // \"\"][0]")
+            --jq "[.jobs[] | select(.name | endswith(\"$JOB_NAME\")) | .conclusion // \"\"][0]" 2>/dev/null) \
+            || { echo "status poll failed (transient API error), retrying"; conclusion=""; }
           case "$conclusion" in
             success) exit 0 ;;
             failure|cancelled|timed_out|skipped) echo "$JOB_NAME concluded: $conclusion"; exit 1 ;;
