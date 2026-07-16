@@ -11,6 +11,7 @@
         "scene_load_failure",
         "render_target_pool",
         "dynamic_buffer_reuse",
+        "vulkan_image_subresources",
         "pipeline_switch_pool"
     ],
     "macos-macos-release": [
@@ -40,6 +41,7 @@
         "scene_load_failure",
         "render_target_pool",
         "dynamic_buffer_reuse",
+        "vulkan_image_subresources",
         "pipeline_switch_pool"
     ]
 }

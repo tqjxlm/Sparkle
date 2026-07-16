@@ -436,9 +436,9 @@ public:
         return image_;
     }
 
-    [[nodiscard]] VkImageLayout GetVkLayout(unsigned mip_level) const
+    [[nodiscard]] VkImageLayout GetVkLayout(unsigned mip_level, unsigned array_layer = 0) const
     {
-        return GetVulkanImageLayout(GetCurrentLayout(mip_level));
+        return GetVulkanImageLayout(GetCurrentLayout(mip_level, array_layer));
     }
 
     [[nodiscard]] VkImageAspectFlags GetAspect() const

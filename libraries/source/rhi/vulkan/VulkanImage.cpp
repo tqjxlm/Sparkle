@@ -54,90 +54,76 @@ void VulkanImage::CreateSampler()
 void VulkanImage::TransitionLayout(VkCommandBuffer command_buffer, const TransitionRequest &request)
 {
     ASSERT(command_buffer);
+    ASSERT(request.base_mip < attributes_.mip_levels);
+    ASSERT(request.base_array_layer < GetArrayLayerCount());
+
+    const auto mip_count = request.mip_count == 0 ? attributes_.mip_levels - request.base_mip : request.mip_count;
+    const auto array_layer_count =
+        request.array_layer_count == 0 ? GetArrayLayerCount() - request.base_array_layer : request.array_layer_count;
+
+    ASSERT(request.base_mip + mip_count <= attributes_.mip_levels);
+    ASSERT(request.base_array_layer + array_layer_count <= GetArrayLayerCount());
 
     const VkPipelineStageFlags source_stage = GetVulkanPipelineStage(request.after_stage);
     const VkPipelineStageFlags destination_stage = GetVulkanPipelineStage(request.before_stage);
     const VkImageLayout new_layout = GetVulkanImageLayout(request.target_layout);
 
-    auto transition_mip_range = [this, new_layout, source_stage, destination_stage, &request,
-                                 command_buffer](VkImageLayout old_layout, unsigned first_mip, unsigned last_mip) {
-        if (new_layout == old_layout)
+    std::vector<VkImageMemoryBarrier> barriers;
+    barriers.reserve(mip_count * array_layer_count);
+
+    auto transition_mip_range = [this, new_layout, &request, &barriers](RHIImageLayout old_layout, unsigned first_mip,
+                                                                        unsigned last_mip, unsigned array_layer) {
+        const auto old_vk_layout = GetVulkanImageLayout(old_layout);
+        if (new_layout == old_vk_layout)
         {
             return;
         }
 
-        VkImageMemoryBarrier barrier{};
+        auto &barrier = barriers.emplace_back(VkImageMemoryBarrier{});
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout = old_layout;
+        barrier.oldLayout = old_vk_layout;
         barrier.newLayout = new_layout;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image_;
+        barrier.subresourceRange.aspectMask = GetAspect();
         barrier.subresourceRange.baseMipLevel = first_mip;
         barrier.subresourceRange.levelCount = last_mip - first_mip + 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = attributes_.type == RHIImage::ImageType::Image2DCube ? 6 : 1;
-
-        switch (attributes_.format)
-        {
-        case PixelFormat::B8G8R8A8Srgb:
-        case PixelFormat::B8G8R8A8Unorm:
-        case PixelFormat::R8G8B8A8Srgb:
-        case PixelFormat::R8G8B8A8Unorm:
-        case PixelFormat::RGBAFloat:
-        case PixelFormat::RGBAFloat16:
-        case PixelFormat::R10G10B10A2Unorm:
-        case PixelFormat::R32UInt:
-        case PixelFormat::R32Float:
-        case PixelFormat::RGBAUInt32:
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            break;
-        case PixelFormat::D24S8:
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-            break;
-        case PixelFormat::D32:
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-            break;
-        case PixelFormat::Count:
-        default:
-            UnImplemented(attributes_.format);
-            break;
-        }
-
-        barrier.srcAccessMask = GetImageAccessFlags(this, GetCurrentLayout(first_mip), request.after_stage);
+        barrier.subresourceRange.baseArrayLayer = array_layer;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.srcAccessMask = GetImageAccessFlags(this, old_layout, request.after_stage);
         barrier.dstAccessMask = GetImageAccessFlags(this, request.target_layout, request.before_stage);
-
-        vkCmdPipelineBarrier(command_buffer, source_stage, destination_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     };
 
-    auto range_start = request.base_mip;
-    auto mip_count = request.mip_count == 0 ? GetAttributes().mip_levels : request.mip_count;
-    auto range_end = range_start + mip_count - 1;
-    auto old_layout = GetCurrentLayout(range_start);
-
-    // example
-    // current layouts: [a, a, a, b, c, c]
-    // target layout: b
-    // range 0: [a, a, a] -> [b, b, b]
-    // range 1: [b] -> noop
-    // range 2: [c, c] -> [b, b]
-    for (auto i = range_start; i <= range_end; i++)
+    const auto mip_end = request.base_mip + mip_count;
+    const auto array_layer_end = request.base_array_layer + array_layer_count;
+    for (auto array_layer = request.base_array_layer; array_layer < array_layer_end; array_layer++)
     {
-        if (GetCurrentLayout(i) != old_layout)
-        {
-            // transition last range
-            transition_mip_range(GetVulkanImageLayout(old_layout), range_start, i - 1);
+        auto range_start = request.base_mip;
+        auto old_layout = GetCurrentLayout(range_start, array_layer);
 
-            // start next range
-            range_start = i;
-            old_layout = GetCurrentLayout(i);
+        for (auto mip = range_start + 1; mip < mip_end; mip++)
+        {
+            if (GetCurrentLayout(mip, array_layer) == old_layout)
+            {
+                continue;
+            }
+
+            transition_mip_range(old_layout, range_start, mip - 1, array_layer);
+            range_start = mip;
+            old_layout = GetCurrentLayout(mip, array_layer);
         }
+
+        transition_mip_range(old_layout, range_start, mip_end - 1, array_layer);
     }
 
-    // transition last range
-    transition_mip_range(GetVulkanImageLayout(old_layout), range_start, range_end);
+    if (!barriers.empty())
+    {
+        vkCmdPipelineBarrier(command_buffer, source_stage, destination_stage, 0, 0, nullptr, 0, nullptr,
+                             static_cast<uint32_t>(barriers.size()), barriers.data());
+    }
 
-    SetCurrentLayout(request.target_layout, request.base_mip, mip_count);
+    SetCurrentLayout(request.target_layout, request.base_mip, mip_count, request.base_array_layer, array_layer_count);
 }
 
 void VulkanImage::Upload(const uint8_t *data)
