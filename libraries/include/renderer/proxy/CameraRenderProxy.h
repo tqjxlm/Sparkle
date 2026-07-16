@@ -9,7 +9,6 @@ namespace sparkle
 // the camera render proxy is used for:
 // 1. translate camera parameters to view info.
 // 2. view info management.
-// TODO(tqjxlm) separate view from camera
 class CameraRenderProxy : public RenderProxy
 {
 public:
