@@ -393,6 +393,7 @@ void VulkanContext::BeginFrame()
         begin_info.pInheritanceInfo = nullptr;
 
         CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
+        ResetCommandState();
 
         current_command_buffer_ = command_buffers_[frame_index];
         return;
@@ -437,6 +438,7 @@ void VulkanContext::BeginFrame()
     begin_info.pInheritanceInfo = nullptr;
 
     CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
+    ResetCommandState();
 
     current_command_buffer_ = command_buffers_[frame_index];
 }
