@@ -136,7 +136,10 @@ static size_t CountDescriptorUpdates(const VulkanDescriptorSetManager::SharedDes
     size_t update_count = 0;
     for (auto slot = 0u; slot < bindings.size(); slot++)
     {
-        update_count += descriptor_set.bound_resource_id[slot] != bindings[slot]->GetResource()->GetId();
+        if (descriptor_set.bound_resource_id[slot] != bindings[slot]->GetResource()->GetId())
+        {
+            update_count++;
+        }
     }
     return update_count;
 }
