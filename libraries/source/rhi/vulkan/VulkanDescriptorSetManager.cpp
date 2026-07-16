@@ -127,6 +127,20 @@ static void CollectDescriptorUpdate(const RHIShaderResourceBinding *binding, uns
     }
 }
 
+static size_t CountDescriptorUpdates(const VulkanDescriptorSetManager::SharedDescriptorSet &descriptor_set,
+                                     const RHIShaderResourceSet &resource_set)
+{
+    const auto &bindings = resource_set.GetBindings();
+    ASSERT_EQUAL(descriptor_set.bound_resource_id.size(), bindings.size());
+
+    size_t update_count = 0;
+    for (auto slot = 0u; slot < bindings.size(); slot++)
+    {
+        update_count += descriptor_set.bound_resource_id[slot] != bindings[slot]->GetResource()->GetId();
+    }
+    return update_count;
+}
+
 VkDescriptorSet VulkanDescriptorSetManager::AllocateDescriptorSet(VkDescriptorSetLayout layout,
                                                                   const RHIShaderResourceSet &resource_set)
 {
@@ -234,10 +248,20 @@ VkDescriptorSet VulkanDescriptorSetManager::RequestDescriptorSet(uint32_t resour
         }
         else
         {
-            // get a free descriptor set
-            // TODO(tqjxlm): get the descriptor that needs least effort to update
-            descriptor_index = cache.free_sets.back();
-            cache.free_sets.pop_back();
+            auto best_set = cache.free_sets.begin();
+            auto minimum_updates = CountDescriptorUpdates(cache.all_sets[*best_set], resource_set);
+            for (auto candidate = best_set + 1; candidate != cache.free_sets.end(); candidate++)
+            {
+                auto update_count = CountDescriptorUpdates(cache.all_sets[*candidate], resource_set);
+                if (update_count < minimum_updates)
+                {
+                    best_set = candidate;
+                    minimum_updates = update_count;
+                }
+            }
+
+            descriptor_index = *best_set;
+            cache.free_sets.erase(best_set);
         }
 
         cache.allocated_sets[resource_hash] = descriptor_index;
@@ -251,7 +275,7 @@ VkDescriptorSet VulkanDescriptorSetManager::RequestDescriptorSet(uint32_t resour
 
 void VulkanDescriptorSetManager::ReleaseDescriptorSet(uint32_t resource_hash, uint32_t layout_hash)
 {
-    context->GetRHI()->EnqueueEndOfFrameTasks([this, resource_hash, layout_hash]() {
+    context->GetRHI()->EnqueueEndOfRenderTasks([this, resource_hash, layout_hash]() {
         auto &cache = cache_[layout_hash];
 
         ASSERT(cache.allocated_sets.contains(resource_hash));
