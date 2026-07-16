@@ -124,6 +124,46 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
     return camera;
 }
 
+// missing channels: grey replicates into rgb, alpha becomes 1 in the source texel encoding
+static std::vector<uint8_t> ExpandToRgba(const std::vector<uint8_t> &src, int channels, size_t component_size)
+{
+    static constexpr std::array<uint8_t, 4> OneU8{0xFF};
+    static constexpr std::array<uint8_t, 4> OneF16{0x00, 0x3C};
+    static constexpr std::array<uint8_t, 4> OneF32{0x00, 0x00, 0x80, 0x3F};
+
+    const std::array<uint8_t, 4> *one = &OneF32;
+    if (component_size == 1)
+    {
+        one = &OneU8;
+    }
+    else if (component_size == 2)
+    {
+        one = &OneF16;
+    }
+
+    const auto channel_count = static_cast<size_t>(channels);
+    const size_t src_pixel_size = channel_count * component_size;
+    const size_t pixel_count = src.size() / src_pixel_size;
+
+    std::vector<uint8_t> dst(pixel_count * 4 * component_size);
+    for (size_t p = 0; p < pixel_count; p++)
+    {
+        const auto *in = src.data() + p * src_pixel_size;
+        auto *out = dst.data() + p * 4 * component_size;
+        for (size_t c = 0; c < 4; c++)
+        {
+            const bool is_alpha = c == 3 && channel_count < 4;
+            const size_t src_channel = c < channel_count ? c : 0;
+            for (size_t b = 0; b < component_size; b++)
+            {
+                out[c * component_size + b] = is_alpha ? (*one)[b] : in[src_channel * component_size + b];
+            }
+        }
+    }
+
+    return dst;
+}
+
 static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id)
 {
     // tydra keeps the texture entry but leaves these ids at -1 when it fails to load the image
@@ -143,30 +183,46 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
 
     const auto &image_data = ctx.render_scene.buffers[static_cast<size_t>(image.buffer_id)];
 
-    // TODO(tqjxlm): support 3 channels and 1 channel textures
-    ASSERT_EQUAL(image.channels, 4);
-
     PixelFormat format = PixelFormat::Count;
+    size_t component_size = 0;
     switch (image.assetTexelComponentType)
     {
     case tinyusdz::tydra::ComponentType::UInt8:
     case tinyusdz::tydra::ComponentType::Int8: {
-        // TODO(tqjxlm): sRGB vs Lin_sRGB?
+        // Lin_sRGB carries linear data and must not gamma-decode. only the gamma variants map to Srgb formats.
         bool is_srgb = image.colorSpace == tinyusdz::tydra::ColorSpace::sRGB ||
-                       image.usdColorSpace == tinyusdz::tydra::ColorSpace::Lin_sRGB;
+                       image.colorSpace == tinyusdz::tydra::ColorSpace::sRGB_Texture ||
+                       image.usdColorSpace == tinyusdz::tydra::ColorSpace::sRGB ||
+                       image.usdColorSpace == tinyusdz::tydra::ColorSpace::sRGB_Texture;
 
         format = is_srgb ? PixelFormat::R8G8B8A8Srgb : PixelFormat::R8G8B8A8Unorm;
+        component_size = 1;
         break;
     }
     case tinyusdz::tydra::ComponentType::Half:
         format = PixelFormat::RGBAFloat16;
+        component_size = 2;
         break;
     case tinyusdz::tydra::ComponentType::Float:
         format = PixelFormat::RGBAFloat;
+        component_size = 4;
         break;
     default:
         UnImplemented(format);
         return nullptr;
+    }
+
+    if (image.channels != 4)
+    {
+        if (image.channels != 3 && image.channels != 1)
+        {
+            Log(Error, "USDLoader: unsupported texture channel count {}: {}", image.channels,
+                image.asset_identifier);
+            return nullptr;
+        }
+
+        return std::make_shared<Image2D>(image.width, image.height, format,
+                                         ExpandToRgba(image_data.data, image.channels, component_size));
     }
 
     auto texture = std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
