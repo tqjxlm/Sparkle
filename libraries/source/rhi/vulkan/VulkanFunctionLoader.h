@@ -10,7 +10,7 @@ struct VulkanFunctionLoader
 {
     static bool Init();
     static void LoadInstance(VkInstance instance);
-    static void LoadDevice(VkDevice device);
+    static void LoadDevice(VkDevice device, bool enable_ray_tracing, bool enable_debug_utils);
 };
 } // namespace sparkle
 

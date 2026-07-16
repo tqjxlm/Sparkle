@@ -65,12 +65,14 @@ void VulkanFunctionLoader::LoadInstance(VkInstance instance)
 #endif
 }
 
-void VulkanFunctionLoader::LoadDevice(VkDevice device)
+void VulkanFunctionLoader::LoadDevice(VkDevice device, bool enable_ray_tracing, bool enable_debug_utils)
 {
 #if VULKAN_USE_VOLK
     volkLoadDevice(device);
+    static_cast<void>(enable_ray_tracing);
+    static_cast<void>(enable_debug_utils);
 #else
-    if (rhi_->SupportsHardwareRayTracing())
+    if (enable_ray_tracing)
     {
         GET_VK_FN_CHECKED(vkGetBufferDeviceAddressKHR);
         GET_VK_FN_CHECKED(vkCreateAccelerationStructureKHR);
@@ -80,9 +82,11 @@ void VulkanFunctionLoader::LoadDevice(VkDevice device)
         GET_VK_FN_CHECKED(vkCmdBuildAccelerationStructuresKHR);
     }
 
-    if (rhi->GetRHI()->GetConfig().enable_validation)
+    if (enable_debug_utils)
     {
         GET_VK_FN_CHECKED(vkSetDebugUtilsObjectNameEXT)
+        GET_VK_FN_CHECKED(vkCmdBeginDebugUtilsLabelEXT)
+        GET_VK_FN_CHECKED(vkCmdEndDebugUtilsLabelEXT)
     }
 #endif
 }

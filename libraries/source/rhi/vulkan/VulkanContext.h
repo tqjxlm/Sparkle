@@ -107,6 +107,8 @@ public:
     void CreateCommandPool();
 
     void SetDebugInfo(uint64_t objectHandle, VkObjectType objectType, const char *name);
+    void BeginDebugLabel(VkCommandBuffer command_buffer, const char *name) const;
+    void EndDebugLabel(VkCommandBuffer command_buffer) const;
 
     void EnqueueCommandBufferResource(OneShotCommandBufferScope::CommandBufferResources &&resources)
     {
@@ -119,7 +121,6 @@ private:
     bool PickPhysicalDevice();
     void QuerySubgroupQuadSupport();
     bool CheckValidationLayerSupport();
-    static bool CheckInstanceExtensionSupport();
     void GetRequiredInstanceExtensions();
     void SetupDebugMessenger();
     void SetupMemoryAllocator();
@@ -183,9 +184,10 @@ private:
 
     bool supports_subgroup_quad_ops_ = false;
 
-    VkDebugUtilsMessengerEXT debug_messenger_;
+    VkDebugUtilsMessengerEXT debug_messenger_ = VK_NULL_HANDLE;
 
     bool enable_validation_ = false;
+    bool enable_debug_utils_ = false;
     bool enable_ray_tracing_ = false;
 
     VulkanRHI *rhi_;

@@ -14,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <string_view>
 #include <unordered_set>
 
 namespace sparkle
@@ -236,7 +237,7 @@ VulkanContext::~VulkanContext() = default;
 
 void VulkanContext::SetupDebugMessenger()
 {
-    if (!enable_validation_)
+    if (!enable_validation_ || !enable_debug_utils_)
     {
         return;
     }
@@ -296,7 +297,7 @@ void VulkanContext::Cleanup()
 
     DestroySurface();
 
-    if (enable_validation_)
+    if (debug_messenger_ != VK_NULL_HANDLE)
     {
         DestroyDebugUtilsMessengerExt(instance_, debug_messenger_, nullptr);
     }
@@ -636,26 +637,6 @@ bool VulkanContext::CheckValidationLayerSupport()
     return required_validation_layers.empty();
 }
 
-bool VulkanContext::CheckInstanceExtensionSupport()
-{
-    uint32_t extension_count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr);
-
-    std::vector<VkExtensionProperties> extensions(extension_count);
-
-    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, extensions.data());
-
-#ifndef NDEBUG
-    Log(Debug, "available instance extensions:");
-    for (const auto &extension : extensions)
-    {
-        Log(Debug, "\t{}", extension.extensionName);
-    }
-#endif
-
-    return true;
-}
-
 void VulkanContext::BeginCommandBuffer()
 {
     if (current_command_buffer_ != nullptr)
@@ -784,7 +765,6 @@ bool VulkanContext::CreateInstance()
     app_info.apiVersion = ApiVersion;
 
     GetRequiredInstanceExtensions();
-    CheckInstanceExtensionSupport();
 
     VkInstanceCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -815,7 +795,13 @@ bool VulkanContext::CreateInstance()
         .settingCount = ARRAY_COUNT(settings),
         .pSettings = settings,
     };
-    create_info.pNext = &layer_settings_create_info;
+    const bool layer_settings_enabled = std::ranges::any_of(instance_extensions_, [](const char *extension) {
+        return std::string_view(extension) == VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
+    });
+    if (layer_settings_enabled)
+    {
+        create_info.pNext = &layer_settings_create_info;
+    }
 #endif //__APPLE__
 
     if (enable_validation_)
@@ -890,16 +876,6 @@ bool VulkanContext::CreateLogicalDevice()
     create_info.enabledExtensionCount = static_cast<uint32_t>(device_extensions_.size());
     create_info.ppEnabledExtensionNames = device_extensions_.data();
 
-    if (enable_validation_)
-    {
-        create_info.enabledLayerCount = static_cast<uint32_t>(validation_layers_.size());
-        create_info.ppEnabledLayerNames = validation_layers_.data();
-    }
-    else
-    {
-        create_info.enabledLayerCount = 0;
-    }
-
     VkPhysicalDeviceBufferDeviceAddressFeatures enabled_buffer_device_addres_features{};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR enabled_acceleration_structure_features{};
     VkPhysicalDeviceRayQueryFeaturesKHR enabled_ray_query_features{};
@@ -939,7 +915,7 @@ bool VulkanContext::CreateLogicalDevice()
 
     if (success)
     {
-        VulkanFunctionLoader::LoadDevice(device_);
+        VulkanFunctionLoader::LoadDevice(device_, enable_ray_tracing_, enable_debug_utils_);
 
         vkGetDeviceQueue(device_, indices.graphicsFamily, 0, &graphics_queue_);
         vkGetDeviceQueue(device_, indices.presentFamily, 0, &present_queue_);
@@ -997,6 +973,26 @@ uint32_t VulkanContext::GetMaxUsableSampleCount()
 
 void VulkanContext::GetRequiredInstanceExtensions()
 {
+    uint32_t extension_count = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr);
+
+    std::vector<VkExtensionProperties> available_extensions(extension_count);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, available_extensions.data());
+
+#ifndef NDEBUG
+    Log(Debug, "available instance extensions:");
+    for (const auto &extension : available_extensions)
+    {
+        Log(Debug, "\t{}", extension.extensionName);
+    }
+#endif
+
+    const auto extension_available = [&available_extensions](std::string_view name) {
+        return std::ranges::any_of(available_extensions, [name](const VkExtensionProperties &extension) {
+            return std::string_view(extension.extensionName) == name;
+        });
+    };
+
     std::vector<const char *> required_extensions;
     if (!rhi_->IsHeadless())
     {
@@ -1008,8 +1004,11 @@ void VulkanContext::GetRequiredInstanceExtensions()
         instance_extensions_.push_back(required_extension);
     }
 
-    // TODO(tqjxlm): we may want to disable it in release builds
-    instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    enable_debug_utils_ = extension_available(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (enable_debug_utils_)
+    {
+        instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
 
 #ifdef __APPLE__
 #if VK_KHR_portability_enumeration
@@ -1017,20 +1016,9 @@ void VulkanContext::GetRequiredInstanceExtensions()
     // sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.
     instance_extensions_.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 
-    // Only add VK_EXT_layer_settings if the loader exposes it.
+    if (extension_available(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME))
     {
-        uint32_t ext_count = 0;
-        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, nullptr);
-        std::vector<VkExtensionProperties> exts(ext_count);
-        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data());
-
-        bool layer_settings_available = std::ranges::any_of(exts, [](const VkExtensionProperties &e) {
-            return std::string_view(e.extensionName) == VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
-        });
-        if (layer_settings_available)
-        {
-            instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
-        }
+        instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
     }
 #endif
 #endif
@@ -1044,6 +1032,11 @@ void VulkanContext::GetRequiredInstanceExtensions()
 
 void VulkanContext::SetDebugInfo(uint64_t objectHandle, VkObjectType objectType, const char *name)
 {
+    if (!enable_debug_utils_)
+    {
+        return;
+    }
+
     VkDebugUtilsObjectNameInfoEXT name_info = {};
     name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
     name_info.objectType = objectType;
@@ -1051,6 +1044,27 @@ void VulkanContext::SetDebugInfo(uint64_t objectHandle, VkObjectType objectType,
     name_info.pObjectName = name;
 
     vkSetDebugUtilsObjectNameEXT(device_, &name_info);
+}
+
+void VulkanContext::BeginDebugLabel(VkCommandBuffer command_buffer, const char *name) const
+{
+    if (!enable_debug_utils_)
+    {
+        return;
+    }
+
+    VkDebugUtilsLabelEXT debug_label{};
+    debug_label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    debug_label.pLabelName = name;
+    vkCmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
+}
+
+void VulkanContext::EndDebugLabel(VkCommandBuffer command_buffer) const
+{
+    if (enable_debug_utils_)
+    {
+        vkCmdEndDebugUtilsLabelEXT(command_buffer);
+    }
 }
 
 void VulkanContext::RecreateSwapChain()
