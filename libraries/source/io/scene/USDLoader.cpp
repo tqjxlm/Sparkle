@@ -364,12 +364,12 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
     if (is_dieletric)
     {
         material_resource.eta = render_material.surfaceShader->ior.value;
-        material = material_manager.GetOrCreateMaterial<DieletricMaterial>(material_resource);
+        material = material_manager.CreateMaterial<DieletricMaterial>(material_resource);
     }
     else
     {
         material_resource.eta = 0;
-        material = material_manager.GetOrCreateMaterial<PbrMaterial>(material_resource);
+        material = material_manager.CreateMaterial<PbrMaterial>(material_resource);
     }
 
     mesh_primitive->SetMaterial(material);
