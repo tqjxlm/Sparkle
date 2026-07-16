@@ -13,6 +13,8 @@ public:
     using RHIBLAS::RHIBLAS;
 
     void Build(id<MTLAccelerationStructureCommandEncoder> command_encoder, id<MTLBuffer> __strong &scratch_buffer);
+    id<MTLAccelerationStructure> Compact(id<MTLAccelerationStructureCommandEncoder> command_encoder,
+                                         NSUInteger compacted_size);
 
     [[nodiscard]] id<MTLAccelerationStructure> GetAccelerationStructure() const
     {
@@ -44,6 +46,7 @@ private:
     id<MTLAccelerationStructure> tlas_;
     NSMutableArray *blas_array_;
     id<MTLBuffer> scratch_buffer_;
+    std::vector<uint32_t> primitive_to_instance_;
 };
 } // namespace sparkle
 
