@@ -978,8 +978,10 @@ void VulkanContext::GetRequiredInstanceExtensions()
         instance_extensions_.push_back(required_extension);
     }
 
-    // TODO(tqjxlm): we may want to disable it in release builds
-    instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (enable_validation_)
+    {
+        instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
 
 #ifdef __APPLE__
 #if VK_KHR_portability_enumeration
@@ -1014,6 +1016,11 @@ void VulkanContext::GetRequiredInstanceExtensions()
 
 void VulkanContext::SetDebugInfo(uint64_t objectHandle, VkObjectType objectType, const char *name)
 {
+    if (!enable_validation_)
+    {
+        return;
+    }
+
     VkDebugUtilsObjectNameInfoEXT name_info = {};
     name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
     name_info.objectType = objectType;
