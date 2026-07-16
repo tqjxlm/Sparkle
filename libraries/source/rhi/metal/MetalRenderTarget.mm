@@ -2,17 +2,19 @@
 
 #include "MetalRenderTarget.h"
 
-#include "MetalContext.h"
-#include "MetalImage.h"
-
 namespace sparkle
 {
-void MetalRenderTarget::Init()
+MetalRenderTarget::MetalRenderTarget(const Attribute &attribute, const RHIResourceRef<RHIImage> &color_image,
+                                     const RHIResourceRef<RHIImage> &depth_image, const std::string &name)
+    : RHIRenderTarget(attribute, depth_image, name)
 {
-    if (IsBackBufferTarget())
-    {
-        SetColorImage(context->GetBackBufferColor(), 0);
-    }
+    SetColorImage(color_image, 0);
+}
+
+MetalRenderTarget::MetalRenderTarget(const Attribute &attribute, const RHIRenderTarget::ColorImageArray &color_images,
+                                     const RHIResourceRef<RHIImage> &depth_image, const std::string &name)
+    : RHIRenderTarget(attribute, color_images, depth_image, name)
+{
 }
 } // namespace sparkle
 

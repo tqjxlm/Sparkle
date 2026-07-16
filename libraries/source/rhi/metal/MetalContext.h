@@ -2,7 +2,6 @@
 
 #if FRAMEWORK_APPLE
 
-#include "MetalImage.h"
 #include "MetalRHIInternal.h"
 #import "apple/MetalView.h"
 
@@ -22,11 +21,6 @@ public:
     [[nodiscard]] id<MTLCommandBuffer> GetCurrentCommandBuffer() const
     {
         return current_command_buffer_;
-    }
-
-    [[nodiscard]] RHIResourceRef<MetalImage> GetBackBufferColor() const
-    {
-        return back_buffer_color_;
     }
 
     [[nodiscard]] bool IsInCommandBuffer() const
@@ -58,8 +52,6 @@ public:
         return headless_;
     }
 
-    void CreateBackBuffer();
-
     void SwapBuffer();
 
     void BeginFrame();
@@ -88,9 +80,6 @@ private:
     id<MTLCommandBuffer> last_command_buffer_;
 
     dispatch_semaphore_t frame_throttle_semaphore_ = nullptr;
-
-    // TODO(tqjxlm): remove the reference here
-    RHIResourceRef<MetalImage> back_buffer_color_;
 
     uint32_t num_frames_to_capture_ = 0;
     bool is_capturing_frame_ = false;

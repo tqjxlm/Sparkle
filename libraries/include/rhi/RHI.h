@@ -258,7 +258,6 @@ public:
     }
 
 protected:
-    friend class MetalContext;
     friend class VulkanBLAS;
     friend class VulkanRenderTarget;
     friend class VulkanSwapChain;

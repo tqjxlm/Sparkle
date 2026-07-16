@@ -86,6 +86,9 @@ protected:
     void CleanupInternal() override;
 
     RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
+
+private:
+    RHIResourceRef<RHIImage> CreateBackBufferColor();
 };
 } // namespace sparkle
 #endif

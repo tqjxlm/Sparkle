@@ -12,27 +12,8 @@ void MetalContext::SwapBuffer()
 {
     ASSERT(!headless_);
 
-    back_buffer_color_->SetBackBufferImage(current_drawable_.texture);
-}
-
-void MetalContext::CreateBackBuffer()
-{
-    auto drawable_size = GetDrawableSize();
-
-    RHIImage::Attribute attribute;
-    attribute.width = drawable_size.width;
-    attribute.height = drawable_size.height;
-    attribute.mip_levels = 1;
-    attribute.msaa_samples = 1;
-    attribute.format = PixelFormat::B8G8R8A8Srgb;
-    attribute.usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
-    attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
-
-    back_buffer_color_ = context->GetRHI()->CreateResource<MetalImage>(attribute, nullptr, "BackBufferColor");
+    auto back_buffer_color = RHICast<MetalImage>(rhi_->GetBackBufferRenderTarget()->GetColorImage(0));
+    back_buffer_color->SetBackBufferImage(current_drawable_.texture);
 }
 
 MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
