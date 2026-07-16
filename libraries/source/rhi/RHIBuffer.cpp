@@ -84,8 +84,12 @@ void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribu
 {
     frames_in_flight_ = rhi->GetMaxFramesInFlight();
     offset_alignment_ = rhi->GetMinBufferOffsetAlignment();
+    capacity_ = attribute.dynamic_buffer_capacity;
+    ASSERT(capacity_ > 0);
+    ASSERT_F(capacity_ % offset_alignment_ == 0, "Dynamic buffer capacity {} must be aligned to {}", capacity_,
+             offset_alignment_);
     RHIBuffer::Attribute dynamic_attribute{
-        .size = RHIBufferSubAllocation::DynamicBufferCapacity * frames_in_flight_,
+        .size = static_cast<size_t>(capacity_) * frames_in_flight_,
         .usages = attribute.usages,
         .mem_properties =
             RHIMemoryProperty::AlwaysMap | RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
@@ -93,9 +97,10 @@ void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribu
     };
 
     buffer_ =
-        rhi->CreateBuffer(dynamic_attribute, "DynamicBuffer" + std::to_string(static_cast<uint32_t>(attribute.usages)));
+        rhi->CreateBuffer(dynamic_attribute, "DynamicBuffer" + std::to_string(static_cast<uint32_t>(attribute.usages)) +
+                                                 "_" + std::to_string(capacity_));
 
-    free_ranges_.emplace(0, RHIBufferSubAllocation::DynamicBufferCapacity);
+    free_ranges_.emplace(0, capacity_);
 }
 
 bool RHIDynamicBuffer::CanAllocate(unsigned size) const
@@ -121,12 +126,12 @@ RHIBufferSubAllocation RHIDynamicBuffer::Allocate(unsigned size)
         free_ranges_.emplace(offset + aligned_size, remaining_size);
     }
 
-    return RHIBufferSubAllocation(frames_in_flight_, offset, aligned_size, this);
+    return RHIBufferSubAllocation(frames_in_flight_, offset, aligned_size, capacity_, this);
 }
 
 RHIBufferSubAllocation::RHIBufferSubAllocation(unsigned frames_in_flight, unsigned offset, unsigned size,
-                                               RHIDynamicBuffer *parent)
-    : offset_(offset), size_(size), parent_(parent)
+                                               unsigned frame_stride, RHIDynamicBuffer *parent)
+    : offset_(offset), size_(size), frame_stride_(frame_stride), parent_(parent)
 {
     for (auto i = 0u; i < frames_in_flight; i++)
     {
@@ -136,7 +141,7 @@ RHIBufferSubAllocation::RHIBufferSubAllocation(unsigned frames_in_flight, unsign
 
 RHIBufferSubAllocation RHIBufferManager::SubAllocateDynamicBuffer(const RHIBuffer::Attribute &attribute)
 {
-    auto index = attribute.usages;
+    const DynamicBufferKey index{attribute.usages, attribute.dynamic_buffer_capacity};
     auto found = dynamic_buffers_.find(index);
     if (found == dynamic_buffers_.end())
     {
@@ -147,6 +152,24 @@ RHIBufferSubAllocation RHIBufferManager::SubAllocateDynamicBuffer(const RHIBuffe
     auto &matching_buffer = found->second;
 
     return matching_buffer.Allocate(static_cast<unsigned>(attribute.size));
+}
+
+bool RHIBufferManager::CanSubAllocateDynamicBuffer(const RHIBuffer::Attribute &attribute) const
+{
+    if (attribute.dynamic_buffer_capacity == 0 || attribute.size > attribute.dynamic_buffer_capacity)
+    {
+        return false;
+    }
+
+    const DynamicBufferKey index{attribute.usages, attribute.dynamic_buffer_capacity};
+    const auto found = dynamic_buffers_.find(index);
+    if (found != dynamic_buffers_.end())
+    {
+        return found->second.CanAllocate(static_cast<unsigned>(attribute.size));
+    }
+
+    const auto aligned_size = utilities::AlignAddress(attribute.size, rhi_->GetMinBufferOffsetAlignment());
+    return aligned_size <= attribute.dynamic_buffer_capacity;
 }
 
 void RHIBufferSubAllocation::Deallocate()
@@ -226,17 +249,15 @@ void RHIBuffer::Upload(RHIContext *rhi, const void *data)
     }
     else
     {
-        // otherwise, we create a staging buffer and enqueue a copy command on GPU
-        // TODO(tqjxlm): use a dynamic buffer as global staging buffer instead of creating one every time
-        RHIBuffer::Attribute staging_attribute{.size = GetSize(),
-                                               .usages = RHIBuffer::BufferUsage::TransferSrc,
-                                               .mem_properties =
-                                                   RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                                               .is_dynamic = false};
-
-        auto staging_buffer = rhi->CreateBuffer(staging_attribute, "UploadStagingBuffer");
-
-        staging_buffer->UploadImmediate(data);
+        auto staging_buffer = rhi->CreateUploadStagingBuffer(GetSize());
+        if (staging_buffer->IsDynamic())
+        {
+            staging_buffer->Upload(rhi, data);
+        }
+        else
+        {
+            staging_buffer->UploadImmediate(data);
+        }
 
         staging_buffer->CopyToBuffer(this);
     }
