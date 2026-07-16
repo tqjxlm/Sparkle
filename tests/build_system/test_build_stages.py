@@ -126,6 +126,40 @@ class ValidateStagesTest(unittest.TestCase):
         build_script.validate_stages(["package"], "android")
 
 
+class SetupTest(unittest.TestCase):
+    def run_setup(self, stages, generate_only=False, configure_only=False, clangd=False):
+        args = {"stages": stages, "generate_only": generate_only,
+                "configure_only": configure_only, "clangd": clangd}
+        with patch.object(build_script, "run_git_submodule_update") as submodules, \
+                patch("resources.setup.setup_resources") as resources, \
+                patch("ide.setup.setup_ide") as ide:
+            build_script.setup(args)
+        return {"submodules": submodules.called, "resources": resources.called,
+                "ide": ide.called}
+
+    def test_build_stage_runs_every_setup_step(self):
+        self.assertEqual(self.run_setup(["build", "cook"]),
+                         {"submodules": True, "resources": True, "ide": True})
+
+    def test_cook_only_needs_resources_but_no_submodules(self):
+        self.assertEqual(self.run_setup(["cook"]),
+                         {"submodules": False, "resources": True, "ide": False})
+
+    def test_package_only_skips_all_setup(self):
+        self.assertEqual(self.run_setup(["package"]),
+                         {"submodules": False, "resources": False, "ide": False})
+
+    def test_run_without_stages_skips_all_setup(self):
+        self.assertEqual(self.run_setup([]),
+                         {"submodules": False, "resources": False, "ide": False})
+
+    def test_configure_modes_set_up_like_a_build(self):
+        for mode in ("generate_only", "configure_only", "clangd"):
+            with self.subTest(mode=mode):
+                self.assertEqual(self.run_setup([], **{mode: True}),
+                                 {"submodules": True, "resources": True, "ide": True})
+
+
 class PackageProjectTest(unittest.TestCase):
     class FakeBuilder:
         def __init__(self):
