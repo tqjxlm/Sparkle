@@ -29,7 +29,7 @@ STANDALONE_BUILDS = (
 # must hold every tests/coverage.json triplet: that file decides who runs the suite
 TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
-    # take the suite close to an hour (see TODO.md), hence the generous timeout
+    # take the suite close to an hour, hence the generous timeout
     "windows-glfw-release": {
         "suite_args": "--software --headless --require_cooked",
         "suite_timeout": 120,

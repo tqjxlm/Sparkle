@@ -2,7 +2,6 @@
 
 ## CI/CD
 
-* [ ] unit test pipeline
 * [ ] performance test pipeline
 
 ## Path Tracing Renderers
