@@ -6,7 +6,7 @@
 
 ## Path Tracing Renderers
 
-* [ ] vendor-specific denoising and super sampling
+* [ ] vendor-specific supersampling
 * [ ] dynamic scene
 
 ## Rasterization Renderers

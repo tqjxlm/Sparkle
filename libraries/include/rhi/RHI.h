@@ -205,8 +205,7 @@ public:
 
     virtual RHIResourceRef<RHIComputePass> CreateComputePass(const std::string &name, bool need_timestamp) = 0;
 
-    // NVIDIA NRD backend (Metal only): compiles NRD's SPIR-V shaders and drives its dispatches. Null on
-    // backends without an NRD path.
+    // NVIDIA NRD backend: compiles NRD's shaders and drives its dispatches. Null on backends without an NRD path.
     virtual std::unique_ptr<RHINrdBackend> CreateNrdBackend()
     {
         return nullptr;

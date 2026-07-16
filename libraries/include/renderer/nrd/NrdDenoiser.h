@@ -21,7 +21,7 @@ struct Instance;
 namespace sparkle
 {
 // NVIDIA NRD (ReBLUR_DIFFUSE_SPECULAR) denoiser for the gpu path tracer. Owns the GPU-agnostic
-// nrd::Instance and hands SPIR-V + per-frame dispatches to an RHINrdBackend (Metal today). Also owns
+// nrd::Instance and hands shaders + per-frame dispatches to an RHINrdBackend. Also owns
 // the G-buffer targets the path tracer writes when the denoiser is on: nrd_pack encodes them into
 // NRD's input textures, the backend runs ReBLUR, and nrd_resolve re-modulates the denoised signal
 // into output_ for tone mapping.
