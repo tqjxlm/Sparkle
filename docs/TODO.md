@@ -59,7 +59,5 @@
       load can mutate the replacement scene. Scene/component teardown needs
       generation-owned render commands or an explicit drain-before-destroy contract;
       load completion must then use the same generation boundary.
-* [ ] a shader resource declared in a C++ `USE_SHADER_RESOURCE` table but absent from the
-      compiled shader (e.g. dead-code-eliminated by slang) crashes with a null dereference in
-      `RHIShaderResourceSet::UpdateLayoutHash` during pipeline setup instead of failing with a
-      clear error.
+* [ ] a shader resource declared in a C++ `USE_SHADER_RESOURCE` table but absent from the compiled shader (e.g. dead-code-eliminated by slang) crashes with a null dereference in `RHIShaderResourceSet::UpdateLayoutHash` during pipeline setup instead of failing with a clear error.
+* [ ] on Android, backgrounding and foregrounding the app races swapchain recreation against the render loop: `APP_CMD_INIT_WINDOW` schedules `RecreateSurface`/`RecreateSwapChain` while the render thread may sit in `VulkanContext::BeginFrame`, and the Adreno driver segfaults inside `vkWaitForFences`/`VulkanSwapChain::Recreate` roughly every other cycle (S25 Ultra, validation layer loaded). Window recreation needs to fence out the in-flight frame before the swapchain is replaced.
