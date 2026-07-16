@@ -21,6 +21,7 @@ public:
 
 private:
     id<MTLAccelerationStructure> acceleration_structure_;
+    id<MTLBuffer> scratch_buffer_;
 };
 
 class MetalTLAS : public RHITLAS
@@ -42,6 +43,7 @@ public:
 private:
     RHIResourceRef<RHIBuffer> blas_descriptor_buffer_;
     id<MTLAccelerationStructure> tlas_;
+    id<MTLBuffer> scratch_buffer_;
     NSMutableArray *blas_array_;
 };
 } // namespace sparkle
