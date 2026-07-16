@@ -121,8 +121,8 @@ private:
         Expect(material_ids[0] == 0 && material_ids[BaseBufferSize] == BaseBufferSize &&
                    material_ids[DenseEntryCount - 1] == DenseEntryCount - 1,
                "primitive metadata preserves boundary material IDs");
-        Expect(std::all_of(material_ids + DenseEntryCount,
-                           material_ids + material_id_buffer->GetSize() / sizeof(uint32_t),
+        const auto material_id_count = material_id_buffer->GetSize() / sizeof(*material_ids);
+        Expect(std::all_of(material_ids + DenseEntryCount, material_ids + material_id_count,
                            [](uint32_t value) { return value == 0; }),
                "primitive metadata clears unused capacity");
         material_id_buffer->UnLock();
