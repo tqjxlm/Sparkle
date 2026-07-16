@@ -138,10 +138,6 @@ VulkanBuffer::~VulkanBuffer()
     {
         vmaDestroyBuffer(context->GetMemoryAllocator(), buffer_, allocation_);
     }
-    else if (IsDynamic())
-    {
-        dynamic_allocation_.Deallocate();
-    }
 }
 
 void VulkanBuffer::UnLock()

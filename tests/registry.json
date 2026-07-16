@@ -114,6 +114,11 @@
         "description": "RHIRenderTargetPool reuse and release semantics on the render thread."
     },
     {
+        "name": "dynamic_buffer_reuse",
+        "test_case": "dynamic_buffer_reuse",
+        "description": "Dynamic buffer suballocation reuse and adjacent free-range coalescing."
+    },
+    {
         "name": "pipeline_switch_pool",
         "test_case": "pipeline_switch_pool",
         "description": "Runtime pipeline switch and pooled render-target reuse."
