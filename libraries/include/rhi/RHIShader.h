@@ -161,8 +161,12 @@ public:
         {
             static_assert(std::derived_from<T, RHIResourceArray>);
 
-            // TODO(tqjxlm): check the underlying type statically
-            ASSERT(resource->GetUnderlyingType() == Type);
+            if (resource->GetUnderlyingType() != Type)
+            {
+                Log(Error, "cannot bind {} resource array to {} shader resource {}",
+                    Enum2Str(resource->GetUnderlyingType()), Enum2Str(Type), GetReflection()->name);
+                DumpAndAbort();
+            }
         }
         else
         {
