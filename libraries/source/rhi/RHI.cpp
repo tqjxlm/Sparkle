@@ -58,11 +58,17 @@ void RHIContext::Cleanup()
     samplers_.clear();
     dummy_textures_.clear();
 
-    // discard unfinished tasks, we won't need them any way
+    // discard unfinished tasks before releasing the resources they may retain
+    before_frame_tasks_.clear();
+    end_of_frame_tasks_.clear();
     end_of_render_tasks_.clear();
+
+    // logical dynamic buffers must return their suballocations while the manager is alive
+    FlushDeferredDeletions();
 
     buffer_manager_ = nullptr;
 
+    // deleting the manager releases its physical backing buffers
     FlushDeferredDeletions();
 
     CleanupInternal();
