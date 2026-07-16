@@ -1,9 +1,87 @@
+import hashlib
 import os
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from build_system import prerequisites
+
+
+class InstallVulkanSdkTests(unittest.TestCase):
+    VERSION = "test-version"
+    ARCHIVE_CONTENT = b"verified Vulkan SDK archive"
+
+    @property
+    def digest(self):
+        return hashlib.sha256(self.ARCHIVE_CONTENT).hexdigest()
+
+    @property
+    def versions(self):
+        return {
+            "VulkanSDK": self.VERSION,
+            "VulkanSDK_SHA256": {"linux": self.digest},
+        }
+
+    def create_linux_archive(self, build_cache_dir):
+        archive_path = os.path.join(
+            build_cache_dir, f"vulkansdk-linux-x86_64-{self.VERSION}.tar.xz")
+        with open(archive_path, "wb") as archive:
+            archive.write(self.ARCHIVE_CONTENT)
+        return archive_path
+
+    def extract_linux_sdk(self, _archive_path, destination):
+        include_dir = os.path.join(
+            destination, self.VERSION, "x86_64", "include", "vulkan")
+        os.makedirs(include_dir)
+        with open(os.path.join(include_dir, "vulkan.h"), "w"):
+            pass
+
+    @patch("build_system.prerequisites.platform.system", return_value="Linux")
+    @patch("build_system.prerequisites.load_prerequisites_versions")
+    @patch("build_system.prerequisites.extract_archive")
+    @patch("build_system.prerequisites.download_file")
+    def test_verifies_fresh_download(self, mock_download, mock_extract, mock_versions, _mock_system):
+        mock_versions.return_value = self.versions
+        mock_download.side_effect = lambda _url, path: self.create_linux_archive(os.path.dirname(path))
+        mock_extract.side_effect = self.extract_linux_sdk
+
+        with tempfile.TemporaryDirectory() as build_cache_dir:
+            sdk_path = prerequisites.install_vulkan_sdk(build_cache_dir)
+
+        self.assertTrue(sdk_path.endswith(os.path.join("VulkanSDK", self.VERSION)))
+        mock_download.assert_called_once()
+
+    @patch("build_system.prerequisites.platform.system", return_value="Linux")
+    @patch("build_system.prerequisites.load_prerequisites_versions")
+    @patch("build_system.prerequisites.extract_archive")
+    @patch("build_system.prerequisites.download_file")
+    def test_verifies_cached_download(self, mock_download, mock_extract, mock_versions, _mock_system):
+        mock_versions.return_value = self.versions
+        mock_extract.side_effect = self.extract_linux_sdk
+
+        with tempfile.TemporaryDirectory() as build_cache_dir:
+            self.create_linux_archive(build_cache_dir)
+            prerequisites.install_vulkan_sdk(build_cache_dir)
+
+        mock_download.assert_not_called()
+
+    @patch("build_system.prerequisites.platform.system", return_value="Linux")
+    @patch("build_system.prerequisites.load_prerequisites_versions")
+    @patch("build_system.prerequisites.download_file")
+    def test_removes_cached_download_with_wrong_hash(self, mock_download, mock_versions, _mock_system):
+        mock_versions.return_value = self.versions
+
+        with tempfile.TemporaryDirectory() as build_cache_dir:
+            archive_path = self.create_linux_archive(build_cache_dir)
+            versions = self.versions
+            versions["VulkanSDK_SHA256"]["linux"] = "0" * 64
+            mock_versions.return_value = versions
+            with self.assertRaisesRegex(RuntimeError, "SHA-256 verification"):
+                prerequisites.install_vulkan_sdk(build_cache_dir)
+            self.assertFalse(os.path.exists(archive_path))
+
+        mock_download.assert_not_called()
 
 
 class FindVisualStudioPathTests(unittest.TestCase):

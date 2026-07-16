@@ -1,5 +1,10 @@
 {
     "VulkanSDK": "1.4.350.0",
+    "VulkanSDK_SHA256": {
+        "linux": "b65f068ab36263559da49d7cacd7e7b9df23824ca8b68ccc522a2b06f5725df2",
+        "mac": "7acc181b8fd9b4781bf51ed086222ec95d22004b85b3d0a6683a7e48ca5a1679",
+        "windows": "855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b"
+    },
     "slang": "2026.12.2",
     "ninja": "1.12.1",
     "cmake": "3.30.5"

@@ -1,4 +1,5 @@
 import glob
+import hashlib
 import json
 import os
 import platform
@@ -141,6 +142,14 @@ def validate_vulkan_sdk(vulkan_sdk_path):
     return os.path.exists(vulkan_include)
 
 
+def _verify_sha256(path, expected_digest):
+    digest = hashlib.sha256()
+    with open(path, "rb") as archive:
+        for chunk in iter(lambda: archive.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().lower() == expected_digest.lower()
+
+
 def set_vulkan_layer_path(vulkan_sdk_path):
     """Set VK_LAYER_PATH environment variable for validation layers."""
     layer_path = os.path.join(vulkan_sdk_path, "share",
@@ -227,6 +236,10 @@ def install_vulkan_sdk(build_cache_dir):
 
     prerequisites = load_prerequisites_versions()
     latest_version = prerequisites.get("VulkanSDK", "1.4.350.0")
+    expected_digest = prerequisites.get("VulkanSDK_SHA256", {}).get(platform_name)
+    if not expected_digest:
+        raise RuntimeError(
+            f"Missing SHA-256 checksum for Vulkan SDK {latest_version} on {platform_name}.")
     print(f"Use Vulkan SDK version: {latest_version}")
 
     vulkan_sdk_path = os.path.join(
@@ -261,10 +274,14 @@ def install_vulkan_sdk(build_cache_dir):
     print(f"Downloading Vulkan SDK {latest_version} from: {download_url}")
 
     if os.path.exists(download_path):
-        # TODO: check hash
         print(f"Vulkan SDK {latest_version} already downloaded.")
     else:
         download_file(download_url, download_path)
+
+    if not _verify_sha256(download_path, expected_digest):
+        os.remove(download_path)
+        raise RuntimeError(
+            f"Vulkan SDK {latest_version} archive failed SHA-256 verification.")
 
     if platform_name == "linux":
         print("Extracting Vulkan SDK...")
@@ -336,7 +353,7 @@ def install_vulkan_sdk(build_cache_dir):
 
     os.remove(download_path)
 
-    if is_macos:
+    if platform_name == "mac":
         vulkan_sdk_path = os.path.join(vulkan_sdk_path, "macOS")
 
     print(f"Vulkan SDK {latest_version} installed successfully!")
