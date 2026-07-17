@@ -1,11 +1,12 @@
 """Compute the CI matrices from one product table.
 
-The pipeline (.github/workflows/build.yml) runs three matrix jobs over the same
-product set: build, release and test. GitHub cannot share a matrix definition
+The pipeline (.github/workflows/build.yml) runs two matrix jobs over the same
+product set: build, and a per-product release-test chain
+(.github/workflows/release-test.yml). GitHub cannot share a matrix definition
 between jobs, so this script is the single source of truth: the plan job runs it
 once and downstream jobs consume the JSON through fromJSON().
 
-Prints one GITHUB_OUTPUT line per matrix: build=..., release=..., test=...
+Prints one GITHUB_OUTPUT line per matrix: build=..., release=...
 """
 
 import argparse
@@ -80,10 +81,21 @@ def covered_triplets():
     return [column for column in header if column != "case"]
 
 
-def test_cell(triplet):
-    host, framework, config = triplet.split("-")
-    return dict({"os": f"{host}-latest", "framework": framework,
-                 "build_type": config.capitalize()}, **TEST_RUNNERS[triplet])
+def triplet(cell):
+    return "-".join((cell["os"].removesuffix("-latest"), cell["framework"],
+                     cell["build_type"].lower()))
+
+
+def with_suite(cell, covered):
+    """The release cell, carrying its suite config when tests/coverage.csv covers it.
+    A TEST_RUNNERS abi picks which product of the triplet runs the suite."""
+    if triplet(cell) not in covered:
+        return cell
+    runner = TEST_RUNNERS[triplet(cell)]
+    if runner.get("abi", "") != cell.get("abi", ""):
+        return cell
+    return dict(cell, test=True,
+                **{key: value for key, value in runner.items() if key != "abi"})
 
 
 def product_cell(product, build_type):
@@ -95,19 +107,24 @@ def product_cell(product, build_type):
 
 
 def matrices(build_types):
-    """The three include lists. Cell keys stay ordered os, framework, build_type:
-    GitHub renders job display names from them (extras such as abi trail), and
-    wait-for-job awaits cells by those names."""
+    """The two include lists. Cell keys stay ordered os, framework, build_type:
+    GitHub renders build job display names from them (extras such as abi trail), and
+    wait-for-job awaits cells by those names; the release-test caller sets its cell
+    names explicitly, so the trailing suite keys stay out of display names."""
     cells = [product_cell(product, build_type)
              for product in PRODUCTS for build_type in build_types
              if build_type in product.get("build_types", build_types)]
+    build = [cell for cell in cells if cell not in STANDALONE_BUILDS]
     # Debug products are compile-coverage only: nothing ships or tests them,
     # so they get no release cell
-    release = [cell for cell in cells if cell["build_type"] == "Release"]
-    build = [cell for cell in cells if cell not in STANDALONE_BUILDS]
-    test = [cell for cell in map(test_cell, covered_triplets())
-            if cell["build_type"] in build_types]
-    return {"build": build, "release": release, "test": test}
+    covered = set(covered_triplets())
+    release = [with_suite(cell, covered)
+               for cell in cells if cell["build_type"] == "Release"]
+    untested = ({t for t in covered if t.rsplit("-", 1)[1].capitalize() in build_types}
+                - {triplet(cell) for cell in release if "test" in cell})
+    if untested:
+        raise LookupError(f"tests/coverage.csv triplets without a release cell: {sorted(untested)}")
+    return {"build": build, "release": release}
 
 
 def main():
