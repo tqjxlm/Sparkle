@@ -1,16 +1,27 @@
 name: "Setup Mesa Lavapipe"
-description: "Install Mesa lavapipe software Vulkan driver for headless CI testing on Windows"
+description: "Install Mesa lavapipe software Vulkan driver for headless CI testing"
 
 inputs:
   mesa-version:
-    description: "Mesa version to install"
+    description: "Mesa version to install (windows only; linux uses the distribution package)"
     required: false
     default: "25.3.5"
 
 runs:
   using: "composite"
   steps:
-    - name: Download Mesa
+    # the distribution package tracks its own mesa version; dev/run_without_gpu.py
+    # selects the lavapipe ICD it installs under /usr/share/vulkan/icd.d
+    - name: Install Mesa (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+        ls /usr/share/vulkan/icd.d/
+
+    - name: Download Mesa (Windows)
+      if: runner.os == 'Windows'
       shell: pwsh
       run: |
         $version = "${{ inputs.mesa-version }}"
@@ -24,6 +35,7 @@ runs:
         Get-ChildItem -Recurse "$dest" -Include "lvp_icd*","vulkan_lvp*" | ForEach-Object { Write-Host $_.FullName }
 
     - name: Register Lavapipe ICD in Windows Registry
+      if: runner.os == 'Windows'
       shell: pwsh
       run: |
         $mesaDir = "${{ github.workspace }}/mesa/x64"

@@ -192,7 +192,7 @@ def parse_args():
     parser.add_argument("--scene",
                         help="scene file path; its filename selects screenshot ground truth")
     parser.add_argument("--software", action="store_true",
-                        help="use Mesa Lavapipe on Windows")
+                        help="use Mesa Lavapipe software Vulkan (windows and linux)")
     parser.add_argument("--case", dest="cases", action="append",
                         help="run only the named registry cases regardless of coverage;"
                         " repeat to select multiple")

@@ -44,20 +44,20 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 ### Framework Support
 
-| framework | supported platforms | supported generators           |
-| --------- | ------------------- | ------------------------------ |
-| glfw      | windows, macos      | ninja, makefile, Visual Studio |
+| framework | supported platforms   | supported generators           |
+| --------- | --------------------- | ------------------------------ |
+| glfw      | windows, macos, linux | ninja, makefile, Visual Studio |
 | android   | android             | Android Studio                 |
 | macos     | macos               | Xcode                          |
 | ios       | ios                 | Xcode                          |
 
 ### Graphics API Support
 
-| pipeline         | windows     | macos                    | ios       | android        |
-| ---------------- | ----------- | ------------------------ | --------- | -------------- |
-| cpu              | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
-| gpu              | vulkan-glfw | metal-macos              | metal-ios | vulkan-android |
-| forward/deferred | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
+| pipeline         | windows     | linux       | macos                    | ios       | android        |
+| ---------------- | ----------- | ----------- | ------------------------ | --------- | -------------- |
+| cpu              | vulkan-glfw | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
+| gpu              | vulkan-glfw | vulkan-glfw | metal-macos              | metal-ios | vulkan-android |
+| forward/deferred | vulkan-glfw | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
 
 ### Tested on Devices
 

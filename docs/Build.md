@@ -4,13 +4,13 @@
 
 ### Compiler
 
-| framework | windows                 | macos              | ios                | android               |
-| --------- | ----------------------- | ------------------ | ------------------ | --------------------- |
-| glfw      | clang-cl (vs-installer) | apple-llvm (Xcode) | -                  | -                     |
-| glfw (VS solution via `--generate_only`) | msvc (Visual Studio) | -     | -                  | -                     |
-| macos     | -                       | apple-llvm (Xcode) | -                  | -                     |
-| ios       | -                       | -                  | apple-llvm (Xcode) | -                     |
-| android   | -                       | -                  | -                  | llvm (Android Studio) |
+| framework | windows                 | macos              | linux            | ios                | android               |
+| --------- | ----------------------- | ------------------ | ---------------- | ------------------ | --------------------- |
+| glfw      | clang-cl (vs-installer) | apple-llvm (Xcode) | clang 19+ (apt)  | -                  | -                     |
+| glfw (VS solution via `--generate_only`) | msvc (Visual Studio) | -     | -                | -                  | -                     |
+| macos     | -                       | apple-llvm (Xcode) | -                | -                  | -                     |
+| ios       | -                       | -                  | -                | apple-llvm (Xcode) | -                     |
+| android   | -                       | -                  | -                | -                  | llvm (Android Studio) |
 
 ### External Dependencies
 
@@ -35,6 +35,7 @@ These libraries should be installed via an installer or package manager (apt, br
   ``` shell
   brew install glfw # MacOS
   vcpkg install glfw3:x64-windows # Windows
+  sudo apt install libglfw3-dev # Linux
   ```
 
 * **CMake**: 3.24+
@@ -164,7 +165,7 @@ python3 run.py --framework=<framework> [build-options] [app-options]   # build f
 
 **Supported frameworks:**
 
-* `glfw` - Cross-platform GLFW build (Windows/MacOS)
+* `glfw` - Cross-platform GLFW build (Windows/MacOS/Linux)
 * `android` - Android APK with automatic environment setup
 * `macos` - Native MacOS application
 * `ios` - iOS application
@@ -175,18 +176,18 @@ The host machine (where build.py runs) and the target framework (what is built, 
 
 | target \ host    | macOS | Windows | Linux |
 | ---------------- | ----- | ------- | ----- |
-| `glfw`           | ✔     | ✔       | ✗     |
+| `glfw`           | ✔     | ✔       | ✔     |
 | `macos`          | ✔     | ✗       | ✗     |
 | `ios`            | ✔     | ✗       | ✗     |
 | `android`        | ✔     | ✔       | ✔     |
 
 * `macos`/`ios` need Xcode, so they build only on a macOS host. `glfw` always targets the host's own desktop OS (there is no cross-OS desktop build), so a Windows glfw package can only come from a Windows host.
-* The cook stage runs on any host through the host's own framework binary (`macos` on macOS, `glfw` on Windows) regardless of the target — cooked content is target-independent. A Linux host can build for android but cannot cook for it: no supported framework produces a cooker binary on Linux, so android there defaults to build + package and packages cooked content produced elsewhere (`--cooked`).
-* Product archives are named by target (`android-Release.apk`, `macos-Release.zip`); only glfw carries the host system in its name (`windows-glfw-Release.zip`), because its target is the host's own desktop OS.
+* The cook stage runs on any host through the host's own framework binary (`macos` on macOS, `glfw` on Windows and Linux) regardless of the target — cooked content is target-independent.
+* Product archives are named by target (`android-Release.apk`, `macos-Release.zip`); only glfw carries the host system in its name (`windows-glfw-Release.zip`, `linux-glfw-Release.zip`), because its target is the host's own desktop OS.
 
 **Pipeline stages:**
 
-The pipeline is three stages, selected with `--stage` (repeatable) and run in canonical order build → cook → package. The default is every stage the host supports: a plain `build.py` produces a complete distributable — a built app, cooked content (see [Cooking.md](Cooking.md)), and a product archive whose packed content is the cooked image — minus the cook stage on hosts that cannot produce a cooker binary. Explicit selections (including `--stage all`) never degrade; a missing capability fails fast instead. The development loop is `run.py`, which selects only the stages a launch consumes: build + cook (cooked content is always wanted, and a warm cook costs only artifact lookups; desktop runs read the cook output from the build tree directly), plus package for the device frameworks (`android`, `ios`) because a device only receives cooked content through its installed package.
+The pipeline is three stages, selected with `--stage` (repeatable) and run in canonical order build → cook → package. The default is every stage: a plain `build.py` produces a complete distributable — a built app, cooked content (see [Cooking.md](Cooking.md)), and a product archive whose packed content is the cooked image. Explicit selections (including `--stage all`) never degrade; a missing input fails fast instead. The development loop is `run.py`, which selects only the stages a launch consumes: build + cook (cooked content is always wanted, and a warm cook costs only artifact lookups; desktop runs read the cook output from the build tree directly), plus package for the device frameworks (`android`, `ios`) because a device only receives cooked content through its installed package.
 
 * Each stage is idempotent through its own cache (incremental compile, hit-or-cook artifacts, archive from current inputs) and fails fast when an input from an earlier stage is missing — it never runs an upstream stage implicitly.
 * Cooked content is shared across targets, and the cooker lives in the sparkle binary — so cooking for a cross-compiled framework (`android`, `ios`) executes the host framework's binary (`macos` on a Mac, `glfw` elsewhere) and fails with a hint if that binary is not built yet. The cook stage assembles its output into a self-contained content image at `build_system/<cooker>/output/cooked_image`, which the package stage picks up automatically (`--cooked <dir>` overrides).

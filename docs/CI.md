@@ -11,10 +11,10 @@
 
 [.github/workflows/build.yml](../.github/workflows/build.yml) runs four stages:
 
-* **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
+* **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything. Debug cells are compile gates only: they ship no release package and therefore run no release or test node.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes the assembled content image as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
-* **release**: every product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; the plan node maps its columns onto the release cells as suite configs. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
+* **release**: every released product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
+* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; the plan node maps its columns onto the release cells as suite configs. Currently enabled: windows-glfw-release and ubuntu-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
 Both matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the per-triplet suite invocations, and attaches the suite invocations [tests/coverage.csv](../tests/coverage.csv) picks to their release cells — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.
 
@@ -31,7 +31,7 @@ python3 dev/check_tidy.py
 python3 dev/run_tests.py --framework macos --config Release
 ```
 
-On Windows, use the GLFW suite with software Vulkan when no physical GPU is available:
+On Windows or Linux, use the GLFW suite with software Vulkan when no physical GPU is available:
 
 ```bash
 python3 dev/run_tests.py --framework glfw --config Release --software

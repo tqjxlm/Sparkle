@@ -728,6 +728,24 @@ def install_glfw():
             print(
                 "Failed to install GLFW via Homebrew. Please make sure it is installed manually.")
             print(f"Error: {e}")
+    elif platform.system() == "Linux":
+        if any(os.path.exists(os.path.join(prefix, "include", "GLFW", "glfw3.h"))
+               for prefix in ("/usr", "/usr/local")):
+            return
+        # -n: fail instead of prompting for a password, so unattended runs never hang
+        print("Installing GLFW via apt...")
+        try:
+            result = subprocess.run(
+                ["sudo", "-n", "apt-get", "install", "-y", "libglfw3-dev"],
+                capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                print("Successfully installed GLFW via apt")
+            else:
+                raise RuntimeError(result.stderr)
+        except Exception as e:
+            print("Failed to install GLFW via apt."
+                  " Please install it manually: sudo apt install libglfw3-dev")
+            print(f"Error: {e}")
     else:
         print("GLFW auto-installation not supported on this platform. Please make sure it is installed manually, preferably via a native package manager.")
 
