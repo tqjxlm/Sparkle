@@ -17,13 +17,11 @@ SPEC.loader.exec_module(ci_matrix)
 
 class CiMatrixTest(unittest.TestCase):
 
-    def test_release_covers_every_product_and_config(self):
+    def test_release_covers_every_product_release_config_only(self):
+        # Debug products are compile-coverage only: they build but never release
         matrices = ci_matrix.matrices(["Debug", "Release"])
-        expected = [ci_matrix.product_cell(product, build_type)
-                    for product in ci_matrix.PRODUCTS
-                    for build_type in ("Debug", "Release")
-                    if build_type in product.get("build_types",
-                                                 ("Debug", "Release"))]
+        expected = [ci_matrix.product_cell(product, "Release")
+                    for product in ci_matrix.PRODUCTS]
         self.assertEqual(matrices["release"], expected)
 
     def test_restricted_products_never_leak_their_restriction(self):
@@ -34,6 +32,16 @@ class CiMatrixTest(unittest.TestCase):
                          ["Release"])
         for cell in android_x86:
             self.assertNotIn("build_types", cell)
+
+    def test_debug_products_still_build(self):
+        matrices = ci_matrix.matrices(["Debug", "Release"])
+        built = {(cell["os"], cell["framework"], cell.get("abi"),
+                  cell["build_type"]) for cell in matrices["build"]}
+        for product in ci_matrix.PRODUCTS:
+            if "Debug" not in product.get("build_types", ("Debug",)):
+                continue
+            self.assertIn((product["os"], product["framework"],
+                           product.get("abi"), "Debug"), built)
 
     def test_build_excludes_only_the_standalone_cook_build(self):
         matrices = ci_matrix.matrices(["Debug", "Release"])
