@@ -30,7 +30,7 @@ void DeferredRenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
-    gbuffer_.InitRenderResources(rhi_, image_size_);
+    gbuffer_.InitRenderResources(rhi_, resolution_.scene);
 
     RHIRenderTarget::Attribute lighting_rt_attribute;
     lighting_rt_attribute.SetColorAttribute(
@@ -40,8 +40,8 @@ void DeferredRenderer::InitRenderResources()
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
+            .width = resolution_.scene.x(),
+            .height = resolution_.scene.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment,
             .msaa_samples = 1,
         },
@@ -58,8 +58,8 @@ void DeferredRenderer::InitRenderResources()
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
+            .width = resolution_.scene.x(),
+            .height = resolution_.scene.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::DepthStencilAttachment,
             .msaa_samples = 1,
         },
@@ -73,8 +73,8 @@ void DeferredRenderer::InitRenderResources()
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
+            .width = resolution_.output.x(),
+            .height = resolution_.output.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment |
                       RHIImage::ImageUsage::TransferSrc,
 

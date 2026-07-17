@@ -36,8 +36,8 @@ void ForwardRenderer::InitRenderResources()
 
     if (use_prepass_)
     {
-        pre_pass_ = PipelinePass::Create<DepthPass>(render_config_, rhi_, scene_render_proxy_, image_size_.x(),
-                                                    image_size_.y());
+        pre_pass_ = PipelinePass::Create<DepthPass>(render_config_, rhi_, scene_render_proxy_, resolution_.scene.x(),
+                                                    resolution_.scene.y());
     }
 
     scene_color_ = rhi_->CreateImage(
@@ -47,8 +47,8 @@ void ForwardRenderer::InitRenderResources()
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
+            .width = resolution_.scene.x(),
+            .height = resolution_.scene.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment,
             .msaa_samples = 1,
         },
@@ -68,8 +68,8 @@ void ForwardRenderer::InitRenderResources()
                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-                .width = image_size_.x(),
-                .height = image_size_.y(),
+                .width = resolution_.scene.x(),
+                .height = resolution_.scene.y(),
                 .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::DepthStencilAttachment,
                 .msaa_samples = 1,
             },
@@ -84,8 +84,8 @@ void ForwardRenderer::InitRenderResources()
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
+            .width = resolution_.output.x(),
+            .height = resolution_.output.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment |
                       RHIImage::ImageUsage::TransferSrc,
 

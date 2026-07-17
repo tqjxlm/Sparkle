@@ -84,8 +84,8 @@ void GPURenderer::InitRenderResources()
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
+            .width = resolution_.scene.x(),
+            .height = resolution_.scene.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
             .memory_properties = RHIMemoryProperty::DeviceLocal,
             .mip_levels = 1,
@@ -104,8 +104,8 @@ void GPURenderer::InitRenderResources()
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
+            .width = resolution_.output.x(),
+            .height = resolution_.output.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment |
                       RHIImage::ImageUsage::TransferSrc,
             .msaa_samples = 1,
@@ -212,7 +212,7 @@ void GPURenderer::Render()
 
         rhi_->BeginComputePass(compute_pass_);
 
-        rhi_->DispatchCompute(pipeline_state_, {image_size_.x(), image_size_.y(), 1u}, {16u, 16u, 1u});
+        rhi_->DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u}, {16u, 16u, 1u});
 
         rhi_->EndComputePass(compute_pass_);
 

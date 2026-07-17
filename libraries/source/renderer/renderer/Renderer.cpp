@@ -53,10 +53,16 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
 }
 
 Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy)
-    : rhi_(rhi_context), scene_render_proxy_(scene_render_proxy),
-      image_size_{render_config.image_width, render_config.image_height}, render_config_(render_config)
+    : rhi_(rhi_context), scene_render_proxy_(scene_render_proxy), resolution_(render_config.GetResolution()),
+      render_config_(render_config)
 {
-    Log(Info, "View size [{}, {}]", image_size_.x(), image_size_.y());
+    Log(Info, "View size [{}, {}]", resolution_.output.x(), resolution_.output.y());
+
+    if (resolution_.NeedUpsample())
+    {
+        Log(Info, "Scene renders at [{}, {}] (render_scale {})", resolution_.scene.x(), resolution_.scene.y(),
+            render_config.render_scale);
+    }
 }
 
 void Renderer::Tick()

@@ -259,7 +259,8 @@ void RenderFramework::StopRenderThread()
 
 void RenderFramework::RecreateRendererIfNecessary()
 {
-    bool should_recreate = !renderer_ || render_config_.pipeline != renderer_->GetRenderMode();
+    bool should_recreate = !renderer_ || render_config_.pipeline != renderer_->GetRenderMode() ||
+                           render_config_.GetResolution() != renderer_->GetResolution();
     if (!should_recreate)
     {
         return;

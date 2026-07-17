@@ -24,6 +24,9 @@ static ConfigValue<uint32_t> config_random_seed_offset(
     "renderer", 0);
 static ConfigValue<uint32_t> config_width("width", "image width", "renderer", 1280);
 static ConfigValue<uint32_t> config_height("height", "image height", "renderer", 720);
+static ConfigValue<float> config_render_scale("render_scale",
+                                              "scene render resolution as a fraction of output resolution, (0, 1]",
+                                              "renderer", 1.f, true);
 static ConfigValue<uint32_t> config_bounce("bounce", "num intersections allowed per ray", "renderer", 8);
 static ConfigValue<bool> config_ssao("ssao", "enable ssao", "renderer", false, true);
 static ConfigValue<bool> config_diffuse_ibl("diffuse_ibl", "enable diffuse ibl", "renderer", true, true);
@@ -58,6 +61,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_prepass, use_prepass);
     ConfigCollectionHelper::RegisterConfig(this, config_width, image_width);
     ConfigCollectionHelper::RegisterConfig(this, config_height, image_height);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_scale, render_scale);
     ConfigCollectionHelper::RegisterConfig(this, config_spatial_denoise, spatial_denoise);
     ConfigCollectionHelper::RegisterConfig(this, config_shadow_map_resolution, shadow_map_resolution);
     ConfigCollectionHelper::RegisterConfig(this, config_dynamic_spp, use_dynamic_spp);
@@ -133,6 +137,13 @@ void RenderConfig::Validate()
             config_prepass.Set(false);
             use_prepass = true;
         }
+    }
+
+    if (render_scale <= 0.f || render_scale > 1.f)
+    {
+        Log(Warn, "render_scale {} out of range (0, 1]. set to 1", render_scale);
+        config_render_scale.Set(1.f);
+        render_scale = 1.f;
     }
 
 #if FRAMEWORK_ANDROID || FRAMEWORK_IOS

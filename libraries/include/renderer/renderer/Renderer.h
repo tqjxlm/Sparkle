@@ -76,6 +76,11 @@ public:
         debug_point_.y() = y < 0 ? UINT_MAX : static_cast<unsigned>(y);
     }
 
+    [[nodiscard]] const RenderResolution &GetResolution() const
+    {
+        return resolution_;
+    }
+
 protected:
     virtual void Update() = 0;
 
@@ -87,7 +92,7 @@ protected:
     SceneRenderProxy *scene_render_proxy_;
 
     Vector2UInt debug_point_{UINT_MAX, UINT_MAX};
-    Vector2UInt image_size_;
+    RenderResolution resolution_;
 
     const RenderConfig &render_config_;
 
