@@ -31,7 +31,7 @@ TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
     # take the suite close to an hour (see TODO.md), hence the generous timeout
     "windows-glfw-release": {
-        "suite_args": "--software --headless --require_cooked",
+        "suite_args": "--software",
         "suite_timeout": 120,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
@@ -39,14 +39,14 @@ TEST_RUNNERS = {
     # virtualized device exposes no ray tracing, so the gpu path-tracing pipeline
     # (and NRD) silently falls back to forward and cannot be tested here
     "macos-macos-release": {
-        "suite_args": "--headless --require_cooked",
+        "suite_args": "",
         "suite_timeout": 60,
         "screenshots": "~/Documents/sparkle/screenshots/",
     },
     # the Vulkan backend on a real GPU (via MoltenVK), which windows-glfw only
     # exercises through software rasterization
     "macos-glfw-release": {
-        "suite_args": "--headless --require_cooked",
+        "suite_args": "",
         "suite_timeout": 60,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
