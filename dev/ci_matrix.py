@@ -9,6 +9,7 @@ Prints one GITHUB_OUTPUT line per matrix: build=..., release=..., test=...
 """
 
 import argparse
+import csv
 import json
 import os
 
@@ -26,7 +27,7 @@ STANDALONE_BUILDS = (
     {"os": "macos-latest", "framework": "macos", "build_type": "Release"},
 )
 
-# must hold every tests/coverage.json triplet: that file decides who runs the suite
+# must hold every tests/coverage.csv triplet column: that table decides who runs the suite
 TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
     # take the suite close to an hour (see TODO.md), hence the generous timeout
@@ -54,10 +55,12 @@ TEST_RUNNERS = {
 
 
 def covered_triplets():
+    """The triplet columns of the coverage table (its rows pick the cases)."""
     coverage_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "tests", "coverage.json")
-    with open(coverage_path) as coverage_file:
-        return list(json.load(coverage_file))
+                                 "tests", "coverage.csv")
+    with open(coverage_path, newline="") as coverage_file:
+        header = next(csv.reader(coverage_file))
+    return [column for column in header if column != "case"]
 
 
 def test_cell(triplet):

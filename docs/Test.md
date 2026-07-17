@@ -34,24 +34,30 @@ A case carries:
 * `test_case`: the C++ `TestCase` it runs.
 * `app_args` / `scene_args`: cvar arguments for the app run; `scene_args` apply only when the suite is given `--scene`. `{framework}`, `{scene}` and `{scene_stem}` expand at run time.
 * `evaluator`: an optional Python script (with its own `args` / `scene_args`) that judges the app output afterwards.
-* `recooks`: marks a case whose deliberate runtime cook is incompatible with `--require_cooked`; the suite drops it under that flag.
+* `recooks`: marks a case whose deliberate runtime cook would trip the suite's cook gate; coverage runs drop it, so it runs only via `--case`.
 
 ## Test Coverage
 
-[tests/coverage.json](../tests/coverage.json) assigns each CI triplet (`host-framework-config`, e.g. `macos-macos-release`) the registry cases it must run, in execution order. This file decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from it, so covering a new triplet means adding its case picks here and its suite invocation to `TEST_RUNNERS` in `ci_matrix.py`. A triplet absent from the file ships untested — currently only `macos-macos-release`, `macos-glfw-release` and `windows-glfw-release` have capable runners. Registry cases picked by no triplet are development-only and run via `--case`.
+[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from its columns. A triplet without a column ships untested — currently only `macos-macos-release`, `macos-glfw-release` and `windows-glfw-release` have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
 
-Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators, and coverage that picks existing registry cases for triplets `ci_matrix.py` can run.
+Maintaining the two tables:
+
+* Adding a test case: append a [tests/registry.json](../tests/registry.json) entry (unique `name`, the C++ `test_case` it pins, `app_args`, optional evaluator) and a [tests/coverage.csv](../tests/coverage.csv) row at its execution-order position, marking every triplet that must run it. Development-only cases need no row; every row must name a registry case.
+* Adding a platform: add a triplet column to [tests/coverage.csv](../tests/coverage.csv), mark its picks, and give the triplet a suite invocation in `TEST_RUNNERS` in [dev/ci_matrix.py](../dev/ci_matrix.py).
+* Retiring a case or platform: remove both sides (registry entry and coverage row, or column and `TEST_RUNNERS` entry).
+
+Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators, coverage rows picking only registry cases, and a `TEST_RUNNERS` entry for every covered triplet.
 
 ## Test Orchestration
 
-`dev/run_tests.py` runs the Python unit tests as a fail-fast preflight, builds once, then derives the current triplet from the host OS and the `--framework` / `--config` arguments and runs the cases [tests/coverage.json](../tests/coverage.json) assigns to it. The application suite runs to completion and reports all failures together.
+`dev/run_tests.py` runs the Python unit tests as a fail-fast preflight, derives the current triplet from the host OS and the `--framework` / `--config` arguments, and runs the cases [tests/coverage.csv](../tests/coverage.csv) assigns to it. The application suite runs to completion and reports all failures together.
 
 ```bash
-python3 dev/run_tests.py --framework macos --config Release --headless
-python3 dev/run_tests.py --framework glfw --config Release --software --headless   # on Windows
+python3 dev/run_tests.py --framework macos --config Release
+python3 dev/run_tests.py --framework glfw --config Release --software   # on Windows
 ```
 
-Use `--case <name>` (repeatable) to run registry cases by name regardless of coverage — e.g. `--case forward_render_static` to focus one pipeline, or `--case gpu_render_static` for a development-only case. Use `--skip_build` only when the intended binary is already built. CI runs the packaged Windows build under Lavapipe with `--software --require_cooked`, and the packaged macOS builds (both the macos framework and the glfw/Vulkan one via MoltenVK) on a physical Metal GPU with `--require_cooked`, which rejects runtime cooking. See [CI.md](CI.md) for the exact commands and why the gpu pipeline stays local-only.
+The suite never builds: it tests the existing build (produce one first, e.g. `python3 build.py --framework macos --config Release`). Every case runs headless — a case that needs a window overrides that itself through `OnEnforceConfigs()` — and coverage runs are cook-gated: any on-the-fly cook fails the run. Use `--case <name>` (repeatable) to run registry cases by name regardless of coverage — e.g. `--case forward_render_static` to focus one pipeline, or `--case gpu_render_static` for a development-only case; `--case` runs skip the cook gate, which is how deliberately recooking cases like `ibl_parity` run. CI runs the packaged Windows build under Lavapipe with `--software`, and the packaged macOS builds (both the macos framework and the glfw/Vulkan one via MoltenVK) on a physical Metal GPU. See [CI.md](CI.md) for the exact commands and why the gpu pipeline stays local-only.
 
 The static-render evaluator lives at [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py), and the USD evaluator lives at [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py). They own specialized assertions; they do not orchestrate the general suite. Shared framework, dependency and image mechanics live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py), so one evaluator never serves as another evaluator's utility layer.
 
@@ -99,7 +105,7 @@ Use `--test_timeout <frames>` to set a frame budget for the test. If the test do
 2. Subclass `sparkle::TestCase` and implement `OnTick()`.
 3. If the test needs fixed runtime config, optionally override `OnEnforceConfigs()`.
 4. Register with `TestCaseRegistrar<T>` using a unique name string.
-5. If the suite should run it, add a [tests/registry.json](../tests/registry.json) entry with the exact arguments and pick it in [tests/coverage.json](../tests/coverage.json) for the triplets that must run it. Development-only cases need no coverage pick; without a registry entry either, they still run directly via `--test_case`.
+5. If the suite should run it, add a [tests/registry.json](../tests/registry.json) entry with the exact arguments and mark its [tests/coverage.csv](../tests/coverage.csv) row for the triplets that must run it (see [Test Coverage](#test-coverage) for how to maintain both tables). Cases without a registry entry still run directly via `--test_case`.
 
 The registered name is injected into the test instance and available via `TestCase::GetName()`, so log messages do not need to duplicate it manually.
 
@@ -146,4 +152,4 @@ Test case names (the string passed to `TestCaseRegistrar`) must be unique across
 
 ## Built-in Test Cases
 
-Test cases self-register by name: search `tests/` for `TestCaseRegistrar` to enumerate them. The suite-runnable ones live in [tests/registry.json](../tests/registry.json) with their CI assignment in [tests/coverage.json](../tests/coverage.json) (see [Test Registry](#test-registry)); purely development-facing cases (e.g. `multi_frame_screenshot`, `denoiser_sweep`) are documented with the feature they serve.
+Test cases self-register by name: search `tests/` for `TestCaseRegistrar` to enumerate them. The suite-runnable ones live in [tests/registry.json](../tests/registry.json) with their CI assignment in [tests/coverage.csv](../tests/coverage.csv) (see [Test Registry](#test-registry)); purely development-facing cases (e.g. `multi_frame_screenshot`, `denoiser_sweep`) are documented with the feature they serve.
