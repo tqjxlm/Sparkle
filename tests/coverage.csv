@@ -15,6 +15,7 @@ render_target_pool,x,x,x
 dynamic_buffer_reuse,x,x,x
 vulkan_image_subresources,x,,x
 pipeline_switch_pool,x,x,x
+surface_loss_recovery,,,
 gpu_render_static,,,
 cpu_render_static,,,
 ibl_parity,,,
