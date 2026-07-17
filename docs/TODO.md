@@ -40,10 +40,6 @@
       out-parameter ICE (<https://github.com/shader-slang/slang/issues/11969>).
       All other shaders already compile slang->metal directly.
 
-## Build
-
-* [ ] Linux support
-
 ## Infrastructure
 
 * [ ] modularize core libraries
