@@ -11,6 +11,10 @@ inputs:
     description: "Build configuration (Debug/Release), used to key the compiler cache"
     required: false
     default: ""
+  abi:
+    description: "Android target ABI when it differs from the default, used to key the compiler cache"
+    required: false
+    default: ""
 outputs:
   build-args:
     description: "Additional build arguments"
@@ -55,9 +59,9 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ./.ccache
-        key: ${{ inputs.os }}-${{ inputs.framework }}-${{ inputs.build-type }}-ccache-${{ github.sha }}
+        key: ${{ inputs.os }}-${{ inputs.framework }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}-${{ inputs.build-type }}-ccache-${{ github.sha }}
         restore-keys: |
-          ${{ inputs.os }}-${{ inputs.framework }}-${{ inputs.build-type }}-ccache-
+          ${{ inputs.os }}-${{ inputs.framework }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}-${{ inputs.build-type }}-ccache-
 
     - name: Configure ccache
       shell: bash

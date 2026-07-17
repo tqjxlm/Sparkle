@@ -10,6 +10,9 @@ inputs:
   build-type:
     description: "Build configuration (Debug or Release)"
     required: true
+  abi:
+    description: "Android target ABI when it differs from the default (keys the artifact names)"
+    default: ""
   macos-certificate-p12-base64:
     default: ""
   macos-certificate-password:
@@ -38,7 +41,7 @@ runs:
     - name: Download build product
       uses: actions/download-artifact@v4
       with:
-        name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}
+        name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
         path: build_system/${{ inputs.framework }}/product
 
     - name: Download cooked content image
@@ -120,5 +123,5 @@ runs:
     - name: Upload release product
       uses: actions/upload-artifact@v4
       with:
-        name: release-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}
+        name: release-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
         path: build_system/${{ inputs.framework }}/product

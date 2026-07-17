@@ -54,6 +54,7 @@ jobs:
           framework: ${{ matrix.framework }}
           os: ${{ matrix.os }}
           build-type: ${{ matrix.build_type }}
+          abi: ${{ matrix.abi }}
           ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
           ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
           ios-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
@@ -146,7 +147,7 @@ jobs:
       - name: Wait for this product's build
         uses: ./.github/actions/wait-for-job
         with:
-          job-name: build (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
+          job-name: build (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }}${{ matrix.abi != '' && format(', {0}', matrix.abi) || '' }})
 
       - name: Release Platform
         uses: ./.github/actions/release-platform
@@ -154,6 +155,7 @@ jobs:
           framework: ${{ matrix.framework }}
           os: ${{ matrix.os }}
           build-type: ${{ matrix.build_type }}
+          abi: ${{ matrix.abi }}
           macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
           macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
           macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -187,11 +189,12 @@ jobs:
       - name: Wait for this product's release
         uses: ./.github/actions/wait-for-job
         with:
-          job-name: release (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }})
+          job-name: release (${{ matrix.os }}, ${{ matrix.framework }}, ${{ matrix.build_type }}${{ matrix.abi != '' && format(', {0}', matrix.abi) || '' }})
 
-      # the suite drives the app through build.py, which needs the build prerequisites
+      # the suite drives the app through build.py, which needs the build prerequisites;
+      # the android cell needs the SDK for adb and the emulator
       - name: Setup Environment
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' || matrix.framework == 'android'
         uses: ./.github/actions/setup-environment
         with:
           framework: ${{ matrix.framework }}
@@ -201,11 +204,32 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: ./.github/actions/setup-mesa
 
+      # the emulator needs hardware virtualization; hosted ubuntu runners expose
+      # /dev/kvm but leave it root-only
+      - name: Enable KVM (android)
+        if: matrix.framework == 'android'
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # the AVD with its quickboot snapshot: the suite seeds it on a miss (cold boot
+      # + clean shutdown) and resumes from it in seconds on a hit. the system image
+      # stays out — sdkmanager refetches it faster than a gigabyte of shared cache
+      # quota is worth. bump the key suffix to discard a stale snapshot by hand
+      - name: Cache emulator AVD (android)
+        if: matrix.framework == 'android'
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/avd
+          key: ${{ matrix.os }}-avd-${{ matrix.abi }}-api35-v1
+
       # the release package already carries the cooked content in its packed resources
       - name: Download app
         uses: actions/download-artifact@v4
         with:
-          name: release-${{ matrix.framework }}-${{ matrix.os }}-${{ matrix.build_type }}
+          name: release-${{ matrix.framework }}-${{ matrix.os }}-${{ matrix.build_type }}${{ matrix.abi != '' && format('-{0}', matrix.abi) || '' }}
           path: build_system/${{ matrix.framework }}/product
 
       - name: Extract app (glfw, windows)
@@ -240,9 +264,21 @@ jobs:
           # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
           # cells that do not run MoltenVK
           MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
         run: >-
           python3 dev/run_tests.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }}
           ${{ matrix.suite_args }}
+
+      - name: Dump app logs (android)
+        if: failure() && matrix.framework == 'android'
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat build_system/android/output/device/logs/*.log 2>/dev/null || true
+          echo "=== emulator log ==="
+          cat build_system/android/output/emulator.log 2>/dev/null || true
 
       - name: Dump app logs
         if: failure() && matrix.os == 'macos-latest'

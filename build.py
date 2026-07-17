@@ -160,6 +160,9 @@ def parse_args(args=None):
                         "See https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
     parser.add_argument("--cmake-args",
                         help="Additional CMake arguments (e.g., --cmake-args='-DCMAKE_EXE_LINKER_FLAGS=\"-lc++abi\"')")
+    parser.add_argument("--android_abi", choices=["arm64-v8a", "x86_64"],
+                        help="Android target ABI (default arm64-v8a, the shipping ABI);"
+                        " x86_64 targets emulators on x86 hosts")
 
     # Unknown args pass through to the app (cook stage runs and run.py launches)
     parsed_args, unknown_args = parser.parse_known_args(args)
@@ -171,6 +174,7 @@ def parse_args(args=None):
         "cooked": parsed_args.cooked,
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
+        "android_abi": parsed_args.android_abi,
         "generate_only": parsed_args.generate_only,
         "configure_only": parsed_args.configure_only,
         "clangd": parsed_args.clangd,

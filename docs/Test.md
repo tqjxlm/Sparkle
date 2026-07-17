@@ -38,7 +38,7 @@ A case carries:
 
 ## Test Coverage
 
-[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from its columns. A triplet without a column ships untested — currently only `macos-macos-release`, `macos-glfw-release` and `windows-glfw-release` have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
+[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from its columns. A triplet without a column ships untested — currently `macos-macos-release`, `macos-glfw-release`, `windows-glfw-release` and `ubuntu-android-release` (an emulator, see [Android](#android)) have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
 
 Maintaining the two tables:
 
@@ -66,9 +66,11 @@ The static-render evaluator lives at [tests/screenshot/static_render_test.py](..
 The suite runs on a device or emulator through the android runner in [build_system/android/build.py](../build_system/android/build.py). Android has no argv or exit-code channel, so the runner delivers cvars as the runtime config file (`<external-storage-path>/config/config.json`, see [Run.md](Run.md)), starts the activity, and reads the verdict from the `Test case '<name>' passed/failed` logcat markers. After each case it pulls the app log and screenshots to `build_system/android/output/device/`, where the suite's cook gate and the Python evaluators expect them.
 
 * If no device is connected, the runner boots the `sparkle_test` AVD headless (arm64, like every shipped apk), installing the system image and creating the AVD on first use. It needs the SDK `cmdline-tools` package (`sdkmanager`/`avdmanager`).
+* First use also seeds a quickboot snapshot (cold boot, settle, clean shutdown); every later boot resumes from it in seconds. CI caches the AVD directory between runs, so only cache-miss runs pay the cold boot.
 * The config push requires `adb root` (available on emulator `google_apis` images): files a non-root shell creates under `Android/data` are invisible to the app through FUSE. On a non-rootable physical device the push may still work depending on the vendor's FUSE behavior.
 * A `TestCase` can ask the runner for device-level actions by logging `[TestCaseAction] <name>`; `surface_loss_recovery` uses the `cycle_window` action (screen off/on) to destroy and restore the native window mid-run.
 * Render cases compare against the published android ground truth, which is captured at 1560x720; pass `--width 1560 --height 720` so headless screenshots match.
+* CI covers the `ubuntu-android-release` triplet with a dedicated x86_64 package (`--android_abi x86_64`, a product that exists only for this cell) on a KVM-accelerated emulator, because no hosted runner can emulate the shipping arm64 apk: Google publishes no linux-arm64 emulator, x86 hosts reject arm64 system images, and GitHub's Apple-silicon runners expose no nested virtualization. The emulator image ABI follows the host, so local runs on Apple silicon test the arm64 apk itself.
 
 ```bash
 # package once, then run cases on a local emulator (boots one if no device is attached)
