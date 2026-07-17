@@ -9,7 +9,7 @@
 #include "VulkanSwapChain.h"
 #include "application/NativeView.h"
 
-#ifdef PLATFORM_MACOS
+#if PLATFORM_MACOS
 #include "core/math/Utilities.h"
 #endif
 
@@ -108,6 +108,14 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
         if (strcmp(extension.extensionName, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0)
         {
             device_extensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+        }
+
+        // validation workaround: slang emits StorageImageReadWithoutFormat, which validation accepts via
+        // the equivalent device feature, VK_VERSION_1_3, or this extension. enable it where available so
+        // devices lacking the feature (e.g. Adreno) still pass; devices lacking the extension use the feature.
+        if (strcmp(extension.extensionName, VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) == 0)
+        {
+            device_extensions.push_back(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME);
         }
     }
 
@@ -795,7 +803,7 @@ bool VulkanContext::CreateInstance()
     create_info.pApplicationInfo = &app_info;
     create_info.enabledExtensionCount = static_cast<uint32_t>(instance_extensions_.size());
     create_info.ppEnabledExtensionNames = instance_extensions_.data();
-#ifdef PLATFORM_MACOS
+#if PLATFORM_MACOS
 #if VK_KHR_portability_enumeration
     create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
@@ -1007,7 +1015,7 @@ void VulkanContext::GetRequiredInstanceExtensions()
         instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
-#ifdef PLATFORM_MACOS
+#if PLATFORM_MACOS
 #if VK_KHR_portability_enumeration
     // Required on macOS regardless of headless mode, since CreateInstance always
     // sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.
