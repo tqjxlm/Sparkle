@@ -7,13 +7,13 @@ camera_nudge_return,x,x,x,x,x
 primitive_move,x,x,x,x,x
 usd_round_trip,,x,,,x
 input_injection,x,x,x,x,x
-cooker_request,x,,,,
+cooker_request,x,,,,x
 image_io,x,x,x,x,x
 usd_loader_semantics,x,x,x,,x
 scene_load_failure,x,x,x,x,x
 render_target_pool,x,x,x,x,x
 dynamic_buffer_reuse,x,x,x,x,x
-vulkan_image_subresources,x,,x,x,
+vulkan_image_subresources,x,,x,x,x
 pipeline_switch_pool,x,x,x,x,x
 surface_loss_recovery,,,,x,
 gpu_render_static,,,,,
