@@ -253,12 +253,7 @@ private:
 
     const std::vector<const char *> validation_layers_ = {"VK_LAYER_KHRONOS_validation"};
     std::vector<const char *> instance_extensions_ = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
-    std::vector<const char *> device_extensions_ = {
-        // slang unnecessarily introduces this validatio error. workaround for now:
-        // vkCreateShaderModule(): SPIR-V Capability StorageImageReadWithoutFormat was declared, but one of the
-        // following requirements is required (VkPhysicalDeviceFeatures::shaderStorageImageReadWithoutFormat OR
-        // VK_VERSION_1_3 OR VK_KHR_format_feature_flags2).
-        VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME};
+    std::vector<const char *> device_extensions_;
 
     VmaAllocator allocator_;
 
