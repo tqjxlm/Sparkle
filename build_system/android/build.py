@@ -1,7 +1,12 @@
+import hashlib
+import json
 import os
 import re
+import select
+import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 import platform
 from pathlib import Path
@@ -194,6 +199,334 @@ def resign_apk(apk_path):
     print(f"re-signed {apk_path} with the debug key")
 
 
+PACKAGE_NAME = "io.tqjxlm.sparkle"
+ACTIVITY_NAME = f"{PACKAGE_NAME}/{PACKAGE_NAME}.VulkanActivity"
+DEVICE_FILES_DIR = f"/sdcard/Android/data/{PACKAGE_NAME}/files"
+DEVICE_OUTPUT_DIR = os.path.join(SCRIPTPATH, "output", "device")
+
+EMULATOR_AVD_NAME = "sparkle_test"
+EMULATOR_API_LEVEL = 35
+
+# runner-side commands a TestCase may request through a "[TestCaseAction] <name>" log line.
+# cycle_window goes through the home screen rather than the power key: emulators count as
+# permanently charging, and stay-on defaults vary per image, so a sleep keyevent may leave
+# the surface untouched
+TEST_CASE_ACTIONS = {
+    "cycle_window": (
+        ["shell", "am", "start", "-a", "android.intent.action.MAIN",
+         "-c", "android.intent.category.HOME"],
+        ["shell", "am", "start", "-n",
+         "io.tqjxlm.sparkle/io.tqjxlm.sparkle.VulkanActivity"],
+    ),
+}
+
+TEST_PASS_PATTERN = re.compile(r"Test case '.+' passed")
+TEST_FAIL_PATTERNS = (
+    re.compile(r"Test case '.+' failed"),
+    re.compile(r"TestCase '.+' is not registered"),
+    re.compile(r"Failed to init"),
+    re.compile(r"Fatal signal|FATAL EXCEPTION"),
+)
+TEST_ACTION_PATTERN = re.compile(r"\[TestCaseAction\] (\w+)")
+
+
+def sdk_tool(*relative):
+    path = os.path.join(find_android_sdk(), *relative)
+    if platform.system() == "Windows" and not os.path.exists(path):
+        path += ".exe" if not path.endswith(".bat") else ""
+    return path
+
+
+def adb(*args, check=True, capture=False, timeout=None):
+    adb_binary = sdk_tool("platform-tools", "adb")
+    if not os.path.exists(adb_binary):
+        adb_binary = "adb"
+    return subprocess.run([adb_binary] + list(args), check=check, text=True,
+                          capture_output=capture, timeout=timeout)
+
+
+def online_devices():
+    result = adb("devices", capture=True)
+    return [line.split()[0] for line in result.stdout.splitlines()[1:]
+            if line.strip().endswith("device")]
+
+
+def run_sdk_install(sdkmanager, package):
+    """sdkmanager floods a progress bar and prompts for licenses; keep the log
+    clean and answer yes, surfacing the output only on failure."""
+    result = subprocess.run([sdkmanager, "--install", package],
+                            input="y\n" * 8, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"sdkmanager --install {package} failed:\n"
+                           f"{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
+
+
+def ensure_emulator():
+    """Make sure a device is online, booting the project emulator if none is.
+
+    Installs the system image and creates the AVD on first use. The image ABI
+    follows the host (the emulator only accelerates same-arch guests), so the
+    installed apk must match; google_apis images allow adb root, which the
+    config push relies on.
+    """
+    if online_devices():
+        return
+
+    host_abi = "arm64-v8a" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
+    image = f"system-images;android-{EMULATOR_API_LEVEL};google_apis;{host_abi}"
+
+    sdkmanager = sdk_tool("cmdline-tools", "latest", "bin", "sdkmanager")
+    avdmanager = sdk_tool("cmdline-tools", "latest", "bin", "avdmanager")
+    for tool in (sdkmanager, avdmanager):
+        if not os.path.exists(tool):
+            raise RuntimeError(f"{tool} not found; install the Android SDK"
+                               " cmdline-tools package")
+
+    # pin the AVD home so avdmanager and the emulator cannot disagree on it
+    avd_home = os.environ.setdefault("ANDROID_AVD_HOME",
+                                     os.path.expanduser("~/.android/avd"))
+    os.makedirs(avd_home, exist_ok=True)
+
+    emulator = sdk_tool("emulator", "emulator")
+    if not os.path.exists(emulator):
+        print("Installing emulator...", flush=True)
+        run_sdk_install(sdkmanager, "emulator")
+
+    if not os.path.isdir(os.path.join(find_android_sdk(), *image.split(";"))):
+        print(f"Installing {image}...", flush=True)
+        run_sdk_install(sdkmanager, image)
+
+    if not os.path.isdir(os.path.join(avd_home, f"{EMULATOR_AVD_NAME}.avd")):
+        print(f"Creating AVD {EMULATOR_AVD_NAME}...", flush=True)
+        subprocess.run([avdmanager, "create", "avd", "-n", EMULATOR_AVD_NAME,
+                        "-k", image, "--force"], check=True, input="no\n", text=True)
+
+    for probe in (["-list-avds"], ["-accel-check"]):
+        result = subprocess.run([emulator] + probe, capture_output=True, text=True)
+        print(f"emulator {probe[0]}: {(result.stdout + result.stderr).strip()}", flush=True)
+
+    print("Booting emulator...", flush=True)
+    # no -gpu override: headless auto mode selects swangle for GL and lavapipe for
+    # Vulkan. forcing swiftshader_indirect would force the SwiftShader Vulkan ICD
+    # with it, which crashes the emulator on slang-generated SPIR-V (source
+    # language 11)
+    boot_command = [emulator, "-avd", EMULATOR_AVD_NAME, "-no-window", "-no-audio",
+                    "-no-boot-anim", "-no-snapshot",
+                    "-memory", "4096", "-cores", "4"]
+    log_path = os.path.join(SCRIPTPATH, "output", "emulator.log")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "w") as log_file:
+        emulator_process = subprocess.Popen(boot_command, stdout=log_file,
+                                            stderr=subprocess.STDOUT)
+
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        if emulator_process.poll() is not None:
+            with open(log_path, errors="replace") as log_file:
+                tail = "".join(log_file.readlines()[-30:])
+            raise RuntimeError(f"emulator exited with code"
+                               f" {emulator_process.returncode}:\n{tail}")
+        result = adb("shell", "getprop", "sys.boot_completed",
+                     check=False, capture=True)
+        if result.stdout.strip() == "1":
+            break
+        time.sleep(2)
+    else:
+        emulator_process.kill()
+        raise RuntimeError(f"emulator did not boot in time; see {log_path}")
+
+    adb("shell", "locksettings", "set-disabled", "true", check=False)
+    # the boot-broadcast storm right after sys.boot_completed can kill the first
+    # activity started into it
+    time.sleep(15)
+    print("Emulator booted.", flush=True)
+
+
+def adb_restart_as_root():
+    result = adb("root", check=False, capture=True)
+    adb("wait-for-device", timeout=60)
+    return "cannot run as root" not in (result.stdout + result.stderr)
+
+
+def install_apk_once(apk_path):
+    """Skip the ~250 MB install when the connected device already has this apk."""
+    with open(apk_path, "rb") as apk_file:
+        sha1 = hashlib.sha1(apk_file.read()).hexdigest()
+
+    marker = "/data/local/tmp/sparkle_apk.sha1"
+    installed = adb("shell", "cat", marker, check=False, capture=True).stdout.strip()
+    if installed == sha1:
+        print("APK unchanged on device, skipping install")
+        return
+
+    print(f"Installing {apk_path}...")
+    adb("install", "-r", apk_path)
+    adb("shell", f"echo {sha1} > {marker}")
+
+
+def ensure_app_data_dirs():
+    """The app's external files tree exists only after a first launch, so a fresh
+    install on a pristine device needs one warm-up start."""
+    if adb("shell", "test", "-d", DEVICE_FILES_DIR, check=False).returncode == 0:
+        return
+
+    print("First launch to create app storage...", flush=True)
+    adb("shell", "am", "start", "-n", ACTIVITY_NAME)
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if adb("shell", "test", "-d", DEVICE_FILES_DIR, check=False).returncode == 0:
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError(f"{DEVICE_FILES_DIR} did not appear after first launch")
+    adb("shell", "am", "force-stop", PACKAGE_NAME)
+
+
+def parse_cvar_args(unknown_args):
+    """Interpret pass-through app arguments (--name value pairs) as config values.
+
+    Android has no argv channel; the values ship through the runtime config file."""
+    if len(unknown_args) % 2 != 0:
+        raise RuntimeError(f"expected --name value pairs, got {unknown_args}")
+
+    cvars = {}
+    for name, value in zip(unknown_args[::2], unknown_args[1::2]):
+        if not name.startswith("--"):
+            raise RuntimeError(f"expected an option name, got {name}")
+        try:
+            cvars[name[2:]] = json.loads(value)
+        except json.JSONDecodeError:
+            cvars[name[2:]] = value
+    return cvars
+
+
+def push_test_config(cvars, rooted):
+    """Deliver the runtime config. Shell-owned files under Android/data are invisible
+    to the app through FUSE, so with root the file is staged and chown'd to the app."""
+    local_path = os.path.join(DEVICE_OUTPUT_DIR, "config.json")
+    os.makedirs(DEVICE_OUTPUT_DIR, exist_ok=True)
+    with open(local_path, "w") as config_file:
+        json.dump(cvars, config_file, indent=2)
+
+    config_dir = f"{DEVICE_FILES_DIR}/config"
+    if rooted:
+        staged = "/data/local/tmp/sparkle_config.json"
+        adb("push", local_path, staged)
+        owner = adb("shell", "stat", "-c", "%U", DEVICE_FILES_DIR,
+                    capture=True).stdout.strip()
+        adb("shell", f"mkdir -p {config_dir}"
+            f" && cp {staged} {config_dir}/config.json"
+            f" && chown -R {owner}:ext_data_rw {config_dir}")
+    else:
+        adb("shell", "mkdir", "-p", config_dir)
+        adb("push", local_path, f"{config_dir}/config.json")
+
+
+def watch_test_run(timeout_seconds):
+    """Follow logcat until the TestCase verdict, serving TestCaseAction requests."""
+    adb_binary = sdk_tool("platform-tools", "adb")
+    # unbuffered: a quiet logcat must not block the deadline check, and select
+    # only sees the fd, so no reader-side buffer may hold lines back
+    logcat = subprocess.Popen(
+        [adb_binary, "logcat", "-v", "brief", "sparkle:*", "DEBUG:I",
+         "AndroidRuntime:E", "*:S"],
+        stdout=subprocess.PIPE, bufsize=0)
+
+    pending = b""
+    quiet_polls = 0
+    deadline = time.time() + timeout_seconds
+    try:
+        while time.time() < deadline:
+            ready, _, _ = select.select([logcat.stdout], [], [],
+                                        min(10, max(1, deadline - time.time())))
+            if not ready:
+                # a silent app that no longer runs will never produce a verdict;
+                # two probes in a row absorb the startup race after am start
+                pid = adb("shell", "pidof", PACKAGE_NAME,
+                          check=False, capture=True).stdout.strip()
+                quiet_polls = 0 if pid else quiet_polls + 1
+                if quiet_polls >= 2:
+                    return 2, "app process gone without a verdict"
+                continue
+            quiet_polls = 0
+            chunk = os.read(logcat.stdout.fileno(), 65536)
+            if not chunk:
+                return 1, "logcat ended unexpectedly"
+            *raw_lines, pending = (pending + chunk).split(b"\n")
+
+            for raw_line in raw_lines:
+                line = raw_line.decode(errors="replace")
+                print(line, flush=True)
+
+                action = TEST_ACTION_PATTERN.search(line)
+                if action:
+                    for command in TEST_CASE_ACTIONS[action.group(1)]:
+                        time.sleep(2)
+                        adb(*command, check=False)
+                    continue
+                if TEST_PASS_PATTERN.search(line):
+                    return 0, "passed"
+                if any(pattern.search(line) for pattern in TEST_FAIL_PATTERNS):
+                    return 1, line.strip()
+        return 1, f"timeout after {timeout_seconds}s"
+    finally:
+        logcat.kill()
+
+
+def pull_test_artifacts():
+    """Pull the run's log and screenshots where the suite and evaluators expect them."""
+    logs_dir = os.path.join(DEVICE_OUTPUT_DIR, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    local_log = os.path.join(logs_dir, f"output_{int(time.time() * 1000)}.log")
+    adb("pull", f"{DEVICE_FILES_DIR}/logs/output.log", local_log, check=False)
+
+    screenshots_dir = os.path.join(DEVICE_OUTPUT_DIR, "screenshots")
+    shutil.rmtree(screenshots_dir, ignore_errors=True)
+    os.makedirs(screenshots_dir)
+    adb("pull", f"{DEVICE_FILES_DIR}/screenshots/.", screenshots_dir, check=False)
+
+
+def packaged_apk_path(args):
+    product = os.path.join(SCRIPTPATH, "product", f"android-{args['config']}.apk")
+    return product if os.path.isfile(product) else None
+
+
+def run_test_case(args):
+    """Automated single-TestCase run on a device or emulator; returns the exit code."""
+    ensure_emulator()
+    rooted = adb_restart_as_root()
+    if not rooted:
+        print("WARNING: adb root unavailable; config push may be invisible to the app")
+
+    apk_path = args.get("product_path") or packaged_apk_path(args)
+    if not apk_path:
+        raise RuntimeError("no packaged apk to test; run the package stage first"
+                           f" (expected {os.path.join(SCRIPTPATH, 'product')})")
+    install_apk_once(apk_path)
+    ensure_app_data_dirs()
+
+    adb("shell", "am", "force-stop", PACKAGE_NAME)
+    push_test_config(parse_cvar_args(args["unknown_args"]), rooted)
+
+    # one retry absorbs transient system kills (e.g. the app starting into a
+    # just-booted, still-settling device)
+    for attempt in (1, 2):
+        adb("logcat", "-c", check=False)
+        print(f"Starting {ACTIVITY_NAME}")
+        adb("shell", "am", "start", "-n", ACTIVITY_NAME)
+        code, verdict = watch_test_run(timeout_seconds=900)
+        print(f"=== test run: {verdict}")
+        if code != 2:
+            break
+        adb("shell", "am", "force-stop", PACKAGE_NAME)
+    code = min(code, 1)
+
+    adb("shell", "am", "force-stop", PACKAGE_NAME)
+    pull_test_artifacts()
+    adb("shell", "rm", "-f", f"{DEVICE_FILES_DIR}/config/config.json", check=False)
+    return code
+
+
 def report_cook_activity(log_path):
     sys.path.insert(0, os.path.join(REPO_ROOT, "dev"))
     from cook_log import count_cook_activity
@@ -314,4 +647,6 @@ class AndroidBuilder(FrameworkBuilder):
 
     def run(self, args):
         """Run the built project."""
-        run_on_device(args)
+        if "--test_case" in args["unknown_args"]:
+            return run_test_case(args)
+        return run_on_device(args)

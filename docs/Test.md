@@ -61,6 +61,21 @@ The suite never builds: it tests the existing build (produce one first, e.g. `py
 
 The static-render evaluator lives at [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py), and the USD evaluator lives at [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py). They own specialized assertions; they do not orchestrate the general suite. Shared framework, dependency and image mechanics live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py), so one evaluator never serves as another evaluator's utility layer.
 
+## Android
+
+The suite runs on a device or emulator through the android runner in [build_system/android/build.py](../build_system/android/build.py). Android has no argv or exit-code channel, so the runner delivers cvars as the runtime config file (`<external-storage-path>/config/config.json`, see [Run.md](Run.md)), starts the activity, and reads the verdict from the `Test case '<name>' passed/failed` logcat markers. After each case it pulls the app log and screenshots to `build_system/android/output/device/`, where the suite's cook gate and the Python evaluators expect them.
+
+* If no device is connected, the runner boots the `sparkle_test` AVD headless (arm64, like every shipped apk), installing the system image and creating the AVD on first use. It needs the SDK `cmdline-tools` package (`sdkmanager`/`avdmanager`).
+* The config push requires `adb root` (available on emulator `google_apis` images): files a non-root shell creates under `Android/data` are invisible to the app through FUSE. On a non-rootable physical device the push may still work depending on the vendor's FUSE behavior.
+* A `TestCase` can ask the runner for device-level actions by logging `[TestCaseAction] <name>`; `surface_loss_recovery` uses the `cycle_window` action (screen off/on) to destroy and restore the native window mid-run.
+* Render cases compare against the published android ground truth, which is captured at 1560x720; pass `--width 1560 --height 720` so headless screenshots match.
+
+```bash
+# package once, then run cases on a local emulator (boots one if no device is attached)
+python3 build.py --framework android --config Release
+python3 dev/run_tests.py --framework android --config Release --case smoke
+```
+
 ## TestCase System
 
 * A `TestCase` is a C++ class that runs inside the app after the scene finishes loading.

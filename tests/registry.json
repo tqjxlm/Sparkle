@@ -151,6 +151,16 @@
         "description": "Init and scene-load sanity check."
     },
     {
+        "name": "surface_loss_recovery",
+        "test_case": "surface_loss_recovery",
+        "description": "Native window destroy/restore mid-run (screen off/on driven by the android runner); the recreated surface and swapchain must reproduce the pre-loss frame. Android only.",
+        "app_args": ["--clear_screenshots", "true"],
+        "evaluator": {
+            "script": "tests/android/surface_loss_test.py",
+            "args": ["--framework", "{framework}"]
+        }
+    },
+    {
         "name": "nrd_probe",
         "test_case": "nrd_probe",
         "description": "Cooked ReBLUR pipelines compile to PSOs on the current GPU. Apple platforms only."
