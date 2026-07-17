@@ -86,7 +86,8 @@ def _setup_lavapipe_windows(version):
 
 def _setup_lavapipe_linux():
     for icd_dir in LINUX_ICD_DIRS:
-        candidates = sorted(glob.glob(os.path.join(icd_dir, "lvp_icd.*.json")))
+        # debian/ubuntu ship a multi-arch lvp_icd.json; other distributions suffix the arch
+        candidates = sorted(glob.glob(os.path.join(icd_dir, "lvp_icd*.json")))
         if candidates:
             icd_json = candidates[0]
             print(f"Mesa lavapipe ready: {icd_json}")
