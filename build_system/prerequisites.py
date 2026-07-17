@@ -123,6 +123,8 @@ def install_cmake():
             f"Expected directory not found after extraction: {extracted_dir}")
 
     shutil.move(extracted_dir, cmake_dir)
+    # leftovers in tmp ride along in the CI-cached build_cache; drop them
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     os.remove(download_path)
 
     if not os.path.exists(cmake_executable):
@@ -246,6 +248,9 @@ def install_vulkan_sdk(build_cache_dir):
     platform_name = platform_map[system]
 
     tmp_dir = os.path.join(build_cache_dir, "tmp")
+    # stale extraction leftovers — including ones restored from an older CI cache entry —
+    # would otherwise be re-saved into the CI-cached build_cache on every run
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
     prerequisites = load_prerequisites_versions()
     latest_version = prerequisites.get("VulkanSDK", "1.4.350.0")
@@ -352,6 +357,9 @@ def install_vulkan_sdk(build_cache_dir):
     install_with_retry(download_url, download_path, provision,
                        reset=lambda: shutil.rmtree(vulkan_sdk_path, ignore_errors=True))
 
+    # the extracted tree in tmp would otherwise ride along in the CI-cached build_cache,
+    # carrying the SDK twice (~doubling the ubuntu entry against the 10GB actions-cache quota)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     os.remove(download_path)
 
     if is_macos:
