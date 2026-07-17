@@ -1,7 +1,7 @@
 #pragma once
 
-#include <array>
 #include <functional>
+#include <memory>
 
 class ImGuiIO;
 struct ImDrawData;
@@ -45,9 +45,7 @@ private:
 
     std::vector<CustomUiWindow> pending_windows_to_draw_;
 
-    std::array<ImDrawData *, 4> draw_data_per_frame_;
-
-    unsigned main_thread_context_index_ = 0;
-    unsigned render_thread_context_index_ = 0;
+    // render thread only; the main thread hands it over through the frame task queue
+    std::shared_ptr<ImDrawData> render_thread_draw_data_;
 };
 } // namespace sparkle

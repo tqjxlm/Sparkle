@@ -543,9 +543,13 @@ bool AppFramework::MainLoop()
     {
         PROFILE_SCOPE("MainLoop render ui");
 
-        if (ui_manager_ && view_->CanRender())
+        if (ui_manager_)
         {
-            DrawUi();
+            if (view_->CanRender())
+            {
+                DrawUi();
+            }
+
             ui_manager_->Render();
         }
     }

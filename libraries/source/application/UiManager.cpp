@@ -4,6 +4,7 @@
 #include "core/Exception.h"
 #include "core/FileManager.h"
 #include "core/ThreadManager.h"
+#include "core/task/TaskManager.h"
 
 #include <IconsFontAwesome7.h>
 #include <imgui.h>
@@ -164,8 +165,6 @@ UiManager::UiManager(NativeView *native_view) : native_view_(native_view)
 
     native_view_->InitUiSystem();
 
-    std::ranges::fill(draw_data_per_frame_, nullptr);
-
     // after this point, RHIUiHandler will call Init() in render thread
 }
 
@@ -181,11 +180,8 @@ void UiManager::Render()
 
     ASSERT(ThreadManager::IsInMainThread());
 
-    if (pending_windows_to_draw_.empty())
-    {
-        draw_data_per_frame_[main_thread_context_index_] = nullptr;
-    }
-    else
+    std::shared_ptr<ImDrawData> draw_data;
+    if (!pending_windows_to_draw_.empty())
     {
         native_view_->TickUiSystem();
 
@@ -199,15 +195,13 @@ void UiManager::Render()
         // render does not actually happen at this point.
         ImGui::Render();
 
-        FreeDrawData(draw_data_per_frame_[main_thread_context_index_]);
-
-        auto *draw_data_clone = CloneDrawData(ImGui::GetDrawData());
-        draw_data_per_frame_[main_thread_context_index_] = draw_data_clone;
+        draw_data = std::shared_ptr<ImDrawData>(CloneDrawData(ImGui::GetDrawData()), FreeDrawData);
 
         pending_windows_to_draw_.clear();
     }
 
-    main_thread_context_index_ = (main_thread_context_index_ + 1) % draw_data_per_frame_.size();
+    // hand over even when empty, so the render thread never redraws a stale clone
+    TaskManager::RunInRenderThread([this, draw_data]() { render_thread_draw_data_ = draw_data; });
 
     // after this point, RHIUiHandler will call BeginFrame() and Render() in render thread
 }
@@ -216,9 +210,7 @@ void UiManager::BeginRenderThread()
 {
     ASSERT(ThreadManager::IsInRenderThread());
 
-    ImGui::GetIO().UserData = draw_data_per_frame_[render_thread_context_index_];
-
-    render_thread_context_index_ = (render_thread_context_index_ + 1) % draw_data_per_frame_.size();
+    ImGui::GetIO().UserData = render_thread_draw_data_.get();
 }
 
 bool UiManager::HasDataToDraw()
@@ -245,7 +237,7 @@ void UiManager::Shutdown()
     // before this point, RHIUiHandler should have called Shutdown() in render thread
     native_view_->ShutdownUiSystem();
 
-    std::ranges::for_each(draw_data_per_frame_, FreeDrawData);
+    render_thread_draw_data_ = nullptr;
 
     ImGui::DestroyContext();
 
