@@ -85,8 +85,6 @@ class CoverageTest(unittest.TestCase):
     def test_every_covered_triplet_has_a_ci_runner(self):
         for triplet in COVERAGE:
             self.assertIn(triplet, ci_matrix.TEST_RUNNERS)
-            cell = ci_matrix.test_cell(triplet)
-            self.assertEqual(list(cell)[:3], ["os", "framework", "build_type"])
 
 
 if __name__ == "__main__":

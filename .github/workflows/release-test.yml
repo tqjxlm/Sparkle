@@ -1,0 +1,181 @@
+name: Release and Test
+
+# the per-product tail of the pipeline: release, then the aggregate suite when the cell
+# carries a suite config. one call handles exactly one product, so the test -> release
+# edge is a real needs edge and the test runner is only requested once its own product's
+# release is done. build.yml calls this workflow as a matrix over the release cells of
+# dev/ci_matrix.py.
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: true
+      framework:
+        type: string
+        required: true
+      build_type:
+        type: string
+        required: true
+      abi:
+        type: string
+        default: ""
+      test:
+        description: "Run the aggregate suite after releasing (tests/coverage.csv covers this product)"
+        type: boolean
+        default: false
+      suite_args:
+        type: string
+        default: ""
+      suite_timeout:
+        type: number
+        default: 0
+      screenshots:
+        type: string
+        default: ""
+
+jobs:
+  release:
+    # apple signing needs a macos runner; injection elsewhere is zip surgery, ubuntu starts fastest
+    runs-on: ${{ (inputs.framework == 'macos' || inputs.framework == 'ios') && 'macos-latest' || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # needs cannot target a single matrix cell, so the edge to this product's own build
+      # is a job-name await. it only ever waits while few macos builds remain (cook, a
+      # macos build, is already done), so waiting cells cannot starve the build queue
+      - name: Wait for this product's build
+        uses: ./.github/actions/wait-for-job
+        with:
+          job-name: build (${{ inputs.os }}, ${{ inputs.framework }}, ${{ inputs.build_type }}${{ inputs.abi != '' && format(', {0}', inputs.abi) || '' }})
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: ${{ inputs.framework }}
+          os: ${{ inputs.os }}
+          build-type: ${{ inputs.build_type }}
+          abi: ${{ inputs.abi }}
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  test:
+    if: inputs.test
+    needs: release
+    runs-on: ${{ inputs.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # the suite drives the app through build.py, which needs the build prerequisites;
+      # the android cell needs the SDK for adb and the emulator
+      - name: Setup Environment
+        if: inputs.os == 'macos-latest' || inputs.framework == 'android'
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: ${{ inputs.framework }}
+          os: ${{ inputs.os }}
+
+      - name: Setup Mesa Lavapipe
+        if: inputs.os == 'windows-latest'
+        uses: ./.github/actions/setup-mesa
+
+      # the emulator needs hardware virtualization; hosted ubuntu runners expose
+      # /dev/kvm but leave it root-only
+      - name: Enable KVM (android)
+        if: inputs.framework == 'android'
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # the AVD is deliberately NOT cached: the snapshot entry weighs ~4GB, and duplicated
+      # per branch it evicts every compiler cache in the repo's 10GB actions-cache quota
+      # (a cold windows rebuild costs ~20 minutes); the suite seeds a fresh AVD in ~5
+      # minutes instead (cold boot + clean shutdown)
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build_type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
+          path: build_system/${{ inputs.framework }}/product
+
+      - name: Extract app (glfw, windows)
+        if: inputs.framework == 'glfw' && inputs.os == 'windows-latest'
+        shell: bash
+        run: >-
+          python3 -m zipfile -e build_system/glfw/product/windows-glfw-${{ inputs.build_type }}.zip
+          build_system/glfw/output/
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app (glfw, macos)
+        if: inputs.framework == 'glfw' && inputs.os == 'macos-latest'
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          ditto -x -k build_system/glfw/product/macos-glfw-${{ inputs.build_type }}.zip build_system/glfw/output/
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app (macos)
+        if: inputs.framework == 'macos'
+        shell: bash
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-${{ inputs.build_type }}.zip build_system/macos/output/build/
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: ${{ inputs.suite_timeout }}
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: >-
+          python3 dev/run_tests.py --framework ${{ inputs.framework }} --config ${{ inputs.build_type }}
+          ${{ inputs.suite_args }}
+
+      - name: Dump app logs (android)
+        if: failure() && inputs.framework == 'android'
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat build_system/android/output/device/logs/*.log 2>/dev/null || true
+          echo "=== emulator log ==="
+          cat build_system/android/output/emulator.log 2>/dev/null || true
+
+      - name: Dump app logs
+        if: failure() && inputs.os == 'macos-latest'
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+          echo "=== crash reports ==="
+          sleep 10
+          for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-screenshots-${{ inputs.framework }}-${{ inputs.os }}
+          path: ${{ inputs.screenshots }}
