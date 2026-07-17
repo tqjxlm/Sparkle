@@ -35,7 +35,10 @@ on:
         default: ""
 
 jobs:
+  # explicit triplet names: the graph renders a called workflow's jobs by their own
+  # names, which would otherwise collapse every product to a bare "release"/"test"
   release:
+    name: release (${{ inputs.os }}, ${{ inputs.framework }}, ${{ inputs.build_type }}${{ inputs.abi != '' && format(', {0}', inputs.abi) || '' }})
     # apple signing needs a macos runner; injection elsewhere is zip surgery, ubuntu starts fastest
     runs-on: ${{ (inputs.framework == 'macos' || inputs.framework == 'ios') && 'macos-latest' || 'ubuntu-latest' }}
 
@@ -71,6 +74,7 @@ jobs:
           ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
   test:
+    name: test (${{ inputs.os }}, ${{ inputs.framework }}, ${{ inputs.build_type }}${{ inputs.abi != '' && format(', {0}', inputs.abi) || '' }})
     if: inputs.test
     needs: release
     runs-on: ${{ inputs.os }}
