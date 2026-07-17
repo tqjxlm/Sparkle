@@ -44,9 +44,15 @@ runs:
           ${{ inputs.os }}-android-gradle-
 
     # compiled objects are cached with ccache across runs. the key always misses (github.sha)
-    # so the updated cache is saved after every run; restore-keys picks up the newest previous one.
-    - name: Cache compiler cache (All Platforms)
-      uses: actions/cache@v4
+    # so restore-keys picks up the newest previous cache. restore-only: build-platform uploads
+    # the updated cache, and only when the run compiled something new. saving here would
+    # re-upload the restored cache untouched from every job, and those duplicates crowd the
+    # repo's 10GB actions-cache quota until the entries other runs need get evicted (a cold
+    # windows rebuild costs ~20 minutes). jobs that never compile (cook, test, tidy) pass no
+    # build-type and skip the restore, so they stop keeping their dead cache entries alive.
+    - name: Restore compiler cache (All Platforms)
+      if: inputs.build-type != ''
+      uses: actions/cache/restore@v4
       with:
         path: ./.ccache
         key: ${{ inputs.os }}-${{ inputs.framework }}-${{ inputs.build-type }}-ccache-${{ github.sha }}
