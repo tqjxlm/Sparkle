@@ -218,16 +218,10 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # the AVD with its quickboot snapshot: the suite seeds it on a miss (cold boot
-      # + clean shutdown) and resumes from it in seconds on a hit. the system image
-      # stays out — sdkmanager refetches it faster than a gigabyte of shared cache
-      # quota is worth. bump the key suffix to discard a stale snapshot by hand
-      - name: Cache emulator AVD (android)
-        if: matrix.framework == 'android'
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/avd
-          key: ${{ matrix.os }}-avd-${{ matrix.abi }}-api35-v1
+      # the AVD is deliberately NOT cached: the snapshot entry weighs ~4GB, and duplicated
+      # per branch it evicts every compiler cache in the repo's 10GB actions-cache quota
+      # (a cold windows rebuild costs ~20 minutes); the suite seeds a fresh AVD in ~5
+      # minutes instead (cold boot + clean shutdown)
 
       # the release package already carries the cooked content in its packed resources
       - name: Download app
