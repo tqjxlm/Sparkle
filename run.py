@@ -16,9 +16,7 @@ import build
 def launch_stages(framework):
     """The stages a launch consumes: desktop runs read the cook output from the
     build tree directly, device runs install the packaged product."""
-    stages = ["build"]
-    if build.cooker_framework(framework) is not None:
-        stages.append("cook")
+    stages = ["build", "cook"]
     if framework in build.DEVICE_FRAMEWORKS:
         stages.append("package")
     return stages
