@@ -98,10 +98,13 @@ def matrices(build_types):
     """The three include lists. Cell keys stay ordered os, framework, build_type:
     GitHub renders job display names from them (extras such as abi trail), and
     wait-for-job awaits cells by those names."""
-    release = [product_cell(product, build_type)
-               for product in PRODUCTS for build_type in build_types
-               if build_type in product.get("build_types", build_types)]
-    build = [cell for cell in release if cell not in STANDALONE_BUILDS]
+    cells = [product_cell(product, build_type)
+             for product in PRODUCTS for build_type in build_types
+             if build_type in product.get("build_types", build_types)]
+    # Debug products are compile-coverage only: nothing ships or tests them,
+    # so they get no release cell
+    release = [cell for cell in cells if cell["build_type"] == "Release"]
+    build = [cell for cell in cells if cell not in STANDALONE_BUILDS]
     test = [cell for cell in map(test_cell, covered_triplets())
             if cell["build_type"] in build_types]
     return {"build": build, "release": release, "test": test}

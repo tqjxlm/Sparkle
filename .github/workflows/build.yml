@@ -9,8 +9,9 @@ on:
         default: '"Debug","Release"'
 
 # stages: build (every product in parallel, the heavy stage) -> cook (macos-release, on
-# the macos runners' real Metal GPU) -> release (every product: swap in the cooked
-# content image and re-sign) -> test (tests/coverage.csv decides which released products
+# the macos runners' real Metal GPU) -> release (every Release product: swap in the
+# cooked content image and re-sign; Debug builds are compile-coverage only and are
+# never released) -> test (tests/coverage.csv decides which released products
 # run the suite and with which cases). a cell waits only for the shared cook and its own product's
 # upstream cell, never other products': the stage -> cook edges are real needs edges,
 # while the edge to the product's own build (for release cells) or release (for test
@@ -129,6 +130,9 @@ jobs:
 
   release:
     needs: [plan, cook]
+    # debug builds get no release cell, so a Debug-only selection leaves this table
+    # empty, and GitHub rejects empty matrices
+    if: needs.plan.outputs.release != '[]'
     # apple signing needs a macos runner; injection elsewhere is zip surgery, ubuntu starts fastest
     runs-on: ${{ (matrix.framework == 'macos' || matrix.framework == 'ios') && 'macos-latest' || 'ubuntu-latest' }}
 
