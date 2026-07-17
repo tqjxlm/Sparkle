@@ -37,11 +37,11 @@ def _find_7z():
     return None
 
 
-def _lavapipe_env(icd_json, extra_path=None):
-    """Force the Vulkan loader to use exactly the lavapipe ICD."""
+def _lavapipe_env(icd_jsons, extra_path=None):
+    """Force the Vulkan loader to use exactly the lavapipe ICDs."""
     env = os.environ.copy()
-    env["VK_ICD_FILENAMES"] = icd_json
-    env["VK_LOADER_DRIVERS_SELECT"] = os.path.basename(icd_json)
+    env["VK_ICD_FILENAMES"] = os.pathsep.join(icd_jsons)
+    env["VK_LOADER_DRIVERS_SELECT"] = "lvp_icd*"
     env["VK_LOADER_DRIVERS_DISABLE"] = "*"
     if extra_path:
         env["PATH"] = extra_path + os.pathsep + env.get("PATH", "")
@@ -81,17 +81,16 @@ def _setup_lavapipe_windows(version):
             sys.exit(1)
 
     print(f"Mesa lavapipe ready: {icd_json}")
-    return _lavapipe_env(icd_json, extra_path=os.path.dirname(icd_json))
+    return _lavapipe_env([icd_json], extra_path=os.path.dirname(icd_json))
 
 
 def _setup_lavapipe_linux():
     for icd_dir in LINUX_ICD_DIRS:
-        # debian/ubuntu ship a multi-arch lvp_icd.json; other distributions suffix the arch
+        # manifest names vary by distribution; the loader skips unloadable candidates
         candidates = sorted(glob.glob(os.path.join(icd_dir, "lvp_icd*.json")))
         if candidates:
-            icd_json = candidates[0]
-            print(f"Mesa lavapipe ready: {icd_json}")
-            return _lavapipe_env(icd_json)
+            print(f"Mesa lavapipe ready: {', '.join(candidates)}")
+            return _lavapipe_env(candidates)
 
     print("ERROR: lavapipe ICD not found. Install it with:"
           " sudo apt install mesa-vulkan-drivers")
