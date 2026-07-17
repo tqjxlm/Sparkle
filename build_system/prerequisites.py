@@ -729,7 +729,8 @@ def install_glfw():
                 "Failed to install GLFW via Homebrew. Please make sure it is installed manually.")
             print(f"Error: {e}")
     elif platform.system() == "Linux":
-        if os.path.exists("/usr/include/GLFW/glfw3.h"):
+        if any(os.path.exists(os.path.join(prefix, "include", "GLFW", "glfw3.h"))
+               for prefix in ("/usr", "/usr/local")):
             return
         # -n: fail instead of prompting for a password, so unattended runs never hang
         print("Installing GLFW via apt...")
