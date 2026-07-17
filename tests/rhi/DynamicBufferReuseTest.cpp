@@ -95,7 +95,7 @@ private:
         Done,
     };
 
-    RHIBuffer::Attribute MakeAttribute(size_t size) const
+    [[nodiscard]] RHIBuffer::Attribute MakeAttribute(size_t size) const
     {
         return {
             .size = size,
