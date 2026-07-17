@@ -14,9 +14,9 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes the assembled content image as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
 * **release**: every product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage file ([tests/coverage.json](../tests/coverage.json), see [Test.md](Test.md)) decides which released products run the aggregate suite and which registry cases they run; the plan node derives the test matrix from it. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, and macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK. All run with `--require_cooked`. A product absent from the coverage file ships untested — no runner can drive it yet.
+* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; the plan node derives the test matrix from its columns. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, and macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK. A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
-All three matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the per-triplet suite invocations, and derives the test rows from [tests/coverage.json](../tests/coverage.json) — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.
+All three matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the per-triplet suite invocations, and derives the test rows from [tests/coverage.csv](../tests/coverage.csv) — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.
 
 A cell waits only for the shared cook and its own product's upstream cell, never other products'. The release and test matrices carry a real `needs` edge to cook; the edge to the product's own build (for a release cell) or release (for a test cell) cannot be a `needs` (GitHub cannot target a single matrix cell), so it is an await-by-name through the run's job list — the shared [wait-for-job](../.github/actions/wait-for-job/action.yml) action. The awaits start only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. The one standalone job is the macos-release build, which cook's `needs` edge must target.
 
@@ -28,16 +28,16 @@ Run the same validation classes locally in fail-fast order. The cheap, determini
 python3 dev/check_format.py
 python3 build.py --framework glfw --config Release --clangd
 python3 dev/check_tidy.py
-python3 dev/run_tests.py --framework macos --config Release --headless
+python3 dev/run_tests.py --framework macos --config Release
 ```
 
 On Windows, use the GLFW suite with software Vulkan when no physical GPU is available:
 
 ```bash
-python3 dev/run_tests.py --framework glfw --config Release --software --headless
+python3 dev/run_tests.py --framework glfw --config Release --software
 ```
 
-Use `dev/check_format.py --fix` while editing, but rerun the check-only command for the gate. `--skip_build` is valid only when the intended binary was already built; it must not be used to bypass build validation. A focused test is useful during development but does not replace this sequence when declaring a change complete.
+Use `dev/check_format.py --fix` while editing, but rerun the check-only command for the gate. The suite tests an existing build, so build first; a focused test is useful during development but does not replace this sequence when declaring a change complete.
 
 ## Format Check
 
@@ -79,27 +79,24 @@ python3 dev/check_tidy.py                    # check all first-party sources
 
 ## Aggregate Test Suite
 
-`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against three released packages, all in Release mode, headless, and with `--require_cooked`, which fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl_parity` is excluded under that flag: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
+`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against three released packages, all in Release mode. The suite is always headless and cook-gated: it fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl_parity` is excluded: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
 
 The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000/mesa-dist-win):
 
 ```bash
-python3 dev/run_tests.py --framework glfw --config Release --skip_build \
-  --software --headless --require_cooked
+python3 dev/run_tests.py --framework glfw --config Release --software
 ```
 
 The macOS package runs the forward and deferred pipelines on the runner's physical Metal GPU:
 
 ```bash
-python3 dev/run_tests.py --framework macos --config Release --skip_build \
-  --headless --require_cooked
+python3 dev/run_tests.py --framework macos --config Release
 ```
 
 The macOS + GLFW package runs the same Vulkan backend as Windows, but on the runner's physical Metal GPU through MoltenVK:
 
 ```bash
-python3 dev/run_tests.py --framework glfw --config Release --skip_build \
-  --headless --require_cooked
+python3 dev/run_tests.py --framework glfw --config Release
 ```
 
 The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the NRD gate suite (see [Nrd.md](Nrd.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.

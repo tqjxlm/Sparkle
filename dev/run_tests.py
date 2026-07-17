@@ -1,14 +1,15 @@
 """Run the validation suite against an existing build; it never builds anything.
 
 tests/registry.json registers the runnable cases: each names a C++ TestCase, the
-exact arguments to run it with, and an optional Python evaluator. tests/coverage.json
-assigns each CI triplet (host-framework-config) the registry cases it must run. The
-suite runs the current triplet's assignment headless and cook-gated: any on-the-fly
-cook fails the run, so recooking cases are dropped. --case runs registry cases by
-name regardless of coverage, without the cook gate.
+exact arguments to run it with, and an optional Python evaluator. tests/coverage.csv
+assigns each CI triplet (host-framework-config) the registry cases it must run, in
+row order. The suite runs the current triplet's assignment headless and cook-gated:
+any on-the-fly cook fails the run, so recooking cases are dropped. --case runs
+registry cases by name regardless of coverage, without the cook gate.
 """
 
 import argparse
+import csv
 import glob
 import json
 import os
@@ -19,7 +20,7 @@ import venv
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(REPO, "tests", "registry.json")
-COVERAGE = os.path.join(REPO, "tests", "coverage.json")
+COVERAGE = os.path.join(REPO, "tests", "coverage.csv")
 SUPPORTED_FRAMEWORKS = ("glfw", "macos")
 HOST_NAMES = {"darwin": "macos", "win32": "windows"}
 
@@ -59,8 +60,22 @@ def load_registry():
 
 
 def load_coverage():
-    with open(COVERAGE) as coverage_file:
-        return json.load(coverage_file)
+    """The coverage table: one row per registry case in execution order, one
+    column per triplet, an x marking a pick. Returns {triplet: [case names]}."""
+    with open(COVERAGE, newline="") as coverage_file:
+        rows = list(csv.DictReader(coverage_file))
+
+    triplets = [column for column in rows[0] if column != "case"]
+    coverage = {triplet: [] for triplet in triplets}
+    for row in rows:
+        for triplet in triplets:
+            mark = (row[triplet] or "").strip()
+            if mark == "x":
+                coverage[triplet].append(row["case"])
+            elif mark:
+                raise ValueError(f"{COVERAGE}: case {row['case']}, triplet"
+                                 f" {triplet}: mark must be 'x' or empty, got {mark!r}")
+    return coverage
 
 
 def current_triplet(framework, config):

@@ -1,5 +1,6 @@
 """Consistency checks for the test-case registry and its CI coverage."""
 
+import csv
 import importlib.util
 import json
 import os
@@ -8,16 +9,22 @@ import sys
 import unittest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SPEC = importlib.util.spec_from_file_location(
-    "ci_matrix", os.path.join(PROJECT_ROOT, "dev", "ci_matrix.py"))
-ci_matrix = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = ci_matrix
-SPEC.loader.exec_module(ci_matrix)
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(PROJECT_ROOT, *path))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+ci_matrix = load_module("ci_matrix", ("dev", "ci_matrix.py"))
+run_tests = load_module("run_tests", ("dev", "run_tests.py"))
 
 with open(os.path.join(PROJECT_ROOT, "tests", "registry.json")) as registry_file:
     REGISTRY = json.load(registry_file)
-with open(os.path.join(PROJECT_ROOT, "tests", "coverage.json")) as coverage_file:
-    COVERAGE = json.load(coverage_file)
+COVERAGE = run_tests.load_coverage()
 
 REGISTRAR_PATTERN = re.compile(r'TestCaseRegistrar<\w+>\s+\w+\("([^"]+)"\)')
 
@@ -55,6 +62,14 @@ class RegistryTest(unittest.TestCase):
 
 
 class CoverageTest(unittest.TestCase):
+
+    def test_coverage_rows_pick_from_the_registry(self):
+        with open(os.path.join(PROJECT_ROOT, "tests", "coverage.csv"),
+                  newline="") as coverage_file:
+            rows = [row["case"] for row in csv.DictReader(coverage_file)]
+        names = {case["name"] for case in REGISTRY}
+        self.assertLessEqual(set(rows), names)
+        self.assertEqual(sorted(rows), sorted(set(rows)), "duplicate rows")
 
     def test_coverage_picks_existing_registry_cases(self):
         names = {case["name"] for case in REGISTRY}
