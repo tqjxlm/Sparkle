@@ -8,7 +8,7 @@ SCRIPTPATH = os.path.dirname(SCRIPT)
 def setup_resources():
     packed_dir = os.path.join(SCRIPTPATH, "packed")
     zip_path = os.path.join(SCRIPTPATH, "resources.zip")
-    url = "https://www.dropbox.com/scl/fo/q973wvw155dsrdf6wfkqt/ALzcfn5n44756u4NDKLJHl8?rlkey=l9kyje6xkf1tf6zsiv4bx98lj&st=wzo7vcll&dl=1"
+    url = "https://drive.usercontent.google.com/download?id=1QbM3lTuDaiozINaNqAkWDHkLF7UBQdRI&export=download&confirm=t"
 
     if os.path.exists(zip_path):
         print("Resources are up-to-date, skipping setup.")
