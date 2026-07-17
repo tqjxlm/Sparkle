@@ -14,7 +14,7 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes the assembled content image as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
 * **release**: every product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; the plan node derives the test matrix from its columns. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, and macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK. A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
+* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; the plan node derives the test matrix from its columns. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
 All three matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the per-triplet suite invocations, and derives the test rows from [tests/coverage.csv](../tests/coverage.csv) — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.
 
@@ -79,7 +79,7 @@ python3 dev/check_tidy.py                    # check all first-party sources
 
 ## Aggregate Test Suite
 
-`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against three released packages, all in Release mode. The suite is always headless and cook-gated: it fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl_parity` is excluded: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
+`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against four released packages, all in Release mode. The suite is always headless and cook-gated: it fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl_parity` is excluded: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
 
 The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000/mesa-dist-win):
 
@@ -97,6 +97,12 @@ The macOS + GLFW package runs the same Vulkan backend as Windows, but on the run
 
 ```bash
 python3 dev/run_tests.py --framework glfw --config Release
+```
+
+The Android cell runs the dedicated x86_64 package on a KVM-accelerated headless emulator, whose guest Vulkan device is llvmpipe — the same software-rasterizer class as the Windows cell (the shipping arm64 apk cannot be emulated on any hosted runner; see the Android section in [Test.md](Test.md)). Its picks include `surface_loss_recovery`, which exercises the Android native-window teardown/recreate path. `--width 1560 --height 720` matches the resolution of the published android ground-truth captures:
+
+```bash
+python3 dev/run_tests.py --framework android --config Release --width 1560 --height 720
 ```
 
 The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the NRD gate suite (see [Nrd.md](Nrd.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.

@@ -305,16 +305,34 @@ def ensure_emulator():
         result = subprocess.run([emulator] + probe, capture_output=True, text=True)
         print(f"emulator {probe[0]}: {(result.stdout + result.stderr).strip()}", flush=True)
 
-    print("Booting emulator...", flush=True)
+    log_path = os.path.join(SCRIPTPATH, "output", "emulator.log")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    snapshot = os.path.join(avd_home, f"{EMULATOR_AVD_NAME}.avd",
+                            "snapshots", "default_boot", "snapshot.pb")
+    if not os.path.isfile(snapshot):
+        # a clean shutdown is what writes the quickboot snapshot, taken only after
+        # the boot-broadcast storm (which kills activities started into it) has
+        # settled; later boots — and CI runs restoring the cached AVD — resume from
+        # it in seconds
+        print("Seeding quickboot snapshot...", flush=True)
+        process = boot_and_wait(emulator, log_path)
+        adb("shell", "locksettings", "set-disabled", "true", check=False)
+        time.sleep(15)
+        adb("emu", "kill", check=False)
+        process.wait(timeout=120)
+
+    boot_and_wait(emulator, log_path)
+    print("Emulator booted.", flush=True)
+
+
+def boot_and_wait(emulator, log_path):
     # no -gpu override: headless auto mode selects swangle for GL and lavapipe for
     # Vulkan. forcing swiftshader_indirect would force the SwiftShader Vulkan ICD
     # with it, which crashes the emulator on slang-generated SPIR-V (source
     # language 11)
     boot_command = [emulator, "-avd", EMULATOR_AVD_NAME, "-no-window", "-no-audio",
-                    "-no-boot-anim", "-no-snapshot",
-                    "-memory", "4096", "-cores", "4"]
-    log_path = os.path.join(SCRIPTPATH, "output", "emulator.log")
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                    "-no-boot-anim", "-memory", "4096", "-cores", "4"]
     with open(log_path, "w") as log_file:
         emulator_process = subprocess.Popen(boot_command, stdout=log_file,
                                             stderr=subprocess.STDOUT)
@@ -329,17 +347,11 @@ def ensure_emulator():
         result = adb("shell", "getprop", "sys.boot_completed",
                      check=False, capture=True)
         if result.stdout.strip() == "1":
-            break
+            return emulator_process
         time.sleep(2)
-    else:
-        emulator_process.kill()
-        raise RuntimeError(f"emulator did not boot in time; see {log_path}")
 
-    adb("shell", "locksettings", "set-disabled", "true", check=False)
-    # the boot-broadcast storm right after sys.boot_completed can kill the first
-    # activity started into it
-    time.sleep(15)
-    print("Emulator booted.", flush=True)
+    emulator_process.kill()
+    raise RuntimeError(f"emulator did not boot in time; see {log_path}")
 
 
 def adb_restart_as_root():
@@ -577,6 +589,11 @@ def run_on_device(args):
         report_cook_activity(log_destination)
 
 
+def gradle_abi_properties(args):
+    abi = args.get("android_abi") if args else None
+    return [f"-PtargetAbi={abi}"] if abi else []
+
+
 def sync_only(args):
     """Trigger Gradle sync without building to generate CMake files."""
     gradlew_path, output_dir = prepare_environment(args)
@@ -590,7 +607,7 @@ def sync_only(args):
         gradle_task,
         f"-PcmakeArgs={' '.join(cmake_args)}",
         "--info",
-    ]
+    ] + gradle_abi_properties(args)
 
     log_file = os.path.join(output_dir, "sync.log")
     run_command_with_logging(sync_cmd, log_file, "Syncing Android project")
@@ -630,7 +647,7 @@ class AndroidBuilder(FrameworkBuilder):
             gradle_task,
             f"-PcmakeArgs={' '.join(cmake_args)}",
             "--info"
-        ]
+        ] + gradle_abi_properties(args)
 
         log_file = os.path.join(output_dir, "build.log")
         run_command_with_logging(build_cmd, log_file, "Building Android APK")

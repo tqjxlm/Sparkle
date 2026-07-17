@@ -19,10 +19,21 @@ class CiMatrixTest(unittest.TestCase):
 
     def test_release_covers_every_product_and_config(self):
         matrices = ci_matrix.matrices(["Debug", "Release"])
-        expected = [dict(product, build_type=build_type)
+        expected = [ci_matrix.product_cell(product, build_type)
                     for product in ci_matrix.PRODUCTS
-                    for build_type in ("Debug", "Release")]
+                    for build_type in ("Debug", "Release")
+                    if build_type in product.get("build_types",
+                                                 ("Debug", "Release"))]
         self.assertEqual(matrices["release"], expected)
+
+    def test_restricted_products_never_leak_their_restriction(self):
+        matrices = ci_matrix.matrices(["Debug", "Release"])
+        android_x86 = [cell for cell in matrices["release"]
+                       if cell.get("abi") == "x86_64"]
+        self.assertEqual([cell["build_type"] for cell in android_x86],
+                         ["Release"])
+        for cell in android_x86:
+            self.assertNotIn("build_types", cell)
 
     def test_build_excludes_only_the_standalone_cook_build(self):
         matrices = ci_matrix.matrices(["Debug", "Release"])
