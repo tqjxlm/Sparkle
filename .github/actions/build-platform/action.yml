@@ -108,13 +108,13 @@ runs:
     # also saved after a failed build: the objects compiled before the failure warm the retry
     - name: Save compiler cache
       if: always() && steps.ccache-delta.outputs.misses != '0'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: ./.ccache
         key: ${{ inputs.os }}-${{ inputs.framework }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}-${{ inputs.build-type }}-ccache-${{ github.sha }}
 
     - name: Upload build product
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
         path: build_system/${{ inputs.framework }}/product

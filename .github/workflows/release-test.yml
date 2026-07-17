@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # needs cannot target a single matrix cell, so the edge to this product's own build
       # is a job-name await. it only ever waits while few macos builds remain (cook, a
@@ -81,7 +81,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # the suite drives the app through build.py, which needs the build prerequisites;
       # the android cell needs the SDK for adb and the emulator
@@ -121,7 +121,7 @@ jobs:
 
       # the release package already carries the cooked content in its packed resources
       - name: Download app
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build_type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
           path: build_system/${{ inputs.framework }}/product
@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload Test Screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-screenshots-${{ inputs.framework }}-${{ inputs.os }}
           path: ${{ inputs.screenshots }}
