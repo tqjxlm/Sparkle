@@ -91,6 +91,24 @@ runs:
       shell: bash
       run: ccache -s || true
 
+    # the restore in setup-environment is save-less; upload a fresh entry only when this run
+    # compiled something (stats were zeroed above before the build), so a 100%-hit rebuild
+    # does not push a byte-identical duplicate into the 10GB actions-cache quota. an
+    # unparsable miss count leaves the output empty, which fails open into saving.
+    - name: Count new compiler cache entries
+      id: ccache-delta
+      if: always()
+      shell: bash
+      run: echo "misses=$(ccache --print-stats | awk '$1 == "cache_miss" { print $2 }')" >> "$GITHUB_OUTPUT"
+
+    # also saved after a failed build: the objects compiled before the failure warm the retry
+    - name: Save compiler cache
+      if: always() && steps.ccache-delta.outputs.misses != '0'
+      uses: actions/cache/save@v4
+      with:
+        path: ./.ccache
+        key: ${{ inputs.os }}-${{ inputs.framework }}-${{ inputs.build-type }}-ccache-${{ github.sha }}
+
     - name: Upload build product
       uses: actions/upload-artifact@v4
       with:
