@@ -226,15 +226,24 @@ def run_git_submodule_update():
     )
 
 
-def setup():
-    from resources.setup import setup_resources
-    from ide.setup import setup_ide
+def setup(args):
+    """Stage-scoped setup: each step exists to feed a specific stage, so invocations
+    that skip the stage skip the step (e.g. CI cook and test nodes, which never
+    compile, skip the recursive submodule clone)."""
+    compiling = ("build" in args["stages"] or args["generate_only"]
+                 or args["configure_only"] or args["clangd"])
 
-    run_git_submodule_update()
-    setup_resources()
-    setup_ide()
+    if compiling:
+        run_git_submodule_update()
 
-    print("Setup complete.")
+    # the build embeds resources/packed into the product and the cook stage images it
+    if compiling or "cook" in args["stages"]:
+        from resources.setup import setup_resources
+        setup_resources()
+
+    if compiling:
+        from ide.setup import setup_ide
+        setup_ide()
 
 
 def product_name(framework, config, extension):
@@ -349,7 +358,7 @@ def main():
 
     args = parse_args()
 
-    setup()
+    setup(args)
 
     check_environment(args)
 
