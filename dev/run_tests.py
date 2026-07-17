@@ -1,10 +1,11 @@
-"""Build once and run the coverage-selected desktop validation suite.
+"""Run the validation suite against an existing build; it never builds anything.
 
 tests/registry.json registers the runnable cases: each names a C++ TestCase, the
 exact arguments to run it with, and an optional Python evaluator. tests/coverage.json
 assigns each CI triplet (host-framework-config) the registry cases it must run. The
-suite runs the current triplet's assignment; --case runs registry cases by name
-regardless of coverage.
+suite runs the current triplet's assignment headless and cook-gated: any on-the-fly
+cook fails the run, so recooking cases are dropped. --case runs registry cases by
+name regardless of coverage, without the cook gate.
 """
 
 import argparse
@@ -13,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import venv
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,13 +31,6 @@ def venv_python():
     if not os.path.isfile(python):
         venv.create(venv_dir, with_pip=True)
     return python
-
-
-def build_command(framework, config):
-    # explicit stages: the suite needs a runnable build with cooked content, not a package
-    return [sys.executable, os.path.join(REPO, "build.py"),
-            "--framework", framework, "--config", config,
-            "--stage", "build", "--stage", "cook"]
 
 
 def preflight_steps():
@@ -82,14 +77,15 @@ def expand(template_args, context):
     return [arg.format(**context) for arg in template_args]
 
 
-def test_steps(cases, framework, config, software, headless, scene,
+def test_steps(cases, framework, config, software, scene,
                other_args, test_python):
     context = {
         "framework": framework,
         "scene": scene,
         "scene_stem": os.path.splitext(os.path.basename(scene))[0] if scene else None,
     }
-    common_args = ["--headless", "true"] if headless else []
+    # cases that need a window override this through OnEnforceConfigs
+    common_args = ["--headless", "true"]
     steps = []
 
     for case in cases:
@@ -155,8 +151,9 @@ def cook_gate(framework, previous_sizes):
 
 def run_step(name, command):
     print(f"\n=== {name}: {' '.join(command)}", flush=True)
+    start = time.monotonic()
     code = subprocess.run(command, cwd=REPO).returncode
-    return name, code == 0, f"exit {code}"
+    return name, code == 0, f"exit {code}, {time.monotonic() - start:.1f}s"
 
 
 def print_summary(results):
@@ -178,12 +175,6 @@ def parse_args():
                         help="scene file path; its filename selects screenshot ground truth")
     parser.add_argument("--software", action="store_true",
                         help="use Mesa Lavapipe on Windows")
-    parser.add_argument("--headless", action="store_true",
-                        help="run application test cases without a window")
-    parser.add_argument("--skip_build", action="store_true",
-                        help="test an existing build without rebuilding")
-    parser.add_argument("--require_cooked", action="store_true",
-                        help="fail if any test cooks on the fly")
     parser.add_argument("--case", dest="cases", action="append",
                         help="run only the named registry cases regardless of coverage;"
                         " repeat to select multiple")
@@ -207,7 +198,6 @@ def select_cases(registry, coverage, args):
             return None
         print(f"=== triplet {triplet}: {[case['name'] for case in cases]}")
 
-    if args.require_cooked:
         recooking = [case["name"] for case in cases if case.get("recooks")]
         if recooking:
             print(f"skipping {recooking}: their deliberate recook would trip the cook gate")
@@ -237,21 +227,12 @@ def main():
             print_summary(results)
             return 1
 
-    if not args.skip_build:
-        build_result = run_step(
-            "build", build_command(args.framework, args.config))
-        results.append(build_result)
-        if not build_result[1]:
-            print_summary(results)
-            return 1
-
     previous_log_sizes = snapshot_logs(args.framework)
     steps = test_steps(
         cases=cases,
         framework=args.framework,
         config=args.config,
         software=args.software,
-        headless=args.headless,
         scene=args.scene,
         other_args=other_args,
         test_python=venv_python(),
@@ -260,7 +241,7 @@ def main():
     for name, command in steps:
         results.append(run_step(name, command))
 
-    if args.require_cooked:
+    if not args.cases:
         passed, detail = cook_gate(args.framework, previous_log_sizes)
         print(f"\n=== cook gate: {detail}", flush=True)
         results.append(("cook gate", passed, detail))

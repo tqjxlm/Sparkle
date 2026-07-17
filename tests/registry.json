@@ -142,7 +142,7 @@
     {
         "name": "ibl_parity",
         "test_case": "ibl_parity",
-        "description": "CPU IBL cook jobs compared against their GPU producers. Needs a physical GPU; its deliberate artifact recook is incompatible with --require_cooked, so CI never runs it.",
+        "description": "CPU IBL cook jobs compared against their GPU producers. Needs a physical GPU; its deliberate artifact recook would trip the suite's cook gate, so it runs only via --case.",
         "recooks": true
     },
     {

@@ -242,7 +242,7 @@ jobs:
           MVK_CONFIG_USE_MTLHEAP: 0
         run: >-
           python3 dev/run_tests.py --framework ${{ matrix.framework }} --config ${{ matrix.build_type }}
-          --skip_build ${{ matrix.suite_args }}
+          ${{ matrix.suite_args }}
 
       - name: Dump app logs
         if: failure() && matrix.os == 'macos-latest'

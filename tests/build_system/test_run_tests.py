@@ -27,16 +27,14 @@ def suite_steps(triplet, scene=None):
         framework=triplet.split("-")[1],
         config="Release",
         software=False,
-        headless=True,
         scene=scene,
         other_args=[],
         test_python="test-python",
     )
 
 
-def select(cases=None, require_cooked=False, triplet="macos-macos-release"):
-    args = argparse.Namespace(cases=cases, framework="macos", config="Release",
-                              require_cooked=require_cooked)
+def select(cases=None, triplet="macos-macos-release"):
+    args = argparse.Namespace(cases=cases, framework="macos", config="Release")
     with patch.object(run_tests, "current_triplet", return_value=triplet), \
             contextlib.redirect_stdout(io.StringIO()):
         return run_tests.select_cases(REGISTRY, COVERAGE, args)
@@ -164,14 +162,12 @@ class RunTestsCommandTest(unittest.TestCase):
 
         self.assertTrue(passed)
 
-    def test_ibl_parity_stays_out_of_cook_gated_runs(self):
-        self.assertIn("ibl_parity", COVERAGE["macos-macos-release"])
-        self.assertNotIn("ibl_parity", COVERAGE["windows-glfw-release"])
+    def test_recooking_cases_run_only_by_explicit_selection(self):
+        for triplet, names in COVERAGE.items():
+            self.assertNotIn("ibl_parity", names, triplet)
 
-        names = [case["name"] for case in select(require_cooked=True)]
-        self.assertNotIn("ibl_parity", names)
-        self.assertIn("ibl_parity",
-                      [case["name"] for case in select(require_cooked=False)])
+        self.assertEqual([case["name"] for case in select(cases=["ibl_parity"])],
+                         ["ibl_parity"])
 
     def test_explicit_case_selection_ignores_coverage(self):
         self.assertEqual([case["name"] for case in select(cases=["smoke"])],
