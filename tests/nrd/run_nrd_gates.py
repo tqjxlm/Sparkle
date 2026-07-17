@@ -49,11 +49,11 @@ def main():
     args = parser.parse_args()
 
     py = sys.executable
-    build = [py, os.path.join(PROJECT_ROOT, "build.py"), "--framework", args.framework]
+    runner = [py, os.path.join(PROJECT_ROOT, "run.py"), "--framework", args.framework]
 
     # capability probe (also produces the converged reference for the firefly gate)
-    probe = build + (["--skip_build"] if args.skip_build else []) + [
-        "--run", "--test_case", "screenshot", "--pipeline", "gpu", "--headless", "true", "--max_spp", "512"]
+    probe = runner + (["--skip_build"] if args.skip_build else []) + [
+        "--test_case", "screenshot", "--pipeline", "gpu", "--headless", "true", "--max_spp", "512"]
     code, output = run(probe, capture=True)
     if "effective pipeline: Gpu" not in output:
         if args.allow_unsupported and "hardware ray tracing not supported" in output:

@@ -2,7 +2,7 @@
 
 Cooking moves deterministic asset work out of the frame loop: a cook job transforms source data into a validated disk artifact once, and every later run loads the artifact.
 
-Day to day it is automatic. The default `build.py` invocation runs the cook stage after building (see [Build.md](Build.md) for stage selection, host/target rules and packaging), and at runtime a missing artifact cooks on the fly while the requester shows its pending state. Artifacts live in the app's internal storage under `cooked/` (`sparkle.app/Contents/SharedSupport/cooked` for macos, `build/generated/cooked` for glfw); delete that directory or run the app with `--rebuild_cache true` to force a recook. Cook stage runs log to `logs/cook.log` next to the regular app logs. Device frameworks (`android`, `ios`) cannot read the host's cook output at runtime, so their default invocation also packages: the product's asset tree is replaced with the cooked content image, the package is re-signed, and `--run` installs that product — the device then reads the packaged artifacts instead of cooking on the fly.
+Day to day it is automatic. `run.py` and the default `build.py` invocation run the cook stage after building (see [Build.md](Build.md) for stage selection, host/target rules and packaging), and at runtime a missing artifact cooks on the fly while the requester shows its pending state. Artifacts live in the app's internal storage under `cooked/` (`sparkle.app/Contents/SharedSupport/cooked` for macos, `build/generated/cooked` for glfw); delete that directory or run the app with `--rebuild_cache true` to force a recook. Cook stage runs log to `logs/cook.log` next to the regular app logs. Device frameworks (`android`, `ios`) cannot read the host's cook output at runtime, so a `run.py` launch for them also packages: the product's asset tree is replaced with the cooked content image, the package is re-signed, and the run installs that product — the device then reads the packaged artifacts instead of cooking on the fly.
 
 ## Architecture
 
@@ -48,7 +48,7 @@ The CPU jobs port the cook shaders one-to-one ([libraries/include/renderer/resou
 The `ibl_parity` test case enforces this: it deletes the internal IBL artifacts, lets the GPU cook them, runs the CPU jobs and compares (rgb only — the alpha channel is producer-dependent and no consumer reads it). It is deliberately not a CI gate — the CPU reference cook costs ~15 runner-minutes, and once a CI node cooks through the CPU jobs the screenshot gates cover divergence end to end. It runs as part of the local macos suite (its coverage in tests/coverage.json is macos-only — a software rasterizer would compare CPU to CPU — and its `recooks` mark makes the suite drop it under `--require_cooked`, whose gate its deliberate recook would trip; see [Test.md](Test.md)) or standalone:
 
 ```bash
-python3 build.py --framework macos --config Release --run --test_case ibl_parity --headless true
+python3 run.py --framework macos --config Release --test_case ibl_parity --headless true
 ```
 
 On failure it writes both payloads to internal storage under `cooked_debug/` for offline analysis. Measured on Apple M-series: `ibl_brdf` max error is one half ULP; the env maps stay under 0.05 against a clamp ceiling of 10.

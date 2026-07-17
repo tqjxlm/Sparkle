@@ -17,10 +17,10 @@ NUM_FRAMES = 16  # must match DenoiserSweepTest.cpp NumFrames
 
 
 def run_sweep(framework, extra, skip_build=False, headless=False):
-    cmd = [sys.executable, os.path.join(PROJECT_ROOT, "build.py"), "--framework", framework]
+    cmd = [sys.executable, os.path.join(PROJECT_ROOT, "run.py"), "--framework", framework]
     if skip_build:
         cmd.append("--skip_build")
-    cmd += ["--run", "--test_case", "denoiser_sweep", "--clear_screenshots", "true", "--pipeline", "gpu"]
+    cmd += ["--test_case", "denoiser_sweep", "--clear_screenshots", "true", "--pipeline", "gpu"]
     cmd += list(extra)
     if headless:
         cmd += ["--headless", "true"]
@@ -30,11 +30,11 @@ def run_sweep(framework, extra, skip_build=False, headless=False):
 
 
 def run_test_case(framework, test_case, extra, skip_build=False, headless=False):
-    cmd = [sys.executable, os.path.join(PROJECT_ROOT, "build.py"),
+    cmd = [sys.executable, os.path.join(PROJECT_ROOT, "run.py"),
            "--framework", framework]
     if skip_build:
         cmd.append("--skip_build")
-    cmd += ["--run", "--test_case", test_case] + list(extra)
+    cmd += ["--test_case", test_case] + list(extra)
     if headless:
         cmd += ["--headless", "true"]
     print("Running:", " ".join(cmd), flush=True)

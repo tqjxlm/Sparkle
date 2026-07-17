@@ -76,29 +76,19 @@ def assemble_cooked_image(cooker):
     print(f"Assembled cooked content image at {image_dir}")
 
 
-def resolve_stages(stage_args, skip_build, cook, archive, framework):
-    """Stage selection: explicit --stage wins, then legacy flags; the default is
-    build + cook (cooked content is always wanted; hosts that cannot cook for the
-    target build without it), plus package for device frameworks (a device only
-    receives cooked content through its installed package)."""
+def resolve_stages(stage_args, framework):
+    """Stage selection: explicit --stage wins; the default is every stage the host
+    supports for the target — the full pipeline, minus cook on hosts that cannot
+    produce a cooker binary. Explicit selections (including 'all') never degrade:
+    a missing capability fails fast in validate_stages."""
     if stage_args:
         selected = set()
         for stage in stage_args:
             selected |= set(STAGES) if stage == "all" else {stage}
-    elif skip_build or cook or archive:
-        selected = set()
-        if not skip_build:
-            selected.add("build")
-        if cook:
-            selected.add("cook")
-        if archive:
-            selected.add("package")
     else:
-        selected = {"build"}
+        selected = {"build", "package"}
         if cooker_framework(framework) is not None:
             selected.add("cook")
-        if framework in DEVICE_FRAMEWORKS:
-            selected.add("package")
     return [stage for stage in STAGES if stage in selected]
 
 
@@ -144,10 +134,8 @@ def parse_args(args=None):
     parser.add_argument("--stage", action="append",
                         choices=["build", "cook", "package", "all"],
                         help="Pipeline stage(s) to run in canonical order build -> cook -> package;"
-                        " repeat to select multiple. Default: build + cook. Cross-compiled"
-                        " frameworks cook through the host framework's binary")
-    parser.add_argument("--archive", action="store_true",
-                        help="Alias for the package stage (build + package)")
+                        " repeat to select multiple. Default: every stage the host supports."
+                        " Cross-compiled frameworks cook through the host framework's binary")
     parser.add_argument("--cooked",
                         help="Cooked content image directory for the package stage"
                         " (default: the host cooker's assembled image)")
@@ -163,12 +151,6 @@ def parse_args(args=None):
                         help="Run the build's configure step (fetches dependencies) without building")
     parser.add_argument("--clangd", action="store_true",
                         help="Generate compile_commands.json for clangd")
-    parser.add_argument("--cook", action="store_true",
-                        help="Alias for the cook stage (build + cook; with --skip_build: cook only)")
-    parser.add_argument("--run", action="store_true",
-                        help="Run the built executable after building")
-    parser.add_argument("--skip_build", action="store_true",
-                        help="Do every thing but skip building")
     parser.add_argument("--strip_test", action="store_true",
                         help="Disable test case support (enabled by default)")
     parser.add_argument("--clean", action="store_true",
@@ -179,15 +161,13 @@ def parse_args(args=None):
     parser.add_argument("--cmake-args",
                         help="Additional CMake arguments (e.g., --cmake-args='-DCMAKE_EXE_LINKER_FLAGS=\"-lc++abi\"')")
 
-    # Unknown args will be used for --run the built executable
+    # Unknown args pass through to the app (cook stage runs and run.py launches)
     parsed_args, unknown_args = parser.parse_known_args(args)
 
     return {
         "framework": parsed_args.framework,
         "config": parsed_args.config,
-        "stages": resolve_stages(parsed_args.stage, parsed_args.skip_build,
-                                 parsed_args.cook, parsed_args.archive, parsed_args.framework),
-        "run": parsed_args.run,
+        "stages": resolve_stages(parsed_args.stage, parsed_args.framework),
         "cooked": parsed_args.cooked,
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
@@ -345,12 +325,6 @@ def build_project(args):
 
     if "package" in stages:
         package_project(builder, args)
-
-    if args["run"]:
-        print("Running...")
-        exit_code = builder.run(args)
-        if exit_code is not None and exit_code != 0:
-            sys.exit(exit_code)
 
 
 def main():
