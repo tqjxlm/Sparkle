@@ -15,19 +15,19 @@ SCRIPTPATH = os.path.dirname(SCRIPT)
 STAGES = ("build", "cook", "package")
 
 # the cooker lives in the sparkle binary; cross-compiled frameworks cook through the host
-# framework's binary, and linux has no supported framework that could provide one
+# framework's binary
 COOK_FRAMEWORKS = ("glfw", "macos")
 
 # device targets run from an installed package, so cooked content can only reach them
 # through the package stage; desktop runs read the cook output from the build tree directly
 DEVICE_FRAMEWORKS = ("android", "ios")
 
+# every desktop host can cook: macos through its native framework, windows and linux
+# through glfw
 if platform.system() == "Darwin":
     HOST_COOK_FRAMEWORK = "macos"
-elif platform.system() == "Windows":
-    HOST_COOK_FRAMEWORK = "glfw"
 else:
-    HOST_COOK_FRAMEWORK = None
+    HOST_COOK_FRAMEWORK = "glfw"
 
 BINARY_PATH = {
     "glfw": os.path.join("build_system", "glfw", "output", "build",
@@ -51,17 +51,15 @@ COOKED_IMAGE_DIR = {
 
 def cooker_framework(framework):
     """The framework whose binary executes the cook: itself when host-runnable,
-    otherwise the host framework (artifacts are shared across targets). None when
-    this host cannot produce a cooker binary."""
+    otherwise the host framework (artifacts are shared across targets)."""
     return framework if framework in COOK_FRAMEWORKS else HOST_COOK_FRAMEWORK
 
 
 def default_cooked_image_dir(framework):
     """Where the package stage finds the cooked content image by default: the host
-    cooker's assembled image. None when this host cannot cook, anchored to the repo
-    root otherwise because builders may chdir during build."""
-    cooker = cooker_framework(framework)
-    return os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker]) if cooker else None
+    cooker's assembled image, anchored to the repo root because builders may chdir
+    during build."""
+    return os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker_framework(framework)])
 
 
 def assemble_cooked_image(cooker):
@@ -77,18 +75,15 @@ def assemble_cooked_image(cooker):
 
 
 def resolve_stages(stage_args, framework):
-    """Stage selection: explicit --stage wins; the default is every stage the host
-    supports for the target — the full pipeline, minus cook on hosts that cannot
-    produce a cooker binary. Explicit selections (including 'all') never degrade:
-    a missing capability fails fast in validate_stages."""
+    """Stage selection: explicit --stage wins; the default is the full pipeline.
+    Explicit selections (including 'all') never degrade: a missing input fails
+    fast in validate_stages."""
     if stage_args:
         selected = set()
         for stage in stage_args:
             selected |= set(STAGES) if stage == "all" else {stage}
     else:
-        selected = {"build", "package"}
-        if cooker_framework(framework) is not None:
-            selected.add("cook")
+        selected = set(STAGES)
     return [stage for stage in STAGES if stage in selected]
 
 
@@ -96,10 +91,6 @@ def validate_stages(stages, framework):
     """Stages never run an upstream stage implicitly: missing inputs fail fast."""
     if "cook" in stages:
         cooker = cooker_framework(framework)
-        if cooker is None:
-            raise RuntimeError(
-                f"this host cannot cook for '{framework}': no supported framework produces a"
-                " cooker binary on it; cook on macOS or Windows and pass --cooked when packaging")
         binary_exists = os.path.exists(os.path.join(SCRIPTPATH, BINARY_PATH[cooker]))
         # building a cross-compiled framework never produces the cooker binary
         if not binary_exists and (cooker != framework or "build" not in stages):

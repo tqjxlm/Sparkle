@@ -27,19 +27,8 @@ class ResolveStagesTest(unittest.TestCase):
             self.assertEqual(self.resolve(framework="glfw"), ["build", "cook", "package"])
             self.assertEqual(self.resolve(framework="android"), ["build", "cook", "package"])
 
-    def test_default_drops_cook_when_the_host_cannot_cook(self):
-        with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
-            self.assertEqual(self.resolve(framework="android"), ["build", "package"])
-            # glfw cooks through its own binary regardless of the host
-            self.assertEqual(self.resolve(framework="glfw"), ["build", "cook", "package"])
-
     def test_all_selects_every_stage_in_canonical_order(self):
         self.assertEqual(self.resolve(["all"]), ["build", "cook", "package"])
-
-    def test_explicit_all_never_degrades(self):
-        with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
-            self.assertEqual(self.resolve(["all"], framework="android"),
-                             ["build", "cook", "package"])
 
     def test_explicit_stages_run_in_canonical_order(self):
         self.assertEqual(self.resolve(["package", "build"]), ["build", "package"])
@@ -69,14 +58,7 @@ class ValidateStagesTest(unittest.TestCase):
         self.assertEqual(build_script.cooker_framework("ios"), "glfw")
         self.assertEqual(build_script.cooker_framework("macos"), "macos")
 
-    def test_cook_fails_on_a_host_without_a_cooker_framework(self):
-        with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
-            with self.assertRaises(RuntimeError):
-                build_script.validate_stages(["build", "cook"], "android")
-
-    def test_default_image_dir_is_none_when_the_host_cannot_cook(self):
-        with patch.object(build_script, "HOST_COOK_FRAMEWORK", None):
-            self.assertIsNone(build_script.default_cooked_image_dir("android"))
+    def test_default_image_dir_follows_the_host_cooker(self):
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", "glfw"):
             self.assertTrue(build_script.default_cooked_image_dir("android")
                             .endswith("cooked_image"))

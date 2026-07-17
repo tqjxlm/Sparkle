@@ -24,6 +24,7 @@ PRODUCTS = (
     {"os": "macos-latest", "framework": "ios"},
     {"os": "macos-latest", "framework": "glfw"},
     {"os": "windows-latest", "framework": "glfw"},
+    {"os": "ubuntu-latest", "framework": "glfw"},
     {"os": "ubuntu-latest", "framework": "android"},
     {"os": "ubuntu-latest", "framework": "android", "abi": "x86_64",
      "build_types": ("Release",)},
@@ -39,6 +40,13 @@ TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
     # take the suite close to an hour (see TODO.md), hence the generous timeout
     "windows-glfw-release": {
+        "suite_args": "--software",
+        "suite_timeout": 120,
+        "screenshots": "build_system/glfw/output/build/generated/screenshots/",
+    },
+    # the linux product, validated under software vulkan like windows (hosted
+    # ubuntu runners have no GPU); same registry cases as macos-macos-release
+    "ubuntu-glfw-release": {
         "suite_args": "--software",
         "suite_timeout": 120,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
