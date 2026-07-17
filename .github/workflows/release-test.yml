@@ -96,7 +96,9 @@ jobs:
       - name: Install GLFW runtime (linux)
         if: inputs.os == 'ubuntu-latest' && inputs.framework == 'glfw'
         shell: bash
-        run: sudo apt-get install -y libglfw3
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libglfw3
 
       # the emulator needs hardware virtualization; hosted ubuntu runners expose
       # /dev/kvm but leave it root-only
@@ -183,7 +185,12 @@ jobs:
           echo "=== app logs ==="
           cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
           cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
-          echo "=== crash reports (macos) ==="
+
+      # the sleep gives ReportCrash time to land the report in DiagnosticReports
+      - name: Dump crash reports (macos)
+        if: failure() && inputs.os == 'macos-latest'
+        shell: bash
+        run: |
           sleep 10
           for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
 
