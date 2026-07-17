@@ -153,7 +153,7 @@ public:
                 .max_u = focus_plane_.max_u,
                 .max_v = focus_plane_.max_v,
                 .lensRadius = state_.aperture_radius,
-                .resolution = {config.image_width, config.image_height}};
+                .resolution = config.GetResolution().scene.cast<int>()};
     }
 
 private:

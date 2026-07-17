@@ -26,6 +26,9 @@ def main():
                         choices=SUPPORTED_FRAMEWORKS)
     parser.add_argument("--pipeline", default="forward")
     parser.add_argument("--scene", default=DEFAULT_SCENE)
+    parser.add_argument("--flip_threshold", type=float, default=FLIP_THRESHOLD,
+                        help="Override the default FLIP threshold "
+                             "(e.g. sub-resolution renders tolerate upsampling softness)")
     args = parser.parse_args()
 
     install_dependencies()
@@ -41,11 +44,11 @@ def main():
         print(f"FAIL: {error}", flush=True)
         return 1
 
-    if mean_flip <= FLIP_THRESHOLD:
+    if mean_flip <= args.flip_threshold:
         print("PASS", flush=True)
         return 0
 
-    print(f"FAIL: mean FLIP error {mean_flip:.4f} > {FLIP_THRESHOLD}")
+    print(f"FAIL: mean FLIP error {mean_flip:.4f} > {args.flip_threshold}")
     return 1
 
 

@@ -24,6 +24,18 @@
         }
     },
     {
+        "name": "forward_render_static_halfres",
+        "test_case": "screenshot",
+        "description": "Still frame on the forward pipeline at render_scale 0.5. The output must stay at full resolution (size mismatch fails the evaluator) and FLIP-match the full-resolution ground truth within an upsampling-softness allowance.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--render_scale", "0.5"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "forward", "--flip_threshold", "0.05"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
         "name": "gpu_render_static",
         "test_case": "screenshot",
         "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Needs hardware ray tracing, which no hosted runner exposes, so it stays local-only.",

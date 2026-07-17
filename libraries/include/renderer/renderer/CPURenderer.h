@@ -45,6 +45,13 @@ private:
     RHIResourceRef<RHIBuffer> image_buffer_;
     RHIResourceRef<RHIImage> screen_texture_;
     RHIResourceRef<RHIRenderTarget> screen_rt_;
+
+    // output-resolution surface that ui, screenshots and present read. aliases screen_texture_/
+    // screen_rt_ unless sub-resolution rendering makes upsample_pass_ fill a dedicated target.
+    RHIResourceRef<RHIImage> composite_texture_;
+    RHIResourceRef<RHIRenderTarget> composite_rt_;
+    std::unique_ptr<class ScreenQuadPass> upsample_pass_;
+
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
     std::unique_ptr<class UiPass> ui_pass_;
 

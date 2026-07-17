@@ -22,7 +22,7 @@ namespace sparkle
 CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy)
     : Renderer(render_config, rhi_context, scene_render_proxy),
-      output_image_(image_size_.x(), image_size_.y(), PixelFormat::RGBAFloat16)
+      output_image_(resolution_.scene.x(), resolution_.scene.y(), PixelFormat::RGBAFloat16)
 {
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Cpu);
 }
@@ -47,34 +47,57 @@ void CPURenderer::InitRenderResources()
                                         .is_dynamic = true},
                                        "RayTracingOutputBuffer");
 
-    screen_texture_ = rhi_->CreateImage(
-        RHIImage::Attribute{
+    auto color_buffer_attribute = [this](const Vector2UInt &size, RHIImage::ImageUsage usages) {
+        return RHIImage::Attribute{
             .format = output_image_.GetFormat(),
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear},
-            .width = image_size_.x(),
-            .height = image_size_.y(),
-            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst |
-                      RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransferSrc,
+            .width = size.x(),
+            .height = size.y(),
+            .usages = usages,
             .msaa_samples = static_cast<uint8_t>(rhi_->GetConfig().msaa_samples),
-        },
+        };
+    };
+
+    screen_texture_ = rhi_->CreateImage(
+        color_buffer_attribute(resolution_.scene, RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst |
+                                                      RHIImage::ImageUsage::ColorAttachment |
+                                                      RHIImage::ImageUsage::TransferSrc),
         "CpuPipelineColorBuffer");
 
     screen_rt_ = rhi_->CreateRenderTarget({}, screen_texture_, nullptr, "CpuPipelineRenderTarget");
 
-    screen_quad_pass_ =
-        PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, screen_texture_, rhi_->GetBackBufferRenderTarget());
+    if (resolution_.NeedUpsample())
+    {
+        composite_texture_ =
+            rhi_->CreateImage(color_buffer_attribute(resolution_.output, RHIImage::ImageUsage::Texture |
+                                                                             RHIImage::ImageUsage::ColorAttachment |
+                                                                             RHIImage::ImageUsage::TransferSrc),
+                              "CpuPipelineCompositeBuffer");
+
+        composite_rt_ = rhi_->CreateRenderTarget({}, composite_texture_, nullptr, "CpuPipelineCompositeRenderTarget");
+
+        upsample_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, screen_texture_, composite_rt_);
+    }
+    else
+    {
+        composite_texture_ = screen_texture_;
+        composite_rt_ = screen_rt_;
+    }
+
+    screen_quad_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, composite_texture_,
+                                                             rhi_->GetBackBufferRenderTarget());
 
     if (!rhi_->IsHeadless())
     {
-        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, screen_rt_);
+        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, composite_rt_);
     }
 
-    gbuffer_.Resize(image_size_.x(), image_size_.y());
-    ping_pong_buffer_.resize(image_size_.y(), std::vector<Vector4>(image_size_.x()));
-    frame_buffer_.resize(image_size_.y(), std::vector<Vector4>(image_size_.x()));
+    gbuffer_.Resize(resolution_.scene.x(), resolution_.scene.y());
+    ping_pong_buffer_.resize(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
+    frame_buffer_.resize(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
 
     sub_pixel_count_ =
         static_cast<unsigned>(std::lround(std::sqrt(static_cast<float>(render_config_.sample_per_pixel))));
@@ -101,7 +124,7 @@ void CPURenderer::Render()
     {
         if (camera_->NeedClear())
         {
-            TaskManager::ParallelFor(0u, image_size_.y(), [this](unsigned j) {
+            TaskManager::ParallelFor(0u, resolution_.scene.y(), [this](unsigned j) {
                 auto &row = frame_buffer_[j];
                 std::ranges::fill(row, Vector4::Zero());
             }).wait();
@@ -110,14 +133,18 @@ void CPURenderer::Render()
             dispatched_sample_count_ = 0;
         }
 
-        BasePass(*scene_render_proxy_, render_config_, debug_point_);
+        // debug_point_ arrives in output space; the buffers below are indexed in scene space
+        const Vector2UInt debug_point{
+            debug_point_.x() == UINT_MAX ? UINT_MAX : debug_point_.x() * resolution_.scene.x() / resolution_.output.x(),
+            debug_point_.y() == UINT_MAX ? UINT_MAX
+                                         : debug_point_.y() * resolution_.scene.y() / resolution_.output.y()};
 
-        DenoisePass(render_config_, debug_point_);
+        BasePass(*scene_render_proxy_, render_config_, debug_point);
+
+        DenoisePass(render_config_, debug_point);
 
         ToneMappingPass(output_image_);
     }
-
-    bool has_readback = false;
 
     // GPU workload: copy the image to a texture
     {
@@ -128,29 +155,45 @@ void CPURenderer::Render()
                                      .before_stage = RHIPipelineStage::Transfer});
 
         image_buffer_->CopyToImage(screen_texture_.get());
+    }
 
-        has_readback = ReadbackFinalOutputIfRequested(screen_rt_.get(), false, RHIPipelineStage::Transfer);
+    // the stage that last wrote composite_texture_, driving downstream transitions
+    auto composite_stage = RHIPipelineStage::Transfer;
+
+    if (upsample_pass_)
+    {
+        screen_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                     .after_stage = RHIPipelineStage::Transfer,
+                                     .before_stage = RHIPipelineStage::PixelShader});
+
+        upsample_pass_->Render();
+
+        composite_stage = RHIPipelineStage::ColorOutput;
+    }
+
+    if (ReadbackFinalOutputIfRequested(composite_rt_.get(), false, composite_stage))
+    {
+        composite_stage = RHIPipelineStage::Transfer;
     }
 
     // post process: ui
+    if (render_config_.render_ui && ui_pass_)
     {
-        if (render_config_.render_ui && ui_pass_)
-        {
-            screen_texture_->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                         .after_stage = RHIPipelineStage::Transfer,
-                                         .before_stage = RHIPipelineStage::ColorOutput});
-            ui_pass_->Render();
+        composite_texture_->Transition({.target_layout = RHIImageLayout::ColorOutput,
+                                        .after_stage = composite_stage,
+                                        .before_stage = RHIPipelineStage::ColorOutput});
+        ui_pass_->Render();
 
-            has_readback = ReadbackFinalOutputIfRequested(screen_rt_.get(), true, RHIPipelineStage::ColorOutput);
+        composite_stage = RHIPipelineStage::ColorOutput;
+        if (ReadbackFinalOutputIfRequested(composite_rt_.get(), true, RHIPipelineStage::ColorOutput))
+        {
+            composite_stage = RHIPipelineStage::Transfer;
         }
     }
 
-    auto last_stage =
-        (has_readback || !render_config_.render_ui) ? RHIPipelineStage::Transfer : RHIPipelineStage::ColorOutput;
-
-    screen_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                 .after_stage = last_stage,
-                                 .before_stage = RHIPipelineStage::PixelShader});
+    composite_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                    .after_stage = composite_stage,
+                                    .before_stage = RHIPipelineStage::PixelShader});
 
     // screen pass: render it on a screen quad
     {
@@ -374,11 +417,11 @@ void CPURenderer::BasePass(const SceneRenderProxy &scene, const RenderConfig &co
 {
     PROFILE_SCOPE("CPURenderer base pass");
 
-    const float pixel_width = 1.f / static_cast<float>(image_size_.x() - 1);
-    const float pixel_height = 1.f / static_cast<float>(image_size_.y() - 1);
+    const float pixel_width = 1.f / static_cast<float>(resolution_.scene.x() - 1);
+    const float pixel_height = 1.f / static_cast<float>(resolution_.scene.y() - 1);
 
     static std::vector<std::shared_ptr<TaskFuture<>>> row_tasks;
-    row_tasks.resize(image_size_.y());
+    row_tasks.resize(resolution_.scene.y());
 
     // Use a per-frame seed that advances every dispatch so fresh samples are generated
     // even after cumulated_sample_count is capped. Stays identical to GetCumulatedSampleCount()
@@ -386,14 +429,15 @@ void CPURenderer::BasePass(const SceneRenderProxy &scene, const RenderConfig &co
     const auto frame_seed = dispatched_sample_count_;
 
     // parallel by row
-    for (auto j = 0u; j < image_size_.y(); j++)
+    for (auto j = 0u; j < resolution_.scene.y(); j++)
     {
         row_tasks[j] = TaskManager::RunInWorkerThread([=, this, &scene]() {
-            for (auto i = 0u; i < image_size_.x(); i++)
+            for (auto i = 0u; i < resolution_.scene.x(); i++)
             {
                 // Per-pixel seed: each pixel gets an independent, deterministic
                 // random sequence regardless of which thread processes this row.
-                sampler::ReseedCurrentThread(j * image_size_.x() + i + frame_seed * image_size_.x() * image_size_.y());
+                sampler::ReseedCurrentThread(j * resolution_.scene.x() + i +
+                                             frame_seed * resolution_.scene.x() * resolution_.scene.y());
                 RenderPixel(i, j, pixel_width, pixel_height, scene, config, debug_point);
             }
         });
@@ -463,17 +507,17 @@ void CPURenderer::DenoisePass(const RenderConfig &config, const Vector2UInt &deb
     // spatial denoise
     if (config.spatial_denoise)
     {
-        TaskManager::ParallelFor(0u, image_size_.y(), [this](unsigned j) {
-            for (auto i = 0u; i < image_size_.x(); i++)
+        TaskManager::ParallelFor(0u, resolution_.scene.y(), [this](unsigned j) {
+            for (auto i = 0u; i < resolution_.scene.x(); i++)
             {
                 ping_pong_buffer_[j][i] = gbuffer_.color[j][i];
             }
         }).wait();
 
-        TaskManager::ParallelFor(0u, image_size_.y(), [this](unsigned j) {
-            for (auto i = 0u; i < image_size_.x(); i++)
+        TaskManager::ParallelFor(0u, resolution_.scene.y(), [this](unsigned j) {
+            for (auto i = 0u; i < resolution_.scene.x(); i++)
             {
-                SpatialDenoisePixel(i, j, image_size_.x(), image_size_.y(), 8, gbuffer_, ping_pong_buffer_);
+                SpatialDenoisePixel(i, j, resolution_.scene.x(), resolution_.scene.y(), 8, gbuffer_, ping_pong_buffer_);
             }
         }).wait();
     }
@@ -485,8 +529,8 @@ void CPURenderer::DenoisePass(const RenderConfig &config, const Vector2UInt &deb
                           static_cast<float>(cumulated_sample_count + actual_sample_per_pixel_);
 
     // temporal denoise
-    TaskManager::ParallelFor(0u, image_size_.y(), [this, &pass_input, moving_average](unsigned j) {
-        for (auto i = 0u; i < image_size_.x(); i++)
+    TaskManager::ParallelFor(0u, resolution_.scene.y(), [this, &pass_input, moving_average](unsigned j) {
+        for (auto i = 0u; i < resolution_.scene.x(); i++)
         {
             const Vector4 &new_pixel = pass_input[j][i];
 
@@ -496,7 +540,7 @@ void CPURenderer::DenoisePass(const RenderConfig &config, const Vector2UInt &deb
         }
     }).wait();
 
-    [[unlikely]] if (debug_point.x() < image_size_.x() && debug_point.y() < image_size_.y())
+    [[unlikely]] if (debug_point.x() < resolution_.scene.x() && debug_point.y() < resolution_.scene.y())
     {
         Log(Info, "frame buffer {}. new pixel {}",
             utilities::VectorToString(frame_buffer_[debug_point.y()][debug_point.x()]),
@@ -519,11 +563,11 @@ void CPURenderer::ToneMappingPass(Image2D &image)
 {
     PROFILE_SCOPE("CPURenderer tonemapping pass");
 
-    TaskManager::ParallelFor(0u, image_size_.y(), [&image, this](unsigned j) {
-        for (auto i = 0u; i < image_size_.x(); i++)
+    TaskManager::ParallelFor(0u, resolution_.scene.y(), [&image, this](unsigned j) {
+        for (auto i = 0u; i < resolution_.scene.x(); i++)
         {
             const Vector3 &pixel = ACESFilm(frame_buffer_[j][i].head<3>(), camera_->GetAttribute().exposure);
-            image.SetPixel(i, image_size_.y() - 1 - j, pixel);
+            image.SetPixel(i, resolution_.scene.y() - 1 - j, pixel);
         }
     }).wait();
 }

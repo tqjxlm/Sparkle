@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application/ConfigCollection.h"
+#include "renderer/RenderResolution.h"
 
 namespace sparkle
 {
@@ -58,6 +59,11 @@ struct RenderConfig : public ConfigCollection
 
     void Init();
 
+    [[nodiscard]] RenderResolution GetResolution() const
+    {
+        return {{image_width, image_height}, render_scale};
+    }
+
     void SetupBackend(RHIContext *rhi, NativeView *view)
     {
         rhi_ = rhi;
@@ -91,6 +97,7 @@ struct RenderConfig : public ConfigCollection
     bool manual_accumulation;
     float target_framerate;
     float gpu_time_budget_ratio;
+    float render_scale;
 
     // manual-accumulation hold states. Not ConfigValues: the app layer rewrites them every frame
     // (space key / the panel button) and the per-frame snapshot carries them to the render thread.

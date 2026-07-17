@@ -20,7 +20,7 @@ void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera,
 
     if (attribute_dirty_)
     {
-        aspect_ratio_ = static_cast<float>(config.image_width) / static_cast<float>(config.image_height);
+        aspect_ratio_ = config.GetResolution().AspectRatio();
 
         auto h = std::tan(state_.vertical_fov / 2.f);
         focus_plane_.height = 2.f * h * state_.focus_distance;

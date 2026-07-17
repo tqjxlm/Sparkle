@@ -1,6 +1,7 @@
 {
     "windows-glfw-release": [
         "forward_render_static",
+        "forward_render_static_halfres",
         "deferred_render_static",
         "camera_nudge_return",
         "primitive_move",
@@ -13,6 +14,7 @@
     ],
     "macos-macos-release": [
         "forward_render_static",
+        "forward_render_static_halfres",
         "deferred_render_static",
         "camera_nudge_return",
         "primitive_move",
@@ -26,6 +28,7 @@
     ],
     "macos-glfw-release": [
         "forward_render_static",
+        "forward_render_static_halfres",
         "deferred_render_static",
         "camera_nudge_return",
         "primitive_move",

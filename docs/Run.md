@@ -43,6 +43,7 @@ The base storage path varies by platform:
 | `pipeline`          | string | `forward`  | all               | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                                      |
 | `scene`             | string | *(empty)*  | all               | Scene to render. Empty = packaged **TestScene** (the default; also the CI ground-truth scene). Other values = model/scene file path under `resources/models/` |
 | `width` / `height`  | uint   | 1280 / 720 | all               | Render resolution                                                                                            |
+| `render_scale`      | float  | 1.0        | all               | Scene render resolution as a fraction of output resolution, `(0, 1]`. The scene is upsampled to `width`x`height` before UI and present |
 | `max_spp`           | uint   | 2048       | cpu, gpu          | Max accumulated samples per pixel                                                                            |
 | `spp`               | uint   | 1          | cpu, gpu          | Rays per sample per frame                                                                                    |
 | `bounce`            | uint   | 8          | cpu, gpu          | Max ray bounces per path                                                                                     |

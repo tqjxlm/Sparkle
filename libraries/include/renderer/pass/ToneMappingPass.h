@@ -21,5 +21,8 @@ protected:
     void BindPixelShaderResources() override;
 
     void SetupRenderPass() override;
+
+private:
+    [[nodiscard]] RHIResourceRef<RHISampler> GetInputSampler() const;
 };
 } // namespace sparkle
