@@ -3,22 +3,20 @@
 ## General Info
 
 * A CI pipeline is setup in github [actions](https://github.com/tqjxlm/Sparkle/actions) at .github/workflows/ci.yml
-* Pushing tags will generate releases on github. The release process is defined in .github/workflows/release.yml.
+* Pushing a version tag runs the same pipeline and additionally assembles a github release from the shipped packages (the `github-release` job).
 * All PRs are required to pass CI before merging.
 * The required gates are formatting, clang-tidy, the platform build matrix, cooking and package assembly, and the aggregate test suite. Performance testing is not yet automated.
 
 ## Pipeline Graph
 
-[.github/workflows/build.yml](../.github/workflows/build.yml) runs four stages:
+[.github/workflows/ci.yml](../.github/workflows/ci.yml) runs four stages:
 
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything. Debug cells are compile gates only: they ship no release package and therefore run no release or test node.
 * **cook**: one macos-release node cooks the shared content on the runner's Metal GPU and publishes the assembled content image as the `cooked-shared` artifact (see [Cooking.md](Cooking.md)).
 * **release**: every released product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; the plan node maps its columns onto the release cells as suite configs. Currently enabled: windows-glfw-release and ubuntu-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
+* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release and ubuntu-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
-Both matrices derive from one product table: a cheap plan node runs [dev/ci_matrix.py](../dev/ci_matrix.py) — which owns the product list, the standalone-build carve-out and the per-triplet suite invocations, and attaches the suite invocations [tests/coverage.csv](../tests/coverage.csv) picks to their release cells — and the matrix jobs consume its JSON through `fromJSON`, so no combination is ever listed twice.
-
-A cell waits only for the shared cook and its own product's upstream cell, never other products'. Release and test run as a per-product chain ([release-test.yml](../.github/workflows/release-test.yml), called once per release cell), so the edge from a test to its own release is a real `needs` and its runner is only requested once the release is done; the chain's edge to cook is a real `needs` too. Only the edge from a release cell to its own build cannot be a `needs` (GitHub cannot target a single matrix cell), so it is an await-by-name through the run's job list — the shared [wait-for-job](../.github/actions/wait-for-job/action.yml) action. That await starts only after cook — by then the cook's own macos build is done, so waiting cells cannot starve the macos build queue. The one standalone job is the macos-release build, which cook's `needs` edge must target.
+The pipeline jobs are generated, not hand-written: GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot express the per-product edges (release → its own build, test → its own release) without runners idling in polling loops. [dev/ci_matrix.py](../dev/ci_matrix.py) owns the product table and the per-triplet suite invocations, and unrolls them into explicit jobs below the `GENERATED PIPELINE` marker of ci.yml: every edge is a real `needs`, no runner is ever requested before its dependencies are done, and every node renders flat as `stage (os, framework, config[, abi])`. After changing the product table, a `TEST_RUNNERS` entry or a coverage column, regenerate with `python3 dev/ci_matrix.py --fix`; the format job fails when the region is stale.
 
 ## Local Validation Gates
 

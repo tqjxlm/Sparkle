@@ -1,7 +1,6 @@
-"""Tests for the CI matrix planner."""
+"""Tests for the CI pipeline generator."""
 
 import importlib.util
-import json
 import os
 import subprocess
 import sys
@@ -14,95 +13,82 @@ ci_matrix = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = ci_matrix
 SPEC.loader.exec_module(ci_matrix)
 
-
-SUITE_KEYS = {"test"}.union(
-    *(runner.keys() for runner in ci_matrix.TEST_RUNNERS.values())) - {"abi"}
+JOBS = dict(ci_matrix.jobs())
 
 
-def without_suite(cell):
-    return {key: value for key, value in cell.items() if key not in SUITE_KEYS}
+def release_products():
+    return [product for product in ci_matrix.PRODUCTS
+            if "Release" in product.get("build_types", ("Release",))]
 
 
-class CiMatrixTest(unittest.TestCase):
+class CiPipelineTest(unittest.TestCase):
 
-    def test_release_covers_every_product_release_config_only(self):
-        # Debug products are compile-coverage only: they build but never release
-        matrices = ci_matrix.matrices(["Debug", "Release"])
-        expected = [ci_matrix.product_cell(product, "Release")
-                    for product in ci_matrix.PRODUCTS]
-        self.assertEqual([without_suite(cell) for cell in matrices["release"]],
-                         expected)
+    def test_generated_region_is_fresh(self):
+        with open(ci_matrix.WORKFLOW) as workflow_file:
+            current = workflow_file.read()
+        self.assertIn(ci_matrix.MARKER, current)
+        self.assertEqual(current[current.index(ci_matrix.MARKER):],
+                         ci_matrix.generate())
 
-    def test_restricted_products_never_leak_their_restriction(self):
-        matrices = ci_matrix.matrices(["Debug", "Release"])
-        android_x86 = [cell for cell in matrices["release"]
-                       if cell.get("abi") == "x86_64"]
-        self.assertEqual([cell["build_type"] for cell in android_x86],
-                         ["Release"])
-        for cell in android_x86:
-            self.assertNotIn("build_types", cell)
+    def test_check_mode_passes_on_a_fresh_workflow(self):
+        subprocess.run([sys.executable, SCRIPT], check=True)
 
-    def test_debug_products_still_build(self):
-        matrices = ci_matrix.matrices(["Debug", "Release"])
-        built = {(cell["os"], cell["framework"], cell.get("abi"),
-                  cell["build_type"]) for cell in matrices["build"]}
+    def test_every_product_config_builds(self):
         for product in ci_matrix.PRODUCTS:
-            if "Debug" not in product.get("build_types", ("Debug",)):
+            for config in product.get("build_types", ("Debug", "Release")):
+                self.assertIn(ci_matrix.slug("build", product, config), JOBS)
+
+    def test_debug_builds_are_compile_gates_only(self):
+        for job_id, text in JOBS.items():
+            if job_id.startswith("build-") and job_id.endswith("-debug"):
+                self.assertIn("github.ref_type != 'tag'", text)
+        self.assertEqual(len([job_id for job_id in JOBS
+                              if job_id.startswith("release-")]),
+                         len(release_products()))
+
+    def test_cook_needs_the_macos_release_build(self):
+        self.assertIn("needs: build-macos-macos-release", JOBS["cook"])
+
+    def test_release_needs_its_own_build_and_cook(self):
+        for product in release_products():
+            build_id = ci_matrix.slug("build", product, "Release")
+            self.assertIn(f"needs: [{build_id}, cook]",
+                          JOBS[ci_matrix.slug("release", product)])
+
+    def test_every_covered_triplet_tests_after_its_release(self):
+        tested = set()
+        for product in release_products():
+            runner = ci_matrix.suite_runner(product)
+            if not runner:
+                self.assertNotIn(ci_matrix.slug("test", product), JOBS)
                 continue
-            self.assertIn((product["os"], product["framework"],
-                           product.get("abi"), "Debug"), built)
-
-    def test_build_excludes_only_the_standalone_cook_build(self):
-        matrices = ci_matrix.matrices(["Debug", "Release"])
-        missing = [without_suite(cell) for cell in matrices["release"]
-                   if without_suite(cell) not in matrices["build"]]
-        self.assertEqual(missing, list(ci_matrix.STANDALONE_BUILDS))
-
-    def test_every_covered_triplet_rides_exactly_one_release_cell(self):
-        matrices = ci_matrix.matrices(["Debug", "Release"])
-        tested = [cell for cell in matrices["release"] if cell.get("test")]
-        self.assertEqual({ci_matrix.triplet(cell) for cell in tested},
-                         set(ci_matrix.covered_triplets()))
-        for cell in tested:
-            runner = ci_matrix.TEST_RUNNERS[ci_matrix.triplet(cell)]
-            self.assertEqual(cell.get("abi", ""), runner.get("abi", ""))
-            for key, value in runner.items():
-                if key != "abi":
-                    self.assertEqual(cell[key], value)
+            text = JOBS[ci_matrix.slug("test", product)]
+            self.assertIn(f"needs: {ci_matrix.slug('release', product)}", text)
+            self.assertIn(f"timeout-minutes: {runner['suite_timeout']}", text)
+            if runner["suite_args"]:
+                self.assertIn(runner["suite_args"], text)
+            self.assertIn(runner["screenshots"], text)
+            tested.add(ci_matrix.tested_triplet(product))
+        self.assertEqual(tested, set(ci_matrix.covered_triplets()))
 
     def test_unmatched_coverage_column_fails_loudly(self):
         original = ci_matrix.covered_triplets
         ci_matrix.covered_triplets = lambda: ["windows-macos-release"]
         try:
             with self.assertRaises(LookupError):
-                ci_matrix.matrices(["Release"])
+                ci_matrix.jobs()
         finally:
             ci_matrix.covered_triplets = original
 
-    def test_unrequested_build_types_produce_no_cells(self):
-        matrices = ci_matrix.matrices(["Debug"])
-        self.assertEqual(matrices["release"], [])
-        self.assertNotIn("Release",
-                         {cell["build_type"] for cell in matrices["build"]})
+    def test_github_release_needs_every_release(self):
+        for job_id in JOBS:
+            if job_id.startswith("release-"):
+                self.assertIn(job_id, JOBS["github-release"])
 
-    def test_display_name_keys_lead_every_cell(self):
-        # GitHub renders matrix job names from the include object's leading values,
-        # and wait-for-job awaits cells by those names: os, framework, build_type
-        # must stay the first keys in that order
-        for matrix in ci_matrix.matrices(["Debug", "Release"]).values():
-            for cell in matrix:
-                self.assertEqual(list(cell)[:3],
-                                 ["os", "framework", "build_type"])
-
-    def test_cli_emits_one_github_output_line_per_matrix(self):
-        stdout = subprocess.run(
-            [sys.executable, SCRIPT, "--build_types", '"Debug","Release"'],
-            capture_output=True, text=True, check=True).stdout
-        lines = [line for line in stdout.splitlines() if line]
-        self.assertEqual([line.split("=", 1)[0] for line in lines],
-                         ["build", "release"])
-        for line in lines:
-            self.assertTrue(json.loads(line.split("=", 1)[1]))
+    def test_gate_needs_every_job(self):
+        for job_id in ["changes", "format", "tidy"] + list(JOBS):
+            if job_id != "ci":
+                self.assertIn(job_id, JOBS["ci"])
 
 
 if __name__ == "__main__":

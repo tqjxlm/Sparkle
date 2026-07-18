@@ -1,24 +1,29 @@
-"""Compute the CI matrices from one product table.
+"""Generate the CI pipeline jobs of .github/workflows/ci.yml from one product table.
 
-The pipeline (.github/workflows/build.yml) runs two matrix jobs over the same
-product set: build, and a per-product release-test chain
-(.github/workflows/release-test.yml). GitHub cannot share a matrix definition
-between jobs, so this script is the single source of truth: the plan job runs it
-once and downstream jobs consume the JSON through fromJSON().
+GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot
+express the pipeline's per-product edges (release -> its own build, test -> its own
+release) without runners polling for their dependencies. This script instead unrolls
+the product table into explicit jobs below the GENERATED PIPELINE marker of ci.yml:
+every edge is a real `needs`, no runner ever waits, and every node renders flat as
+"stage (os, framework, config[, abi])".
 
-Prints one GITHUB_OUTPUT line per matrix: build=..., release=...
+python3 dev/ci_matrix.py          # check mode: fails when ci.yml is stale
+python3 dev/ci_matrix.py --fix    # rewrite the generated region in place
 """
 
 import argparse
 import csv
-import json
 import os
+import sys
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKFLOW = os.path.join(REPO_ROOT, ".github", "workflows", "ci.yml")
+MARKER = "  # ========================== GENERATED PIPELINE =========================="
 
 # every product CI ships: the target framework and the runner that builds it.
 # the x86_64 android product exists only to feed the emulator test cell (hosted
 # runners cannot virtualize arm64 guests), so it only builds the Release the
-# cell tests; the shipping apk stays arm64. build_types stays out of the matrix
-# cells: their key set renders the job display names the wait-for-job edges match
+# cell tests; the shipping apk stays arm64
 PRODUCTS = (
     {"os": "macos-latest", "framework": "macos"},
     {"os": "macos-latest", "framework": "ios"},
@@ -28,11 +33,6 @@ PRODUCTS = (
     {"os": "ubuntu-latest", "framework": "android"},
     {"os": "ubuntu-latest", "framework": "android", "abi": "x86_64",
      "build_types": ("Release",)},
-)
-
-# built by the standalone job the cook stage's needs edge targets, never by the matrix
-STANDALONE_BUILDS = (
-    {"os": "macos-latest", "framework": "macos", "build_type": "Release"},
 )
 
 # must hold every tests/coverage.csv triplet column: that table decides who runs the suite
@@ -79,71 +79,466 @@ TEST_RUNNERS = {
     },
 }
 
+HEADER = MARKER + """
+  # stages: build (every product in parallel, the heavy stage) -> cook (macos-release,
+  # on the macos runners' real Metal GPU) -> release (swap in the cooked content image
+  # and re-sign; on ubuntu unless apple signing needs a macos runner) -> test (the
+  # products tests/coverage.csv covers). Debug builds are compile gates only: nothing
+  # releases or tests them. every edge is a real needs edge; jobs are unrolled from the
+  # product table in dev/ci_matrix.py because needs cannot target a single matrix cell.
+  # regenerate with `python3 dev/ci_matrix.py --fix`; the format job fails when stale.
+"""
+
+BUILD_JOB = """
+  @id@:
+    name: build (@os@, @framework@, @config@@name_abi@)
+    needs: changes
+    if: @condition@
+    runs-on: @os@
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: @framework@
+          os: @os@
+          build-type: @config@
+@extras@"""
+
+BUILD_IOS_SECRETS = """\
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+"""
+
+COOK_JOB = """
+  cook:
+    name: cook (macos-latest, macos, Release)
+    needs: build-macos-macos-release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Environment
+        id: setup-environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: macos
+          os: macos-latest
+
+      - name: Download build product
+        uses: actions/download-artifact@v8
+        with:
+          name: build-macos-macos-latest-Release
+          path: build_system/macos/product
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
+
+      - name: Cook
+        shell: bash
+        run: |
+          # a hung app never fails the step on its own; kill it so the diagnostics below run
+          ( sleep 900 && echo "cook watchdog fired" && pkill -f sparkle.app/Contents/MacOS/sparkle ) &
+          WATCHDOG=$!
+          if ! python3 build.py --framework macos --config Release --stage cook ${{ steps.setup-environment.outputs.build-args }}; then
+            kill $WATCHDOG 2>/dev/null || true
+            echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+            echo "=== crash reports ==="
+            sleep 10
+            for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+            exit 1
+          fi
+          kill $WATCHDOG 2>/dev/null || true
+          test -f build_system/macos/output/cooked_image/cooked/manifest.json
+
+      - name: Upload cooked content image
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-shared
+          path: build_system/macos/output/cooked_image
+"""
+
+RELEASE_JOB = """
+  @id@:
+    name: release (@os@, @framework@, Release@name_abi@)
+    needs: [@build_id@, cook]
+    runs-on: @runs_on@
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: @framework@
+          os: @os@
+          build-type: Release
+@extras@\
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+"""
+
+TEST_JOB_HEAD = """
+  @id@:
+    name: test (@os@, @framework@, Release@name_abi@)
+    needs: @release_id@
+    runs-on: @os@
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+"""
+
+STEP_SETUP_ENV = """
+      # the suite drives the app through build.py, which needs the build prerequisites;
+      # the android cell needs the SDK for adb and the emulator
+      - name: Setup Environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: @framework@
+          os: @os@
+"""
+
+STEP_MESA = """
+      - name: Setup Mesa Lavapipe
+        uses: ./.github/actions/setup-mesa
+"""
+
+STEP_GLFW_RUNTIME = """
+      # the released linux binary links libglfw at runtime even in headless mode
+      - name: Install GLFW runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libglfw3
+"""
+
+STEP_KVM = """
+      # the emulator needs hardware virtualization; hosted ubuntu runners expose
+      # /dev/kvm but leave it root-only
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # the AVD is deliberately NOT cached: the snapshot entry weighs ~4GB, and duplicated
+      # per branch it evicts every compiler cache in the repo's 10GB actions-cache quota
+      # (a cold windows rebuild costs ~20 minutes); the suite seeds a fresh AVD in ~5
+      # minutes instead (cold boot + clean shutdown)
+"""
+
+STEP_DOWNLOAD = """
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-@framework@-@os@-Release@artifact_abi@
+          path: build_system/@framework@/product
+"""
+
+STEP_EXTRACT_WINDOWS = """
+      - name: Extract app
+        shell: bash
+        run: >-
+          python3 -m zipfile -e build_system/glfw/product/windows-glfw-Release.zip
+          build_system/glfw/output/
+"""
+
+STEP_EXTRACT_LINUX = """
+      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
+"""
+
+STEP_EXTRACT_GLFW_MACOS = """
+      # ditto, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          ditto -x -k build_system/glfw/product/macos-glfw-Release.zip build_system/glfw/output/
+"""
+
+STEP_EXTRACT_MACOS = """
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
+"""
+
+STEP_RUN_TESTS = """
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: @suite_timeout@
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework @framework@ --config Release@suite_args@
+"""
+
+STEP_DUMP_ANDROID = """
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat build_system/android/output/device/logs/*.log 2>/dev/null || true
+          echo "=== emulator log ==="
+          cat build_system/android/output/emulator.log 2>/dev/null || true
+"""
+
+STEP_DUMP_LOGS = """
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+"""
+
+STEP_DUMP_CRASH = """
+      # the sleep gives ReportCrash time to land the report in DiagnosticReports
+      - name: Dump crash reports
+        if: failure()
+        shell: bash
+        run: |
+          sleep 10
+          for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+"""
+
+STEP_UPLOAD_SCREENSHOTS = """
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-@framework@-@os@
+          path: @screenshots@
+"""
+
+GITHUB_RELEASE_JOB = """
+  # pushing a version tag assembles a github release from the shipped packages
+  github-release:
+    name: github release
+    if: github.ref_type == 'tag'
+    needs: [@release_ids@]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          generate_release_notes: true
+          # release-stage products only: build products lack cooked content, and CI also
+          # uploads cook artifacts and test screenshots
+          files: |
+            artifacts/release-*/**/*.zip
+            artifacts/release-*/**/*.apk
+            artifacts/release-*/**/*.ipa
+"""
+
+GATE_JOB = """
+  ci:
+    if: always()
+    needs: [@all_ids@]
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+"""
+
 
 def covered_triplets():
     """The triplet columns of the coverage table (its rows pick the cases)."""
-    coverage_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "tests", "coverage.csv")
-    with open(coverage_path, newline="") as coverage_file:
+    with open(os.path.join(REPO_ROOT, "tests", "coverage.csv"), newline="") as coverage_file:
         header = next(csv.reader(coverage_file))
     return [column for column in header if column != "case"]
 
 
-def triplet(cell):
-    return "-".join((cell["os"].removesuffix("-latest"), cell["framework"],
-                     cell["build_type"].lower()))
+def host(product):
+    return product["os"].removesuffix("-latest")
 
 
-def with_suite(cell, covered):
-    """The release cell, carrying its suite config when tests/coverage.csv covers it.
+def slug(stage, product, config=None):
+    parts = [stage, host(product), product["framework"], product.get("abi"),
+             config.lower() if config else None]
+    return "-".join(part for part in parts if part)
+
+
+def name_abi(product):
+    return f", {product['abi']}" if "abi" in product else ""
+
+
+def render(template, **tokens):
+    text = template
+    for token, value in tokens.items():
+        text = text.replace(f"@{token}@", str(value))
+    return text
+
+
+def build_job(product, config):
+    extras = ""
+    if "abi" in product:
+        extras += f"          abi: {product['abi']}\n"
+    if product["framework"] == "ios":
+        extras += BUILD_IOS_SECRETS
+    condition = "needs.changes.outputs.code == 'true'"
+    if config == "Debug":
+        condition += " && github.ref_type != 'tag'"
+    return render(BUILD_JOB, id=slug("build", product, config), os=product["os"],
+                  framework=product["framework"], config=config,
+                  name_abi=name_abi(product), condition=condition, extras=extras)
+
+
+def release_job(product):
+    apple = product["framework"] in ("macos", "ios")
+    extras = f"          abi: {product['abi']}\n" if "abi" in product else ""
+    return render(RELEASE_JOB, id=slug("release", product), os=product["os"],
+                  framework=product["framework"], name_abi=name_abi(product),
+                  build_id=slug("build", product, "Release"),
+                  runs_on="macos-latest" if apple else "ubuntu-latest", extras=extras)
+
+
+def test_job(product, runner):
+    framework, os_name = product["framework"], product["os"]
+    linux_glfw = framework == "glfw" and os_name == "ubuntu-latest"
+    text = render(TEST_JOB_HEAD, id=slug("test", product), os=os_name,
+                  framework=framework, name_abi=name_abi(product),
+                  release_id=slug("release", product))
+    if os_name == "macos-latest" or framework == "android":
+        text += render(STEP_SETUP_ENV, framework=framework, os=os_name)
+    if os_name == "windows-latest" or linux_glfw:
+        text += STEP_MESA
+    if linux_glfw:
+        text += STEP_GLFW_RUNTIME
+    if framework == "android":
+        text += STEP_KVM
+    text += render(STEP_DOWNLOAD, framework=framework, os=os_name,
+                   artifact_abi=f"-{product['abi']}" if "abi" in product else "")
+    if framework == "glfw":
+        text += {"windows-latest": STEP_EXTRACT_WINDOWS,
+                 "ubuntu-latest": STEP_EXTRACT_LINUX,
+                 "macos-latest": STEP_EXTRACT_GLFW_MACOS}[os_name]
+    elif framework == "macos":
+        text += STEP_EXTRACT_MACOS
+    suite_args = f" {runner['suite_args']}" if runner["suite_args"] else ""
+    text += render(STEP_RUN_TESTS, suite_timeout=runner["suite_timeout"],
+                   framework=framework, suite_args=suite_args)
+    if framework == "android":
+        text += STEP_DUMP_ANDROID
+    else:
+        text += STEP_DUMP_LOGS
+        if os_name == "macos-latest":
+            text += STEP_DUMP_CRASH
+    text += render(STEP_UPLOAD_SCREENSHOTS, framework=framework, os=os_name,
+                   screenshots=runner["screenshots"])
+    return text
+
+
+def suite_runner(product):
+    """The product's suite config when tests/coverage.csv covers it.
     A TEST_RUNNERS abi picks which product of the triplet runs the suite."""
-    if triplet(cell) not in covered:
-        return cell
-    runner = TEST_RUNNERS[triplet(cell)]
-    if runner.get("abi", "") != cell.get("abi", ""):
-        return cell
-    return dict(cell, test=True,
-                **{key: value for key, value in runner.items() if key != "abi"})
+    triplet = f"{host(product)}-{product['framework']}-release"
+    if triplet not in covered_triplets():
+        return None
+    runner = TEST_RUNNERS[triplet]
+    if runner.get("abi", "") != product.get("abi", ""):
+        return None
+    return runner
 
 
-def product_cell(product, build_type):
-    cell = {"os": product["os"], "framework": product["framework"],
-            "build_type": build_type}
-    cell.update({key: value for key, value in product.items()
-                 if key not in cell and key != "build_types"})
-    return cell
+def tested_triplet(product):
+    return f"{host(product)}-{product['framework']}-release"
 
 
-def matrices(build_types):
-    """The two include lists. Cell keys stay ordered os, framework, build_type:
-    GitHub renders build job display names from them (extras such as abi trail), and
-    wait-for-job awaits cells by those names; the release-test caller sets its cell
-    names explicitly, so the trailing suite keys stay out of display names."""
-    cells = [product_cell(product, build_type)
-             for product in PRODUCTS for build_type in build_types
-             if build_type in product.get("build_types", build_types)]
-    build = [cell for cell in cells if cell not in STANDALONE_BUILDS]
-    # Debug products are compile-coverage only: nothing ships or tests them,
-    # so they get no release cell
-    covered = set(covered_triplets())
-    release = [with_suite(cell, covered)
-               for cell in cells if cell["build_type"] == "Release"]
-    untested = ({t for t in covered if t.rsplit("-", 1)[1].capitalize() in build_types}
-                - {triplet(cell) for cell in release if "test" in cell})
+def jobs():
+    """Ordered (id, text) pairs of the generated region."""
+    generated = []
+    tested = set()
+    for product in PRODUCTS:
+        for config in product.get("build_types", ("Debug", "Release")):
+            generated.append((slug("build", product, config),
+                              build_job(product, config)))
+    generated.append(("cook", COOK_JOB))
+    for product in PRODUCTS:
+        if "Release" not in product.get("build_types", ("Release",)):
+            continue
+        generated.append((slug("release", product), release_job(product)))
+        runner = suite_runner(product)
+        if runner:
+            generated.append((slug("test", product), test_job(product, runner)))
+            tested.add(tested_triplet(product))
+    untested = set(covered_triplets()) - tested
     if untested:
-        raise LookupError(f"tests/coverage.csv triplets without a release cell: {sorted(untested)}")
-    return {"build": build, "release": release}
+        raise LookupError(f"tests/coverage.csv triplets without a product: {sorted(untested)}")
+    release_ids = [job_id for job_id, _ in generated if job_id.startswith("release-")]
+    generated.append(("github-release",
+                      render(GITHUB_RELEASE_JOB, release_ids=", ".join(release_ids))))
+    all_ids = ["changes", "format", "tidy"] + [job_id for job_id, _ in generated]
+    generated.append(("ci", render(GATE_JOB, all_ids=", ".join(all_ids))))
+    return generated
+
+
+def generate():
+    return HEADER + "".join(text for _, text in jobs())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build_types", required=True,
-                        help="the workflow's build_type input: a JSON list body"
-                        " such as '\"Debug\",\"Release\"'")
+    parser.add_argument("--fix", action="store_true",
+                        help="rewrite the generated region instead of checking it")
     args = parser.parse_args()
 
-    for name, matrix in matrices(json.loads(f"[{args.build_types}]")).items():
-        print(f"{name}={json.dumps(matrix)}")
+    with open(WORKFLOW) as workflow_file:
+        current = workflow_file.read()
+    if MARKER not in current:
+        sys.exit(f"marker not found in {WORKFLOW}")
+    expected = current[:current.index(MARKER)] + generate()
+
+    if args.fix:
+        with open(WORKFLOW, "w") as workflow_file:
+            workflow_file.write(expected)
+        print(f"regenerated {WORKFLOW}")
+    elif current != expected:
+        sys.exit(f"{WORKFLOW} is stale: regenerate with python3 dev/ci_matrix.py --fix")
 
 
 if __name__ == "__main__":
