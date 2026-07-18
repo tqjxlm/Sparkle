@@ -171,6 +171,23 @@ jobs:
           ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
           ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
+  build-macos-ios-simulator-release:
+    name: build (macos-latest, ios, Release, simulator)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: ios
+          os: macos-latest
+          build-type: Release
+          abi: simulator
+
   build-macos-glfw-debug:
     name: build (macos-latest, glfw, Debug)
     needs: changes
@@ -484,6 +501,92 @@ jobs:
           ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
           ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
           ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  release-macos-ios-simulator:
+    name: release (macos-latest, ios, Release, simulator)
+    needs: [build-macos-ios-simulator-release, cook]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: ios
+          os: macos-latest
+          build-type: Release
+          abi: simulator
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  test-macos-ios-simulator:
+    name: test (macos-latest, ios, Release, simulator)
+    needs: release-macos-ios-simulator
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # the suite drives the app through build.py, which needs the build prerequisites;
+      # the android cell needs the SDK for adb and the emulator
+      - name: Setup Environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: ios
+          os: macos-latest
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-ios-macos-latest-Release-simulator
+          path: build_system/ios/product
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 90
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework ios --config Release --width 1560 --height 720
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat build_system/ios/output/device/logs/*.log 2>/dev/null || true
+
+      # the sleep gives ReportCrash time to land the report in DiagnosticReports
+      - name: Dump crash reports
+        if: failure()
+        shell: bash
+        run: |
+          sleep 10
+          for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-ios-macos-latest
+          path: build_system/ios/output/device/screenshots/
 
   release-macos-glfw:
     name: release (macos-latest, glfw, Release)
@@ -860,7 +963,7 @@ jobs:
   github-release:
     name: github release
     if: github.ref_type == 'tag'
-    needs: [release-macos-macos, release-macos-ios, release-macos-glfw, release-windows-glfw, release-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64]
+    needs: [release-macos-macos, release-macos-ios, release-macos-ios-simulator, release-macos-glfw, release-windows-glfw, release-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -884,7 +987,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-glfw-debug, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
+    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-debug, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

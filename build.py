@@ -154,6 +154,9 @@ def parse_args(args=None):
     parser.add_argument("--android_abi", choices=["arm64-v8a", "x86_64"],
                         help="Android target ABI (default arm64-v8a, the shipping ABI);"
                         " x86_64 targets emulators on x86 hosts")
+    parser.add_argument("--ios_platform", choices=["device", "simulator"],
+                        help="iOS target platform (default device, the shipping target);"
+                        " simulator targets the host's iOS Simulator and builds unsigned")
 
     # Unknown args pass through to the app (cook stage runs and run.py launches)
     parsed_args, unknown_args = parser.parse_known_args(args)
@@ -166,6 +169,7 @@ def parse_args(args=None):
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
         "android_abi": parsed_args.android_abi,
+        "ios_platform": parsed_args.ios_platform,
         "generate_only": parsed_args.generate_only,
         "configure_only": parsed_args.configure_only,
         "clangd": parsed_args.clangd,

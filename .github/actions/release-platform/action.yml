@@ -11,7 +11,7 @@ inputs:
     description: "Build configuration (Debug or Release)"
     required: true
   abi:
-    description: "Android target ABI when it differs from the default (keys the artifact names)"
+    description: "Product variant when it differs from the default (keys the artifact names): an android target ABI, or 'simulator' for ios"
     default: ""
   macos-certificate-p12-base64:
     default: ""
@@ -84,8 +84,9 @@ runs:
         "$TOOLS/zipalign" -f 4 "$PKG" aligned.apk
         "$TOOLS/apksigner" sign --ks debug.keystore --ks-pass pass:android --out "$PKG" aligned.apk
 
+    # the simulator variant is unsigned: nothing to restore after the rewrite
     - name: Setup Signing Certificates (iOS)
-      if: inputs.framework == 'ios'
+      if: inputs.framework == 'ios' && inputs.abi == ''
       uses: ./.github/actions/setup-certs-ios
       with:
         certificate-p12-base64: ${{ inputs.ios-certificate-p12-base64 }}
@@ -97,7 +98,7 @@ runs:
 
     # rewriting the bundle invalidates the code seal; re-sign with the same identity
     - name: Re-sign (iOS)
-      if: inputs.framework == 'ios'
+      if: inputs.framework == 'ios' && inputs.abi == ''
       shell: bash
       run: |
         PKG="${{ steps.package.outputs.path }}"

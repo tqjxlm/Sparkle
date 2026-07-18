@@ -207,6 +207,7 @@ The pipeline is three stages, selected with `--stage` (repeatable) and run in ca
 * `--asan` - Enable AddressSanitizer.
 * `--clean` - Clean output directory before configure, which resolves some build errors.
 * `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)
+* `--ios_platform=<device|simulator>` - iOS target platform (ios framework only, default device). `simulator` builds an unsigned package for the host's iOS Simulator, which the test suite runs (see [Test.md](Test.md)); switching platforms resets the iOS project and output trees.
 * `--cmake-args='...'` - Pass extra arguments to CMake, e.g. `--cmake-args='-DENABLE_LTO=ON'` to enable link time optimization for a distribution build (off by default: it adds minutes of Release link time).
 * `--help` - Show all usage help.
 * `--skip_build` - (run.py only) Launch the existing binary without running any pipeline stage. For mobile builds, the run installs on a connected device.

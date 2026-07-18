@@ -7,6 +7,9 @@
 
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
+#include <cstring>
+#include <vector>
+
 namespace sparkle
 {
 static MTLTextureUsage GetMetalTextureUsage(RHIImage::ImageUsage usage)
@@ -138,7 +141,13 @@ MetalImage::MetalImage(const Attribute &attributes, const std::string &name) : R
     texture_descriptor.height = attributes.height;
     texture_descriptor.mipmapLevelCount = attributes.mip_levels;
     texture_descriptor.usage = GetMetalTextureUsage(attributes.usages);
+#if TARGET_OS_SIMULATOR
+    // the simulator's Metal implementation rejects shared-storage textures; every texture
+    // stays private and uploads go through a staging blit (see UploadStaged)
+    texture_descriptor.storageMode = MTLStorageModePrivate;
+#else
     texture_descriptor.storageMode = GetMetalStorageMode(attributes.memory_properties);
+#endif
     texture_descriptor.arrayLength = 1;
 
     if (attributes.type == RHIImage::ImageType::Image2DCube)
@@ -167,8 +176,57 @@ MetalImage::MetalImage(const Attribute &attributes, id<MTLTexture> texture, cons
     CreateSamplerIfNeeded();
 }
 
+// private textures cannot use replaceRegion; stage the payload in a shared buffer and
+// blit it in, waiting for completion so the semantics match replaceRegion
+void MetalImage::UploadStaged(const uint8_t *data)
+{
+    @autoreleasepool
+    {
+        id<MTLBuffer> staging = [context->GetDevice() newBufferWithBytes:data
+                                                                  length:GetStorageSize()
+                                                                 options:MTLResourceStorageModeShared];
+        ASSERT_F(staging, "Failed to create staging buffer for {}", GetName());
+
+        auto command_buffer = context->CreateStandaloneCommandBuffer();
+        auto command_encoder = [command_buffer blitCommandEncoder];
+
+        uint32_t copied_bytes = 0;
+
+        unsigned num_layers = attributes_.type == RHIImage::ImageType::Image2DCube ? 6 : 1;
+
+        // mip-major with layers inside, matching Upload
+        for (auto mip_level = 0u; mip_level < attributes_.mip_levels; mip_level++)
+        {
+            for (auto layer = 0u; layer < num_layers; layer++)
+            {
+                [command_encoder copyFromBuffer:staging
+                                   sourceOffset:copied_bytes
+                              sourceBytesPerRow:GetBytesPerRow(mip_level)
+                            sourceBytesPerImage:GetStorageSize(mip_level)
+                                     sourceSize:{GetWidth(mip_level), GetHeight(mip_level), 1}
+                                      toTexture:texture_
+                               destinationSlice:layer
+                               destinationLevel:mip_level
+                              destinationOrigin:{0, 0, 0}];
+
+                copied_bytes += GetStorageSize(mip_level);
+            }
+        }
+
+        [command_encoder endEncoding];
+        [command_buffer commit];
+        [command_buffer waitUntilCompleted];
+    }
+}
+
 void MetalImage::Upload(const uint8_t *data)
 {
+    if (texture_.storageMode == MTLStorageModePrivate)
+    {
+        UploadStaged(data);
+        return;
+    }
+
     uint32_t copied_bytes = 0;
 
     unsigned num_layers = attributes_.type == RHIImage::ImageType::Image2DCube ? 6 : 1;
@@ -196,6 +254,25 @@ void MetalImage::Upload(const uint8_t *data)
 void MetalImage::UploadFaces(std::array<const uint8_t *, 6> data)
 {
     ASSERT(attributes_.type == RHIImage::ImageType::Image2DCube);
+
+    if (texture_.storageMode == MTLStorageModePrivate)
+    {
+        // repack the face-major payload into the mip-major layout UploadStaged expects
+        std::vector<uint8_t> mip_major(GetStorageSize());
+        uint32_t written_bytes = 0;
+        std::array<uint32_t, 6> face_offsets{};
+        for (auto mip_level = 0u; mip_level < attributes_.mip_levels; mip_level++)
+        {
+            for (auto face = 0; face < 6; face++)
+            {
+                memcpy(mip_major.data() + written_bytes, data[face] + face_offsets[face], GetStorageSize(mip_level));
+                written_bytes += GetStorageSize(mip_level);
+                face_offsets[face] += GetStorageSize(mip_level);
+            }
+        }
+        UploadStaged(mip_major.data());
+        return;
+    }
 
     for (auto face = 0; face < 6; face++)
     {

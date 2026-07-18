@@ -24,6 +24,12 @@ public:
         return current_command_buffer_;
     }
 
+    // a one-off command buffer independent of the frame's, for synchronous transfers
+    [[nodiscard]] id<MTLCommandBuffer> CreateStandaloneCommandBuffer() const
+    {
+        return [command_queue_ commandBuffer];
+    }
+
     [[nodiscard]] RHIResourceRef<MetalImage> GetBackBufferColor() const
     {
         return back_buffer_color_;

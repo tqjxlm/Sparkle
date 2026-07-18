@@ -14,8 +14,6 @@
 
 #include <cstring>
 
-#if FRAMEWORK_MACOS
-
 namespace
 {
 bool IsTrueValue(const char *value)
@@ -26,7 +24,7 @@ bool IsTrueValue(const char *value)
            strcmp(value, "ON") == 0;
 }
 
-bool HasFlag(int argc, const char *argv[], const char *flag)
+bool HasFlag(int argc, const char *const argv[], const char *flag)
 {
     for (int i = 1; i < argc; i++)
     {
@@ -51,7 +49,40 @@ bool HasFlag(int argc, const char *argv[], const char *flag)
 
     return false;
 }
+
+// the windowless entry shared by macos and ios: no AppKit/UIKit is ever touched,
+// so an ios build can run it as a plain process inside the simulator
+int RunHeadless(int argc, const char *const argv[])
+{
+    @autoreleasepool
+    {
+        sparkle::AppleNativeView view;
+
+        sparkle::AppFramework app;
+        app.InitCore(argc, argv);
+        app.SetNativeView(&view);
+
+        if (!app.Init())
+        {
+            return 1;
+        }
+
+        while (!sparkle::CoreStates::IsExiting() && !view.ShouldClose())
+        {
+            app.MainLoop();
+        }
+
+        app.Cleanup();
+#if ENABLE_TEST_CASES
+        return app.GetExitCode();
+#else
+        return 0;
+#endif
+    }
+}
 } // namespace
+
+#if FRAMEWORK_MACOS
 
 int main(int argc, const char *argv[])
 {
@@ -71,31 +102,7 @@ int main(int argc, const char *argv[])
 
     if (HasFlag(argc, argv, "--headless"))
     {
-        @autoreleasepool
-        {
-            sparkle::AppleNativeView view;
-
-            sparkle::AppFramework app;
-            app.InitCore(argc, argv);
-            app.SetNativeView(&view);
-
-            if (!app.Init())
-            {
-                return 1;
-            }
-
-            while (!sparkle::CoreStates::IsExiting() && !view.ShouldClose())
-            {
-                app.MainLoop();
-            }
-
-            app.Cleanup();
-#if ENABLE_TEST_CASES
-            return app.GetExitCode();
-#else
-            return 0;
-#endif
-        }
+        return RunHeadless(argc, argv);
     }
 
     @autoreleasepool
@@ -108,6 +115,11 @@ int main(int argc, const char *argv[])
 
 int main(int argc, char *argv[])
 {
+    // must be decided before UIApplicationMain: the headless path may not touch UIKit
+    if (HasFlag(argc, argv, "--headless"))
+    {
+        return RunHeadless(argc, argv);
+    }
 
     @autoreleasepool
     {

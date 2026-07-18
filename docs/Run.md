@@ -20,7 +20,7 @@ The base storage path varies by platform:
 | -------- | ---------------------------------------------------------------------- |
 | Windows  | executable directory (e.g. `build_system/glfw/output/build/generated`) |
 | macOS    | `~/Documents/sparkle/`                                                 |
-| iOS      | App's Document Directory (use `ios-deploy` to access)                  |
+| iOS      | App's Document Directory (simulator test runs copy logs and screenshots to `build_system/ios/output/device/`) |
 | Android  | `/sdcard/Android/data/io.tqjxlm.sparkle/files/` (use `adb` to access)  |
 
 ## Config System
@@ -61,7 +61,7 @@ The base storage path varies by platform:
 | `target_framerate`  | float  | 60         | gpu               | Target FPS for dynamic SPP                                                                                   |
 | `load_last_session` | bool   | false      | all               | Restore last session (camera, config) on startup                                                             |
 | `clear_screenshots` | bool   | false      | all               | Clear old screenshots in the screenshots directory before taking a new screenshot                            |
-| `headless`          | bool   | false      | all               | Run without creating a window and without input (GLFW, macOS and Android frameworks; not supported on iOS) |
+| `headless`          | bool   | false      | all               | Run without creating a window and without input. On iOS it applies only to processes launched with arguments, e.g. the simulator test runner (see [Test.md](Test.md)) |
 
 Search across the project for keyword "ConfigValue" for more available configs.
 
