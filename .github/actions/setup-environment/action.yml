@@ -23,7 +23,7 @@ runs:
   using: "composite"
   steps:
     - name: Cache Prerequisites (All Platforms)
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ./build_cache
@@ -37,7 +37,7 @@ runs:
     # the expensive (native) part of what they saved
     - name: Cache Gradle packages (Android)
       if: inputs.framework == 'android'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.gradle/caches
@@ -56,7 +56,7 @@ runs:
     # build-type and skip the restore, so they stop keeping their dead cache entries alive.
     - name: Restore compiler cache (All Platforms)
       if: inputs.build-type != ''
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: ./.ccache
         key: ${{ inputs.os }}-${{ inputs.framework }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}-${{ inputs.build-type }}-ccache-${{ github.sha }}
@@ -85,6 +85,20 @@ runs:
           sudo apt-get install -y ccache
         fi
 
+    # the runner image ships third-party taps (e.g. aws/tap) that homebrew's tap-trust
+    # check warns about on every brew command; nothing here installs from them. the
+    # override silences the same warning during the untap itself. untap refuses taps
+    # with installed formulae (the image ships bicep from azure/bicep) — those are
+    # trusted taps that never warn, so they can stay
+    - name: Untap untrusted homebrew taps (macOS)
+      if: contains(inputs.os, 'macos')
+      shell: bash
+      run: |
+        export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
+        for tap in $(brew tap | grep -v '^homebrew/' || true); do
+          brew untap "$tap" || true
+        done
+
     - name: Setup GLFW Environment (All Platforms)
       if: inputs.framework == 'glfw'
       uses: aminya/setup-cpp@v1
@@ -109,14 +123,14 @@ runs:
 
     - name: Set up JDK 17 (Android)
       if: inputs.framework == 'android'
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v5
       with:
         java-version: "17"
         distribution: "temurin"
 
     - name: Setup Android SDK (Android)
       if: inputs.framework == 'android'
-      uses: android-actions/setup-android@v3
+      uses: android-actions/setup-android@v4
 
     - name: Setup Xcode (macOS/iOS)
       if: inputs.framework == 'macos' || inputs.framework == 'ios'

@@ -39,13 +39,13 @@ runs:
   using: "composite"
   steps:
     - name: Download build product
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
         path: build_system/${{ inputs.framework }}/product
 
     - name: Download cooked content image
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: cooked-shared
         path: cooked
@@ -121,7 +121,7 @@ runs:
         app-path: ${{ steps.package.outputs.path }}
 
     - name: Upload release product
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: release-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
         path: build_system/${{ inputs.framework }}/product
