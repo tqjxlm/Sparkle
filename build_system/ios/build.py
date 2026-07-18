@@ -184,19 +184,34 @@ TEST_TIMEOUT_SECONDS = 900
 
 
 def simctl(*args, check=True, capture=False, timeout=None):
-    return subprocess.run(["xcrun", "simctl"] + list(args), check=check, text=True,
-                          capture_output=capture, timeout=timeout, env=os.environ.copy())
+    result = subprocess.run(["xcrun", "simctl"] + list(args), check=False, text=True,
+                            capture_output=capture, timeout=timeout, env=os.environ.copy())
+    if check and result.returncode != 0:
+        if capture:
+            print(result.stdout + result.stderr, flush=True)
+        raise RuntimeError(f"simctl {args[0]} failed with exit code {result.returncode}")
+    return result
 
 
 def newest_iphone_device_type():
-    """simctl lists device types oldest first; the last iPhone is the newest model."""
-    result = simctl("list", "devicetypes", "--json", capture=True)
-    iphones = [device_type["identifier"]
-               for device_type in json.loads(result.stdout)["devicetypes"]
-               if device_type.get("productFamily") == "iPhone"]
+    """The newest iPhone the newest installed iOS runtime can pair with. The device
+    type list alone cannot decide compatibility: e.g. iPod touch reports the iPhone
+    product family, yet no current runtime supports it."""
+    result = simctl("list", "runtimes", "--json", capture=True)
+    runtimes = [runtime for runtime in json.loads(result.stdout)["runtimes"]
+                if "SimRuntime.iOS" in runtime.get("identifier", "") and runtime.get("isAvailable")]
+    if not runtimes:
+        raise RuntimeError("no iOS simulator runtime available; install one through Xcode")
+
+    def version_key(runtime):
+        return [int(part) for part in runtime.get("version", "0").split(".") if part.isdigit()]
+
+    supported = max(runtimes, key=version_key).get("supportedDeviceTypes", [])
+    prefix = "com.apple.CoreSimulator.SimDeviceType.iPhone"
+    iphones = [device_type["identifier"] for device_type in supported
+               if device_type["identifier"].startswith(prefix)]
     if not iphones:
-        raise RuntimeError("no iPhone simulator device types available; install an iOS"
-                           " runtime through Xcode")
+        raise RuntimeError("the newest iOS simulator runtime supports no iPhone device types")
     return iphones[-1]
 
 
