@@ -393,15 +393,23 @@ elseif(IOS)
         "-framework MetalPerformanceShaders"
     )
 
-    if(DEFINED ENV{APPLE_DEVELOPER_TEAM_ID})
-        set(DEVELOPER_ID_CONFIG XCODE_ATTRIBUTE_DEVELOPMENT_TEAM $ENV{APPLE_DEVELOPER_TEAM_ID})
-    endif()
-
-    if(ENABLE_APPLE_AUTO_SIGN)
-        set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic)
+    if(PLATFORM MATCHES "SIMULATOR")
+        # simulator bundles never install on a device: build unsigned
+        set(IOS_TARGET_PLATFORMS "iphonesimulator")
+        set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO")
     else()
-        set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGN_STYLE Manual)
-        set(PROVISIONING_CONFIG XCODE_ATTRIBUTE_PROVISIONING_PROFILE_SPECIFIER "SparkleTestProfile")
+        set(IOS_TARGET_PLATFORMS "iphoneos")
+
+        if(DEFINED ENV{APPLE_DEVELOPER_TEAM_ID})
+            set(DEVELOPER_ID_CONFIG XCODE_ATTRIBUTE_DEVELOPMENT_TEAM $ENV{APPLE_DEVELOPER_TEAM_ID})
+        endif()
+
+        if(ENABLE_APPLE_AUTO_SIGN)
+            set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic)
+        else()
+            set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGN_STYLE Manual)
+            set(PROVISIONING_CONFIG XCODE_ATTRIBUTE_PROVISIONING_PROFILE_SPECIFIER "SparkleTestProfile")
+        endif()
     endif()
 
     set_target_properties(sparkle PROPERTIES
@@ -409,7 +417,7 @@ elseif(IOS)
         RESOURCE "${RESOURCES}"
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/build_system/ios/Info.plist
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-        XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos"
+        XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "${IOS_TARGET_PLATFORMS}"
         ${DEVELOPER_ID_CONFIG}
         ${CODE_SIGN_STYLE}
         ${PROVISIONING_CONFIG}

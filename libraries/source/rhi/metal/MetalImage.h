@@ -56,6 +56,8 @@ public:
 private:
     void CreateSamplerIfNeeded();
 
+    void UploadStaged(const uint8_t *data);
+
     id<MTLTexture> texture_;
 };
 

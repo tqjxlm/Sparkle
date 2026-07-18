@@ -1,6 +1,9 @@
 import json
 import os
+import platform
+import shutil
 import subprocess
+import time
 import zipfile
 
 from build_system.utils import run_command_with_logging, robust_rmtree
@@ -9,15 +12,46 @@ from build_system.builder_interface import FrameworkBuilder
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
 
-platform_args = ["-DPLATFORM=OS64", "-DCMAKE_SYSTEM_NAME=iOS",
-                 "-DDEPLOYMENT_TARGET=18.0", "-DENABLE_BITCODE=FALSE"]
 toolchain_args = [
     f"-DCMAKE_TOOLCHAIN_FILE={os.path.join(SCRIPTPATH, 'ios.toolchain.cmake')}"]
+
+
+def is_simulator(args):
+    return args.get("ios_platform") == "simulator"
+
+
+def platform_args(args):
+    """The ios-cmake toolchain platform: the device target by default, or the
+    host-arch simulator for --ios_platform simulator."""
+    if is_simulator(args):
+        arm64_host = platform.machine().lower() in ("arm64", "aarch64")
+        target = "SIMULATORARM64" if arm64_host else "SIMULATOR64"
+    else:
+        target = "OS64"
+    return [f"-DPLATFORM={target}", "-DCMAKE_SYSTEM_NAME=iOS",
+            "-DDEPLOYMENT_TARGET=18.0", "-DENABLE_BITCODE=FALSE"]
 
 
 def get_project_dir():
     """Directory for CMake/Xcode project files."""
     return os.path.join(SCRIPTPATH, "project")
+
+
+def reset_on_platform_switch(args):
+    """Device and simulator builds cannot share CMake caches or build products;
+    a platform switch resets both trees."""
+    stamp_path = os.path.join(get_project_dir(), ".ios_platform")
+    current = "simulator" if is_simulator(args) else "device"
+    if os.path.isfile(stamp_path):
+        with open(stamp_path) as stamp_file:
+            previous = stamp_file.read().strip()
+        if previous != current:
+            print(f"iOS target platform changed ({previous} -> {current}), cleaning outputs")
+            robust_rmtree(get_project_dir())
+            robust_rmtree(get_output_dir())
+    os.makedirs(get_project_dir(), exist_ok=True)
+    with open(stamp_path, "w") as stamp_file:
+        stamp_file.write(current)
 
 
 def get_output_dir():
@@ -144,6 +178,138 @@ def run_on_device(app_path):
     print("3. Build and run from Xcode")
 
 
+SIMULATOR_DEVICE_NAME = "sparkle_test"
+DEVICE_OUTPUT_DIR = os.path.join(SCRIPTPATH, "output", "device")
+TEST_TIMEOUT_SECONDS = 900
+
+
+def simctl(*args, check=True, capture=False, timeout=None):
+    result = subprocess.run(["xcrun", "simctl"] + list(args), check=False, text=True,
+                            capture_output=capture, timeout=timeout, env=os.environ.copy())
+    if check and result.returncode != 0:
+        if capture:
+            print(result.stdout + result.stderr, flush=True)
+        raise RuntimeError(f"simctl {args[0]} failed with exit code {result.returncode}")
+    return result
+
+
+def newest_iphone_device_type():
+    """The newest iPhone the newest installed iOS runtime can pair with. The device
+    type list alone cannot decide compatibility: e.g. iPod touch reports the iPhone
+    product family, yet no current runtime supports it."""
+    result = simctl("list", "runtimes", "--json", capture=True)
+    runtimes = [runtime for runtime in json.loads(result.stdout)["runtimes"]
+                if "SimRuntime.iOS" in runtime.get("identifier", "") and runtime.get("isAvailable")]
+    if not runtimes:
+        raise RuntimeError("no iOS simulator runtime available; install one through Xcode")
+
+    def version_key(runtime):
+        return [int(part) for part in runtime.get("version", "0").split(".") if part.isdigit()]
+
+    supported = max(runtimes, key=version_key).get("supportedDeviceTypes", [])
+    prefix = "com.apple.CoreSimulator.SimDeviceType.iPhone"
+    iphones = [device_type["identifier"] for device_type in supported
+               if device_type["identifier"].startswith(prefix)]
+    if not iphones:
+        raise RuntimeError("the newest iOS simulator runtime supports no iPhone device types")
+    return iphones[-1]
+
+
+def find_simulator():
+    result = simctl("list", "devices", "--json", capture=True)
+    for runtime, devices in json.loads(result.stdout)["devices"].items():
+        if "SimRuntime.iOS" not in runtime:
+            continue
+        for device in devices:
+            if device.get("name") == SIMULATOR_DEVICE_NAME and device.get("isAvailable"):
+                return device["udid"], device.get("state")
+    return None, None
+
+
+def ensure_simulator():
+    """The udid of a booted project simulator, creating and booting it on first use.
+    The simulated screen is irrelevant: test runs render headless at the configured
+    resolution, so any iPhone model works."""
+    udid, state = find_simulator()
+    if udid is None:
+        device_type = newest_iphone_device_type()
+        print(f"Creating simulator {SIMULATOR_DEVICE_NAME} ({device_type})...", flush=True)
+        udid = simctl("create", SIMULATOR_DEVICE_NAME, device_type,
+                      capture=True).stdout.strip()
+        state = "Shutdown"
+    if state != "Booted":
+        print(f"Booting simulator {udid}...", flush=True)
+        simctl("boot", udid)
+        simctl("bootstatus", udid, "-b", timeout=300)
+    return udid
+
+
+def simulator_home(udid):
+    """The spawned process's HOME: external storage (Documents) lives under it."""
+    result = simctl("getenv", udid, "HOME", capture=True, check=False)
+    home = result.stdout.strip()
+    if result.returncode == 0 and home:
+        return home
+    return os.path.expanduser(
+        os.path.join("~", "Library", "Developer", "CoreSimulator", "Devices", udid, "data"))
+
+
+def collect_test_artifacts(sim_home):
+    """Copy the run's log and screenshots where the suite and evaluators expect them."""
+    logs_dir = os.path.join(DEVICE_OUTPUT_DIR, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    app_log = os.path.join(sim_home, "Documents", "logs", "output.log")
+    if os.path.isfile(app_log):
+        shutil.copy(app_log, os.path.join(logs_dir, f"output_{int(time.time() * 1000)}.log"))
+
+    screenshots_dir = os.path.join(DEVICE_OUTPUT_DIR, "screenshots")
+    shutil.rmtree(screenshots_dir, ignore_errors=True)
+    os.makedirs(screenshots_dir)
+    app_screenshots = os.path.join(sim_home, "Documents", "screenshots")
+    if os.path.isdir(app_screenshots):
+        for name in os.listdir(app_screenshots):
+            shutil.copy(os.path.join(app_screenshots, name), screenshots_dir)
+
+
+def packaged_ipa_path(args):
+    product = os.path.join(SCRIPTPATH, "product", f"ios-{args['config']}.ipa")
+    return product if os.path.isfile(product) else None
+
+
+def run_test_case(args):
+    """Automated single-TestCase run inside the simulator; returns the exit code.
+
+    The app binary must come from a --ios_platform simulator package. simctl spawn
+    runs it as a plain headless process: argv passes straight through and the process
+    exit code is the TestCase verdict, so no install or log scraping is needed."""
+    ipa_path = args.get("product_path") or packaged_ipa_path(args)
+    if not ipa_path:
+        raise RuntimeError("no packaged ipa to test; run the package stage first"
+                           f" (expected {os.path.join(SCRIPTPATH, 'product')})")
+
+    app_path = extract_ipa(ipa_path, os.path.join(SCRIPTPATH, "output", "deploy"))
+    binary_path = os.path.join(app_path, "sparkle")
+
+    udid = ensure_simulator()
+    sim_home = simulator_home(udid)
+
+    command = ["xcrun", "simctl", "spawn", udid, binary_path] + list(args["unknown_args"])
+    if "--headless" not in args["unknown_args"]:
+        command += ["--headless", "true"]
+    print(f"Running: {' '.join(command)}", flush=True)
+    try:
+        code = subprocess.run(command, env=os.environ.copy(),
+                              timeout=TEST_TIMEOUT_SECONDS).returncode
+        print(f"=== test run: exit {code}", flush=True)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["pkill", "-f", "sparkle.app/sparkle"], check=False)
+        print(f"=== test run: timeout after {TEST_TIMEOUT_SECONDS}s", flush=True)
+        code = 1
+
+    collect_test_artifacts(sim_home)
+    return 0 if code == 0 else 1
+
+
 class IosBuilder(FrameworkBuilder):
     """iOS framework builder implementation."""
 
@@ -167,7 +333,7 @@ class IosBuilder(FrameworkBuilder):
         cmake_cmd = [
             args["cmake_executable"],
             "../../..",
-        ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args
+        ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args(args)
 
         print("Configuring CMake for clangd (iOS) with command:", " ".join(cmake_cmd))
         result = subprocess.run(cmake_cmd, env=os.environ.copy())
@@ -183,7 +349,7 @@ class IosBuilder(FrameworkBuilder):
         if args.get("clean", False):
             robust_rmtree(output_dir)
 
-        os.makedirs(output_dir, exist_ok=True)
+        reset_on_platform_switch(args)
         os.chdir(output_dir)
 
         sign_args = []
@@ -202,7 +368,7 @@ class IosBuilder(FrameworkBuilder):
         cmake_cmd = [
             args["cmake_executable"],
             "../../..",
-        ] + generator_args + toolchain_args + args["cmake_options"] + sign_args + platform_args
+        ] + generator_args + toolchain_args + args["cmake_options"] + sign_args + platform_args(args)
 
         print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
         result = subprocess.run(cmake_cmd, env=os.environ.copy())
@@ -257,6 +423,9 @@ class IosBuilder(FrameworkBuilder):
 
     def run(self, args):
         """Run the built project."""
+        if "--test_case" in args["unknown_args"]:
+            return run_test_case(args)
+
         product_path = args.get("product_path")
         if product_path:
             app_path = extract_ipa(product_path, os.path.join(SCRIPTPATH, "output", "deploy"))

@@ -7,7 +7,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
-SUPPORTED_FRAMEWORKS = ("glfw", "macos", "android")
+SUPPORTED_FRAMEWORKS = ("glfw", "macos", "android", "ios")
 
 
 def get_screenshot_dir(framework):
@@ -18,6 +18,9 @@ def get_screenshot_dir(framework):
     if framework == "android":
         # the android runner pulls the device screenshots here after each run
         return os.path.join(PROJECT_ROOT, "build_system", "android", "output", "device", "screenshots")
+    if framework == "ios":
+        # the ios simulator runner copies the app screenshots here after each run
+        return os.path.join(PROJECT_ROOT, "build_system", "ios", "output", "device", "screenshots")
     raise ValueError(f"Unsupported framework: {framework}")
 
 

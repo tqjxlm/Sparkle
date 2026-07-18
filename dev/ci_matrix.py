@@ -20,12 +20,15 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKFLOW = os.path.join(REPO_ROOT, ".github", "workflows", "ci.yml")
 
 # every product CI ships: the target framework and the runner that builds it.
-# the x86_64 android product exists only to feed the emulator test cell (hosted
-# runners cannot virtualize arm64 guests), so it only builds the Release the
-# cell tests; the shipping apk stays arm64
+# the x86_64 android and simulator ios products exist only to feed their test
+# cells (hosted runners cannot virtualize arm64 guests or drive physical
+# iphones), so they only build the Release the cell tests; the shipping apk
+# stays arm64 and the shipping ipa targets devices
 PRODUCTS = (
     {"os": "macos-latest", "framework": "macos"},
     {"os": "macos-latest", "framework": "ios"},
+    {"os": "macos-latest", "framework": "ios", "abi": "simulator",
+     "build_types": ("Release",)},
     {"os": "macos-latest", "framework": "glfw"},
     {"os": "windows-latest", "framework": "glfw"},
     {"os": "ubuntu-latest", "framework": "glfw"},
@@ -64,6 +67,17 @@ TEST_RUNNERS = {
         "suite_args": "",
         "suite_timeout": 60,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
+    },
+    # the simulator package as spawned headless processes inside the iOS Simulator
+    # (see build_system/ios/build.py); like the android cell, the tested product
+    # exists only for this cell because no hosted runner can drive a physical
+    # iphone. the simulated GPU exposes no ray tracing, so the gpu pipeline stays
+    # local-only. 1565x720 matches the published ios ground-truth captures
+    "macos-ios-release": {
+        "abi": "simulator",
+        "suite_args": "--width 1565 --height 720",
+        "suite_timeout": 90,
+        "screenshots": "build_system/ios/output/device/screenshots/",
     },
     # the x86_64 android package on a KVM-accelerated headless emulator, whose
     # guest Vulkan device is llvmpipe (the windows cell's driver class): no ray
@@ -406,6 +420,15 @@ STEP_DUMP_ANDROID = """
           cat build_system/android/output/emulator.log 2>/dev/null || true
 """
 
+STEP_DUMP_IOS = """
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat build_system/ios/output/device/logs/*.log 2>/dev/null || true
+"""
+
 STEP_DUMP_LOGS = """
       - name: Dump app logs
         if: failure()
@@ -506,7 +529,8 @@ def build_job(product, config):
     extras = ""
     if "abi" in product:
         extras += f"          abi: {product['abi']}\n"
-    if product["framework"] == "ios":
+    # the simulator product builds unsigned, so it needs no signing secrets
+    if product["framework"] == "ios" and "abi" not in product:
         extras += BUILD_IOS_SECRETS
     condition = "needs.changes.outputs.code == 'true'"
     if config == "Debug":
@@ -552,6 +576,9 @@ def test_job(product, runner):
                    framework=framework, suite_args=suite_args)
     if framework == "android":
         text += STEP_DUMP_ANDROID
+    elif framework == "ios":
+        # spawned simulator processes crash-report on the host like any other process
+        text += STEP_DUMP_IOS + STEP_DUMP_CRASH
     elif os_name == "macos-latest" or linux_glfw:
         text += STEP_DUMP_LOGS
         if os_name == "macos-latest":

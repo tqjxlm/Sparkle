@@ -11,7 +11,7 @@ inputs:
     description: "Build configuration (Debug or Release)"
     required: true
   abi:
-    description: "Android target ABI when it differs from the default (keys the artifact name)"
+    description: "Product variant when it differs from the default (keys the artifact name): an android target ABI, or 'simulator' for ios"
     default: ""
   ios-certificate-p12-base64:
     default: ""
@@ -46,8 +46,9 @@ runs:
         build-type: ${{ inputs.build-type }}
         abi: ${{ inputs.abi }}
 
+    # the simulator variant builds unsigned and needs no certificates
     - name: Setup Signing Certificates (iOS)
-      if: inputs.framework == 'ios'
+      if: inputs.framework == 'ios' && inputs.abi == ''
       uses: ./.github/actions/setup-certs-ios
       with:
         certificate-p12-base64: ${{ inputs.ios-certificate-p12-base64 }}
@@ -70,7 +71,7 @@ runs:
       shell: bash
       run: |
         for attempt in 1 2 3; do
-          python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --configure_only ${{ steps.setup-environment.outputs.build-args }} && exit 0
+          python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --configure_only ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }} && exit 0
           echo "configure attempt ${attempt} failed"
           sleep 20
         done
@@ -80,7 +81,7 @@ runs:
       shell: bash
       env:
         SPARKLE_BUILD_JOBS: 8
-      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --stage build --stage package ${{ inputs.abi != '' && format('--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }}
+      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --stage build --stage package ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }}
 
     - name: Check Android task graph
       if: inputs.framework == 'android' && inputs.build-type == 'Debug'

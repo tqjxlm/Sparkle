@@ -170,13 +170,15 @@ bool AppFramework::Init()
 
     if (app_config_.headless)
     {
-        if (app_config_.platform == AppConfig::NativePlatform::IOS)
+        // a valid view at this point means the UI app attached its window; running that
+        // windowed loop with a headless config would starve the drawable queue on ios
+        if (app_config_.platform == AppConfig::NativePlatform::IOS && view_->IsValid())
         {
-            Log(Error, "Headless mode is not supported on iOS.");
+            Log(Error, "Headless mode on iOS only works for processes launched with --headless, not the UI app.");
             return false;
         }
-#if !FRAMEWORK_GLFW && !FRAMEWORK_MACOS && !FRAMEWORK_ANDROID
-        Log(Error, "Headless mode is currently supported only on GLFW, macOS and Android frameworks.");
+#if !FRAMEWORK_GLFW && !FRAMEWORK_MACOS && !FRAMEWORK_IOS && !FRAMEWORK_ANDROID
+        Log(Error, "Headless mode is currently supported only on GLFW, macOS, iOS and Android frameworks.");
         return false;
 #endif
     }

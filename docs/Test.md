@@ -38,7 +38,7 @@ A case carries:
 
 ## Test Coverage
 
-[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) generates a test job for each of its columns. A triplet without a column ships untested — currently `macos-macos-release`, `macos-glfw-release`, `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` (an emulator, see [Android](#android)) have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
+[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) generates a test job for each of its columns. A triplet without a column ships untested — currently `macos-macos-release`, `macos-glfw-release`, `macos-ios-release` (the simulator, see [iOS](#ios)), `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` (an emulator, see [Android](#android)) have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
 
 Maintaining the two tables:
 
@@ -76,6 +76,21 @@ The suite runs on a device or emulator through the android runner in [build_syst
 # package once, then run cases on a local emulator (boots one if no device is attached)
 python3 build.py --framework android --config Release
 python3 dev/run_tests.py --framework android --config Release --case smoke
+```
+
+## iOS
+
+The suite runs inside the iOS Simulator through the ios runner in [build_system/ios/build.py](../build_system/ios/build.py). It needs a `--ios_platform simulator` package: the shipping ipa targets physical devices, which no automated runner can drive. Unlike Android, the simulator needs no install or log scraping — the app binary from the packaged ipa runs as a plain headless process via `simctl spawn`, so cvars pass through as arguments and the process exit code is the TestCase verdict.
+
+* The runner boots the `sparkle_test` simulator on first use, creating it from the newest installed iPhone device type. The simulated screen is irrelevant: runs are headless at the configured resolution, so any iPhone model works.
+* After each case the runner copies the app log and screenshots to `build_system/ios/output/device/`, where the suite's cook gate and the Python evaluators expect them.
+* Render cases compare against the published ios ground truth; CI passes `--width 1565 --height 720` to match it.
+* The simulator's Metal implementation rejects shared-storage textures, so the Metal backend keeps every texture private there and stages uploads through a buffer blit (see MetalImage). It also reports no ray-tracing support, so the gpu pipeline stays local-only.
+
+```bash
+# package once, then run cases in the simulator (boots one on first use)
+python3 build.py --framework ios --config Release --ios_platform simulator
+python3 dev/run_tests.py --framework ios --config Release --case smoke
 ```
 
 ## TestCase System

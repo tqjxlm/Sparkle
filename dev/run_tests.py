@@ -21,7 +21,7 @@ import venv
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(REPO, "tests", "registry.json")
 COVERAGE = os.path.join(REPO, "tests", "coverage.csv")
-SUPPORTED_FRAMEWORKS = ("glfw", "macos", "android")
+SUPPORTED_FRAMEWORKS = ("glfw", "macos", "android", "ios")
 HOST_NAMES = {"darwin": "macos", "win32": "windows", "linux": "ubuntu"}
 
 
@@ -133,6 +133,9 @@ def log_pattern(framework):
         return os.path.expanduser("~/Documents/sparkle/logs/*.log")
     if framework == "android":
         return os.path.join(REPO, "build_system", "android", "output", "device",
+                            "logs", "*.log")
+    if framework == "ios":
+        return os.path.join(REPO, "build_system", "ios", "output", "device",
                             "logs", "*.log")
     raise ValueError(f"Unsupported framework: {framework}")
 
