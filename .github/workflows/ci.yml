@@ -1,8 +1,11 @@
 name: CI
 
+# a version tag runs the same pipeline and additionally assembles a github release
+# from the shipped packages (the github-release job below the marker)
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
 
@@ -12,11 +15,13 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      # a tag has no base to diff against and always ships
+      code: ${{ github.ref_type == 'tag' && 'true' || steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
+        if: github.ref_type != 'tag'
         with:
           filters: |
             code:
@@ -34,12 +39,6 @@ jobs:
               - 'build.py'
               - 'prerequisites.json'
 
-  pipeline:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    uses: ./.github/workflows/build.yml
-    secrets: inherit
-
   # runs unconditionally: it is cheap and also covers files outside the code filter (e.g. docs)
   format:
     runs-on: ubuntu-latest
@@ -49,6 +48,8 @@ jobs:
         run: pip install clang-format==22.1.5 autopep8==2.3.2
       - name: Check formatting
         run: python3 dev/check_format.py
+      - name: Check generated pipeline
+        run: python3 dev/ci_matrix.py
 
   # clang-tidy needs a compile database, which requires a real CMake configure with
   # dependencies fetched; the glfw configure on ubuntu is the cheapest one CI already
@@ -82,9 +83,813 @@ jobs:
       - name: Check clang-tidy
         run: python3 dev/check_tidy.py
 
+  # ========================== GENERATED PIPELINE ==========================
+  # stages: build (every product in parallel, the heavy stage) -> cook (macos-release,
+  # on the macos runners' real Metal GPU) -> release (swap in the cooked content image
+  # and re-sign; on ubuntu unless apple signing needs a macos runner) -> test (the
+  # products tests/coverage.csv covers). Debug builds are compile gates only: nothing
+  # releases or tests them. every edge is a real needs edge; jobs are unrolled from the
+  # product table in dev/ci_matrix.py because needs cannot target a single matrix cell.
+  # regenerate with `python3 dev/ci_matrix.py --fix`; the format job fails when stale.
+
+  build-macos-macos-debug:
+    name: build (macos-latest, macos, Debug)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: macos
+          os: macos-latest
+          build-type: Debug
+
+  build-macos-macos-release:
+    name: build (macos-latest, macos, Release)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: macos
+          os: macos-latest
+          build-type: Release
+
+  build-macos-ios-debug:
+    name: build (macos-latest, ios, Debug)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: ios
+          os: macos-latest
+          build-type: Debug
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  build-macos-ios-release:
+    name: build (macos-latest, ios, Release)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: ios
+          os: macos-latest
+          build-type: Release
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  build-macos-glfw-debug:
+    name: build (macos-latest, glfw, Debug)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: glfw
+          os: macos-latest
+          build-type: Debug
+
+  build-macos-glfw-release:
+    name: build (macos-latest, glfw, Release)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: glfw
+          os: macos-latest
+          build-type: Release
+
+  build-windows-glfw-debug:
+    name: build (windows-latest, glfw, Debug)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: glfw
+          os: windows-latest
+          build-type: Debug
+
+  build-windows-glfw-release:
+    name: build (windows-latest, glfw, Release)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: glfw
+          os: windows-latest
+          build-type: Release
+
+  build-ubuntu-glfw-debug:
+    name: build (ubuntu-latest, glfw, Debug)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: glfw
+          os: ubuntu-latest
+          build-type: Debug
+
+  build-ubuntu-glfw-release:
+    name: build (ubuntu-latest, glfw, Release)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: glfw
+          os: ubuntu-latest
+          build-type: Release
+
+  build-ubuntu-android-debug:
+    name: build (ubuntu-latest, android, Debug)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: android
+          os: ubuntu-latest
+          build-type: Debug
+
+  build-ubuntu-android-release:
+    name: build (ubuntu-latest, android, Release)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: android
+          os: ubuntu-latest
+          build-type: Release
+
+  build-ubuntu-android-x86_64-release:
+    name: build (ubuntu-latest, android, Release, x86_64)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Platform
+        uses: ./.github/actions/build-platform
+        with:
+          framework: android
+          os: ubuntu-latest
+          build-type: Release
+          abi: x86_64
+
+  cook:
+    name: cook (macos-latest, macos, Release)
+    needs: build-macos-macos-release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Environment
+        id: setup-environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: macos
+          os: macos-latest
+
+      - name: Download build product
+        uses: actions/download-artifact@v8
+        with:
+          name: build-macos-macos-latest-Release
+          path: build_system/macos/product
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
+
+      - name: Cook
+        shell: bash
+        run: |
+          # a hung app never fails the step on its own; kill it so the diagnostics below run
+          ( sleep 900 && echo "cook watchdog fired" && pkill -f sparkle.app/Contents/MacOS/sparkle ) &
+          WATCHDOG=$!
+          if ! python3 build.py --framework macos --config Release --stage cook ${{ steps.setup-environment.outputs.build-args }}; then
+            kill $WATCHDOG 2>/dev/null || true
+            echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+            echo "=== crash reports ==="
+            sleep 10
+            for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+            exit 1
+          fi
+          kill $WATCHDOG 2>/dev/null || true
+          test -f build_system/macos/output/cooked_image/cooked/manifest.json
+
+      - name: Upload cooked content image
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-shared
+          path: build_system/macos/output/cooked_image
+
+  release-macos-macos:
+    name: release (macos-latest, macos, Release)
+    needs: [build-macos-macos-release, cook]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: macos
+          os: macos-latest
+          build-type: Release
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  test-macos-macos:
+    name: test (macos-latest, macos, Release)
+    needs: release-macos-macos
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # the suite drives the app through build.py, which needs the build prerequisites;
+      # the android cell needs the SDK for adb and the emulator
+      - name: Setup Environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: macos
+          os: macos-latest
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-macos-macos-latest-Release
+          path: build_system/macos/product
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/macos/output/build
+          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 60
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework macos --config Release
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+
+      # the sleep gives ReportCrash time to land the report in DiagnosticReports
+      - name: Dump crash reports
+        if: failure()
+        shell: bash
+        run: |
+          sleep 10
+          for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-macos-macos-latest
+          path: ~/Documents/sparkle/screenshots/
+
+  release-macos-ios:
+    name: release (macos-latest, ios, Release)
+    needs: [build-macos-ios-release, cook]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: ios
+          os: macos-latest
+          build-type: Release
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  release-macos-glfw:
+    name: release (macos-latest, glfw, Release)
+    needs: [build-macos-glfw-release, cook]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: glfw
+          os: macos-latest
+          build-type: Release
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  test-macos-glfw:
+    name: test (macos-latest, glfw, Release)
+    needs: release-macos-glfw
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # the suite drives the app through build.py, which needs the build prerequisites;
+      # the android cell needs the SDK for adb and the emulator
+      - name: Setup Environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: glfw
+          os: macos-latest
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-glfw-macos-latest-Release
+          path: build_system/glfw/product
+
+      # ditto, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          ditto -x -k build_system/glfw/product/macos-glfw-Release.zip build_system/glfw/output/
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 60
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework glfw --config Release
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+
+      # the sleep gives ReportCrash time to land the report in DiagnosticReports
+      - name: Dump crash reports
+        if: failure()
+        shell: bash
+        run: |
+          sleep 10
+          for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-glfw-macos-latest
+          path: build_system/glfw/output/build/generated/screenshots/
+
+  release-windows-glfw:
+    name: release (windows-latest, glfw, Release)
+    needs: [build-windows-glfw-release, cook]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: glfw
+          os: windows-latest
+          build-type: Release
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  test-windows-glfw:
+    name: test (windows-latest, glfw, Release)
+    needs: release-windows-glfw
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Mesa Lavapipe
+        uses: ./.github/actions/setup-mesa
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-glfw-windows-latest-Release
+          path: build_system/glfw/product
+
+      - name: Extract app
+        shell: bash
+        run: >-
+          python3 -m zipfile -e build_system/glfw/product/windows-glfw-Release.zip
+          build_system/glfw/output/
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 120
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework glfw --config Release --software
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-glfw-windows-latest
+          path: build_system/glfw/output/build/generated/screenshots/
+
+  release-ubuntu-glfw:
+    name: release (ubuntu-latest, glfw, Release)
+    needs: [build-ubuntu-glfw-release, cook]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: glfw
+          os: ubuntu-latest
+          build-type: Release
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  test-ubuntu-glfw:
+    name: test (ubuntu-latest, glfw, Release)
+    needs: release-ubuntu-glfw
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Mesa Lavapipe
+        uses: ./.github/actions/setup-mesa
+
+      # the released linux binary links libglfw at runtime even in headless mode
+      - name: Install GLFW runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libglfw3
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-glfw-ubuntu-latest-Release
+          path: build_system/glfw/product
+
+      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 120
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework glfw --config Release --software
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-glfw-ubuntu-latest
+          path: build_system/glfw/output/build/generated/screenshots/
+
+  release-ubuntu-android:
+    name: release (ubuntu-latest, android, Release)
+    needs: [build-ubuntu-android-release, cook]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: android
+          os: ubuntu-latest
+          build-type: Release
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  release-ubuntu-android-x86_64:
+    name: release (ubuntu-latest, android, Release, x86_64)
+    needs: [build-ubuntu-android-x86_64-release, cook]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Release Platform
+        uses: ./.github/actions/release-platform
+        with:
+          framework: android
+          os: ubuntu-latest
+          build-type: Release
+          abi: x86_64
+          macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          macos-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          macos-notarization-username: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          macos-notarization-password: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          ios-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_P12_BASE64 }}
+          ios-certificate-password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+          ios-appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+          ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+  test-ubuntu-android-x86_64:
+    name: test (ubuntu-latest, android, Release, x86_64)
+    needs: release-ubuntu-android-x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # the suite drives the app through build.py, which needs the build prerequisites;
+      # the android cell needs the SDK for adb and the emulator
+      - name: Setup Environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: android
+          os: ubuntu-latest
+
+      # the emulator needs hardware virtualization; hosted ubuntu runners expose
+      # /dev/kvm but leave it root-only
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # the AVD is deliberately NOT cached: the snapshot entry weighs ~4GB, and duplicated
+      # per branch it evicts every compiler cache in the repo's 10GB actions-cache quota
+      # (a cold windows rebuild costs ~20 minutes); the suite seeds a fresh AVD in ~5
+      # minutes instead (cold boot + clean shutdown)
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-android-ubuntu-latest-Release-x86_64
+          path: build_system/android/product
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 90
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework android --config Release --width 1560 --height 720
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat build_system/android/output/device/logs/*.log 2>/dev/null || true
+          echo "=== emulator log ==="
+          cat build_system/android/output/emulator.log 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-android-ubuntu-latest
+          path: build_system/android/output/device/screenshots/
+
+  # pushing a version tag assembles a github release from the shipped packages
+  github-release:
+    name: github release
+    if: github.ref_type == 'tag'
+    needs: [release-macos-macos, release-macos-ios, release-macos-glfw, release-windows-glfw, release-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          generate_release_notes: true
+          # release-stage products only: build products lack cooked content, and CI also
+          # uploads cook artifacts and test screenshots
+          files: |
+            artifacts/release-*/**/*.zip
+            artifacts/release-*/**/*.apk
+            artifacts/release-*/**/*.ipa
+
   ci:
     if: always()
-    needs: [changes, pipeline, format, tidy]
+    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-glfw-debug, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

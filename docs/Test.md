@@ -38,12 +38,12 @@ A case carries:
 
 ## Test Coverage
 
-[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) derives the CI test matrix from its columns. A triplet without a column ships untested — currently `macos-macos-release`, `macos-glfw-release`, `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` (an emulator, see [Android](#android)) have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
+[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) generates a test job for each of its columns. A triplet without a column ships untested — currently `macos-macos-release`, `macos-glfw-release`, `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` (an emulator, see [Android](#android)) have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
 
 Maintaining the two tables:
 
 * Adding a test case: append a [tests/registry.json](../tests/registry.json) entry (unique `name`, the C++ `test_case` it pins, `app_args`, optional evaluator) and a [tests/coverage.csv](../tests/coverage.csv) row at its execution-order position, marking every triplet that must run it. Development-only cases need no row; every row must name a registry case.
-* Adding a platform: add a triplet column to [tests/coverage.csv](../tests/coverage.csv), mark its picks, and give the triplet a suite invocation in `TEST_RUNNERS` in [dev/ci_matrix.py](../dev/ci_matrix.py).
+* Adding a platform: add a triplet column to [tests/coverage.csv](../tests/coverage.csv), mark its picks, give the triplet a suite invocation in `TEST_RUNNERS` in [dev/ci_matrix.py](../dev/ci_matrix.py), and regenerate the pipeline with `python3 dev/ci_matrix.py --fix`.
 * Retiring a case or platform: remove both sides (registry entry and coverage row, or column and `TEST_RUNNERS` entry).
 
 Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators, coverage rows picking only registry cases, and a `TEST_RUNNERS` entry for every covered triplet.
