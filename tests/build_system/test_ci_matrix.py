@@ -23,12 +23,9 @@ def release_products():
 
 class CiPipelineTest(unittest.TestCase):
 
-    def test_generated_region_is_fresh(self):
-        with open(ci_matrix.WORKFLOW) as workflow_file:
-            current = workflow_file.read()
-        self.assertIn(ci_matrix.MARKER, current)
-        self.assertEqual(current[current.index(ci_matrix.MARKER):],
-                         ci_matrix.generate())
+    def test_workflow_matches_its_generator(self):
+        with open(ci_matrix.WORKFLOW, encoding="utf-8") as workflow_file:
+            self.assertEqual(workflow_file.read(), ci_matrix.generate())
 
     def test_check_mode_passes_on_a_fresh_workflow(self):
         subprocess.run([sys.executable, SCRIPT], check=True)

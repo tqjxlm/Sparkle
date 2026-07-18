@@ -2,7 +2,7 @@
 
 ## General Info
 
-* A CI pipeline is setup in github [actions](https://github.com/tqjxlm/Sparkle/actions) at .github/workflows/ci.yml
+* A CI pipeline is setup in github [actions](https://github.com/tqjxlm/Sparkle/actions) at .github/workflows/ci.yml — a fully generated file, never edited by hand (see [Pipeline Graph](#pipeline-graph)).
 * Pushing a version tag runs the same pipeline and additionally assembles a github release from the shipped packages (the `github-release` job).
 * All PRs are required to pass CI before merging.
 * The required gates are formatting, clang-tidy, the platform build matrix, cooking and package assembly, and the aggregate test suite. Performance testing is not yet automated.
@@ -16,7 +16,7 @@
 * **release**: every released product: replaces each build product's packed content with the image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
 * **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release and ubuntu-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
-The pipeline jobs are generated, not hand-written: GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot express the per-product edges (release → its own build, test → its own release) without runners idling in polling loops. [dev/ci_matrix.py](../dev/ci_matrix.py) owns the product table and the per-triplet suite invocations, and unrolls them into explicit jobs below the `GENERATED PIPELINE` marker of ci.yml: every edge is a real `needs`, no runner is ever requested before its dependencies are done, and every node renders flat as `stage (os, framework, config[, abi])`. After changing the product table, a `TEST_RUNNERS` entry or a coverage column, regenerate with `python3 dev/ci_matrix.py --fix`; the format job fails when the region is stale.
+ci.yml is a fully generated file: GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot express the per-product edges (release → its own build, test → its own release) without runners idling in polling loops. [dev/ci_matrix.py](../dev/ci_matrix.py) owns the product table and the per-triplet suite invocations, and unrolls them into explicit jobs: every edge is a real `needs`, no runner is ever requested before its dependencies are done, and every node renders flat as `stage (os, framework, config[, abi])`. Never edit ci.yml by hand — change the generator, then regenerate with `python3 dev/ci_matrix.py --fix`. Two gates enforce byte-exact freshness: a pre-commit hook (`.githooks/`, wired automatically by any `build.py` run) rejects the commit, and the format job fails the push.
 
 ## Local Validation Gates
 
@@ -24,6 +24,7 @@ Run the same validation classes locally in fail-fast order. The cheap, determini
 
 ```bash
 python3 dev/check_format.py
+python3 dev/ci_matrix.py
 python3 build.py --framework glfw --config Release --clangd
 python3 dev/check_tidy.py
 python3 dev/run_tests.py --framework macos --config Release

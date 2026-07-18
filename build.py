@@ -201,10 +201,19 @@ def run_git_submodule_update():
     )
 
 
+def configure_git_hooks():
+    """The committed hooks guard generated files (e.g. ci.yml) at commit time."""
+    if os.path.exists(os.path.join(SCRIPTPATH, ".git")):
+        subprocess.run(["git", "config", "core.hooksPath", ".githooks"],
+                       cwd=SCRIPTPATH, check=False)
+
+
 def setup(args):
     """Stage-scoped setup: each step exists to feed a specific stage, so invocations
     that skip the stage skip the step (e.g. CI cook and test nodes, which never
     compile, skip the recursive submodule clone)."""
+    configure_git_hooks()
+
     compiling = ("build" in args["stages"] or args["generate_only"]
                  or args["configure_only"] or args["clangd"])
 
