@@ -564,7 +564,7 @@ jobs:
           # the suite nests python processes whose block-buffered output would otherwise
           # reach the live log minutes late and out of order
           PYTHONUNBUFFERED: 1
-        run: python3 dev/run_tests.py --framework ios --config Release --width 1560 --height 720
+        run: python3 dev/run_tests.py --framework ios --config Release --width 1565 --height 720
 
       - name: Dump app logs
         if: failure()

@@ -72,10 +72,10 @@ TEST_RUNNERS = {
     # (see build_system/ios/build.py); like the android cell, the tested product
     # exists only for this cell because no hosted runner can drive a physical
     # iphone. the simulated GPU exposes no ray tracing, so the gpu pipeline stays
-    # local-only. 1560x720 matches the published ios ground-truth captures
+    # local-only. 1565x720 matches the published ios ground-truth captures
     "macos-ios-release": {
         "abi": "simulator",
-        "suite_args": "--width 1560 --height 720",
+        "suite_args": "--width 1565 --height 720",
         "suite_timeout": 90,
         "screenshots": "build_system/ios/output/device/screenshots/",
     },

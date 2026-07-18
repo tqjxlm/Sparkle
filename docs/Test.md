@@ -84,7 +84,7 @@ The suite runs inside the iOS Simulator through the ios runner in [build_system/
 
 * The runner boots the `sparkle_test` simulator on first use, creating it from the newest installed iPhone device type. The simulated screen is irrelevant: runs are headless at the configured resolution, so any iPhone model works.
 * After each case the runner copies the app log and screenshots to `build_system/ios/output/device/`, where the suite's cook gate and the Python evaluators expect them.
-* Render cases compare against the published ios ground truth; CI passes `--width 1560 --height 720` to match it.
+* Render cases compare against the published ios ground truth; CI passes `--width 1565 --height 720` to match it.
 * The simulator's Metal implementation rejects shared-storage textures, so the Metal backend keeps every texture private there and stages uploads through a buffer blit (see MetalImage). It also reports no ray-tracing support, so the gpu pipeline stays local-only.
 
 ```bash
