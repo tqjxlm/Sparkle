@@ -1,0 +1,3 @@
+#!/bin/sh
+# generated files must match their generators (see docs/CI.md)
+exec python3 dev/ci_matrix.py
