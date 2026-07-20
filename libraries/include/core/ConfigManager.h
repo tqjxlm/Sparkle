@@ -54,6 +54,8 @@ public:
 
     void SetArgs(int argc, const char *const argv[]);
 
+    [[nodiscard]] bool IsFromArgs(const std::string &config_name) const;
+
     void SaveAll();
 
     void LoadAll();

@@ -116,7 +116,7 @@ nlohmann::json BuildCameraJson(const CameraComponent *camera)
     return camera_json;
 }
 
-void ApplyConfigJson(const nlohmann::json &config_json)
+void ApplyConfigJson(const nlohmann::json &config_json, bool respect_args)
 {
     const auto &categories = ConfigManager::Instance().GetConfigsInCategories();
     for (const auto &category_entry : categories)
@@ -127,6 +127,12 @@ void ApplyConfigJson(const nlohmann::json &config_json)
             auto value_it = config_json.find(name);
             if (value_it == config_json.end())
             {
+                continue;
+            }
+
+            if (respect_args && ConfigManager::Instance().IsFromArgs(name))
+            {
+                Log(Info, "Session config {} skipped: set by command line.", name);
                 continue;
             }
 
@@ -285,7 +291,7 @@ void SessionManager::SetLoadLastSession(bool load_last_session)
     load_last_session_ = load_last_session;
 }
 
-bool SessionManager::LoadLastSessionInternal()
+bool SessionManager::LoadLastSessionInternal(bool respect_args)
 {
     nlohmann::json session_json;
     if (!ReadSessionJson(session_json))
@@ -306,7 +312,7 @@ bool SessionManager::LoadLastSessionInternal()
     auto config_it = session_json.find(SessionConfigKey);
     if (config_it != session_json.end() && config_it->is_object())
     {
-        ApplyConfigJson(*config_it);
+        ApplyConfigJson(*config_it, respect_args);
         Log(Info, "Session config restored.");
     }
     else
@@ -329,7 +335,7 @@ bool SessionManager::LoadLastSessionInternal()
 
 bool SessionManager::LoadLastSession()
 {
-    return LoadLastSessionInternal();
+    return LoadLastSessionInternal(false);
 }
 
 void SessionManager::LoadLastSessionIfRequested()
@@ -339,7 +345,7 @@ void SessionManager::LoadLastSessionIfRequested()
         return;
     }
 
-    LoadLastSessionInternal();
+    LoadLastSessionInternal(true);
 }
 
 void SessionManager::ApplyCamera(CameraComponent *camera)
