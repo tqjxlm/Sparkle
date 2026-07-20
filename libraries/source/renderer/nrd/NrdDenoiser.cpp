@@ -15,7 +15,7 @@ namespace sparkle
 {
 namespace
 {
-constexpr float DemodEps = 1e-3f;
+constexpr float DemodEps = 0.04f;
 constexpr float SkyViewZ = 1e6f;
 constexpr float MotionDisplayScale = 20.f;
 
@@ -624,10 +624,10 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
     // the pack marks skipped-lobe frames with hitT = 0 (probabilistic primary-lobe selection); NRD requires
     // reconstruction to fill those from neighbors
     rs.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3;
-    // >maxID disables NRD's materialID test: it compares two differently-derived float decodes for
-    // exact equality, and Adreno's unorm decode is 1 ulp off -> metals reject ALL history every frame
-    rs.minMaterialForDiffuse = 4.f;
-    rs.minMaterialForSpecular = 4.f;
+    // the test is a raw float equality between two differently-derived unorm decodes; it only holds
+    // on every driver because the pack writes IDs 0/3, the exact unorm endpoints (see nrd_pack)
+    rs.minMaterialForDiffuse = 0.f;
+    rs.minMaterialForSpecular = 0.f;
     if (!config_.stabilization)
     {
         rs.maxStabilizedFrameNum = 0;

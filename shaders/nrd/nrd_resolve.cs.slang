@@ -33,7 +33,7 @@
 [[vk::binding(7, 0)]] Texture2D<float4> inSpec;
 [[vk::binding(8, 0)]] Texture2D<float4> gRadiance; // raw per-frame radiance (sky fallback)
 [[vk::binding(9, 0)]] Texture2D<float4> gAlbedoObj;
-[[vk::binding(10, 0)]] Texture2D<float4> gMotion; // z: is-hit
+[[vk::binding(10, 0)]] Texture2D<float4> gMotion; // z: 0 miss / 1 hit / 2 emissive hit
 [[vk::binding(11, 0)]] Texture2D<float4> gSpecAlbedo;
 [[vk::binding(12, 0)]] RWTexture2D<float4> outputImage;
 [[vk::binding(13, 0)]] Texture2D<float4> validation;      // NRD OUT_VALIDATION overlay (.w: transparency)
@@ -87,12 +87,14 @@
         break;
     }
     default: { // None: re-modulate + composite
-        bool is_hit = gMotion.Load(int3(pixel, 0)).z > 0.5f;
-        if (!is_hit)
+        float hit_z = gMotion.Load(int3(pixel, 0)).z;
+        if (hit_z < 0.5f || hit_z > 1.5f)
         {
             // accumulator, NOT per-frame radiance: silhouette pixels whose AA samples straddle
             // geometry/sky never enter NRD (is_hit=0) — per-frame radiance leaves them flickering at
             // 1-spp noise forever (the "fireflies on edges" horizon line); the accumulator converges.
+            // Primary-hit emissive (z=2) is deterministic, so the accumulator equals it exactly;
+            // denoising would only blur its texture detail (see nrd_pack).
             color = sceneAccum.Load(int3(pixel, 0)).rgb;
             break;
         }
