@@ -9,7 +9,7 @@ ray_trace.cs.slang        WritePrimaryHitGBuffer: noise-free primary-hit G-buffe
                           (radiance+hitT, normal+viewZ, albedo+objID, motion+isHit, specAlbedo+roughness)
         |
 nrd_pack.cs.slang         demodulate diffuse (albedo) / specular (pre-integrated BRDF), normalize hit
-                          distances, sky sentinel viewZ; writes NRD's IN_* textures
+                          distances, sky sentinel viewZ (sky + primary-emissive pixels); writes NRD's IN_* textures
         |
 NrdDenoiser               owns the GPU-agnostic nrd::Instance; per frame feeds CommonSettings
  (renderer)               (matrices, frame index, reset) and translates GetComputeDispatches into
@@ -44,6 +44,8 @@ The manifest carries the NRD version; `NrdDenoiser` hard-fails on a mismatch or 
 * viewZ is signed view-space z (negative for visible geometry); sky uses a sentinel beyond `denoisingRange`.
 * Skipped-lobe frames write hit distance EXACTLY 0 (`HitDistanceReconstructionMode` fills them); any positive floor collapses ReBLUR's blur radius.
 * Sky pixels write a valid placeholder normal: ReBLUR's temporal accumulation averages neighbor normals without range gating, so NaN corrupts adjacent geometry.
+* Primary-hit emissive pixels bypass the denoiser (G-buffer flag `gMotion.z = 2`, sky-sentinel viewZ, resolved from the accumulator): emission is terminal and deterministic in the tracer, and demodulating it by base color would blur its texture detail away and bleed it onto neighbors.
+* Material IDs are 0 (dielectric) and 3 (metal) — the exact 2-bit-unorm endpoints. ReBLUR's materialID test is a raw float equality between two differently-derived decodes; mid-range IDs are 1 ulp apart on Adreno and read as a different material every frame (dead history on metals). The test gates ReBLUR's spatial blur at metal/dielectric boundaries, where the demodulated signal is discontinuous.
 
 ## Performance
 

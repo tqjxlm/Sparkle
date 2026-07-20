@@ -338,7 +338,10 @@ void WritePrimaryHitGBuffer(uint2 pixel)
         float2 cur_uv = cur_clip.xy / cur_clip.w * 0.5f + 0.5f;
         motion = prev_uv - cur_uv;
 
-        is_hit = 1.f;
+        // 2 = primary-hit emissive: terminal and deterministic (the accumulator equals it exactly),
+        // so the NRD chain bypasses it instead of blurring its texture detail (see nrd_pack/nrd_resolve).
+        float3 emissive = SampleEmissive(intersection, mat_param);
+        is_hit = dot(emissive, emissive) > Eps * Eps ? 2.f : 1.f;
     }
 
     gNormalDepth[pixel] = float4(normal, linear_z);
