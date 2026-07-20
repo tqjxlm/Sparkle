@@ -82,6 +82,11 @@ void ConfigManager::LoadFromArgs()
     }
 }
 
+bool ConfigManager::IsFromArgs(const std::string &config_name) const
+{
+    return argparser_ && argparser_->present(AsArgumentName(config_name)).has_value();
+}
+
 void ConfigManager::SaveAll()
 {
     using json = nlohmann::json;

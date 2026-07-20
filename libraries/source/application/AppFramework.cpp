@@ -241,11 +241,6 @@ bool AppFramework::Init()
     scene_load_task_ = SceneManager::LoadScene(main_scene_.get(), Path::Resource(app_config_.scene),
                                                app_config_.default_skybox, render_config_.IsRaterizationMode());
 
-    if (session_manager_)
-    {
-        session_manager_->ApplyCamera(GetMainCamera());
-    }
-
     Log(Info, "Default scene loading task dispatched");
 
     frame_timer_.Reset();
@@ -503,6 +498,9 @@ bool AppFramework::MainLoop()
         if (scene_loaded)
         {
             Log(Info, "Scene file loaded");
+
+            // the loaded scene may bring its own main camera, so this must wait until now
+            session_manager_->ApplyCamera(GetMainCamera());
         }
         else
         {

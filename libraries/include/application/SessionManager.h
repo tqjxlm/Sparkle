@@ -33,7 +33,7 @@ public:
     void DrawUi(Scene *scene, bool need_default_sky, bool need_default_lighting);
 
 private:
-    bool LoadLastSessionInternal();
+    bool LoadLastSessionInternal(bool respect_args);
 
     bool load_last_session_ = false;
     std::optional<CameraState> pending_camera_;
