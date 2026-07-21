@@ -124,6 +124,13 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
 
 CookResult Cooker::CookNow(const CookArtifactKey &lookup_key, const CookJobFactory &job_factory)
 {
+    // resolve the logical key first, exactly like Request: a hit must not construct the
+    // job, whose source-derived identity would otherwise override the manifest's
+    if (auto payload = CookArtifactStore::Load(lookup_key); !payload.empty())
+    {
+        return {.status = CookResult::Status::Ready, .payload = std::move(payload)};
+    }
+
     auto done_promise = std::make_shared<std::promise<void>>();
     done_promise->set_value();
     auto done = std::make_shared<TaskFuture<>>(done_promise->get_future());

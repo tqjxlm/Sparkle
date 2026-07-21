@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <tinyusdz.hh>
 #include <tydra/render-data.hh>
 
@@ -177,6 +178,16 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
     const auto &image = ctx.render_scene.images[static_cast<size_t>(image_id)];
     if (image.buffer_id < 0)
     {
+        // an unloadable image keeps its authored path in asset_identifier. inside a
+        // stripped package the cooked artifact fully replaces the source, so resolve by
+        // identity alone
+        if (ctx.asset_root.type == PathType::Resource)
+        {
+            const std::string identity =
+                (ctx.asset_root.path.parent_path() / image.asset_identifier).lexically_normal().generic_string();
+            return ResolveMaterialTexture(nullptr, identity, profile);
+        }
+
         Log(Error, "USDLoader: texture image has no data: {}", image.asset_identifier);
         return nullptr;
     }
@@ -527,32 +538,14 @@ struct TinyusdzAssetUserData
     PathType path_type;
 };
 
-// a stripped package ships cooked texture artifacts instead of source images. serving
-// this stub for a missing image keeps the tydra image entry (and its asset_identifier)
-// alive so ResolveMaterialTexture can substitute the artifact
-constexpr std::array<uint8_t, 69> MissingImageStubPng = {
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
-    0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
-    0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xff, 0xff, 0x3f, 0x00, 0x05, 0xfe, 0x02, 0xfe, 0x0d,
-    0xef, 0x46, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
-
-static bool IsStubbableImageAsset(const char *asset_name)
-{
-    return IsCompressibleImagePath(asset_name);
-}
-
 static int TinyusdzAssetSizeFun(const char *resolved_asset_name, uint64_t *nbytes, std::string *err, void *userdata)
 {
     const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
 
     auto size = user_data->file_manager->GetSize(Path(resolved_asset_name, user_data->path_type));
-    if (size == 0)
+    // missing files report SIZE_MAX (see StdFileManager::GetSize)
+    if (size == 0 || size == std::numeric_limits<size_t>::max())
     {
-        if (user_data->path_type == PathType::Resource && IsStubbableImageAsset(resolved_asset_name))
-        {
-            *nbytes = MissingImageStubPng.size();
-            return 0;
-        }
         *err = std::format("TinyUSDZ: failed to get asset size. asset {}", resolved_asset_name);
         return -1;
     }
@@ -568,15 +561,6 @@ static int TinyusdzAssetReadFun(const char *resolved_asset_name, uint64_t req_nb
     const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
 
     auto data = user_data->file_manager->Read(Path(resolved_asset_name, user_data->path_type));
-    if (data.empty() && user_data->path_type == PathType::Resource && IsStubbableImageAsset(resolved_asset_name) &&
-        req_nbytes >= MissingImageStubPng.size())
-    {
-        Log(Debug, "USDLoader: image {} is not packaged; expecting a cooked texture artifact", resolved_asset_name);
-        memcpy(out_buf, MissingImageStubPng.data(), MissingImageStubPng.size());
-        *nbytes = MissingImageStubPng.size();
-        *err = "";
-        return 0;
-    }
     if (data.size() < req_nbytes)
     {
         *err = std::format("TinyUSDZ: asset size smaller than requested. loaded {}. requested {}. asset {}",
@@ -603,11 +587,6 @@ static int TinyusdzAssetResolveFun(const char *asset_name, const std::vector<std
     *resolved_asset_name = (std::filesystem::path(search_paths[0]) / asset_name).lexically_normal().string();
 
     if (user_data->file_manager->Exists(Path(*resolved_asset_name, user_data->path_type)))
-    {
-        return 0;
-    }
-
-    if (user_data->path_type == PathType::Resource && IsStubbableImageAsset(resolved_asset_name->c_str()))
     {
         return 0;
     }
