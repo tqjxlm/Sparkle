@@ -120,5 +120,11 @@ public:
 
     static CookHandle Request(const CookArtifactKey &lookup_key, CookJobFactory job_factory,
                               std::function<void(CookResult)> on_ready);
+
+    // synchronous counterpart of Request for callers already off the main thread (e.g.
+    // scene loading): store hit or inline execution on the calling thread, with the same
+    // identity, logging and store contract. no coalescing: concurrent identical requests
+    // cook redundantly but save atomically
+    static CookResult CookNow(const CookArtifactKey &lookup_key, const CookJobFactory &job_factory);
 };
 } // namespace sparkle

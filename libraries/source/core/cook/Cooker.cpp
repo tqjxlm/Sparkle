@@ -122,6 +122,15 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
 }
 } // namespace
 
+CookResult Cooker::CookNow(const CookArtifactKey &lookup_key, const CookJobFactory &job_factory)
+{
+    auto done_promise = std::make_shared<std::promise<void>>();
+    done_promise->set_value();
+    auto done = std::make_shared<TaskFuture<>>(done_promise->get_future());
+
+    return ExecuteAndStore(lookup_key, job_factory, done);
+}
+
 CookHandle Cooker::Request(std::unique_ptr<CookJob> job, std::function<void(CookResult)> on_ready)
 {
     ASSERT(job);

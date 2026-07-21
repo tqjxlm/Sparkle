@@ -5,6 +5,7 @@
 #include "core/FileManager.h"
 #include "core/Logger.h"
 #include "io/Mesh.h"
+#include "io/TextureCookJob.h"
 #include "scene/Scene.h"
 #include "scene/SceneNode.h"
 #include "scene/component/camera/OrbitCameraComponent.h"
@@ -15,7 +16,9 @@
 #include "scene/material/MaterialManager.h"
 #include "scene/material/PbrMaterial.h"
 
+#include <array>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <tinyusdz.hh>
 #include <tydra/render-data.hh>
@@ -160,7 +163,8 @@ static std::vector<uint8_t> ExpandToRgba(const std::vector<uint8_t> &src, int ch
     return dst;
 }
 
-static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id)
+static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id,
+                                              TextureCompression::Profile profile)
 {
     // tydra keeps the texture entry but leaves these ids at -1 when it fails to load the image
     auto image_id = ctx.render_scene.textures[texture_id].texture_image_id;
@@ -208,6 +212,7 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
         return nullptr;
     }
 
+    std::shared_ptr<Image2D> texture;
     if (image.channels != 4)
     {
         if (image.channels != 3 && image.channels != 1)
@@ -216,12 +221,27 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
             return nullptr;
         }
 
-        return std::make_shared<Image2D>(image.width, image.height, format,
-                                         ExpandToRgba(image_data.data, image.channels, component_size));
+        texture = std::make_shared<Image2D>(image.width, image.height, format,
+                                            ExpandToRgba(image_data.data, image.channels, component_size));
+    }
+    else
+    {
+        texture = std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
     }
 
-    auto texture = std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
-    return texture;
+    // artifact identities exist only for packaged content: exported or external scenes
+    // load their textures raw. asset_identifier holds the resolver output;
+    // generic_string canonicalizes windows separators so identities match across
+    // platforms
+    if (ctx.asset_root.type != PathType::Resource)
+    {
+        return texture;
+    }
+
+    const std::string identity = std::filesystem::path(image.asset_identifier).lexically_normal().generic_string();
+    texture->SetName(identity);
+
+    return ResolveMaterialTexture(texture, identity, profile);
 }
 
 static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node, const USDLoaderContext &ctx)
@@ -324,8 +344,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
         if (surface_shader.diffuseColor.is_texture())
         {
-            material_resource.base_color_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.diffuseColor.texture_id));
+            material_resource.base_color_texture = CreateTexture(
+                ctx, static_cast<size_t>(surface_shader.diffuseColor.texture_id), TextureCompression::Profile::Color);
         }
         else
         {
@@ -334,8 +354,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
         if (surface_shader.emissiveColor.is_texture())
         {
-            material_resource.emissive_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.emissiveColor.texture_id));
+            material_resource.emissive_texture = CreateTexture(
+                ctx, static_cast<size_t>(surface_shader.emissiveColor.texture_id), TextureCompression::Profile::Color);
 
             // the texture is multiplied by emissive_color, whose default of Zeros would erase it
             material_resource.emissive_color = Ones;
@@ -347,8 +367,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
         if (surface_shader.normal.is_texture())
         {
-            material_resource.normal_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.normal.texture_id));
+            material_resource.normal_texture = CreateTexture(ctx, static_cast<size_t>(surface_shader.normal.texture_id),
+                                                             TextureCompression::Profile::Normal);
         }
 
         if (surface_shader.metallic.is_texture())
@@ -361,8 +381,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
             ASSERT_EQUAL(textures[static_cast<size_t>(surface_shader.metallic.texture_id)].texture_image_id,
                          textures[static_cast<size_t>(surface_shader.roughness.texture_id)].texture_image_id);
 
-            material_resource.metallic_roughness_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.metallic.texture_id));
+            material_resource.metallic_roughness_texture = CreateTexture(
+                ctx, static_cast<size_t>(surface_shader.metallic.texture_id), TextureCompression::Profile::Data);
         }
         else
         {
@@ -507,6 +527,20 @@ struct TinyusdzAssetUserData
     PathType path_type;
 };
 
+// a stripped package ships cooked texture artifacts instead of source images. serving
+// this stub for a missing image keeps the tydra image entry (and its asset_identifier)
+// alive so ResolveMaterialTexture can substitute the artifact
+constexpr std::array<uint8_t, 69> MissingImageStubPng = {
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
+    0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xff, 0xff, 0x3f, 0x00, 0x05, 0xfe, 0x02, 0xfe, 0x0d,
+    0xef, 0x46, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+
+static bool IsStubbableImageAsset(const char *asset_name)
+{
+    return IsCompressibleImagePath(asset_name);
+}
+
 static int TinyusdzAssetSizeFun(const char *resolved_asset_name, uint64_t *nbytes, std::string *err, void *userdata)
 {
     const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
@@ -514,6 +548,11 @@ static int TinyusdzAssetSizeFun(const char *resolved_asset_name, uint64_t *nbyte
     auto size = user_data->file_manager->GetSize(Path(resolved_asset_name, user_data->path_type));
     if (size == 0)
     {
+        if (user_data->path_type == PathType::Resource && IsStubbableImageAsset(resolved_asset_name))
+        {
+            *nbytes = MissingImageStubPng.size();
+            return 0;
+        }
         *err = std::format("TinyUSDZ: failed to get asset size. asset {}", resolved_asset_name);
         return -1;
     }
@@ -529,6 +568,15 @@ static int TinyusdzAssetReadFun(const char *resolved_asset_name, uint64_t req_nb
     const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
 
     auto data = user_data->file_manager->Read(Path(resolved_asset_name, user_data->path_type));
+    if (data.empty() && user_data->path_type == PathType::Resource && IsStubbableImageAsset(resolved_asset_name) &&
+        req_nbytes >= MissingImageStubPng.size())
+    {
+        Log(Debug, "USDLoader: image {} is not packaged; expecting a cooked texture artifact", resolved_asset_name);
+        memcpy(out_buf, MissingImageStubPng.data(), MissingImageStubPng.size());
+        *nbytes = MissingImageStubPng.size();
+        *err = "";
+        return 0;
+    }
     if (data.size() < req_nbytes)
     {
         *err = std::format("TinyUSDZ: asset size smaller than requested. loaded {}. requested {}. asset {}",
@@ -555,6 +603,11 @@ static int TinyusdzAssetResolveFun(const char *asset_name, const std::vector<std
     *resolved_asset_name = (std::filesystem::path(search_paths[0]) / asset_name).lexically_normal().string();
 
     if (user_data->file_manager->Exists(Path(*resolved_asset_name, user_data->path_type)))
+    {
+        return 0;
+    }
+
+    if (user_data->path_type == PathType::Resource && IsStubbableImageAsset(resolved_asset_name->c_str()))
     {
         return 0;
     }
