@@ -4,6 +4,8 @@
 #include "io/ImageTypes.h"
 
 #include <atomic>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 namespace sparkle
@@ -29,6 +31,17 @@ public:
         memcpy(pixels_.data(), pixels.data(), pixels.size());
     }
 
+    // block-compressed image owning a full mip chain (mip-major, tightly packed blocks).
+    // per-pixel access decodes lazily through EnsureDecoded
+    Image2D(unsigned width, unsigned height, PixelFormat format, unsigned mip_count, std::vector<uint8_t> payload,
+            std::string name)
+        : pixel_format_(format), width_(width), height_(height), mip_count_(mip_count),
+          size_vector_{(width_ - 1), (height_ - 1)}, pixels_(std::move(payload)), name_(std::move(name))
+    {
+        ASSERT(IsCompressedFormat(format));
+        channel_count_ = GetFormatChannelCount(format);
+    }
+
     // Creates an R8G8B8A8Srgb image from raw pixel data in the given source format.
     // Handles BGRA swizzle and linear-to-sRGB conversion for HDR formats.
     static Image2D CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format);
@@ -40,6 +53,16 @@ public:
     [[nodiscard]] std::string GetName() const
     {
         return name_;
+    }
+
+    void SetName(std::string name)
+    {
+        name_ = std::move(name);
+    }
+
+    [[nodiscard]] unsigned GetMipCount() const
+    {
+        return mip_count_;
     }
 
     [[nodiscard]] unsigned GetWidth() const
@@ -69,19 +92,29 @@ public:
 
     [[nodiscard]] unsigned GetRowByteSize() const
     {
-        return GetPixelSize(pixel_format_) * width_;
+        return GetImageRowByteSize(pixel_format_, width_);
     }
 
     [[nodiscard]] bool IsValid() const
     {
-        return !pixels_.empty() && pixels_.size() == (width_ * height_ * GetPixelSize(pixel_format_)) &&
-               pixel_format_ != PixelFormat::Count;
+        return !pixels_.empty() && pixels_.size() == GetExpectedStorageSize() && pixel_format_ != PixelFormat::Count;
     }
 
     [[nodiscard]] bool WriteToFile(const Path &file_path) const;
 
+    // content identity over pixels, dimensions and format
+    [[nodiscard]] uint32_t GetContentHash() const;
+
+    // decoded RGBA8 view of a block-compressed image, built once on first use
+    [[nodiscard]] const Image2D &EnsureDecoded() const;
+
     [[nodiscard]] Vector3 Sample(const Vector2 &uv) const
     {
+        if (IsCompressedFormat(pixel_format_))
+        {
+            return EnsureDecoded().Sample(uv);
+        }
+
         // a simple bilinear interpolation with uv wrapping
         using utilities::Lerp;
         using utilities::WrapMod;
@@ -195,14 +228,33 @@ private:
         return reinterpret_cast<T *>(pixels_.data() + y * width_ * GetPixelSize(pixel_format_));
     }
 
+    [[nodiscard]] size_t GetExpectedStorageSize() const
+    {
+        if (IsCompressedFormat(pixel_format_))
+        {
+            size_t total = 0;
+            for (auto mip = 0u; mip < mip_count_; mip++)
+            {
+                total += GetImageMipByteSize(pixel_format_, std::max(width_ >> mip, 1u), std::max(height_ >> mip, 1u));
+            }
+            return total;
+        }
+        return static_cast<size_t>(width_) * height_ * GetPixelSize(pixel_format_);
+    }
+
     PixelFormat pixel_format_ = PixelFormat::Count;
     unsigned width_ = 0;
     unsigned height_ = 0;
     unsigned channel_count_ = 0;
+    unsigned mip_count_ = 1;
 
     Vector2 size_vector_ = Vector2::Zero();
 
     std::vector<uint8_t> pixels_;
+
+    // copies share the cache: decoding is deterministic, so a shared result is benign
+    mutable std::shared_ptr<Image2D> decoded_;
+    mutable std::shared_ptr<std::once_flag> decode_once_ = std::make_shared<std::once_flag>();
 
     std::string name_ = "Image2D";
 };

@@ -4,6 +4,7 @@
 #include "core/Logger.h"
 #include "core/task/TaskManager.h"
 #include "io/ImageTypes.h"
+#include "io/TextureCompression.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -192,8 +193,32 @@ bool Image2D::LoadFromFile(const std::string &file_path)
     return true;
 }
 
+const Image2D &Image2D::EnsureDecoded() const
+{
+    ASSERT(IsCompressedFormat(pixel_format_));
+    std::call_once(*decode_once_, [this] { decoded_ = std::make_shared<Image2D>(TextureCompression::Decode(*this)); });
+    return *decoded_;
+}
+
+uint32_t Image2D::GetContentHash() const
+{
+    CRC32 hasher;
+    hasher.add(pixels_.data(), pixels_.size());
+    const std::array<uint32_t, 3> meta{width_, height_, static_cast<uint32_t>(pixel_format_)};
+    hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
+
+    uint32_t hash = 0;
+    hasher.getHash(reinterpret_cast<unsigned char *>(&hash));
+    return hash;
+}
+
 bool Image2D::WriteToFile(const Path &file_path) const
 {
+    if (IsCompressedFormat(pixel_format_))
+    {
+        return EnsureDecoded().WriteToFile(file_path);
+    }
+
     std::vector<char> buffer;
     auto *custom_data = static_cast<void *>(&buffer);
 
