@@ -55,6 +55,8 @@ public:
 
     bool HasPhysicalGpu() override;
 
+    bool SupportsSampledFormat(PixelFormat format) override;
+
     [[nodiscard]] uint32_t GetMinBufferOffsetAlignment() const override;
 
     void BeginCommandBuffer() override;

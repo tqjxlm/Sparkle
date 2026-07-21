@@ -8,6 +8,7 @@
 #include "rhi/RHIImageView.h"
 #include "rhi/RHIMemory.h"
 
+#include <algorithm>
 #include <vector>
 
 namespace sparkle
@@ -216,22 +217,22 @@ public:
 
     [[nodiscard]] uint32_t GetHeight(uint32_t mip_level = 0) const
     {
-        return attributes_.height >> mip_level;
+        return std::max(attributes_.height >> mip_level, 1u);
     }
 
     [[nodiscard]] uint32_t GetWidth(uint32_t mip_level = 0) const
     {
-        return attributes_.width >> mip_level;
+        return std::max(attributes_.width >> mip_level, 1u);
     }
 
     [[nodiscard]] uint32_t GetBytesPerRow(uint32_t mip_level = 0) const
     {
-        return GetPixelSize(attributes_.format) * GetWidth(mip_level);
+        return GetImageRowByteSize(attributes_.format, GetWidth(mip_level));
     }
 
     [[nodiscard]] uint32_t GetStorageSize(uint32_t mip_level) const
     {
-        return GetBytesPerRow(mip_level) * GetHeight(mip_level);
+        return GetImageMipByteSize(attributes_.format, GetWidth(mip_level), GetHeight(mip_level));
     }
 
     [[nodiscard]] uint32_t GetStorageSizePerLayer() const

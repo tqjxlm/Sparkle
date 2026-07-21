@@ -107,18 +107,27 @@ RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const s
         return nullptr;
     }
 
+    const Image2D *upload_image = image;
+    if (IsCompressedFormat(image->GetFormat()) && !SupportsSampledFormat(image->GetFormat()))
+    {
+        Log(Warn, "texture {} uploads uncompressed: device cannot sample {}", name, Enum2Str(image->GetFormat()));
+        upload_image = &image->EnsureDecoded();
+    }
+
     RHIImage::Attribute attribute;
-    attribute.format = image->GetFormat();
-    attribute.width = image->GetWidth();
-    attribute.height = image->GetHeight();
+    attribute.format = upload_image->GetFormat();
+    attribute.width = upload_image->GetWidth();
+    attribute.height = upload_image->GetHeight();
+    attribute.mip_levels = static_cast<uint8_t>(upload_image->GetMipCount());
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
     attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                          .filtering_method_min = RHISampler::FilteringMethod::Linear,
                          .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
+                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
+                         .max_lod = static_cast<uint8_t>(upload_image->GetMipCount() - 1)};
 
     auto rhi_image = CreateImage(attribute, name);
-    rhi_image->Upload(image->GetRawData());
+    rhi_image->Upload(upload_image->GetRawData());
 
     return rhi_image;
 }

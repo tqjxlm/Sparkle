@@ -200,6 +200,18 @@ inline VkFormat GetVkPixelFormat(PixelFormat format)
         return VK_FORMAT_R32_UINT;
     case PixelFormat::R32Float:
         return VK_FORMAT_R32_SFLOAT;
+    case PixelFormat::ASTC4x4Srgb:
+        return VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
+    case PixelFormat::ASTC4x4Unorm:
+        return VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
+    case PixelFormat::ASTC6x6Srgb:
+        return VK_FORMAT_ASTC_6x6_SRGB_BLOCK;
+    case PixelFormat::ASTC6x6Unorm:
+        return VK_FORMAT_ASTC_6x6_UNORM_BLOCK;
+    case PixelFormat::BC7Srgb:
+        return VK_FORMAT_BC7_SRGB_BLOCK;
+    case PixelFormat::BC7Unorm:
+        return VK_FORMAT_BC7_UNORM_BLOCK;
     default:
         ASSERT_F(false, "Unsupported image format {}", static_cast<int>(format));
         return VK_FORMAT_UNDEFINED;
@@ -296,6 +308,18 @@ inline PixelFormat VkFormatToPixelFormat(VkFormat format)
         return PixelFormat::R32Float;
     case VK_FORMAT_R32G32B32A32_UINT:
         return PixelFormat::RGBAUInt32;
+    case VK_FORMAT_ASTC_4x4_SRGB_BLOCK:
+        return PixelFormat::ASTC4x4Srgb;
+    case VK_FORMAT_ASTC_4x4_UNORM_BLOCK:
+        return PixelFormat::ASTC4x4Unorm;
+    case VK_FORMAT_ASTC_6x6_SRGB_BLOCK:
+        return PixelFormat::ASTC6x6Srgb;
+    case VK_FORMAT_ASTC_6x6_UNORM_BLOCK:
+        return PixelFormat::ASTC6x6Unorm;
+    case VK_FORMAT_BC7_SRGB_BLOCK:
+        return PixelFormat::BC7Srgb;
+    case VK_FORMAT_BC7_UNORM_BLOCK:
+        return PixelFormat::BC7Unorm;
     default:
         UnImplemented(format);
         return PixelFormat::Count;

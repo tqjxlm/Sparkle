@@ -128,6 +128,10 @@ public:
     // worthwhile on a physical device, otherwise the CPU cook jobs run instead
     virtual bool HasPhysicalGpu() = 0;
 
+    // whether the device can sample the format with linear filtering. block-compressed
+    // textures fall back to a CPU decode and an uncompressed upload when unsupported
+    virtual bool SupportsSampledFormat(PixelFormat format) = 0;
+
     [[nodiscard]] virtual uint32_t GetMinBufferOffsetAlignment() const
     {
         return 64;

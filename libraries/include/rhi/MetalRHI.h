@@ -20,6 +20,8 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
+    bool SupportsSampledFormat(PixelFormat format) override;
+
     bool HasPhysicalGpu() override
     {
         return true;

@@ -181,6 +181,17 @@ bool VulkanRHI::HasPhysicalGpu()
     return properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU;
 }
 
+bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
+{
+    VkFormatProperties properties;
+    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
+
+    constexpr VkFormatFeatureFlags Required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                              VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+                                              VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    return (properties.optimalTilingFeatures & Required) == Required;
+}
+
 uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const
 {
     return context->GetMinBufferOffsetAlignment();
