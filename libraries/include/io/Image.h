@@ -36,7 +36,8 @@ public:
     Image2D(unsigned width, unsigned height, PixelFormat format, unsigned mip_count, std::vector<uint8_t> payload,
             std::string name)
         : pixel_format_(format), width_(width), height_(height), mip_count_(mip_count),
-          size_vector_{(width_ - 1), (height_ - 1)}, pixels_(std::move(payload)), name_(std::move(name))
+          size_vector_{(width_ - 1), (height_ - 1)}, pixels_(std::move(payload)),
+          decode_cache_(std::make_shared<DecodeCache>()), name_(std::move(name))
     {
         ASSERT(IsCompressedFormat(format));
         channel_count_ = GetFormatChannelCount(format);
@@ -252,9 +253,14 @@ private:
 
     std::vector<uint8_t> pixels_;
 
+    struct DecodeCache
+    {
+        std::once_flag once;
+        std::shared_ptr<Image2D> image;
+    };
+
     // copies share the cache: decoding is deterministic, so a shared result is benign
-    mutable std::shared_ptr<Image2D> decoded_;
-    mutable std::shared_ptr<std::once_flag> decode_once_ = std::make_shared<std::once_flag>();
+    mutable std::shared_ptr<DecodeCache> decode_cache_;
 
     std::string name_ = "Image2D";
 };

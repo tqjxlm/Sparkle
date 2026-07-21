@@ -195,9 +195,10 @@ bool Image2D::LoadFromFile(const std::string &file_path)
 
 const Image2D &Image2D::EnsureDecoded() const
 {
-    ASSERT(IsCompressedFormat(pixel_format_));
-    std::call_once(*decode_once_, [this] { decoded_ = std::make_shared<Image2D>(TextureCompression::Decode(*this)); });
-    return *decoded_;
+    ASSERT(IsCompressedFormat(pixel_format_) && decode_cache_);
+    std::call_once(decode_cache_->once,
+                   [this] { decode_cache_->image = std::make_shared<Image2D>(TextureCompression::Decode(*this)); });
+    return *decode_cache_->image;
 }
 
 uint32_t Image2D::GetContentHash() const

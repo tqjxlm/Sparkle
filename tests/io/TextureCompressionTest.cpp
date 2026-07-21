@@ -105,6 +105,11 @@ class TextureCompressionTest : public TestCase
         success &= Expect(decoded.IsValid() && decoded.GetFormat() == source.GetFormat(),
                           (label + ": decode restores the source format").c_str());
 
+        auto fresh = TextureCompression::CreateImageFromPayload(payload, "texture_compression_copy");
+        const Image2D copy = *fresh; // NOLINT(performance-unnecessary-copy-initialization)
+        success &= Expect(&fresh->EnsureDecoded() == &copy.EnsureDecoded(),
+                          (label + ": pre-decode copy shares the decode cache").c_str());
+
         const float psnr = ComputePsnr(source, decoded);
         Log(Info, "TextureCompressionTest: {} PSNR {:.2f} dB", label, psnr);
         success &= Expect(psnr > 30.f, (label + ": decode fidelity above 30 dB").c_str());
