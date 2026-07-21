@@ -281,9 +281,6 @@ static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint
     auto image_index = static_cast<unsigned>(model.textures[texture_index].source);
     auto image = model.images[image_index];
 
-    const bool is_linear = profile != TextureCompression::Profile::Color;
-    auto image2d = CreateImage2D(image, is_linear);
-
     // artifact identities exist only for packaged, non-embedded images; anything else
     // loads raw
     std::string identity;
@@ -291,6 +288,23 @@ static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint
     {
         identity = MakeTextureIdentity(model_dir, image.uri);
     }
+
+    // tinygltf keeps the image entry with no pixels when the external file is missing;
+    // inside a stripped package the cooked artifact fully replaces the source, so
+    // resolve by identity alone
+    if (image.image.empty())
+    {
+        if (identity.empty())
+        {
+            Log(Error, "GLTFLoader: texture image has no data: {}", image.uri);
+            return nullptr;
+        }
+        return ResolveMaterialTexture(nullptr, identity, profile);
+    }
+
+    const bool is_linear = profile != TextureCompression::Profile::Color;
+    auto image2d = CreateImage2D(image, is_linear);
+
     if (identity.empty())
     {
         return image2d;
