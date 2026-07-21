@@ -243,15 +243,19 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
     }
 
     // artifact identities exist only for packaged content: exported or external scenes
-    // load their textures raw. asset_identifier holds the resolver output;
-    // generic_string canonicalizes windows separators so identities match across
-    // platforms
+    // load their textures raw. tydra keeps the authored asset path in asset_identifier
+    // whether or not the image loaded, so the identity joins it to the scene parent —
+    // the same construction as the unloadable-image path above
     if (ctx.asset_root.type != PathType::Resource)
     {
         return texture;
     }
 
-    const std::string identity = std::filesystem::path(image.asset_identifier).lexically_normal().generic_string();
+    const std::string identity = MakeTextureIdentity(ctx.asset_root.path.parent_path(), image.asset_identifier);
+    if (identity.empty())
+    {
+        return texture;
+    }
     texture->SetName(identity);
 
     return ResolveMaterialTexture(texture, identity, profile);
