@@ -20,6 +20,8 @@
 #include "application/NativeView.h"
 #include "core/Logger.h"
 
+#include <string_view>
+
 namespace sparkle
 {
 constexpr unsigned HeadlessFramesInFlight = 2;
@@ -183,6 +185,19 @@ bool VulkanRHI::HasPhysicalGpu()
 
 bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
 {
+    if (IsCompressedFormat(format))
+    {
+        // the Apple Paravirtual device (macOS CI runners) advertises compressed formats
+        // through MoltenVK but its buffer-to-image copies produce blank texels; the same
+        // device handles them correctly through native Metal shared-storage uploads
+        VkPhysicalDeviceProperties device_properties;
+        vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &device_properties);
+        if (std::string_view(device_properties.deviceName).find("Paravirtual") != std::string_view::npos)
+        {
+            return false;
+        }
+    }
+
     VkFormatProperties properties;
     vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
 
