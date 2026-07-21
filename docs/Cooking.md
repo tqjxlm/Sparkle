@@ -39,6 +39,22 @@ Saves are atomic: artifact and manifest are written to a temporary file and rena
 
 Artifact payloads for full GPU images use the `RHIImage::Upload`/`ReadToMemory` byte order, which is a cross-backend contract: mip-major with array layers inside each mip, rows tightly packed. `VulkanImage` and `MetalImage` must never diverge on this.
 
+## Material texture compression
+
+Material textures (base color, normal, metallic-roughness, emissive from glTF/USD scenes) cook into block-compressed artifacts with full mip chains, replacing the runtime-decoded single-mip RGBA8 uploads. This cuts GPU memory roughly 3-6x, adds proper minification, and lets packages ship without the source images.
+
+Two artifact families exist because desktop GPUs have no ASTC and mobile GPUs prefer ASTC over BC: `texture_astc` (Apple via Metal or MoltenVK, Android) and `texture_bc` (Windows/Linux Vulkan). Formats per profile: `color` (sRGB: base color, emissive) and `data` (linear: metallic-roughness) use ASTC 6x6 / BC7; `normal` uses ASTC 4x4 / BC7 and its mips are renormalized. Mips are generated at cook time with a gamma-correct box filter — block-compressed images cannot be blit-downsampled at runtime. The encoders are [astc-encoder](https://github.com/ARM-software/astc-encoder) and [bc7enc_rdo](https://github.com/richgel999/bc7enc_rdo); presets and block sizes live in [TextureCompression](../libraries/include/io/TextureCompression.h).
+
+The artifact identity is `<packed-relative image path>#<profile>` with the content hash of the decoded RGBA8 pixels; `TextureCookJob` owns the job. Identities exist only for packaged (`Path::Resource`) non-embedded images — exported, external and procedural textures always load raw.
+
+Unlike the async SkyLight pattern, texture cooks resolve synchronously inside the scene-load worker (`ResolveMaterialTexture` via `Cooker::CookNow`): scene loading already carries the async completion contract that tests fence on, and resolving in place avoids a pending state, proxy recreation and bindless churn. A cache hit swaps the compressed payload in; a miss encodes inline (seconds, and only on runs without a prior cook stage); a source with neither artifact nor pixels falls back to a dummy texture with an error.
+
+The compressed image stays a regular `Image2D`. Consumers that need texels — the CPU pipeline's material sampling and USD export — decode lazily to an RGBA8 shadow copy on first use. If a device cannot sample the format (`RHIContext::SupportsSampledFormat`), `CreateTexture` uploads that decoded copy instead; software rasterizers (lavapipe, SwiftShader) sample both families directly.
+
+Both families cook on the one cook host; a build-time cook also writes `cooked/texture_sources.json`, the source images its artifacts fully replace. The content image drops those sources (`assemble_cooked_image`), and packaging drops the family the product's GPUs never sample ([dev/package_cooked.py](../dev/package_cooked.py), derived from the framework and the product name). Inside a stripped package the USD loader serves a 1x1 stub for the missing image files so the texture identities survive to artifact resolution. `rebuild_cache true` in a stripped package cannot re-encode textures — it keeps using the packaged artifacts.
+
+The `texture_compression` test case covers encode/decode invariants for every profile and family on every platform; packaged screenshot runs plus the CI cook gate prove end to end that shipped packages resolve every texture from artifacts.
+
 ## CPU/GPU parity
 
 A job with a GPU-accelerated producer runs it only when a physical GPU is present (`RHIContext::HasPhysicalGpu`; software rasterizers such as lavapipe take the CPU jobs) — both producers must emit the same artifact under the same key.
