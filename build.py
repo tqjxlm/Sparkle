@@ -65,12 +65,27 @@ def default_cooked_image_dir(framework):
 def assemble_cooked_image(cooker):
     """The cook stage's product: a self-contained content image holding every raw
     asset passed through plus the cooked artifacts. The package stage swaps a
-    product's packed content for this directory."""
+    product's packed content for this directory. Sources consumed into compressed
+    texture artifacts ship as artifacts only."""
     image_dir = os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker])
     shutil.rmtree(image_dir, ignore_errors=True)
     shutil.copytree(os.path.join(SCRIPTPATH, "resources", "packed"), image_dir)
     shutil.copytree(os.path.join(SCRIPTPATH, COOKED_OUTPUT_DIR[cooker]),
                     os.path.join(image_dir, "cooked"))
+
+    consumed_manifest = os.path.join(image_dir, "cooked", "texture_sources.json")
+    if os.path.isfile(consumed_manifest):
+        import json
+        with open(consumed_manifest, encoding="utf-8") as manifest_file:
+            consumed = json.load(manifest_file)
+        stripped = 0
+        for relative in consumed:
+            source_path = os.path.join(image_dir, relative)
+            if os.path.isfile(source_path):
+                os.remove(source_path)
+                stripped += 1
+        print(f"stripped {stripped} texture sources from the content image")
+
     print(f"Assembled cooked content image at {image_dir}")
 
 

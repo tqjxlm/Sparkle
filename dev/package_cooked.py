@@ -35,6 +35,19 @@ INTERNAL_STATE_PREFIX = {
     "macos": "sparkle.app/Contents/SharedSupport/",
 }
 
+# one compressed-texture family ships per product; the other is dead weight for its GPUs
+TEXTURE_FAMILY_DIRS = {"astc": "cooked/texture_astc/", "bc": "cooked/texture_bc/"}
+
+
+def texture_family(framework, package):
+    """ASTC for Apple and Android GPUs, BC for other desktop GPUs. glfw products
+    carry their host system in the package name (see build.py copy_build_products)."""
+    if framework != "glfw":
+        return "astc"
+    system = os.path.basename(package).split("-")[0]
+    return "astc" if system == "macos" else "bc"
+
+
 ANDROID_ASSET_ROOT = "assets/"
 ANDROID_DIR_MANIFEST = "_dir_manifest.txt"
 
@@ -117,6 +130,11 @@ def package_cooked(package, framework, image_dir):
         if internal_prefix:
             strip_internal_state(package, internal_prefix)
         return 0
+
+    family = texture_family(framework, package)
+    dropped_families = tuple(prefix for name, prefix in TEXTURE_FAMILY_DIRS.items() if name != family)
+    image_files = {relative: path for relative, path in image_files.items()
+                   if not relative.startswith(dropped_families)}
 
     claimed = {relative.split("/")[0] for relative in image_files} & set(BUILD_OWNED_SUBTREES)
     if claimed:
