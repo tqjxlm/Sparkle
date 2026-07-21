@@ -297,17 +297,15 @@ static void CollectMaterialTextureJobs(const Scene &scene, std::vector<std::uniq
 }
 
 // the packaging stage strips these source files from the content image: their cooked
-// artifacts replace them (see dev/package_cooked.py and assemble_cooked_image)
-static void WriteConsumedTextureSources(const std::set<std::string> &consumed_sources)
+// artifacts replace them (see dev/package_cooked.py and assemble_cooked_image). the
+// cook output persists across runs, so an empty set must still overwrite a stale file
+static bool WriteConsumedTextureSources(const std::set<std::string> &consumed_sources)
 {
-    if (consumed_sources.empty())
-    {
-        return;
-    }
-
     const nlohmann::json json = consumed_sources;
     const auto dump = json.dump(2);
-    FileManager::GetNativeFileManager()->Write(Path::Internal("cooked/texture_sources.json"), dump.data(), dump.size());
+    const auto written = FileManager::GetNativeFileManager()->Write(Path::Internal("cooked/texture_sources.json"),
+                                                                    dump.data(), dump.size());
+    return !written.empty();
 }
 
 int AppFramework::RunCookMode()
@@ -376,9 +374,10 @@ int AppFramework::RunCookMode()
 
     auto exit_code = SceneCooker::Run(app_config_.scene, job_plan, accelerator);
 
-    if (exit_code == 0)
+    if (exit_code == 0 && !WriteConsumedTextureSources(consumed_texture_sources))
     {
-        WriteConsumedTextureSources(consumed_texture_sources);
+        Log(Error, "failed to write the consumed texture source manifest");
+        exit_code = 1;
     }
 
     if (rhi_)
