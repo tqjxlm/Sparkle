@@ -35,8 +35,10 @@ public:
         uint32_t mip_count = 0;
     };
 
-    // desktop GPUs have no ASTC; Apple and Android GPUs prefer ASTC over BC
-#if FRAMEWORK_APPLE || FRAMEWORK_ANDROID
+    // desktop GPUs have no ASTC; Apple and Android GPUs prefer ASTC over BC. keyed on
+    // the OS, not the framework: glfw on macOS samples through MoltenVK on an Apple GPU
+    // and must agree with the astc-family package (see dev/package_cooked.py)
+#if defined(__APPLE__) || defined(__ANDROID__)
     static constexpr Family PlatformFamily = Family::Astc;
 #else
     static constexpr Family PlatformFamily = Family::Bc;
