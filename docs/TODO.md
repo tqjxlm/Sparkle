@@ -55,4 +55,3 @@
       load can mutate the replacement scene. Scene/component teardown needs
       generation-owned render commands or an explicit drain-before-destroy contract;
       load completion must then use the same generation boundary.
-* [ ] on Android, backgrounding and foregrounding the app races swapchain recreation against the render loop: `APP_CMD_INIT_WINDOW` schedules `RecreateSurface`/`RecreateSwapChain` while the render thread may sit in `VulkanContext::BeginFrame`, and the Adreno driver segfaults inside `vkWaitForFences`/`VulkanSwapChain::Recreate` roughly every other cycle (S25 Ultra, validation layer loaded). Window recreation needs to fence out the in-flight frame before the swapchain is replaced.
