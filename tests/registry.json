@@ -114,6 +114,11 @@
         "description": "Image file content detection, channel normalization, storage sizing, and synchronous writes."
     },
     {
+        "name": "texture_compression",
+        "test_case": "texture_compression",
+        "description": "Block-compressed texture encode/decode invariants for every profile and family: payload layout, mip chain, and decode fidelity."
+    },
+    {
         "name": "scene_load_failure",
         "test_case": "scene_load_failure",
         "description": "Scene async failure propagation for a missing authored sky resource."
