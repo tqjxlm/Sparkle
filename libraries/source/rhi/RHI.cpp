@@ -120,11 +120,13 @@ RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const s
     attribute.height = upload_image->GetHeight();
     attribute.mip_levels = static_cast<uint8_t>(upload_image->GetMipCount());
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
+    // the raster passes bind one sampler for a whole material, so the LOD range must
+    // not derive from any single image's mip count
     attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                          .filtering_method_min = RHISampler::FilteringMethod::Linear,
                          .filtering_method_mag = RHISampler::FilteringMethod::Linear,
                          .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                         .max_lod = static_cast<uint8_t>(upload_image->GetMipCount() - 1)};
+                         .max_lod = RHISampler::SamplerAttribute::UnclampedLod};
 
     auto rhi_image = CreateImage(attribute, name);
     rhi_image->Upload(upload_image->GetRawData());

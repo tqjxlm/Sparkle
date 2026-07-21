@@ -9,6 +9,7 @@
 #include "rhi/RHIMemory.h"
 
 #include <algorithm>
+#include <limits>
 #include <vector>
 
 namespace sparkle
@@ -74,6 +75,10 @@ public:
 
     struct SamplerAttribute
     {
+        // sampling never selects a level beyond the view's mip range, so this is safe
+        // for any image; a max_lod below the image's mip count disables minification
+        static constexpr uint8_t UnclampedLod = std::numeric_limits<uint8_t>::max();
+
         SamplerAddressMode address_mode = SamplerAddressMode::Count;
         BorderColor border_color = BorderColor::Count;
         FilteringMethod filtering_method_min = FilteringMethod::Count;
