@@ -89,6 +89,16 @@ template <typename T> auto OwnStbiPixels(T *pixels)
 {
     return std::unique_ptr<T, decltype(&stbi_image_free)>(pixels, stbi_image_free);
 }
+
+uint32_t FinishContentHash(CRC32 &hasher, uint32_t width, uint32_t height, PixelFormat format)
+{
+    const std::array<uint32_t, 3> meta{width, height, static_cast<uint32_t>(format)};
+    hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
+
+    uint32_t hash = 0;
+    hasher.getHash(reinterpret_cast<unsigned char *>(&hash));
+    return hash;
+}
 } // namespace
 
 Image2D Image2D::CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format)
@@ -205,12 +215,7 @@ uint32_t Image2D::GetContentHash() const
 {
     CRC32 hasher;
     hasher.add(pixels_.data(), pixels_.size());
-    const std::array<uint32_t, 3> meta{width_, height_, static_cast<uint32_t>(pixel_format_)};
-    hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
-
-    uint32_t hash = 0;
-    hasher.getHash(reinterpret_cast<unsigned char *>(&hash));
-    return hash;
+    return FinishContentHash(hasher, width_, height_, pixel_format_);
 }
 
 bool Image2D::WriteToFile(const Path &file_path) const
@@ -364,11 +369,7 @@ uint32_t Image2DCube::GetContentHash() const
     {
         hasher.add(face->GetRawData(), face->GetStorageSize());
     }
-    const std::array<uint32_t, 3> meta{GetWidth(), GetHeight(), static_cast<uint32_t>(GetFormat())};
-    hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
-
-    uint32_t hash = 0;
-    hasher.getHash(reinterpret_cast<unsigned char *>(&hash));
+    const uint32_t hash = FinishContentHash(hasher, GetWidth(), GetHeight(), GetFormat());
 
     content_hash_.store(hash, std::memory_order_relaxed);
     content_hash_valid_.store(true, std::memory_order_release);
