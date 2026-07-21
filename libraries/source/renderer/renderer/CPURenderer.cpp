@@ -32,7 +32,7 @@ CPURenderer::~CPURenderer() = default;
 bool CPURenderer::IsReadyForAutoScreenshot() const
 {
     return Renderer::IsReadyForAutoScreenshot() &&
-           camera_->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
+           scene_render_proxy_->GetCamera()->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
 }
 
 void CPURenderer::InitRenderResources()
@@ -119,6 +119,9 @@ void CPURenderer::Update()
 void CPURenderer::Render()
 {
     PROFILE_SCOPE("CPURenderer::Render");
+
+    // re-fetch every frame: a loaded scene may bring its own main camera and replace the proxy
+    camera_ = scene_render_proxy_->GetCamera();
 
     // CPU workload: software ray tracing
     {
