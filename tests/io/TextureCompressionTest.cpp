@@ -2,6 +2,7 @@
 
 #include "core/Logger.h"
 #include "io/TextureCompression.h"
+#include "io/TextureCookJob.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +20,7 @@ class TextureCompressionTest : public TestCase
 
     Result OnTick(AppFramework & /*app*/) override
     {
-        bool success = true;
+        bool success = VerifyIdentityRules();
 
         for (auto profile : {TextureCompression::Profile::Color, TextureCompression::Profile::Data,
                              TextureCompression::Profile::Normal})
@@ -31,6 +32,22 @@ class TextureCompressionTest : public TestCase
         }
 
         return success ? Result::Pass : Result::Fail;
+    }
+
+    static bool VerifyIdentityRules()
+    {
+        bool success = true;
+        success &= Expect(MakeTextureIdentity("scenes/city", "textures/road.png") == "scenes/city/textures/road.png",
+                          "identity joins the scene parent");
+        success &= Expect(MakeTextureIdentity("", "a/../b.png") == "b.png", "identity normalizes lexically");
+        success &= Expect(MakeTextureIdentity("scenes", "../shared.png") == "shared.png",
+                          "inner .. resolving inside the root survives");
+        success &= Expect(MakeTextureIdentity("", "../escape.png").empty(), "identity escaping the root is rejected");
+        success &= Expect(MakeTextureIdentity("scenes", "../../escape.png").empty(),
+                          "identity escaping through the parent is rejected");
+        success &= Expect(MakeTextureIdentity("", "/abs/x.png").empty(), "absolute identity is rejected");
+        success &= Expect(MakeTextureIdentity("", "").empty(), "empty authored path yields no identity");
+        return success;
     }
 
     static Image2D MakeSource(TextureCompression::Profile profile)

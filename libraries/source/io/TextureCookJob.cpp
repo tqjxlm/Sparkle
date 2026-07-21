@@ -75,6 +75,27 @@ bool IsCompressibleImagePath(const std::string &path)
     return path.ends_with(".png") || path.ends_with(".jpg") || path.ends_with(".jpeg");
 }
 
+std::string MakeTextureIdentity(const std::filesystem::path &scene_parent, const std::string &authored)
+{
+    if (authored.empty())
+    {
+        return {};
+    }
+
+    const std::filesystem::path authored_path(authored);
+    if (authored_path.is_absolute())
+    {
+        return {};
+    }
+
+    auto identity = (scene_parent / authored_path).lexically_normal().generic_string();
+    if (identity == ".." || identity.starts_with("../"))
+    {
+        return {};
+    }
+    return identity;
+}
+
 bool IsCookableMaterialTexture(const Image2D &image)
 {
     return (image.GetFormat() == PixelFormat::R8G8B8A8Srgb || image.GetFormat() == PixelFormat::R8G8B8A8Unorm) &&

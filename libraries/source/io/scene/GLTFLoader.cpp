@@ -289,7 +289,7 @@ static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint
     std::string identity;
     if (path_type == PathType::Resource && !image.uri.empty())
     {
-        identity = (std::filesystem::path(model_dir) / image.uri).lexically_normal().generic_string();
+        identity = MakeTextureIdentity(model_dir, image.uri);
     }
     if (identity.empty())
     {

@@ -116,7 +116,7 @@
     {
         "name": "texture_compression",
         "test_case": "texture_compression",
-        "description": "Block-compressed texture encode/decode invariants for every profile and family: payload layout, mip chain, and decode fidelity."
+        "description": "Block-compressed texture encode/decode invariants for every profile and family, plus source identity canonicalization rules."
     },
     {
         "name": "scene_load_failure",

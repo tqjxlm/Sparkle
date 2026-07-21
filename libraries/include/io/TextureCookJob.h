@@ -4,6 +4,7 @@
 #include "io/Material.h"
 #include "io/TextureCompression.h"
 
+#include <filesystem>
 #include <functional>
 
 namespace sparkle
@@ -55,6 +56,11 @@ void ForEachMaterialTexture(
     const std::function<void(const std::shared_ptr<Image2D> &, TextureCompression::Profile)> &visit);
 
 [[nodiscard]] bool IsCompressibleImagePath(const std::string &path);
+
+// packed-root-relative identity for a texture source: the scene's parent directory
+// joined with the authored path. empty when the result escapes the packed root
+// (absolute or leading ..), which makes the texture non-packageable
+[[nodiscard]] std::string MakeTextureIdentity(const std::filesystem::path &scene_parent, const std::string &authored);
 
 // a cookable material texture is an 8-bit image whose name is its packed-relative
 // source path (set by the scene loaders)

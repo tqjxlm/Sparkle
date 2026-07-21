@@ -183,9 +183,11 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
         // identity alone
         if (ctx.asset_root.type == PathType::Resource)
         {
-            const std::string identity =
-                (ctx.asset_root.path.parent_path() / image.asset_identifier).lexically_normal().generic_string();
-            return ResolveMaterialTexture(nullptr, identity, profile);
+            const std::string identity = MakeTextureIdentity(ctx.asset_root.path.parent_path(), image.asset_identifier);
+            if (!identity.empty())
+            {
+                return ResolveMaterialTexture(nullptr, identity, profile);
+            }
         }
 
         Log(Error, "USDLoader: texture image has no data: {}", image.asset_identifier);
