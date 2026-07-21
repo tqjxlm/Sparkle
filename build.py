@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import shlex
@@ -62,6 +63,42 @@ def default_cooked_image_dir(framework):
     return os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker_framework(framework)])
 
 
+def strip_consumed_texture_sources(image_dir):
+    """Deletes source images that cooked texture artifacts fully replace. The strip
+    manifest maps each source to the store manifest keys of its artifacts; a source is
+    deleted only when every one of them exists in the image, otherwise it ships and the
+    runtime falls back to it."""
+    manifest_path = os.path.join(image_dir, "cooked", "texture_sources.json")
+    if not os.path.isfile(manifest_path):
+        return 0
+
+    with open(manifest_path, encoding="utf-8") as manifest_file:
+        consumed = json.load(manifest_file)
+    if not isinstance(consumed, dict):
+        raise RuntimeError(
+            "texture_sources.json predates artifact verification: re-run the cook stage")
+
+    store_path = os.path.join(image_dir, "cooked", "manifest.json")
+    store = {}
+    if os.path.isfile(store_path):
+        with open(store_path, encoding="utf-8") as store_file:
+            store = json.load(store_file)
+
+    stripped = 0
+    for relative, artifact_keys in consumed.items():
+        missing = [key for key in artifact_keys
+                   if not os.path.isfile(os.path.join(image_dir, store.get(key, {}).get("artifact", "")))]
+        if not artifact_keys or missing:
+            print(f"keeping texture source {relative}: missing artifacts {missing or 'none recorded'}")
+            continue
+
+        source_path = os.path.join(image_dir, relative)
+        if os.path.isfile(source_path):
+            os.remove(source_path)
+            stripped += 1
+    return stripped
+
+
 def assemble_cooked_image(cooker):
     """The cook stage's product: a self-contained content image holding every raw
     asset passed through plus the cooked artifacts. The package stage swaps a
@@ -73,18 +110,8 @@ def assemble_cooked_image(cooker):
     shutil.copytree(os.path.join(SCRIPTPATH, COOKED_OUTPUT_DIR[cooker]),
                     os.path.join(image_dir, "cooked"))
 
-    consumed_manifest = os.path.join(image_dir, "cooked", "texture_sources.json")
-    if os.path.isfile(consumed_manifest):
-        import json
-        with open(consumed_manifest, encoding="utf-8") as manifest_file:
-            consumed = json.load(manifest_file)
-        stripped = 0
-        for relative in consumed:
-            source_path = os.path.join(image_dir, relative)
-            if os.path.isfile(source_path):
-                os.remove(source_path)
-                stripped += 1
-        print(f"stripped {stripped} texture sources from the content image")
+    stripped = strip_consumed_texture_sources(image_dir)
+    print(f"stripped {stripped} texture sources from the content image")
 
     print(f"Assembled cooked content image at {image_dir}")
 

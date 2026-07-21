@@ -34,11 +34,6 @@ std::shared_mutex &GetManifestMutex()
     return mutex;
 }
 
-std::string GetManifestKey(const CookArtifactKey &key)
-{
-    return key.type + ":" + key.source_name;
-}
-
 std::string GetArtifactPath(const CookArtifactKey &key)
 {
     CRC32 hasher;
@@ -140,7 +135,7 @@ CookPayload TryLoadManifestEntry(const nlohmann::json &entry, const CookArtifact
 
 CookPayload LoadFromStores(const CookArtifactKey &key)
 {
-    const auto manifest_key = GetManifestKey(key);
+    const auto manifest_key = CookArtifactStore::GetManifestKey(key);
 
     for (auto path_type : {PathType::Resource, PathType::Internal})
     {
@@ -178,6 +173,11 @@ CookPayload LoadFromStores(const CookArtifactKey &key)
     return {};
 }
 } // namespace
+
+std::string CookArtifactStore::GetManifestKey(const CookArtifactKey &key)
+{
+    return key.type + ":" + key.source_name;
+}
 
 CookPayload CookArtifactStore::Load(const CookArtifactKey &key)
 {

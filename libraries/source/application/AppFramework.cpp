@@ -12,6 +12,7 @@
 #include "core/FileManager.h"
 #include "core/Path.h"
 #include "core/Profiler.h"
+#include "core/cook/CookArtifactStore.h"
 #include "core/task/TaskManager.h"
 #include "io/TextureCookJob.h"
 #include "renderer/nrd/NrdConfig.h"
@@ -37,6 +38,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstring>
+#include <map>
 #include <set>
 #include <unordered_set>
 
@@ -261,7 +263,7 @@ bool AppFramework::Init()
 }
 
 static void CollectMaterialTextureJobs(const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs,
-                                       std::set<std::string> &consumed_sources)
+                                       std::map<std::string, std::set<std::string>> &consumed_sources)
 {
     std::unordered_set<std::string> seen;
     for (const auto *primitive : scene.GetPrimitives())
@@ -280,14 +282,19 @@ static void CollectMaterialTextureJobs(const Scene &scene, std::vector<std::uniq
                     return;
                 }
 
-                consumed_sources.insert(texture->GetName());
+                auto &artifact_keys = consumed_sources[texture->GetName()];
 
                 // every family cooks on the build host; packaging keeps only the family
                 // the target platform samples
                 for (auto family : {TextureCompression::Family::Astc, TextureCompression::Family::Bc})
                 {
                     auto job = std::make_unique<TextureCookJob>(texture, texture->GetName(), profile, family);
-                    if (seen.insert(std::string(job->GetType()) + ":" + job->GetSourceName()).second)
+                    auto manifest_key = CookArtifactStore::GetManifestKey({.type = job->GetType(),
+                                                                           .version = job->GetVersion(),
+                                                                           .source_name = job->GetSourceName(),
+                                                                           .source_hash = std::nullopt});
+                    artifact_keys.insert(manifest_key);
+                    if (seen.insert(std::move(manifest_key)).second)
                     {
                         jobs.push_back(std::move(job));
                     }
@@ -296,12 +303,17 @@ static void CollectMaterialTextureJobs(const Scene &scene, std::vector<std::uniq
     }
 }
 
-// the packaging stage strips these source files from the content image: their cooked
-// artifacts replace them (see dev/package_cooked.py and assemble_cooked_image). the
+// the packaging stage strips these source files from the content image after verifying
+// the artifacts each one maps to (see strip_consumed_texture_sources in build.py). the
 // cook output persists across runs, so an empty set must still overwrite a stale file
-static bool WriteConsumedTextureSources(const std::set<std::string> &consumed_sources)
+static bool WriteConsumedTextureSources(const std::map<std::string, std::set<std::string>> &consumed_sources)
 {
-    const nlohmann::json json = consumed_sources;
+    nlohmann::json json = nlohmann::json::object();
+    for (const auto &[source, artifact_keys] : consumed_sources)
+    {
+        json[source] = artifact_keys;
+    }
+
     const auto dump = json.dump(2);
     const auto written = FileManager::GetNativeFileManager()->Write(Path::Internal("cooked/texture_sources.json"),
                                                                     dump.data(), dump.size());
@@ -345,7 +357,7 @@ int AppFramework::RunCookMode()
     // scene loading must keep raw material textures so the plan can cook every family
     SetMaterialTextureInlineResolve(false);
 
-    std::set<std::string> consumed_texture_sources;
+    std::map<std::string, std::set<std::string>> consumed_texture_sources;
 
     const SceneCooker::JobPlan job_plan{
         .collect_scene_independent_jobs =

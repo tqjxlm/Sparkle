@@ -15,5 +15,8 @@ public:
 
     // Only resolved, non-empty outputs can be persisted.
     static bool Save(const CookArtifactKey &key, const CookPayload &payload);
+
+    // logical identity of an artifact as keyed in cooked/manifest.json
+    [[nodiscard]] static std::string GetManifestKey(const CookArtifactKey &key);
 };
 } // namespace sparkle
