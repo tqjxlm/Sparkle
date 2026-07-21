@@ -84,15 +84,19 @@ def strip_consumed_texture_sources(image_dir):
         with open(store_path, encoding="utf-8") as store_file:
             store = json.load(store_file)
 
+    image_root = os.path.realpath(image_dir)
     stripped = 0
     for relative, artifact_keys in consumed.items():
+        source_path = os.path.realpath(os.path.join(image_dir, relative))
+        if os.path.isabs(relative) or os.path.commonpath([source_path, image_root]) != image_root:
+            raise RuntimeError(f"texture source manifest entry escapes the content image: {relative}")
+
         missing = [key for key in artifact_keys
                    if not os.path.isfile(os.path.join(image_dir, store.get(key, {}).get("artifact", "")))]
         if not artifact_keys or missing:
             print(f"keeping texture source {relative}: missing artifacts {missing or 'none recorded'}")
             continue
 
-        source_path = os.path.join(image_dir, relative)
         if os.path.isfile(source_path):
             os.remove(source_path)
             stripped += 1

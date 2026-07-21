@@ -73,6 +73,26 @@ class StripConsumedTextureSourcesTest(unittest.TestCase):
         self.assertEqual(build_script.strip_consumed_texture_sources(self.image), 0)
         self.assertTrue(os.path.exists(source))
 
+    def test_rejects_escaping_entry_without_deleting(self):
+        outside = self.add_file("outside.png")
+        inner = os.path.join(self.image, "image")
+        os.makedirs(os.path.join(inner, "cooked"))
+        with open(os.path.join(inner, "cooked", "texture_sources.json"), "w",
+                  encoding="utf-8") as manifest_file:
+            json.dump({"../outside.png": [KEY]}, manifest_file)
+
+        with self.assertRaises(RuntimeError):
+            build_script.strip_consumed_texture_sources(inner)
+        self.assertTrue(os.path.exists(outside))
+
+    def test_rejects_absolute_entry(self):
+        target = self.add_file("victim.png")
+        self.write_manifests({target: [KEY]})
+
+        with self.assertRaises(RuntimeError):
+            build_script.strip_consumed_texture_sources(self.image)
+        self.assertTrue(os.path.exists(target))
+
     def test_rejects_legacy_list_manifest(self):
         source = self.add_file(SOURCE)
         self.write_manifests([SOURCE])
