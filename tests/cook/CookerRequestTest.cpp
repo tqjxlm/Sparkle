@@ -2,6 +2,7 @@
 
 #include "application/AppFramework.h"
 #include "application/RenderFramework.h"
+#include "core/ConfigManager.h"
 #include "core/FileManager.h"
 #include "core/Logger.h"
 #include "core/ThreadManager.h"
@@ -85,6 +86,8 @@ public:
             return RequestDuplicate();
         case Stage::WaitDuplicate:
             return WaitDuplicate();
+        case Stage::PackagedFallbackUnderRebuild:
+            return PackagedFallbackUnderRebuild();
         case Stage::WaitForRenderer:
             return app.GetRenderFramework()->IsReadyForAutoScreenshot() ? Result::Pass : Result::Pending;
         default:
@@ -103,6 +106,7 @@ private:
         WaitResolvedZeroMismatch,
         RequestDuplicate,
         WaitDuplicate,
+        PackagedFallbackUnderRebuild,
         WaitForRenderer,
     };
 
@@ -270,6 +274,39 @@ private:
         success &= Expect(duplicate_delivery_count_ == 2, "both requesters receive a delivery");
         success &= Expect(duplicate_all_match_, "both deliveries succeed with the shared payload on the main thread");
 
+        stage_ = Stage::PackagedFallbackUnderRebuild;
+        return success ? Result::Pending : Result::Fail;
+    }
+
+    Result PackagedFallbackUnderRebuild()
+    {
+        if (!CookArtifactStore::Save(FallbackKey, ExpectedPayload))
+        {
+            Log(Error, "{}: FAILED - could not seed artifact", GetName());
+            return Result::Fail;
+        }
+
+        auto *rebuild_config = ConfigManager::Instance().GetConfig<bool>("rebuild_cache");
+        if (rebuild_config == nullptr)
+        {
+            Log(Error, "{}: FAILED - rebuild_cache config not found", GetName());
+            return Result::Fail;
+        }
+
+        CookArtifactKey lookup_key = FallbackKey;
+        lookup_key.source_hash.reset();
+
+        const bool previous = rebuild_config->Get();
+        rebuild_config->Set(true);
+        auto result = Cooker::CookNow(lookup_key, []() -> std::shared_ptr<CookJob> { return nullptr; });
+        rebuild_config->Set(previous);
+
+        bool success = true;
+        success &= Expect(result.status == CookResult::Status::Ready,
+                          "sourceless lookup under rebuild_cache resolves the stored artifact");
+        success &= Expect(result.payload == ExpectedPayload,
+                          "sourceless lookup under rebuild_cache returns the stored payload");
+
         stage_ = Stage::WaitForRenderer;
         return success ? Result::Pending : Result::Fail;
     }
@@ -316,6 +353,10 @@ private:
                                                      .version = 1,
                                                      .source_name = "assets/duplicate/contract.bin",
                                                      .source_hash = 0x77aa55cc};
+    inline static const CookArtifactKey FallbackKey{.type = "cooker_request_test_fallback",
+                                                    .version = 1,
+                                                    .source_name = "assets/fallback/contract.bin",
+                                                    .source_hash = 0x19d2c3b4};
     inline static const std::vector<char> ExpectedPayload{'c', 'o', 'o', 'k', 'e', 'd'};
     inline static const CookPayload DuplicatePayload{'s', 'h', 'a', 'r', 'e', 'd'};
 

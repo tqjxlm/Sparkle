@@ -179,12 +179,15 @@ std::string CookArtifactStore::GetManifestKey(const CookArtifactKey &key)
     return key.type + ":" + key.source_name;
 }
 
-CookPayload CookArtifactStore::Load(const CookArtifactKey &key)
+CookPayload CookArtifactStore::Load(const CookArtifactKey &key, bool ignore_rebuild_config)
 {
-    auto *rebuild_config = ConfigManager::Instance().GetConfig<bool>("rebuild_cache");
-    if (rebuild_config != nullptr && rebuild_config->Get())
+    if (!ignore_rebuild_config)
     {
-        return {};
+        auto *rebuild_config = ConfigManager::Instance().GetConfig<bool>("rebuild_cache");
+        if (rebuild_config != nullptr && rebuild_config->Get())
+        {
+            return {};
+        }
     }
 
     std::shared_lock<std::shared_mutex> lock(GetManifestMutex());

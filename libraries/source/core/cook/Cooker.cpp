@@ -83,6 +83,13 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
     auto job = make_job();
     if (!job)
     {
+        // a null factory means there is no source to recook from; a packaged artifact
+        // is the only copy and must resolve even under rebuild_cache
+        if (auto payload = CookArtifactStore::Load(lookup_key, true); !payload.empty())
+        {
+            return {.status = CookResult::Status::Ready, .payload = std::move(payload)};
+        }
+
         Log(Error, "cannot cook {}: {}: source job creation failed", lookup_key.type, lookup_key.source_name);
         return {.status = CookResult::Status::JobUnavailable, .payload = {}};
     }

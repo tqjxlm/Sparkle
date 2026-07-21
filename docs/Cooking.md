@@ -33,7 +33,7 @@ An artifact lives at `cooked/<type>/<source stem>_<name hash>.cook` (named by a 
 
 A request whose key has no source hash performs a logical lookup and validates against the hash recorded in the manifest internally. Zero remains a valid resolved hash. If the logical path misses, the worker-side factory loads the source and computes its content hash; the cooker then searches same-type artifacts by version and content before executing the job. This lets relocated but identical assets — such as a sky map copied beside a USD export — reuse an artifact without reducing identity to a collision-prone filename.
 
-Invalidation is automatic: bump the job's `version` when the algorithm or payload layout changes, and the source content hash covers asset edits where the source exists. The `rebuild_cache` config forces a miss on every lookup.
+Invalidation is automatic: bump the job's `version` when the algorithm or payload layout changes, and the source content hash covers asset edits where the source exists. The `rebuild_cache` config forces a miss on every lookup whose requester can recook; a lookup with no source data behind it (a stripped package) still resolves the packaged artifact.
 
 Saves are atomic: artifact and manifest are written to a temporary file and renamed into place, so a crash or a concurrent reader never observes partial content.
 
