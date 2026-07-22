@@ -1,0 +1,7 @@
+#include "core/GitVersion.h"
+
+namespace sparkle
+{
+const char *const GitCommit = "@GIT_COMMIT@";
+const char *const GitBranch = "@GIT_BRANCH@";
+} // namespace sparkle

@@ -10,6 +10,7 @@
 #include "core/CoreStates.h"
 #include "core/Event.h"
 #include "core/FileManager.h"
+#include "core/GitVersion.h"
 #include "core/Path.h"
 #include "core/Profiler.h"
 #include "core/cook/CookArtifactStore.h"
@@ -109,6 +110,7 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
 
     // after this point, we can use LN_LOG
     Log(Info, "Program started");
+    Log(Info, "Git version: {} ({})", GitCommit, GitBranch);
 
     PROFILE_SCOPE_LOG("Init core");
 
