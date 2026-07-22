@@ -101,6 +101,29 @@ else()
     target_compile_definitions(sparkle PRIVATE ENABLE_TEST_CASES=0)
 endif()
 
+# ------------------ git version stamp ------------------
+
+# stamped on every build (not configure) so the binary reports the tree state it was
+# actually built from; the script skips rewriting when nothing changed
+set(GIT_VERSION_SOURCE ${CMAKE_BINARY_DIR}/generated/GitVersion.cpp)
+set(GIT_VERSION_ARGS
+    -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+    -DTEMPLATE=${CMAKE_SOURCE_DIR}/cmake/GitVersion.cpp.in
+    -DOUTPUT=${GIT_VERSION_SOURCE})
+
+# generate once at configure time so the source exists for project generation and clangd
+execute_process(COMMAND ${CMAKE_COMMAND} ${GIT_VERSION_ARGS}
+    -P ${CMAKE_SOURCE_DIR}/cmake/GitVersion.cmake)
+
+add_custom_target(stamp-git-version
+    COMMAND ${CMAKE_COMMAND} ${GIT_VERSION_ARGS} -P ${CMAKE_SOURCE_DIR}/cmake/GitVersion.cmake
+    BYPRODUCTS ${GIT_VERSION_SOURCE}
+    COMMENT "Stamping git version"
+)
+
+add_dependencies(sparkle stamp-git-version)
+target_sources(sparkle PRIVATE ${GIT_VERSION_SOURCE})
+
 # ------------------ compiler configuration ------------------
 
 # global macro header that should be included in every source file imiplicitly
