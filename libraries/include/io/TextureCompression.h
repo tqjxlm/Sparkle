@@ -36,8 +36,9 @@ public:
     };
 
     // desktop GPUs have no ASTC; Apple and Android GPUs prefer ASTC over BC. keyed on
-    // the OS, not the framework: glfw on macOS samples through MoltenVK on an Apple GPU
-    // and must agree with the astc-family package (see dev/package_cooked.py)
+    // the OS, not the framework: glfw on macOS samples through MoltenVK on an Apple GPU.
+    // must agree per target with CookTargetFamilies in AppFramework.cpp, which decides
+    // the family a target's packaged content carries
 #if defined(__APPLE__) || defined(__ANDROID__)
     static constexpr Family PlatformFamily = Family::Astc;
 #else

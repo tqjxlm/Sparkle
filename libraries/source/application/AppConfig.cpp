@@ -21,6 +21,11 @@ static ConfigValue<bool> config_load_last_session("load_last_session",
 static ConfigValue<bool> config_headless("headless", "run without creating a window (not supported on iOS)", "app",
                                          false);
 static ConfigValue<bool> config_cook("cook", "cook all content for the bundled cook list, then exit", "app", false);
+static ConfigValue<std::string> config_cook_targets("cook_targets",
+                                                    "'+'-separated target platforms a cook run produces content for "
+                                                    "(android, ios, macos, macos-glfw, windows-glfw, linux-glfw); "
+                                                    "empty = this binary's own platform",
+                                                    "app", "");
 
 #if ENABLE_TEST_CASES
 static ConfigValue<std::string> config_test_case("test_case", "name of test case to run on scene load", "app", "");
@@ -54,6 +59,7 @@ void AppConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_load_last_session, load_last_session);
     ConfigCollectionHelper::RegisterConfig(this, config_headless, headless);
     ConfigCollectionHelper::RegisterConfig(this, config_cook, cook_mode);
+    ConfigCollectionHelper::RegisterConfig(this, config_cook_targets, cook_targets);
 
 #if ENABLE_TEST_CASES
     ConfigCollectionHelper::RegisterConfig(this, config_test_case, test_case);

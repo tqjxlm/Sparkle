@@ -50,17 +50,27 @@ COOKED_IMAGE_DIR = {
 }
 
 
+# must match CookTargetFamilies in AppFramework.cpp; glfw targets carry the host OS
+COOK_TARGETS = ("android", "ios", "macos", "macos-glfw", "windows-glfw", "linux-glfw")
+
+
+def cook_target(framework):
+    """The cook-target identity of a framework built on this host (matches product_name)."""
+    if framework == "glfw":
+        return f"{host_system_name()}-glfw"
+    return framework
+
+
 def cooker_framework(framework):
     """The framework whose binary executes the cook: itself when host-runnable,
-    otherwise the host framework (artifacts are shared across targets)."""
+    otherwise the host framework (the artifact pool is shared across targets)."""
     return framework if framework in COOK_FRAMEWORKS else HOST_COOK_FRAMEWORK
 
 
 def default_cooked_image_dir(framework):
-    """Where the package stage finds the cooked content image by default: the host
-    cooker's assembled image, anchored to the repo root because builders may chdir
-    during build."""
-    return os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker_framework(framework)])
+    """Where the package stage finds the framework's cooked content image by default,
+    anchored to the repo root because builders may chdir during build."""
+    return os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker_framework(framework)], cook_target(framework))
 
 
 def resolve_image_member(image_root, relative, description):
@@ -81,70 +91,83 @@ def resolve_image_member(image_root, relative, description):
     return resolved
 
 
-def strip_consumed_texture_sources(image_dir):
-    """Deletes source images that cooked texture artifacts fully replace. The strip
-    manifest maps each source to the store manifest keys of its artifacts; a source is
-    deleted only when every one of them exists in the image, otherwise it ships and the
-    runtime falls back to it."""
-    manifest_path = os.path.join(image_dir, "cooked", "texture_sources.json")
-    if not os.path.isfile(manifest_path):
-        return 0
+def load_json(path, description):
+    if not os.path.isfile(path):
+        raise RuntimeError(f"{description} missing at {path}; run the cook stage first")
+    with open(path, encoding="utf-8") as json_file:
+        return json.load(json_file)
 
-    with open(manifest_path, encoding="utf-8") as manifest_file:
-        consumed = json.load(manifest_file)
-    if not isinstance(consumed, dict):
+
+def project_artifacts(pool_dir, target_products, image_dir):
+    """Copies the target plan's artifact payloads out of the pool and returns the
+    projected manifest. Every artifact must verify: a cooked package never ships a
+    plan entry it cannot back."""
+    pool_manifest = load_json(os.path.join(pool_dir, "manifest.json"), "cook manifest")
+    pool_root = os.path.realpath(os.path.dirname(pool_dir))
+
+    image_manifest = {}
+    for key in target_products["artifacts"]:
+        entry = pool_manifest.get(key)
+        artifact = entry.get("artifact", "") if isinstance(entry, dict) else ""
+        if not artifact:
+            raise RuntimeError(f"artifact {key} missing from the cook manifest; re-run the cook stage")
+        payload = resolve_image_member(pool_root, artifact, f"artifact {key}")
+        if not os.path.isfile(payload):
+            raise RuntimeError(f"artifact payload missing for {key}: {artifact}")
+
+        destination = os.path.join(image_dir, artifact)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy(payload, destination)
+        image_manifest[key] = entry
+    return image_manifest
+
+
+def assemble_cooked_image(cooker, target):
+    """The cook stage's product for one target: a content image projected from the
+    artifact pool by the target's plan (cook_products.json). Every packed asset ships
+    as itself unless the plan replaces it with verified artifacts; a source whose
+    artifacts fail verification ships as the runtime fallback."""
+    pool_dir = os.path.join(SCRIPTPATH, COOKED_OUTPUT_DIR[cooker])
+    products = load_json(os.path.join(pool_dir, "cook_products.json"), "cook products manifest")
+    if target not in products:
         raise RuntimeError(
-            "texture_sources.json predates artifact verification: re-run the cook stage")
+            f"cook output has no target '{target}' (has: {', '.join(sorted(products))});"
+            f" re-run the cook stage with --cook_targets {target}")
 
-    store_path = os.path.join(image_dir, "cooked", "manifest.json")
-    store = {}
-    if os.path.isfile(store_path):
-        with open(store_path, encoding="utf-8") as store_file:
-            store = json.load(store_file)
-
-    image_root = os.path.realpath(image_dir)
-    source_paths = {
-        relative: resolve_image_member(image_root, relative, "texture source manifest entry")
-        for relative in consumed
-    }
-    strip_candidates = []
-    for relative, artifact_keys in consumed.items():
-        missing = []
-        for key in artifact_keys:
-            artifact = store.get(key, {}).get("artifact", "")
-            if not artifact:
-                missing.append(key)
-                continue
-            artifact_path = resolve_image_member(image_root, artifact, f"texture artifact {key}")
-            if not os.path.isfile(artifact_path):
-                missing.append(key)
-        if not artifact_keys or missing:
-            print(f"keeping texture source {relative}: missing artifacts {missing or 'none recorded'}")
-            continue
-
-        if os.path.isfile(source_paths[relative]):
-            strip_candidates.append(source_paths[relative])
-
-    for source_path in strip_candidates:
-        os.remove(source_path)
-    return len(strip_candidates)
-
-
-def assemble_cooked_image(cooker):
-    """The cook stage's product: a self-contained content image holding every raw
-    asset passed through plus the cooked artifacts. The package stage swaps a
-    product's packed content for this directory. Sources consumed into compressed
-    texture artifacts ship as artifacts only."""
-    image_dir = os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker])
+    image_dir = os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker], target)
     shutil.rmtree(image_dir, ignore_errors=True)
-    shutil.copytree(os.path.join(SCRIPTPATH, "resources", "packed"), image_dir)
-    shutil.copytree(os.path.join(SCRIPTPATH, COOKED_OUTPUT_DIR[cooker]),
-                    os.path.join(image_dir, "cooked"))
 
-    stripped = strip_consumed_texture_sources(image_dir)
-    print(f"stripped {stripped} texture sources from the content image")
+    image_manifest = project_artifacts(pool_dir, products[target], image_dir)
 
-    print(f"Assembled cooked content image at {image_dir}")
+    consumed_sources = products[target]["consumed_sources"]
+    packed_dir = os.path.join(SCRIPTPATH, "resources", "packed")
+    if not os.path.isdir(packed_dir):
+        raise RuntimeError(f"packed resources missing at {packed_dir}; run resources setup first")
+    replaced = 0
+    for root, _, names in os.walk(packed_dir):
+        for name in names:
+            source = os.path.join(root, name)
+            relative = os.path.relpath(source, packed_dir).replace(os.sep, "/")
+            replacing_keys = consumed_sources.get(relative)
+            if replacing_keys and all(key in image_manifest for key in replacing_keys):
+                replaced += 1
+                continue
+            if replacing_keys:
+                print(f"keeping consumed source {relative}: its artifacts failed verification")
+            destination = os.path.join(image_dir, relative)
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            shutil.copy(source, destination)
+
+    # written last so an interrupted assembly never passes downstream manifest checks
+    cooked_dir = os.path.join(image_dir, "cooked")
+    os.makedirs(cooked_dir, exist_ok=True)
+    with open(os.path.join(cooked_dir, "content_target.json"), "w", encoding="utf-8") as target_file:
+        json.dump({"target": target}, target_file, indent=2)
+    with open(os.path.join(cooked_dir, "manifest.json"), "w", encoding="utf-8") as manifest_file:
+        json.dump(image_manifest, manifest_file, indent=2)
+
+    print(f"Assembled cooked content image for {target} at {image_dir}:"
+          f" {len(image_manifest)} artifacts, {replaced} sources replaced")
 
 
 def resolve_stages(stage_args, framework):
@@ -160,8 +183,9 @@ def resolve_stages(stage_args, framework):
     return [stage for stage in STAGES if stage in selected]
 
 
-def validate_stages(stages, framework):
+def validate_stages(stages, args):
     """Stages never run an upstream stage implicitly: missing inputs fail fast."""
+    framework = args["framework"]
     if "cook" in stages:
         cooker = cooker_framework(framework)
         binary_exists = os.path.exists(os.path.join(SCRIPTPATH, BINARY_PATH[cooker]))
@@ -170,6 +194,14 @@ def validate_stages(stages, framework):
             raise RuntimeError(
                 f"cooking for '{framework}' runs the {cooker} binary, which is missing at"
                 f" {BINARY_PATH[cooker]}; build it first: python3 build.py --framework {cooker}")
+
+    # uncooked packages are disallowed by design even though the runtime could cook
+    if "package" in stages and "cook" not in stages:
+        image_dir = args["cooked"] or default_cooked_image_dir(framework)
+        if not os.path.isfile(os.path.join(image_dir, "cooked", "manifest.json")):
+            raise RuntimeError(
+                f"the package stage needs a cooked content image; none at {image_dir}."
+                f" run: python3 build.py --framework {framework} --stage cook")
 
 
 def construct_additional_cmake_options(parsed_args, cmake_args=None):
@@ -202,7 +234,11 @@ def parse_args(args=None):
                         " Cross-compiled frameworks cook through the host framework's binary")
     parser.add_argument("--cooked",
                         help="Cooked content image directory for the package stage"
-                        " (default: the host cooker's assembled image)")
+                        " (default: the built framework's own image from the host cook)")
+    parser.add_argument("--cook_targets",
+                        help="'+'-separated cook targets the cook stage produces content"
+                        f" images for (default: the built framework's own target);"
+                        f" known targets: {', '.join(COOK_TARGETS)}")
     parser.add_argument("--asan", action="store_true",
                         help="Enable AddressSanitizer")
     parser.add_argument("--profile", action="store_true",
@@ -234,11 +270,22 @@ def parse_args(args=None):
     # Unknown args pass through to the app (cook stage runs and run.py launches)
     parsed_args, unknown_args = parser.parse_known_args(args)
 
+    cook_targets = None
+    if parsed_args.cook_targets:
+        cook_targets = [target for target in parsed_args.cook_targets.split("+") if target]
+        unknown_targets = sorted(set(cook_targets) - set(COOK_TARGETS))
+        if unknown_targets:
+            parser.error(f"unknown cook target(s) {', '.join(unknown_targets)};"
+                         f" known targets: {', '.join(COOK_TARGETS)}")
+        if not cook_targets:
+            parser.error("no cook target requested")
+
     return {
         "framework": parsed_args.framework,
         "config": parsed_args.config,
         "stages": resolve_stages(parsed_args.stage, parsed_args.framework),
         "cooked": parsed_args.cooked,
+        "cook_targets": cook_targets,
         "cmake_options": construct_additional_cmake_options(parsed_args, parsed_args.cmake_args),
         "unknown_args": unknown_args,
         "android_abi": parsed_args.android_abi,
@@ -342,23 +389,29 @@ def copy_build_products(product_archive_path, args):
     return product_final_path
 
 
+def archive_product(builder, args):
+    """The raw build product: the built app archived and named, with no cooked
+    content. CI build nodes upload it through dev/archive_product.py; the package
+    stage turns it into a shippable package."""
+    print("Archiving...")
+    archive_path = builder.archive(args)
+    return copy_build_products(archive_path, args)
+
+
 def package_project(builder, args):
     sys.path.insert(0, os.path.join(SCRIPTPATH, "dev"))
     from package_cooked import PackagingError, package_cooked
 
-    print("Archiving...")
-    archive_path = builder.archive(args)
-    product_path = copy_build_products(archive_path, args)
+    product_path = archive_product(builder, args)
 
     image_dir = args["cooked"] or default_cooked_image_dir(args["framework"])
     try:
-        placed = package_cooked(product_path, args["framework"], image_dir,
-                                target_system=host_system_name())
+        package_cooked(product_path, args["framework"], image_dir,
+                       target=cook_target(args["framework"]))
     except PackagingError as error:
         raise RuntimeError(f"package stage failed: {error}") from error
 
-    if placed:
-        builder.resign_package(product_path)
+    builder.resign_package(product_path)
     args["product_path"] = product_path
 
 
@@ -383,7 +436,7 @@ def build_project(args):
         return
 
     stages = args["stages"]
-    validate_stages(stages, args["framework"])
+    validate_stages(stages, args)
 
     if "build" in stages:
         print("Building...")
@@ -393,16 +446,18 @@ def build_project(args):
 
     if "cook" in stages:
         cooker = cooker_framework(args["framework"])
-        print(f"Cooking with the {cooker} binary...")
+        targets = args["cook_targets"] or [cook_target(args["framework"])]
+        print(f"Cooking with the {cooker} binary for: {'+'.join(targets)}")
         cook_args = dict(args)
         cook_args["framework"] = cooker
-        cook_args["unknown_args"] = ["--cook", "true",
+        cook_args["unknown_args"] = ["--cook", "true", "--cook_targets", "+".join(targets),
                                      "--log_path", "logs/cook.log"] + args["unknown_args"]
         cook_builder = builder if cooker == args["framework"] else create_builder(cooker)
         exit_code = cook_builder.run(cook_args)
         if exit_code is not None and exit_code != 0:
             sys.exit(exit_code)
-        assemble_cooked_image(cooker)
+        for target in targets:
+            assemble_cooked_image(cooker, target)
 
     if "package" in stages:
         package_project(builder, args)

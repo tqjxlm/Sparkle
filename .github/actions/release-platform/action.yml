@@ -44,10 +44,10 @@ runs:
         name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
         path: build_system/${{ inputs.framework }}/product
 
-    - name: Download cooked content image
+    - name: Download cooked content images
       uses: actions/download-artifact@v8
       with:
-        name: cooked-shared
+        name: cooked-images
         path: cooked
 
     - name: Resolve package path
@@ -60,22 +60,25 @@ runs:
           ubuntu-latest) target_system=linux ;;
           *) echo "Unsupported target system: ${{ inputs.os }}" >&2; exit 1 ;;
         esac
-        echo "target_system=$target_system" >> $GITHUB_OUTPUT
 
         # products are named by target; only glfw carries the host system in its name
         if [ "${{ inputs.framework }}" = "glfw" ]; then
-          pkg=$(ls build_system/glfw/product/${target_system}-glfw-${{ inputs.build-type }}.*)
+          target=${target_system}-glfw
+          pkg=$(ls build_system/glfw/product/${target}-${{ inputs.build-type }}.*)
         else
-          pkg=$(ls build_system/${{ inputs.framework }}/product/${{ inputs.framework }}-${{ inputs.build-type }}.*)
+          target=${{ inputs.framework }}
+          pkg=$(ls build_system/${{ inputs.framework }}/product/${target}-${{ inputs.build-type }}.*)
         fi
+        echo "target=$target" >> $GITHUB_OUTPUT
         echo "path=$pkg" >> $GITHUB_OUTPUT
 
     - name: Package cooked content image
       shell: bash
       run: >-
         python3 dev/package_cooked.py --framework ${{ inputs.framework }}
-        --package "${{ steps.package.outputs.path }}" --cooked cooked
-        --target-system "${{ steps.package.outputs.target_system }}"
+        --package "${{ steps.package.outputs.path }}"
+        --cooked "cooked/${{ steps.package.outputs.target }}"
+        --target "${{ steps.package.outputs.target }}"
 
     # rewriting the apk breaks its alignment and signature; restore both with the
     # standard debug key, matching the gradle signing config

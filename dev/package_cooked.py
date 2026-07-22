@@ -1,16 +1,19 @@
-"""Package the cooked content image into a build product archive.
+"""Package a target's cooked content image into a build product archive.
 
-The cook stage emits a self-contained content image: every raw asset passed
-through unchanged plus the derived artifacts under cooked/. Packaging replaces
-the archive's content under the packed root with that image; build-owned
-subtrees (compiled shaders) are kept. A missing image only warns: the package
-then ships the build's raw assets and cooks at runtime. The package stage of
+The cook stage emits one self-contained content image per cook target: the raw
+assets its plan passes through plus the projected artifacts under cooked/. The
+image self-declares its target (cooked/content_target.json) and packaging
+asserts it matches the product's target — content is never guessed from
+archive names. Packaging replaces the archive's content under the packed root
+with the image; build-owned subtrees (compiled shaders) are kept. Packages
+always carry cooked content: a missing image is an error. The package stage of
 build.py uses this module directly; CI release nodes that package another
 platform's archive use the CLI. Internal runtime state (logs, caches the app
 wrote on a dev machine) is stripped from the archive; signed packages (apk,
 ipa, macos app) must be re-signed afterwards.
 """
 import argparse
+import json
 import os
 import posixpath
 import shutil
@@ -35,34 +38,6 @@ INTERNAL_STATE_PREFIX = {
     "macos": "sparkle.app/Contents/SharedSupport/",
 }
 
-# one compressed-texture family ships per product; the other is dead weight for its GPUs
-TEXTURE_FAMILY_DIRS = {"astc": "cooked/texture_astc/", "bc": "cooked/texture_bc/"}
-
-# glfw is the one framework whose target OS is not implied by the framework itself
-GLFW_SYSTEM_FAMILY = {"macos": "astc", "windows": "bc", "linux": "bc"}
-
-
-def texture_family(framework, package, target_system=None):
-    """ASTC for Apple and Android GPUs, BC for other desktop GPUs. glfw products carry
-    their target system in the package name (see build.py product_name); an explicit
-    target must agree with a recognizably named archive. Never guesses: an archive
-    whose target cannot be established fails instead of shipping the wrong family."""
-    if framework != "glfw":
-        return "astc"
-
-    named_system = os.path.basename(package).split("-")[0]
-    if target_system is None:
-        target_system = named_system
-    elif named_system in GLFW_SYSTEM_FAMILY and named_system != target_system:
-        raise PackagingError(
-            f"glfw package {package} is named for {named_system} but targets {target_system}")
-
-    if target_system not in GLFW_SYSTEM_FAMILY:
-        raise PackagingError(f"cannot establish the texture family of glfw package {package}")
-
-    return GLFW_SYSTEM_FAMILY[target_system]
-
-
 ANDROID_ASSET_ROOT = "assets/"
 ANDROID_DIR_MANIFEST = "_dir_manifest.txt"
 
@@ -71,11 +46,22 @@ class PackagingError(RuntimeError):
     pass
 
 
-def collect_image(image_dir):
-    """The image's files keyed by packed-root-relative posix path, or None when
-    there is no usable image."""
+def collect_image(image_dir, target):
+    """The image's files keyed by packed-root-relative posix path. Raises unless the
+    image exists and self-declares the expected target."""
     if not image_dir or not os.path.isfile(os.path.join(image_dir, "cooked", "manifest.json")):
-        return None
+        raise PackagingError(
+            f"no cooked content image at {image_dir}; run the cook stage for target {target} first")
+
+    marker_path = os.path.join(image_dir, "cooked", "content_target.json")
+    try:
+        with open(marker_path, encoding="utf-8") as marker_file:
+            declared = json.load(marker_file).get("target")
+    except (OSError, ValueError) as error:
+        raise PackagingError(f"unreadable content target marker at {marker_path}: {error}") from error
+    if declared != target:
+        raise PackagingError(
+            f"content image at {image_dir} is for target '{declared}', not '{target}'")
 
     files = {}
     for root, _, names in os.walk(image_dir):
@@ -122,13 +108,10 @@ def strip_internal_state(package, internal_prefix):
     return stripped
 
 
-def package_cooked(package, framework, image_dir, target_system=None):
+def package_cooked(package, framework, image_dir, target):
     """Returns the number of image files placed into the archive. Raises
-    PackagingError on contract violations.
-
-    A package without cooked content is functional (each cook job falls back to
-    raw assets and cooks at runtime), so a missing image only warns.
-    """
+    PackagingError on contract violations, including a missing image: packages
+    always carry cooked content."""
     packed_root = PACKED_ROOT[framework]
     root_dir = packed_root.split("/")[0] + "/"
     internal_prefix = INTERNAL_STATE_PREFIX.get(framework)
@@ -139,17 +122,7 @@ def package_cooked(package, framework, image_dir, target_system=None):
         raise PackagingError(
             f"{package} has no entries under {root_dir}: unexpected package layout")
 
-    image_files = collect_image(image_dir)
-    if image_files is None:
-        print(f"WARNING: no cooked content image at {image_dir}: the package will cook at runtime")
-        if internal_prefix:
-            strip_internal_state(package, internal_prefix)
-        return 0
-
-    family = texture_family(framework, package, target_system)
-    dropped_families = tuple(prefix for name, prefix in TEXTURE_FAMILY_DIRS.items() if name != family)
-    image_files = {relative: path for relative, path in image_files.items()
-                   if not relative.startswith(dropped_families)}
+    image_files = collect_image(image_dir, target)
 
     claimed = {relative.split("/")[0] for relative in image_files} & set(BUILD_OWNED_SUBTREES)
     if claimed:
@@ -194,12 +167,13 @@ def main():
     parser.add_argument("--framework", required=True, choices=sorted(PACKED_ROOT))
     parser.add_argument("--package", required=True, help="product archive (zip/apk/ipa)")
     parser.add_argument("--cooked", required=True, help="cooked content image directory")
-    parser.add_argument("--target-system", choices=sorted(GLFW_SYSTEM_FAMILY),
-                        help="glfw target system; checked against a recognized archive name")
+    parser.add_argument("--target", required=True,
+                        help="the product's cook target (e.g. android, windows-glfw);"
+                        " must match the image's self-declared target")
     args = parser.parse_args()
 
     try:
-        package_cooked(args.package, args.framework, args.cooked, args.target_system)
+        package_cooked(args.package, args.framework, args.cooked, args.target)
     except PackagingError as error:
         sys.exit(str(error))
 

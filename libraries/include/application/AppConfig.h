@@ -28,6 +28,7 @@ struct AppConfig : public ConfigCollection
     bool load_last_session;
     bool headless;
     bool cook_mode;
+    std::string cook_targets;
 
 #if ENABLE_TEST_CASES
     std::string test_case;

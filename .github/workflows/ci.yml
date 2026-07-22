@@ -89,8 +89,9 @@ jobs:
         run: python3 dev/check_tidy.py
 
   # stages: build (every product in parallel, the heavy stage) -> cook (macos-release,
-  # on the macos runners' real Metal GPU) -> release (swap in the cooked content image
-  # and re-sign; on ubuntu unless apple signing needs a macos runner) -> test (the
+  # on the macos runners' real Metal GPU, one content image per cook target) -> release
+  # (swap in the product's own image and re-sign; on ubuntu unless apple signing needs
+  # a macos runner) -> test (the
   # products tests/coverage.csv covers). Debug builds are compile gates only: nothing
   # releases or tests them. every edge is a real needs edge; jobs are unrolled from the
   # product table because needs cannot target a single matrix cell.
@@ -366,7 +367,7 @@ jobs:
           # a hung app never fails the step on its own; kill it so the diagnostics below run
           ( sleep 900 && echo "cook watchdog fired" && pkill -f sparkle.app/Contents/MacOS/sparkle ) &
           WATCHDOG=$!
-          if ! python3 build.py --framework macos --config Release --stage cook ${{ steps.setup-environment.outputs.build-args }}; then
+          if ! python3 build.py --framework macos --config Release --stage cook --cook_targets macos+ios+macos-glfw+windows-glfw+linux-glfw+android ${{ steps.setup-environment.outputs.build-args }}; then
             kill $WATCHDOG 2>/dev/null || true
             echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
             echo "=== crash reports ==="
@@ -375,12 +376,14 @@ jobs:
             exit 1
           fi
           kill $WATCHDOG 2>/dev/null || true
-          test -f build_system/macos/output/cooked_image/cooked/manifest.json
+          for target in macos ios macos-glfw windows-glfw linux-glfw android; do
+            test -f "build_system/macos/output/cooked_image/$target/cooked/manifest.json"
+          done
 
-      - name: Upload cooked content image
+      - name: Upload cooked content images
         uses: actions/upload-artifact@v7
         with:
-          name: cooked-shared
+          name: cooked-images
           path: build_system/macos/output/cooked_image
 
   release-macos-macos:
