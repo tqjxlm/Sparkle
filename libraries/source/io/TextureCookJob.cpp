@@ -1,5 +1,6 @@
 #include "io/TextureCookJob.h"
 
+#include "core/Hash.h"
 #include "core/Logger.h"
 #include "core/cook/Cooker.h"
 
@@ -10,6 +11,14 @@ namespace sparkle
 namespace
 {
 std::atomic<bool> inline_resolve_enabled{true};
+
+bool HasTexturePathRoot(const std::string &path)
+{
+    const bool drive_qualified = path.size() >= 2 &&
+                                 ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+                                 path[1] == ':';
+    return !path.empty() && (path.front() == '/' || path.front() == '\\' || drive_qualified);
+}
 
 const char *GetProfileName(TextureCompression::Profile profile)
 {
@@ -47,7 +56,12 @@ TextureCookJob::TextureCookJob(std::shared_ptr<const Image2D> source, std::strin
 
 uint32_t TextureCookJob::GetSourceHash() const
 {
-    return source_->GetContentHash();
+    auto hash = source_->GetContentHash();
+    if (profile_ != TextureCompression::Profile::Color)
+    {
+        HashCombine(hash, profile_);
+    }
+    return hash;
 }
 
 CookJobResult TextureCookJob::Execute()
@@ -83,13 +97,15 @@ std::string MakeTextureIdentity(const std::filesystem::path &scene_parent, const
     }
 
     const std::filesystem::path authored_path(authored);
-    if (authored_path.is_absolute())
+    if (HasTexturePathRoot(authored) || authored_path.has_root_name() || authored_path.has_root_directory())
     {
         return {};
     }
 
-    auto identity = (scene_parent / authored_path).lexically_normal().generic_string();
-    if (identity == ".." || identity.starts_with("../"))
+    const auto identity_path = (scene_parent / authored_path).lexically_normal();
+    auto identity = identity_path.generic_string();
+    if (HasTexturePathRoot(identity) || identity_path.has_root_name() || identity_path.has_root_directory() ||
+        identity == ".." || identity.starts_with("../"))
     {
         return {};
     }

@@ -11,9 +11,9 @@ class CookArtifactStore
 public:
     // Resolves packaged content before the writable internal cache. An unresolved key
     // uses its logical identity; a resolved key may reuse identical relocated content.
-    // ignore_rebuild_config serves requesters that cannot recook: rebuild_cache must
-    // not hide the only remaining copy of a packaged artifact
-    [[nodiscard]] static CookPayload Load(const CookArtifactKey &key, bool ignore_rebuild_config = false);
+    // rebuild_cache skips only the writable cache because packaged artifacts cannot be
+    // rebuilt in place.
+    [[nodiscard]] static CookPayload Load(const CookArtifactKey &key);
 
     // Only resolved, non-empty outputs can be persisted.
     static bool Save(const CookArtifactKey &key, const CookPayload &payload);

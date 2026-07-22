@@ -96,7 +96,8 @@
     {
         "name": "usd_loader_semantics",
         "test_case": "usd_loader_semantics",
-        "description": "USD decoded texture, converted light, and mesh attribute semantics."
+        "description": "USD scene semantics and packaged USD/glTF texture identity resolution under cache rebuild.",
+        "app_args": ["--rebuild_cache", "true"]
     },
     {
         "name": "input_injection",

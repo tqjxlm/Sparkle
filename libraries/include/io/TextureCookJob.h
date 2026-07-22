@@ -15,7 +15,7 @@ namespace sparkle
 class TextureCookJob : public CookJob
 {
 public:
-    static constexpr uint32_t Version = 1;
+    static constexpr uint32_t Version = 2;
 
     [[nodiscard]] static const char *GetTypeName(TextureCompression::Family family);
 

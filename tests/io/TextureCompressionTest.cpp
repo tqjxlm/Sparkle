@@ -30,6 +30,10 @@ class TextureCompressionTest : public TestCase
                 success &= VerifyRoundTrip(profile, family);
             }
         }
+        for (auto family : {TextureCompression::Family::Astc, TextureCompression::Family::Bc})
+        {
+            success &= VerifyOddMipEdges(family);
+        }
 
         return success ? Result::Pass : Result::Fail;
     }
@@ -45,8 +49,27 @@ class TextureCompressionTest : public TestCase
         success &= Expect(MakeTextureIdentity("", "../escape.png").empty(), "identity escaping the root is rejected");
         success &= Expect(MakeTextureIdentity("scenes", "../../escape.png").empty(),
                           "identity escaping through the parent is rejected");
-        success &= Expect(MakeTextureIdentity("", "/abs/x.png").empty(), "absolute identity is rejected");
+        for (const auto &absolute : {std::string("/abs/x.png"), std::string("C:/abs/x.png"),
+                                     std::string(R"(C:\abs\x.png)"), std::string(R"(\abs\x.png)"),
+                                     std::string(R"(\\server\share\x.png)"), std::string("//server/share/x.png")})
+        {
+            success &= Expect(MakeTextureIdentity("", absolute).empty(),
+                              ("absolute identity is rejected: " + absolute).c_str());
+        }
         success &= Expect(MakeTextureIdentity("", "").empty(), "empty authored path yields no identity");
+
+        auto source =
+            std::make_shared<Image2D>(1, 1, PixelFormat::R8G8B8A8Unorm, std::vector<uint8_t>{32, 64, 128, 255});
+        const TextureCookJob color_job(source, "texture.png", TextureCompression::Profile::Color,
+                                       TextureCompression::Family::Astc);
+        const TextureCookJob data_job(source, "texture.png", TextureCompression::Profile::Data,
+                                      TextureCompression::Family::Astc);
+        const TextureCookJob normal_job(source, "texture.png", TextureCompression::Profile::Normal,
+                                        TextureCompression::Family::Astc);
+        success &= Expect(color_job.GetSourceHash() != data_job.GetSourceHash() &&
+                              color_job.GetSourceHash() != normal_job.GetSourceHash() &&
+                              data_job.GetSourceHash() != normal_job.GetSourceHash(),
+                          "texture source hashes distinguish compression profiles");
         return success;
     }
 
@@ -131,6 +154,67 @@ class TextureCompressionTest : public TestCase
         Log(Info, "TextureCompressionTest: {} PSNR {:.2f} dB", label, psnr);
         success &= Expect(psnr > 30.f, (label + ": decode fidelity above 30 dB").c_str());
 
+        return success;
+    }
+
+    static bool VerifyOddMipEdges(TextureCompression::Family family)
+    {
+        bool success = VerifyOddMipEdges(family, 7, 5);
+        success &= VerifyOddMipEdges(family, 3, 1);
+        success &= VerifyOddMipEdges(family, 1, 3);
+        return success;
+    }
+
+    static bool VerifyOddMipEdges(TextureCompression::Family family, unsigned width, unsigned height)
+    {
+        std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4, 0);
+        for (unsigned y = 0; y < height; y++)
+        {
+            pixels[(static_cast<size_t>(y) * width + width - 1) * 4] = 255;
+        }
+        for (unsigned x = 0; x < width; x++)
+        {
+            pixels[(static_cast<size_t>(height - 1) * width + x) * 4 + 1] = 255;
+        }
+        for (size_t i = 3; i < pixels.size(); i += 4)
+        {
+            pixels[i] = 255;
+        }
+
+        const Image2D source(width, height, PixelFormat::R8G8B8A8Unorm, pixels);
+        const auto payload = TextureCompression::Encode(source, TextureCompression::Profile::Data, family);
+        const auto label = std::string(TextureCompression::GetFamilyName(family)) + " " + std::to_string(width) + "x" +
+                           std::to_string(height) + " odd mip";
+        bool success = Expect(!payload.empty(), (label + ": encode produced a payload").c_str());
+        auto compressed = TextureCompression::CreateImageFromPayload(payload, "texture_compression_odd_mip");
+        success &= Expect(compressed != nullptr, (label + ": payload validates").c_str());
+        if (compressed == nullptr)
+        {
+            return false;
+        }
+
+        constexpr double CodecTolerance = 0.01;
+        for (auto mip = 1u; mip < compressed->GetMipCount(); mip++)
+        {
+            const auto decoded = TextureCompression::Decode(*compressed, mip);
+            const size_t pixel_count = static_cast<size_t>(decoded.GetWidth()) * decoded.GetHeight();
+            double red = 0.0;
+            double green = 0.0;
+            for (size_t i = 0; i < pixel_count; i++)
+            {
+                red += decoded.GetRawData()[i * 4];
+                green += decoded.GetRawData()[i * 4 + 1];
+            }
+            const double scale = 255.0 * static_cast<double>(pixel_count);
+            const double red_mean = red / scale;
+            const double green_mean = green / scale;
+            const double expected_red = 1.0 / width;
+            const double expected_green = 1.0 / height;
+            Log(Info, "TextureCompressionTest: {} {} edge mean ({:.3f}, {:.3f})", label, mip, red_mean, green_mean);
+            success &= Expect(std::abs(red_mean - expected_red) < CodecTolerance &&
+                                  std::abs(green_mean - expected_green) < CodecTolerance,
+                              (label + " " + std::to_string(mip) + ": final row and column preserve area").c_str());
+        }
         return success;
     }
 

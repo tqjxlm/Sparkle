@@ -12,13 +12,15 @@ namespace sparkle
 {
 namespace
 {
-void LogProgress(const std::shared_ptr<CookJob> &job, const std::shared_ptr<TaskFuture<>> &delivered)
+void LogProgress(const std::shared_ptr<CookJob> &job, const std::shared_ptr<TaskFuture<>> &delivered,
+                 const std::string &tag, bool displayed)
 {
-    const auto tag = std::string("Cooker::") + job->GetType();
-
     if (delivered->IsReady())
     {
-        Logger::LogToScreen(tag, "");
+        if (displayed)
+        {
+            Logger::LogToScreen(tag, "");
+        }
         return;
     }
 
@@ -26,9 +28,11 @@ void LogProgress(const std::shared_ptr<CookJob> &job, const std::shared_ptr<Task
     if (progress >= 0.f)
     {
         Logger::LogToScreen(tag, fmt::format("Cooking {} {:.1f}%", job->GetSourceName(), progress * 100.f));
+        displayed = true;
     }
 
-    TaskManager::RunInMainThread([job, delivered]() { LogProgress(job, delivered); }, false);
+    TaskManager::RunInMainThread([job, delivered, tag, displayed]() { LogProgress(job, delivered, tag, displayed); },
+                                 false);
 }
 
 struct InFlightCook
@@ -83,13 +87,6 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
     auto job = make_job();
     if (!job)
     {
-        // a null factory means there is no source to recook from; a packaged artifact
-        // is the only copy and must resolve even under rebuild_cache
-        if (auto payload = CookArtifactStore::Load(lookup_key, true); !payload.empty())
-        {
-            return {.status = CookResult::Status::Ready, .payload = std::move(payload)};
-        }
-
         Log(Error, "cannot cook {}: {}: source job creation failed", lookup_key.type, lookup_key.source_name);
         return {.status = CookResult::Status::JobUnavailable, .payload = {}};
     }
@@ -110,7 +107,9 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
     }
 
     Log(Info, "cooking {}: {}", key.type, key.source_name);
-    TaskManager::RunInMainThread([job, delivered]() { LogProgress(job, delivered); }, false);
+    const auto progress_tag = "Cooker::" + GetInFlightKey(key);
+    TaskManager::RunInMainThread([job, delivered, progress_tag]() { LogProgress(job, delivered, progress_tag, false); },
+                                 false);
 
     auto job_result = job->Execute();
     if (!job_result.IsSuccess() || job_result.GetPayload().empty())

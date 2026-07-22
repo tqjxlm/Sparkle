@@ -93,6 +93,30 @@ class StripConsumedTextureSourcesTest(unittest.TestCase):
             build_script.strip_consumed_texture_sources(self.image)
         self.assertTrue(os.path.exists(target))
 
+    def test_rejects_late_escaping_entry_without_partial_deletion(self):
+        source = self.add_file(SOURCE)
+        artifact = self.add_file(ARTIFACT)
+        outside = self.add_file("outside.png")
+        self.write_manifests(
+            {SOURCE: [KEY], "../outside.png": [KEY]},
+            {KEY: {"artifact": ARTIFACT}})
+
+        with self.assertRaises(RuntimeError):
+            build_script.strip_consumed_texture_sources(self.image)
+        self.assertTrue(os.path.exists(source))
+        self.assertTrue(os.path.exists(artifact))
+        self.assertTrue(os.path.exists(outside))
+
+    def test_rejects_absolute_artifact_without_deleting_source(self):
+        source = self.add_file(SOURCE)
+        artifact = self.add_file(ARTIFACT)
+        self.write_manifests({SOURCE: [KEY]}, {KEY: {"artifact": artifact}})
+
+        with self.assertRaises(RuntimeError):
+            build_script.strip_consumed_texture_sources(self.image)
+        self.assertTrue(os.path.exists(source))
+        self.assertTrue(os.path.exists(artifact))
+
     def test_rejects_legacy_list_manifest(self):
         source = self.add_file(SOURCE)
         self.write_manifests([SOURCE])

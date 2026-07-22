@@ -63,6 +63,24 @@ def default_cooked_image_dir(framework):
     return os.path.join(SCRIPTPATH, COOKED_IMAGE_DIR[cooker_framework(framework)])
 
 
+def resolve_image_member(image_root, relative, description):
+    """Resolves a manifest path only when it is relative and contained in the image."""
+    drive_qualified = (len(relative) >= 2 and relative[0].isalpha() and
+                       relative[1] == ":")
+    if (not relative or os.path.isabs(relative) or
+            relative.startswith(("/", "\\")) or drive_qualified):
+        raise RuntimeError(f"{description} escapes the content image: {relative}")
+
+    resolved = os.path.realpath(os.path.join(image_root, relative))
+    try:
+        contained = os.path.commonpath([resolved, image_root]) == image_root
+    except ValueError:
+        contained = False
+    if not contained:
+        raise RuntimeError(f"{description} escapes the content image: {relative}")
+    return resolved
+
+
 def strip_consumed_texture_sources(image_dir):
     """Deletes source images that cooked texture artifacts fully replace. The strip
     manifest maps each source to the store manifest keys of its artifacts; a source is
@@ -85,22 +103,31 @@ def strip_consumed_texture_sources(image_dir):
             store = json.load(store_file)
 
     image_root = os.path.realpath(image_dir)
-    stripped = 0
+    source_paths = {
+        relative: resolve_image_member(image_root, relative, "texture source manifest entry")
+        for relative in consumed
+    }
+    strip_candidates = []
     for relative, artifact_keys in consumed.items():
-        source_path = os.path.realpath(os.path.join(image_dir, relative))
-        if os.path.isabs(relative) or os.path.commonpath([source_path, image_root]) != image_root:
-            raise RuntimeError(f"texture source manifest entry escapes the content image: {relative}")
-
-        missing = [key for key in artifact_keys
-                   if not os.path.isfile(os.path.join(image_dir, store.get(key, {}).get("artifact", "")))]
+        missing = []
+        for key in artifact_keys:
+            artifact = store.get(key, {}).get("artifact", "")
+            if not artifact:
+                missing.append(key)
+                continue
+            artifact_path = resolve_image_member(image_root, artifact, f"texture artifact {key}")
+            if not os.path.isfile(artifact_path):
+                missing.append(key)
         if not artifact_keys or missing:
             print(f"keeping texture source {relative}: missing artifacts {missing or 'none recorded'}")
             continue
 
-        if os.path.isfile(source_path):
-            os.remove(source_path)
-            stripped += 1
-    return stripped
+        if os.path.isfile(source_paths[relative]):
+            strip_candidates.append(source_paths[relative])
+
+    for source_path in strip_candidates:
+        os.remove(source_path)
+    return len(strip_candidates)
 
 
 def assemble_cooked_image(cooker):
@@ -280,19 +307,18 @@ def setup(args):
         setup_ide()
 
 
+def host_system_name():
+    system_name = {"Windows": "windows", "Linux": "linux", "Darwin": "macos"}.get(platform.system())
+    if system_name is None:
+        raise RuntimeError(f"Unsupported platform: {platform.system()}")
+    return system_name
+
+
 def product_name(framework, config, extension):
     """Products are named by target. glfw is the one framework whose target is the host's
     own desktop OS, so only there the host system is part of the target identity."""
     if framework == "glfw":
-        if platform.system() == "Windows":
-            system_name = "windows"
-        elif platform.system() == "Linux":
-            system_name = "linux"
-        elif platform.system() == "Darwin":
-            system_name = "macos"
-        else:
-            raise RuntimeError(f"Unsupported platform: {platform.system()}")
-        return f"{system_name}-glfw-{config}{extension}"
+        return f"{host_system_name()}-glfw-{config}{extension}"
     return f"{framework}-{config}{extension}"
 
 
@@ -326,7 +352,8 @@ def package_project(builder, args):
 
     image_dir = args["cooked"] or default_cooked_image_dir(args["framework"])
     try:
-        placed = package_cooked(product_path, args["framework"], image_dir)
+        placed = package_cooked(product_path, args["framework"], image_dir,
+                                target_system=host_system_name())
     except PackagingError as error:
         raise RuntimeError(f"package stage failed: {error}") from error
 

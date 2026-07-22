@@ -66,8 +66,78 @@ public:
             const bool success =
                 VerifyTextures(app.GetScene()) && VerifyLights(app.GetScene()) && VerifyMeshes(app.GetScene());
             CleanupFixtures();
-            return success ? Result::Pass : Result::Fail;
+            if (!success)
+            {
+                return Result::Fail;
+            }
+
+            load_task_ = SceneManager::LoadScene(&nested_scene_a_, NestedSceneAPath, false, false);
+            stage_ = Stage::WaitForNestedSceneA;
+            return Result::Pending;
         }
+
+        case Stage::WaitForNestedSceneA:
+            if (!load_task_->IsReady() || nested_scene_a_.HasPendingAsyncTasks())
+            {
+                return Result::Pending;
+            }
+            if (!load_task_->Get() || !nested_scene_a_.DidAsyncTasksSucceed())
+            {
+                return BeginFinalization(false, false);
+            }
+            load_task_ = SceneManager::LoadScene(&nested_scene_b_, NestedSceneBPath, false, false);
+            stage_ = Stage::WaitForNestedSceneB;
+            return Result::Pending;
+
+        case Stage::WaitForNestedSceneB:
+            if (!load_task_->IsReady() || nested_scene_b_.HasPendingAsyncTasks())
+            {
+                return Result::Pending;
+            }
+            if (!load_task_->Get() || !nested_scene_b_.DidAsyncTasksSucceed())
+            {
+                return BeginFinalization(false, false);
+            }
+            if (!VerifyNestedTextureIdentities())
+            {
+                return BeginFinalization(false, false);
+            }
+            load_task_ = SceneManager::LoadScene(&gltf_scene_, GltfScenePath, false, false);
+            stage_ = Stage::WaitForGltfScene;
+            return Result::Pending;
+
+        case Stage::WaitForGltfScene: {
+            if (!load_task_->IsReady() || gltf_scene_.HasPendingAsyncTasks())
+            {
+                return Result::Pending;
+            }
+            if (!load_task_->Get() || !gltf_scene_.DidAsyncTasksSucceed())
+            {
+                return BeginFinalization(false, false);
+            }
+            return BeginFinalization(true, true);
+        }
+
+        case Stage::WaitForFinalRenderBarrier:
+            if (!render_barrier_->IsReady())
+            {
+                return Result::Pending;
+            }
+            if (verify_gltf_)
+            {
+                final_success_ = VerifyGltfTextureIdentities();
+            }
+            CleanupLoadedScenes();
+            render_barrier_ = TaskManager::RunInRenderThread([] {});
+            stage_ = Stage::WaitForCleanupRenderBarrier;
+            return Result::Pending;
+
+        case Stage::WaitForCleanupRenderBarrier:
+            if (!render_barrier_->IsReady())
+            {
+                return Result::Pending;
+            }
+            return final_success_ ? Result::Pass : Result::Fail;
 
         default:
             return Result::Fail;
@@ -81,6 +151,11 @@ private:
         WaitForRenderBarrier,
         WaitForScene,
         WaitForLoadedRenderBarrier,
+        WaitForNestedSceneA,
+        WaitForNestedSceneB,
+        WaitForGltfScene,
+        WaitForFinalRenderBarrier,
+        WaitForCleanupRenderBarrier,
     };
 
     static bool WriteFixtures()
@@ -307,6 +382,84 @@ def Xform "Root"
         return success;
     }
 
+    bool VerifyNestedTextureIdentities()
+    {
+        const auto *primitive_a = FindMeshPrimitive(&nested_scene_a_, "Triangle");
+        const auto *primitive_b = FindMeshPrimitive(&nested_scene_b_, "Triangle");
+        const auto *material_a = primitive_a ? primitive_a->GetMaterial() : nullptr;
+        const auto *material_b = primitive_b ? primitive_b->GetMaterial() : nullptr;
+
+        bool success = Expect(material_a != nullptr && material_b != nullptr, "loaded both nested scene materials");
+        if (!success)
+        {
+            return false;
+        }
+
+        const auto &texture_a = material_a->GetRawMaterial().base_color_texture;
+        const auto &texture_b = material_b->GetRawMaterial().base_color_texture;
+        success &= Expect(texture_a != nullptr && texture_b != nullptr, "resolved both nested scene textures");
+        if (!success)
+        {
+            return false;
+        }
+
+        success &=
+            Expect(texture_a->GetName() == NestedTextureAIdentity && texture_b->GetName() == NestedTextureBIdentity,
+                   "nested scenes retain distinct packed-relative identities");
+        success &= Expect(IsCompressedFormat(texture_a->GetFormat()) && IsCompressedFormat(texture_b->GetFormat()),
+                          "nested scene textures resolve cooked artifacts");
+
+        const Vector3 color_a = texture_a->EnsureDecoded().AccessPixel(0, 0).head<3>();
+        const Vector3 color_b = texture_b->EnsureDecoded().AccessPixel(0, 0).head<3>();
+        success &= Expect(!color_a.isApprox(color_b), "same-named nested textures retain distinct pixels");
+        return success;
+    }
+
+    bool VerifyGltfTextureIdentities()
+    {
+        const auto *primitive = FindMeshPrimitive(&gltf_scene_, "Triangle_0");
+        const auto *material = primitive ? primitive->GetMaterial() : nullptr;
+
+        if (!Expect(material != nullptr, "loaded external-image glTF material"))
+        {
+            return false;
+        }
+
+        const auto &raw_material = material->GetRawMaterial();
+        const auto &base_color = raw_material.base_color_texture;
+        const auto &emissive = raw_material.emissive_texture;
+        const auto &metallic_roughness = raw_material.metallic_roughness_texture;
+        const auto &normal = raw_material.normal_texture;
+        if (!Expect(base_color && emissive && metallic_roughness && normal,
+                    "loaded every external-image glTF material texture slot"))
+        {
+            return false;
+        }
+
+        const bool success =
+            base_color->GetName() == GltfTextureIdentity && emissive->GetName() == GltfTextureIdentity &&
+            metallic_roughness->GetName() == GltfTextureIdentity && normal->GetName() == GltfTextureIdentity &&
+            IsCompressedFormat(base_color->GetFormat()) && IsCompressedFormat(emissive->GetFormat()) &&
+            IsCompressedFormat(metallic_roughness->GetFormat()) && IsCompressedFormat(normal->GetFormat());
+        return Expect(success, "external glTF textures resolve their cooked packed-relative identity");
+    }
+
+    void CleanupLoadedScenes()
+    {
+        gltf_scene_.Cleanup();
+        nested_scene_b_.Cleanup();
+        nested_scene_a_.Cleanup();
+    }
+
+    Result BeginFinalization(bool success, bool verify_gltf)
+    {
+        final_success_ = success;
+        verify_gltf_ = verify_gltf;
+        render_barrier_ = TaskManager::RunInRenderThread([] {});
+        stage_ = Stage::WaitForFinalRenderBarrier;
+        return Result::Pending;
+    }
+
     static bool Expect(bool condition, const char *description)
     {
         if (condition)
@@ -335,10 +488,21 @@ def Xform "Root"
     static inline const Path ScenePath = Path::Internal("tests/usd_loader_semantics/scene.usda");
     static inline const Path SrgbTexturePath = Path::Internal("tests/usd_loader_semantics/srgb.png");
     static inline const Path LinearTexturePath = Path::Internal("tests/usd_loader_semantics/linear.png");
+    static inline const Path NestedSceneAPath = Path::Resource("tests/nested/a/scene.usda");
+    static inline const Path NestedSceneBPath = Path::Resource("tests/nested/b/scene.usda");
+    static inline const Path GltfScenePath = Path::Resource("tests/gltf_external/scene.gltf");
+    static inline const std::string NestedTextureAIdentity = "tests/nested/a/texture.png";
+    static inline const std::string NestedTextureBIdentity = "tests/nested/b/texture.png";
+    static inline const std::string GltfTextureIdentity = "tests/gltf_external/texture.png";
 
     Stage stage_ = Stage::InsertRenderBarrier;
     std::shared_ptr<TaskFuture<>> render_barrier_;
     std::shared_ptr<TaskFuture<bool>> load_task_;
+    bool final_success_ = false;
+    bool verify_gltf_ = false;
+    Scene nested_scene_a_;
+    Scene nested_scene_b_;
+    Scene gltf_scene_;
 };
 
 static TestCaseRegistrar<UsdLoaderSemanticsTest> usd_loader_semantics_test_registrar("usd_loader_semantics");

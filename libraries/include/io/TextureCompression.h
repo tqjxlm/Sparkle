@@ -55,7 +55,7 @@ public:
     [[nodiscard]] static std::shared_ptr<Image2D> CreateImageFromPayload(const std::vector<char> &payload,
                                                                          const std::string &name);
 
-    // decodes mip 0 of a block-compressed image into RGBA8, preserving sRGB-ness
-    [[nodiscard]] static Image2D Decode(const Image2D &compressed);
+    // decodes one mip of a block-compressed image into RGBA8, preserving sRGB-ness
+    [[nodiscard]] static Image2D Decode(const Image2D &compressed, unsigned mip_level = 0);
 };
 } // namespace sparkle

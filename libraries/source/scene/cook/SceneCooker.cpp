@@ -110,9 +110,8 @@ int SceneCooker::Run(const std::string &scene_override, const JobPlan &job_plan,
                 }
             }));
             PumpMainThreadUntil([&handles] {
-                return static_cast<size_t>(std::ranges::count_if(handles, [](const CookHandle &handle) {
-                           return !handle.OnDelivered()->IsReady();
-                       })) < MaxInFlightCooks;
+                std::erase_if(handles, [](const CookHandle &handle) { return handle.OnDelivered()->IsReady(); });
+                return handles.size() < MaxInFlightCooks;
             });
         }
     };

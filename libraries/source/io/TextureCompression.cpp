@@ -67,21 +67,50 @@ std::vector<float> DownsampleBox(const std::vector<float> &source, unsigned sour
                                  unsigned dest_width, unsigned dest_height)
 {
     std::vector<float> dest(static_cast<size_t>(dest_width) * dest_height * 4);
+    // Scale source-pixel boundaries by the destination dimensions so every overlap
+    // weight is integral; each destination footprint then has this constant area.
+    const double footprint_area = static_cast<double>(source_width) * source_height;
     for (unsigned y = 0; y < dest_height; y++)
     {
-        const unsigned y0 = std::min(y * 2, source_height - 1);
-        const unsigned y1 = std::min(y * 2 + 1, source_height - 1);
+        const uint64_t y_begin = static_cast<uint64_t>(y) * source_height;
+        const uint64_t y_end = static_cast<uint64_t>(y + 1) * source_height;
+        const auto source_y_begin = static_cast<unsigned>(y_begin / dest_height);
+        const unsigned source_y_end =
+            std::min(static_cast<unsigned>((y_end + dest_height - 1) / dest_height), source_height);
         for (unsigned x = 0; x < dest_width; x++)
         {
-            const unsigned x0 = std::min(x * 2, source_width - 1);
-            const unsigned x1 = std::min(x * 2 + 1, source_width - 1);
+            const uint64_t x_begin = static_cast<uint64_t>(x) * source_width;
+            const uint64_t x_end = static_cast<uint64_t>(x + 1) * source_width;
+            const auto source_x_begin = static_cast<unsigned>(x_begin / dest_width);
+            const unsigned source_x_end =
+                std::min(static_cast<unsigned>((x_end + dest_width - 1) / dest_width), source_width);
+            std::array<double, 4> sum{};
+
+            for (unsigned source_y = source_y_begin; source_y < source_y_end; source_y++)
+            {
+                const uint64_t source_y_begin_scaled = static_cast<uint64_t>(source_y) * dest_height;
+                const uint64_t source_y_end_scaled = static_cast<uint64_t>(source_y + 1) * dest_height;
+                const uint64_t y_weight =
+                    std::min(y_end, source_y_end_scaled) - std::max(y_begin, source_y_begin_scaled);
+                for (unsigned source_x = source_x_begin; source_x < source_x_end; source_x++)
+                {
+                    const uint64_t source_x_begin_scaled = static_cast<uint64_t>(source_x) * dest_width;
+                    const uint64_t source_x_end_scaled = static_cast<uint64_t>(source_x + 1) * dest_width;
+                    const uint64_t x_weight =
+                        std::min(x_end, source_x_end_scaled) - std::max(x_begin, source_x_begin_scaled);
+                    const double weight = static_cast<double>(x_weight) * static_cast<double>(y_weight);
+                    const size_t source_offset = (static_cast<size_t>(source_y) * source_width + source_x) * 4;
+                    for (unsigned channel = 0; channel < 4; channel++)
+                    {
+                        sum[channel] += static_cast<double>(source[source_offset + channel]) * weight;
+                    }
+                }
+            }
+
+            const size_t dest_offset = (static_cast<size_t>(y) * dest_width + x) * 4;
             for (unsigned channel = 0; channel < 4; channel++)
             {
-                const float sum = source[(static_cast<size_t>(y0) * source_width + x0) * 4 + channel] +
-                                  source[(static_cast<size_t>(y0) * source_width + x1) * 4 + channel] +
-                                  source[(static_cast<size_t>(y1) * source_width + x0) * 4 + channel] +
-                                  source[(static_cast<size_t>(y1) * source_width + x1) * 4 + channel];
-                dest[(static_cast<size_t>(y) * dest_width + x) * 4 + channel] = sum * 0.25f;
+                dest[dest_offset + channel] = static_cast<float>(sum[channel] / footprint_area);
             }
         }
     }
@@ -440,25 +469,33 @@ std::shared_ptr<Image2D> TextureCompression::CreateImageFromPayload(const std::v
     return std::make_shared<Image2D>(header.width, header.height, format, header.mip_count, std::move(chain), name);
 }
 
-Image2D TextureCompression::Decode(const Image2D &compressed)
+Image2D TextureCompression::Decode(const Image2D &compressed, unsigned mip_level)
 {
     const PixelFormat format = compressed.GetFormat();
     ASSERT(IsCompressedFormat(format));
+    ASSERT(mip_level < compressed.GetMipCount());
 
-    const unsigned width = compressed.GetWidth();
-    const unsigned height = compressed.GetHeight();
+    const unsigned width = MipDim(compressed.GetWidth(), mip_level);
+    const unsigned height = MipDim(compressed.GetHeight(), mip_level);
     const auto decoded_format = IsSRGBFormat(format) ? PixelFormat::R8G8B8A8Srgb : PixelFormat::R8G8B8A8Unorm;
 
-    const size_t mip0_size = GetImageMipByteSize(format, width, height);
+    size_t mip_offset = 0;
+    for (auto mip = 0u; mip < mip_level; mip++)
+    {
+        mip_offset +=
+            GetImageMipByteSize(format, MipDim(compressed.GetWidth(), mip), MipDim(compressed.GetHeight(), mip));
+    }
+    const size_t mip_size = GetImageMipByteSize(format, width, height);
+    const auto *mip_data = compressed.GetRawData() + mip_offset;
     std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
     switch (format)
     {
     case PixelFormat::BC7Srgb:
     case PixelFormat::BC7Unorm:
-        DecodeBc7Mip(compressed.GetRawData(), width, height, rgba.data());
+        DecodeBc7Mip(mip_data, width, height, rgba.data());
         break;
     default:
-        if (!DecodeAstcMip(compressed.GetRawData(), mip0_size, width, height, format, rgba.data()))
+        if (!DecodeAstcMip(mip_data, mip_size, width, height, format, rgba.data()))
         {
             memset(rgba.data(), 0, rgba.size());
         }
