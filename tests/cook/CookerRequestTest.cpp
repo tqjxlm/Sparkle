@@ -2,6 +2,7 @@
 
 #include "application/AppFramework.h"
 #include "application/RenderFramework.h"
+#include "core/ConfigManager.h"
 #include "core/FileManager.h"
 #include "core/Logger.h"
 #include "core/ThreadManager.h"
@@ -19,8 +20,9 @@ class TestCookJob final : public CookJob
 {
 public:
     TestCookJob(CookArtifactKey key, std::atomic<int> *execute_count, const std::atomic<bool> *release_gate = nullptr,
-                CookPayload payload = {'u', 'n', 'e', 'x', 'p'})
-        : key_(std::move(key)), execute_count_(execute_count), release_gate_(release_gate), payload_(std::move(payload))
+                CookPayload payload = {'u', 'n', 'e', 'x', 'p'}, bool report_progress = false)
+        : key_(std::move(key)), execute_count_(execute_count), release_gate_(release_gate),
+          payload_(std::move(payload)), report_progress_(report_progress)
     {
         ASSERT(key_.source_hash.has_value());
     }
@@ -47,12 +49,17 @@ public:
 
     [[nodiscard]] CookJobResult Execute() override
     {
+        execute_count_->fetch_add(1, std::memory_order_acq_rel);
         while (release_gate_ != nullptr && !release_gate_->load())
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        execute_count_->fetch_add(1, std::memory_order_acq_rel);
         return CookJobResult::Success(payload_);
+    }
+
+    [[nodiscard]] float GetProgress() const override
+    {
+        return report_progress_ ? 0.5f : -1.f;
     }
 
 private:
@@ -60,6 +67,7 @@ private:
     std::atomic<int> *execute_count_;
     const std::atomic<bool> *release_gate_;
     CookPayload payload_;
+    bool report_progress_;
 };
 
 class CookerRequestTest : public TestCase
@@ -85,6 +93,14 @@ public:
             return RequestDuplicate();
         case Stage::WaitDuplicate:
             return WaitDuplicate();
+        case Stage::RequestDistinctProgress:
+            return RequestDistinctProgress();
+        case Stage::ReleaseDistinctProgress:
+            return ReleaseDistinctProgress();
+        case Stage::WaitDistinctProgress:
+            return WaitDistinctProgress();
+        case Stage::RebuildCacheScope:
+            return RebuildCacheScope();
         case Stage::WaitForRenderer:
             return app.GetRenderFramework()->IsReadyForAutoScreenshot() ? Result::Pass : Result::Pending;
         default:
@@ -103,6 +119,10 @@ private:
         WaitResolvedZeroMismatch,
         RequestDuplicate,
         WaitDuplicate,
+        RequestDistinctProgress,
+        ReleaseDistinctProgress,
+        WaitDistinctProgress,
+        RebuildCacheScope,
         WaitForRenderer,
     };
 
@@ -270,6 +290,113 @@ private:
         success &= Expect(duplicate_delivery_count_ == 2, "both requesters receive a delivery");
         success &= Expect(duplicate_all_match_, "both deliveries succeed with the shared payload on the main thread");
 
+        stage_ = Stage::RequestDistinctProgress;
+        return success ? Result::Pending : Result::Fail;
+    }
+
+    Result RequestDistinctProgress()
+    {
+        distinct_release_.store(false, std::memory_order_release);
+        distinct_execute_count_.store(0, std::memory_order_release);
+        distinct_delivery_count_ = 0;
+        distinct_all_completed_ = true;
+        distinct_progress_ticks_ = 0;
+
+        auto *file_manager = FileManager::GetNativeFileManager();
+        std::filesystem::remove_all(
+            file_manager->ResolvePath(Path::Internal(std::string("cooked/") + DistinctProgressKeyA.type)));
+
+        auto record = [this](CookResult result) {
+            distinct_delivery_count_++;
+            distinct_all_completed_ &= result.status == CookResult::Status::ExecutionFailed &&
+                                       ThreadManager::IsInCurrentThread(ThreadName::Main);
+        };
+
+        distinct_handle_a_ =
+            Cooker::Request(std::make_unique<TestCookJob>(DistinctProgressKeyA, &distinct_execute_count_,
+                                                          &distinct_release_, CookPayload{}, true),
+                            record);
+        distinct_handle_b_ =
+            Cooker::Request(std::make_unique<TestCookJob>(DistinctProgressKeyB, &distinct_execute_count_,
+                                                          &distinct_release_, CookPayload{}, true),
+                            record);
+
+        stage_ = Stage::ReleaseDistinctProgress;
+        return Result::Pending;
+    }
+
+    Result ReleaseDistinctProgress()
+    {
+        if (distinct_execute_count_.load(std::memory_order_acquire) != 2)
+        {
+            return Result::Pending;
+        }
+
+        if (distinct_progress_ticks_++ < 2)
+        {
+            return Result::Pending;
+        }
+
+        distinct_release_.store(true, std::memory_order_release);
+        stage_ = Stage::WaitDistinctProgress;
+        return Result::Pending;
+    }
+
+    Result WaitDistinctProgress()
+    {
+        if (!distinct_handle_a_.OnDelivered()->IsReady() || !distinct_handle_b_.OnDelivered()->IsReady())
+        {
+            return Result::Pending;
+        }
+
+        bool success = true;
+        success &= Expect(distinct_execute_count_.load(std::memory_order_acquire) == 2,
+                          "same-name requests with distinct hashes execute independently");
+        success &= Expect(distinct_delivery_count_ == 2, "both distinct-hash requesters receive a delivery");
+        success &=
+            Expect(distinct_all_completed_, "distinct-hash progress entries complete independently on the main thread");
+
+        stage_ = Stage::RebuildCacheScope;
+        return success ? Result::Pending : Result::Fail;
+    }
+
+    Result RebuildCacheScope()
+    {
+        if (!CookArtifactStore::Save(FallbackKey, ExpectedPayload))
+        {
+            Log(Error, "{}: FAILED - could not seed artifact", GetName());
+            return Result::Fail;
+        }
+
+        auto *rebuild_config = ConfigManager::Instance().GetConfig<bool>("rebuild_cache");
+        if (rebuild_config == nullptr)
+        {
+            Log(Error, "{}: FAILED - rebuild_cache config not found", GetName());
+            return Result::Fail;
+        }
+
+        CookArtifactKey lookup_key = FallbackKey;
+        lookup_key.source_hash.reset();
+
+        const bool previous = rebuild_config->Get();
+        job_execute_count_.store(0, std::memory_order_release);
+        rebuild_config->Set(true);
+
+        auto rebuilt = Cooker::CookNow(lookup_key, [this]() {
+            return std::make_shared<TestCookJob>(FallbackKey, &job_execute_count_, nullptr, RebuiltPayload);
+        });
+        auto unavailable = Cooker::CookNow(lookup_key, []() -> std::shared_ptr<CookJob> { return nullptr; });
+
+        rebuild_config->Set(previous);
+
+        bool success = true;
+        success &= Expect(job_execute_count_.load(std::memory_order_acquire) == 1,
+                          "rebuild_cache re-executes a source-backed job");
+        success &= Expect(rebuilt.status == CookResult::Status::Ready && rebuilt.payload == RebuiltPayload,
+                          "rebuild_cache returns the rebuilt payload");
+        success &= Expect(unavailable.status == CookResult::Status::JobUnavailable && unavailable.payload.empty(),
+                          "rebuild_cache does not resurrect an internal artifact without a source");
+
         stage_ = Stage::WaitForRenderer;
         return success ? Result::Pending : Result::Fail;
     }
@@ -316,8 +443,21 @@ private:
                                                      .version = 1,
                                                      .source_name = "assets/duplicate/contract.bin",
                                                      .source_hash = 0x77aa55cc};
+    inline static const CookArtifactKey FallbackKey{.type = "cooker_request_test_fallback",
+                                                    .version = 1,
+                                                    .source_name = "assets/fallback/contract.bin",
+                                                    .source_hash = 0x19d2c3b4};
+    inline static const CookArtifactKey DistinctProgressKeyA{.type = "cooker_request_test_progress",
+                                                             .version = 1,
+                                                             .source_name = "assets/progress/contract.bin",
+                                                             .source_hash = 0x11223344};
+    inline static const CookArtifactKey DistinctProgressKeyB{.type = "cooker_request_test_progress",
+                                                             .version = 1,
+                                                             .source_name = "assets/progress/contract.bin",
+                                                             .source_hash = 0x55667788};
     inline static const std::vector<char> ExpectedPayload{'c', 'o', 'o', 'k', 'e', 'd'};
     inline static const CookPayload DuplicatePayload{'s', 'h', 'a', 'r', 'e', 'd'};
+    inline static const CookPayload RebuiltPayload{'r', 'e', 'b', 'u', 'i', 'l', 't'};
 
     Stage stage_ = Stage::SeedExactHit;
     bool callback_on_main_thread_ = false;
@@ -327,9 +467,16 @@ private:
     std::atomic<bool> duplicate_release_{false};
     int duplicate_delivery_count_ = 0;
     bool duplicate_all_match_ = true;
+    std::atomic<bool> distinct_release_{false};
+    std::atomic<int> distinct_execute_count_{0};
+    int distinct_delivery_count_ = 0;
+    int distinct_progress_ticks_ = 0;
+    bool distinct_all_completed_ = true;
     std::vector<char> received_payload_;
     CookHandle handle_;
     CookHandle duplicate_handle_;
+    CookHandle distinct_handle_a_;
+    CookHandle distinct_handle_b_;
 };
 
 static TestCaseRegistrar<CookerRequestTest> cooker_request_test_registrar("cooker_request");

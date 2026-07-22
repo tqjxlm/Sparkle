@@ -2,6 +2,7 @@
 
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,7 +20,7 @@ class PackageCookedTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.package = os.path.join(self.directory.name, "product.zip")
+        self.package = os.path.join(self.directory.name, "linux-glfw-Release.zip")
         self.image = os.path.join(self.directory.name, "image")
 
     def make_package(self, prefix="build/packed/", extra_entries=()):
@@ -75,6 +76,50 @@ class PackageCookedTest(unittest.TestCase):
 
         self.assertIn("build/packed/shaders/forward.spv", self.entries())
         self.assertIn("build/sparkle", self.entries())
+
+    def test_glfw_product_name_selects_bc_family(self):
+        self.make_package()
+        self.make_image(extra_files=["cooked/texture_astc/material.cook",
+                                     "cooked/texture_bc/material.cook"])
+
+        package_cooked.package_cooked(self.package, "glfw", self.image)
+
+        entries = self.entries()
+        self.assertIn("build/packed/cooked/texture_bc/material.cook", entries)
+        self.assertNotIn("build/packed/cooked/texture_astc/material.cook", entries)
+
+    def test_cli_explicit_target_selects_astc_for_renamed_glfw_archive(self):
+        self.package = os.path.join(self.directory.name, "renamed.zip")
+        self.make_package()
+        self.make_image(extra_files=["cooked/texture_astc/material.cook",
+                                     "cooked/texture_bc/material.cook"])
+
+        completed = subprocess.run(
+            [sys.executable, package_cooked.__file__, "--framework", "glfw",
+             "--package", self.package, "--cooked", self.image,
+             "--target-system", "macos"],
+            capture_output=True, text=True, check=False)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        entries = self.entries()
+        self.assertIn("build/packed/cooked/texture_astc/material.cook", entries)
+        self.assertNotIn("build/packed/cooked/texture_bc/material.cook", entries)
+
+    def test_rejects_glfw_name_that_disagrees_with_explicit_target(self):
+        self.make_package()
+        self.make_image()
+
+        with self.assertRaises(package_cooked.PackagingError):
+            package_cooked.package_cooked(
+                self.package, "glfw", self.image, target_system="macos")
+
+    def test_rejects_renamed_glfw_archive_without_an_explicit_target(self):
+        self.package = os.path.join(self.directory.name, "renamed.zip")
+        self.make_package()
+        self.make_image()
+
+        with self.assertRaises(package_cooked.PackagingError):
+            package_cooked.package_cooked(self.package, "glfw", self.image)
 
     def test_replacement_is_idempotent(self):
         self.make_package()

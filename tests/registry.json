@@ -96,7 +96,14 @@
     {
         "name": "usd_loader_semantics",
         "test_case": "usd_loader_semantics",
-        "description": "USD decoded texture, converted light, and mesh attribute semantics."
+        "description": "USD scene semantics and packaged USD/glTF texture identity resolution."
+    },
+    {
+        "name": "usd_loader_semantics_rebuild",
+        "test_case": "usd_loader_semantics",
+        "description": "usd_loader_semantics under rebuild_cache: packaged artifacts must resolve when nothing can recook. Recooks from sources in a dev tree, so it stays out of coverage runs.",
+        "app_args": ["--rebuild_cache", "true"],
+        "recooks": true
     },
     {
         "name": "input_injection",
@@ -112,6 +119,11 @@
         "name": "image_io",
         "test_case": "image_io",
         "description": "Image file content detection, channel normalization, storage sizing, and synchronous writes."
+    },
+    {
+        "name": "texture_compression",
+        "test_case": "texture_compression",
+        "description": "Block-compressed texture encode/decode invariants for every profile and family, plus source identity canonicalization rules."
     },
     {
         "name": "scene_load_failure",

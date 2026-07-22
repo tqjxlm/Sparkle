@@ -12,13 +12,15 @@ namespace sparkle
 {
 namespace
 {
-void LogProgress(const std::shared_ptr<CookJob> &job, const std::shared_ptr<TaskFuture<>> &delivered)
+void LogProgress(const std::shared_ptr<CookJob> &job, const std::shared_ptr<TaskFuture<>> &delivered,
+                 const std::string &tag, bool displayed)
 {
-    const auto tag = std::string("Cooker::") + job->GetType();
-
     if (delivered->IsReady())
     {
-        Logger::LogToScreen(tag, "");
+        if (displayed)
+        {
+            Logger::LogToScreen(tag, "");
+        }
         return;
     }
 
@@ -26,9 +28,11 @@ void LogProgress(const std::shared_ptr<CookJob> &job, const std::shared_ptr<Task
     if (progress >= 0.f)
     {
         Logger::LogToScreen(tag, fmt::format("Cooking {} {:.1f}%", job->GetSourceName(), progress * 100.f));
+        displayed = true;
     }
 
-    TaskManager::RunInMainThread([job, delivered]() { LogProgress(job, delivered); }, false);
+    TaskManager::RunInMainThread([job, delivered, tag, displayed]() { LogProgress(job, delivered, tag, displayed); },
+                                 false);
 }
 
 struct InFlightCook
@@ -103,7 +107,9 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
     }
 
     Log(Info, "cooking {}: {}", key.type, key.source_name);
-    TaskManager::RunInMainThread([job, delivered]() { LogProgress(job, delivered); }, false);
+    const auto progress_tag = "Cooker::" + GetInFlightKey(key);
+    TaskManager::RunInMainThread([job, delivered, progress_tag]() { LogProgress(job, delivered, progress_tag, false); },
+                                 false);
 
     auto job_result = job->Execute();
     if (!job_result.IsSuccess() || job_result.GetPayload().empty())
@@ -121,6 +127,22 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
             .payload = std::move(payload)};
 }
 } // namespace
+
+CookResult Cooker::CookNow(const CookArtifactKey &lookup_key, const CookJobFactory &job_factory)
+{
+    // resolve the logical key first, exactly like Request: a hit must not construct the
+    // job, whose source-derived identity would otherwise override the manifest's
+    if (auto payload = CookArtifactStore::Load(lookup_key); !payload.empty())
+    {
+        return {.status = CookResult::Status::Ready, .payload = std::move(payload)};
+    }
+
+    auto done_promise = std::make_shared<std::promise<void>>();
+    done_promise->set_value();
+    auto done = std::make_shared<TaskFuture<>>(done_promise->get_future());
+
+    return ExecuteAndStore(lookup_key, job_factory, done);
+}
 
 CookHandle Cooker::Request(std::unique_ptr<CookJob> job, std::function<void(CookResult)> on_ready)
 {

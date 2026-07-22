@@ -34,11 +34,6 @@ std::shared_mutex &GetManifestMutex()
     return mutex;
 }
 
-std::string GetManifestKey(const CookArtifactKey &key)
-{
-    return key.type + ":" + key.source_name;
-}
-
 std::string GetArtifactPath(const CookArtifactKey &key)
 {
     CRC32 hasher;
@@ -138,12 +133,17 @@ CookPayload TryLoadManifestEntry(const nlohmann::json &entry, const CookArtifact
     return StripHeader(std::move(data));
 }
 
-CookPayload LoadFromStores(const CookArtifactKey &key)
+CookPayload LoadFromStores(const CookArtifactKey &key, bool skip_internal_cache)
 {
-    const auto manifest_key = GetManifestKey(key);
+    const auto manifest_key = CookArtifactStore::GetManifestKey(key);
 
     for (auto path_type : {PathType::Resource, PathType::Internal})
     {
+        if (skip_internal_cache && path_type == PathType::Internal)
+        {
+            continue;
+        }
+
         const auto manifest = ReadManifest(path_type);
 
         const auto entry = manifest.find(manifest_key);
@@ -179,16 +179,18 @@ CookPayload LoadFromStores(const CookArtifactKey &key)
 }
 } // namespace
 
+std::string CookArtifactStore::GetManifestKey(const CookArtifactKey &key)
+{
+    return key.type + ":" + key.source_name;
+}
+
 CookPayload CookArtifactStore::Load(const CookArtifactKey &key)
 {
     auto *rebuild_config = ConfigManager::Instance().GetConfig<bool>("rebuild_cache");
-    if (rebuild_config != nullptr && rebuild_config->Get())
-    {
-        return {};
-    }
+    const bool skip_internal_cache = rebuild_config != nullptr && rebuild_config->Get();
 
     std::shared_lock<std::shared_mutex> lock(GetManifestMutex());
-    return LoadFromStores(key);
+    return LoadFromStores(key, skip_internal_cache);
 }
 
 bool CookArtifactStore::Save(const CookArtifactKey &key, const CookPayload &payload)

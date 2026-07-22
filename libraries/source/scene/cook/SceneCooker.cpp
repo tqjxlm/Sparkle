@@ -74,6 +74,11 @@ int SceneCooker::Run(const std::string &scene_override, const JobPlan &job_plan,
 
     auto material_manager = MaterialManager::CreateInstance();
 
+    // every requested job runs on its own dedicated thread, and a texture encode
+    // transiently holds a full-resolution float image (~16 B/texel, ~270 MB for one 4k
+    // source), so in-flight cooks are bounded instead of scaling with content
+    constexpr size_t MaxInFlightCooks = 4;
+
     bool failed = false;
     size_t job_count = 0;
     auto request_all = [&](std::vector<std::unique_ptr<CookJob>> &jobs, std::vector<CookHandle> &handles) {
@@ -104,6 +109,10 @@ int SceneCooker::Run(const std::string &scene_override, const JobPlan &job_plan,
                     failed = true;
                 }
             }));
+            PumpMainThreadUntil([&handles] {
+                std::erase_if(handles, [](const CookHandle &handle) { return handle.OnDelivered()->IsReady(); });
+                return handles.size() < MaxInFlightCooks;
+            });
         }
     };
 

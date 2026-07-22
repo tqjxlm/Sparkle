@@ -8,6 +8,8 @@
 #include "rhi/RHIImageView.h"
 #include "rhi/RHIMemory.h"
 
+#include <algorithm>
+#include <limits>
 #include <vector>
 
 namespace sparkle
@@ -73,6 +75,10 @@ public:
 
     struct SamplerAttribute
     {
+        // sampling never selects a level beyond the view's mip range, so this is safe
+        // for any image; a max_lod below the image's mip count disables minification
+        static constexpr uint8_t UnclampedLod = std::numeric_limits<uint8_t>::max();
+
         SamplerAddressMode address_mode = SamplerAddressMode::Count;
         BorderColor border_color = BorderColor::Count;
         FilteringMethod filtering_method_min = FilteringMethod::Count;
@@ -216,22 +222,22 @@ public:
 
     [[nodiscard]] uint32_t GetHeight(uint32_t mip_level = 0) const
     {
-        return attributes_.height >> mip_level;
+        return std::max(attributes_.height >> mip_level, 1u);
     }
 
     [[nodiscard]] uint32_t GetWidth(uint32_t mip_level = 0) const
     {
-        return attributes_.width >> mip_level;
+        return std::max(attributes_.width >> mip_level, 1u);
     }
 
     [[nodiscard]] uint32_t GetBytesPerRow(uint32_t mip_level = 0) const
     {
-        return GetPixelSize(attributes_.format) * GetWidth(mip_level);
+        return GetImageRowByteSize(attributes_.format, GetWidth(mip_level));
     }
 
     [[nodiscard]] uint32_t GetStorageSize(uint32_t mip_level) const
     {
-        return GetBytesPerRow(mip_level) * GetHeight(mip_level);
+        return GetImageMipByteSize(attributes_.format, GetWidth(mip_level), GetHeight(mip_level));
     }
 
     [[nodiscard]] uint32_t GetStorageSizePerLayer() const

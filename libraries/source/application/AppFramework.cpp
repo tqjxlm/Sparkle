@@ -12,7 +12,9 @@
 #include "core/FileManager.h"
 #include "core/Path.h"
 #include "core/Profiler.h"
+#include "core/cook/CookArtifactStore.h"
 #include "core/task/TaskManager.h"
+#include "io/TextureCookJob.h"
 #include "renderer/nrd/NrdConfig.h"
 #include "renderer/resource/IblCookAccelerator.h"
 #include "renderer/resource/IblCookPlan.h"
@@ -21,7 +23,9 @@
 #include "scene/SceneManager.h"
 #include "scene/component/camera/CameraComponent.h"
 #include "scene/component/light/SkyLight.h"
+#include "scene/component/primitive/PrimitiveComponent.h"
 #include "scene/cook/SceneCooker.h"
+#include "scene/material/Material.h"
 #include "scene/material/MaterialManager.h"
 
 #if ENABLE_TEST_CASES
@@ -31,8 +35,12 @@
 #include <IconsFontAwesome7.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <nlohmann/json.hpp>
 
 #include <cstring>
+#include <map>
+#include <set>
+#include <unordered_set>
 
 namespace
 {
@@ -254,6 +262,64 @@ bool AppFramework::Init()
     return true;
 }
 
+static void CollectMaterialTextureJobs(const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs,
+                                       std::map<std::string, std::set<std::string>> &consumed_sources)
+{
+    std::unordered_set<std::string> seen;
+    for (const auto *primitive : scene.GetPrimitives())
+    {
+        const auto *material = primitive->GetMaterial();
+        if (material == nullptr)
+        {
+            continue;
+        }
+
+        ForEachMaterialTexture(
+            material->GetRawMaterial(), [&seen, &jobs, &consumed_sources](const std::shared_ptr<Image2D> &texture,
+                                                                          TextureCompression::Profile profile) {
+                if (!texture || !IsCookableMaterialTexture(*texture))
+                {
+                    return;
+                }
+
+                auto &artifact_keys = consumed_sources[texture->GetName()];
+
+                // every family cooks on the build host; packaging keeps only the family
+                // the target platform samples
+                for (auto family : {TextureCompression::Family::Astc, TextureCompression::Family::Bc})
+                {
+                    auto job = std::make_unique<TextureCookJob>(texture, texture->GetName(), profile, family);
+                    auto manifest_key = CookArtifactStore::GetManifestKey({.type = job->GetType(),
+                                                                           .version = job->GetVersion(),
+                                                                           .source_name = job->GetSourceName(),
+                                                                           .source_hash = std::nullopt});
+                    artifact_keys.insert(manifest_key);
+                    if (seen.insert(std::move(manifest_key)).second)
+                    {
+                        jobs.push_back(std::move(job));
+                    }
+                }
+            });
+    }
+}
+
+// the packaging stage strips these source files from the content image after verifying
+// the artifacts each one maps to (see strip_consumed_texture_sources in build.py). the
+// cook output persists across runs, so an empty set must still overwrite a stale file
+static bool WriteConsumedTextureSources(const std::map<std::string, std::set<std::string>> &consumed_sources)
+{
+    nlohmann::json json = nlohmann::json::object();
+    for (const auto &[source, artifact_keys] : consumed_sources)
+    {
+        json[source] = artifact_keys;
+    }
+
+    const auto dump = json.dump(2);
+    const auto written = FileManager::GetNativeFileManager()->Write(Path::Internal("cooked/texture_sources.json"),
+                                                                    dump.data(), dump.size());
+    return !written.empty();
+}
+
 int AppFramework::RunCookMode()
 {
     ASSERT_F(core_initialized_, "Core is not initialized. Call InitCore first");
@@ -288,30 +354,43 @@ int AppFramework::RunCookMode()
         };
     }
 
-    const SceneCooker::JobPlan job_plan{.collect_scene_independent_jobs =
-                                            [](std::vector<std::unique_ptr<CookJob>> &jobs) {
-                                                IblCookPlan::CollectSceneIndependentJobs(jobs);
-                                                return true;
-                                            },
-                                        .collect_scene_jobs =
-                                            [](const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
-                                                const auto *sky_light = scene.GetSkyLight();
-                                                if (sky_light == nullptr)
-                                                {
-                                                    return true;
-                                                }
+    // scene loading must keep raw material textures so the plan can cook every family
+    SetMaterialTextureInlineResolve(false);
 
-                                                const auto &environment = sky_light->GetCubeMap();
-                                                if (!environment)
-                                                {
-                                                    return !sky_light->HasSkyMap();
-                                                }
+    std::map<std::string, std::set<std::string>> consumed_texture_sources;
 
-                                                IblCookPlan::CollectEnvironmentJobs(environment, jobs);
-                                                return true;
-                                            }};
+    const SceneCooker::JobPlan job_plan{
+        .collect_scene_independent_jobs =
+            [](std::vector<std::unique_ptr<CookJob>> &jobs) {
+                IblCookPlan::CollectSceneIndependentJobs(jobs);
+                return true;
+            },
+        .collect_scene_jobs =
+            [&consumed_texture_sources](const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
+                const auto *sky_light = scene.GetSkyLight();
+                CollectMaterialTextureJobs(scene, jobs, consumed_texture_sources);
+                if (sky_light == nullptr)
+                {
+                    return true;
+                }
+
+                const auto &environment = sky_light->GetCubeMap();
+                if (!environment)
+                {
+                    return !sky_light->HasSkyMap();
+                }
+
+                IblCookPlan::CollectEnvironmentJobs(environment, jobs);
+                return true;
+            }};
 
     auto exit_code = SceneCooker::Run(app_config_.scene, job_plan, accelerator);
+
+    if (exit_code == 0 && !WriteConsumedTextureSources(consumed_texture_sources))
+    {
+        Log(Error, "failed to write the consumed texture source manifest");
+        exit_code = 1;
+    }
 
     if (rhi_)
     {

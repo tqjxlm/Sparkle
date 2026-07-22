@@ -19,8 +19,67 @@ enum class PixelFormat : uint8_t
     RGBAFloat16,
     RGBAUInt32,
     R10G10B10A2Unorm,
+    ASTC4x4Srgb,
+    ASTC4x4Unorm,
+    ASTC6x6Srgb,
+    ASTC6x6Unorm,
+    BC7Srgb,
+    BC7Unorm,
     Count
 };
+
+// per-pixel accessors and GetPixelSize do not apply to block-compressed formats
+constexpr bool IsCompressedFormat(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::ASTC4x4Srgb:
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::ASTC6x6Srgb:
+    case PixelFormat::ASTC6x6Unorm:
+    case PixelFormat::BC7Srgb:
+    case PixelFormat::BC7Unorm:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// texels per block edge
+constexpr unsigned GetBlockDim(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::ASTC4x4Srgb:
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::BC7Srgb:
+    case PixelFormat::BC7Unorm:
+        return 4;
+    case PixelFormat::ASTC6x6Srgb:
+    case PixelFormat::ASTC6x6Unorm:
+        return 6;
+    default:
+        UnImplemented(format);
+        return 0;
+    }
+}
+
+constexpr unsigned GetBlockByteSize(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::ASTC4x4Srgb:
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::ASTC6x6Srgb:
+    case PixelFormat::ASTC6x6Unorm:
+    case PixelFormat::BC7Srgb:
+    case PixelFormat::BC7Unorm:
+        return 16;
+    default:
+        UnImplemented(format);
+        return 0;
+    }
+}
 
 constexpr unsigned GetFormatChannelCount(PixelFormat format)
 {
@@ -34,6 +93,12 @@ constexpr unsigned GetFormatChannelCount(PixelFormat format)
     case PixelFormat::R10G10B10A2Unorm:
     case PixelFormat::RGBAFloat16:
     case PixelFormat::RGBAUInt32:
+    case PixelFormat::ASTC4x4Srgb:
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::ASTC6x6Srgb:
+    case PixelFormat::ASTC6x6Unorm:
+    case PixelFormat::BC7Srgb:
+    case PixelFormat::BC7Unorm:
         return 4;
     case PixelFormat::D24S8:
         return 2;
@@ -76,12 +141,35 @@ constexpr unsigned GetPixelSize(PixelFormat format)
     return 0;
 }
 
+constexpr unsigned GetImageRowByteSize(PixelFormat format, unsigned width)
+{
+    if (IsCompressedFormat(format))
+    {
+        const unsigned block_dim = GetBlockDim(format);
+        return (width + block_dim - 1) / block_dim * GetBlockByteSize(format);
+    }
+    return GetPixelSize(format) * width;
+}
+
+constexpr unsigned GetImageMipByteSize(PixelFormat format, unsigned width, unsigned height)
+{
+    if (IsCompressedFormat(format))
+    {
+        const unsigned block_dim = GetBlockDim(format);
+        return GetImageRowByteSize(format, width) * ((height + block_dim - 1) / block_dim);
+    }
+    return GetImageRowByteSize(format, width) * height;
+}
+
 constexpr bool IsSRGBFormat(PixelFormat pixel_format)
 {
     switch (pixel_format)
     {
     case PixelFormat::R8G8B8A8Srgb:
     case PixelFormat::B8G8R8A8Srgb:
+    case PixelFormat::ASTC4x4Srgb:
+    case PixelFormat::ASTC6x6Srgb:
+    case PixelFormat::BC7Srgb:
         return true;
     case PixelFormat::B8G8R8A8Unorm:
     case PixelFormat::R8G8B8A8Unorm:
@@ -93,6 +181,9 @@ constexpr bool IsSRGBFormat(PixelFormat pixel_format)
     case PixelFormat::R32UInt:
     case PixelFormat::R32Float:
     case PixelFormat::RGBAUInt32:
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::ASTC6x6Unorm:
+    case PixelFormat::BC7Unorm:
         return false;
     case PixelFormat::Count:
     default:
@@ -119,6 +210,12 @@ constexpr bool IsSwizzeldFormat(PixelFormat pixel_format)
     case PixelFormat::R32UInt:
     case PixelFormat::R32Float:
     case PixelFormat::RGBAUInt32:
+    case PixelFormat::ASTC4x4Srgb:
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::ASTC6x6Srgb:
+    case PixelFormat::ASTC6x6Unorm:
+    case PixelFormat::BC7Srgb:
+    case PixelFormat::BC7Unorm:
         return false;
     case PixelFormat::Count:
     default:

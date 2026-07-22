@@ -5,6 +5,7 @@
 #include "core/FileManager.h"
 #include "core/Logger.h"
 #include "io/Mesh.h"
+#include "io/TextureCookJob.h"
 #include "scene/Scene.h"
 #include "scene/SceneNode.h"
 #include "scene/component/camera/OrbitCameraComponent.h"
@@ -15,8 +16,11 @@
 #include "scene/material/MaterialManager.h"
 #include "scene/material/PbrMaterial.h"
 
+#include <array>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
+#include <limits>
 #include <tinyusdz.hh>
 #include <tydra/render-data.hh>
 
@@ -160,7 +164,8 @@ static std::vector<uint8_t> ExpandToRgba(const std::vector<uint8_t> &src, int ch
     return dst;
 }
 
-static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id)
+static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_t texture_id,
+                                              TextureCompression::Profile profile)
 {
     // tydra keeps the texture entry but leaves these ids at -1 when it fails to load the image
     auto image_id = ctx.render_scene.textures[texture_id].texture_image_id;
@@ -173,6 +178,18 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
     const auto &image = ctx.render_scene.images[static_cast<size_t>(image_id)];
     if (image.buffer_id < 0)
     {
+        // an unloadable image keeps its authored path in asset_identifier. inside a
+        // stripped package the cooked artifact fully replaces the source, so resolve by
+        // identity alone
+        if (ctx.asset_root.type == PathType::Resource)
+        {
+            const std::string identity = MakeTextureIdentity(ctx.asset_root.path.parent_path(), image.asset_identifier);
+            if (!identity.empty())
+            {
+                return ResolveMaterialTexture(nullptr, identity, profile);
+            }
+        }
+
         Log(Error, "USDLoader: texture image has no data: {}", image.asset_identifier);
         return nullptr;
     }
@@ -208,6 +225,7 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
         return nullptr;
     }
 
+    std::shared_ptr<Image2D> texture;
     if (image.channels != 4)
     {
         if (image.channels != 3 && image.channels != 1)
@@ -216,12 +234,31 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
             return nullptr;
         }
 
-        return std::make_shared<Image2D>(image.width, image.height, format,
-                                         ExpandToRgba(image_data.data, image.channels, component_size));
+        texture = std::make_shared<Image2D>(image.width, image.height, format,
+                                            ExpandToRgba(image_data.data, image.channels, component_size));
+    }
+    else
+    {
+        texture = std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
     }
 
-    auto texture = std::make_shared<Image2D>(image.width, image.height, format, image_data.data);
-    return texture;
+    // artifact identities exist only for packaged content: exported or external scenes
+    // load their textures raw. tydra keeps the authored asset path in asset_identifier
+    // whether or not the image loaded, so the identity joins it to the scene parent —
+    // the same construction as the unloadable-image path above
+    if (ctx.asset_root.type != PathType::Resource)
+    {
+        return texture;
+    }
+
+    const std::string identity = MakeTextureIdentity(ctx.asset_root.path.parent_path(), image.asset_identifier);
+    if (identity.empty())
+    {
+        return texture;
+    }
+    texture->SetName(identity);
+
+    return ResolveMaterialTexture(texture, identity, profile);
 }
 
 static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node, const USDLoaderContext &ctx)
@@ -324,8 +361,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
         if (surface_shader.diffuseColor.is_texture())
         {
-            material_resource.base_color_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.diffuseColor.texture_id));
+            material_resource.base_color_texture = CreateTexture(
+                ctx, static_cast<size_t>(surface_shader.diffuseColor.texture_id), TextureCompression::Profile::Color);
         }
         else
         {
@@ -334,8 +371,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
         if (surface_shader.emissiveColor.is_texture())
         {
-            material_resource.emissive_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.emissiveColor.texture_id));
+            material_resource.emissive_texture = CreateTexture(
+                ctx, static_cast<size_t>(surface_shader.emissiveColor.texture_id), TextureCompression::Profile::Color);
 
             // the texture is multiplied by emissive_color, whose default of Zeros would erase it
             material_resource.emissive_color = Ones;
@@ -347,8 +384,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
 
         if (surface_shader.normal.is_texture())
         {
-            material_resource.normal_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.normal.texture_id));
+            material_resource.normal_texture = CreateTexture(ctx, static_cast<size_t>(surface_shader.normal.texture_id),
+                                                             TextureCompression::Profile::Normal);
         }
 
         if (surface_shader.metallic.is_texture())
@@ -361,8 +398,8 @@ static std::shared_ptr<MeshPrimitive> LoadMesh(const tinyusdz::tydra::Node &node
             ASSERT_EQUAL(textures[static_cast<size_t>(surface_shader.metallic.texture_id)].texture_image_id,
                          textures[static_cast<size_t>(surface_shader.roughness.texture_id)].texture_image_id);
 
-            material_resource.metallic_roughness_texture =
-                CreateTexture(ctx, static_cast<size_t>(surface_shader.metallic.texture_id));
+            material_resource.metallic_roughness_texture = CreateTexture(
+                ctx, static_cast<size_t>(surface_shader.metallic.texture_id), TextureCompression::Profile::Data);
         }
         else
         {
@@ -512,7 +549,8 @@ static int TinyusdzAssetSizeFun(const char *resolved_asset_name, uint64_t *nbyte
     const auto *user_data = reinterpret_cast<TinyusdzAssetUserData *>(userdata);
 
     auto size = user_data->file_manager->GetSize(Path(resolved_asset_name, user_data->path_type));
-    if (size == 0)
+    // missing files report SIZE_MAX (see StdFileManager::GetSize)
+    if (size == 0 || size == std::numeric_limits<size_t>::max())
     {
         *err = std::format("TinyUSDZ: failed to get asset size. asset {}", resolved_asset_name);
         return -1;

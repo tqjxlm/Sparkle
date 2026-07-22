@@ -35,6 +35,34 @@ INTERNAL_STATE_PREFIX = {
     "macos": "sparkle.app/Contents/SharedSupport/",
 }
 
+# one compressed-texture family ships per product; the other is dead weight for its GPUs
+TEXTURE_FAMILY_DIRS = {"astc": "cooked/texture_astc/", "bc": "cooked/texture_bc/"}
+
+# glfw is the one framework whose target OS is not implied by the framework itself
+GLFW_SYSTEM_FAMILY = {"macos": "astc", "windows": "bc", "linux": "bc"}
+
+
+def texture_family(framework, package, target_system=None):
+    """ASTC for Apple and Android GPUs, BC for other desktop GPUs. glfw products carry
+    their target system in the package name (see build.py product_name); an explicit
+    target must agree with a recognizably named archive. Never guesses: an archive
+    whose target cannot be established fails instead of shipping the wrong family."""
+    if framework != "glfw":
+        return "astc"
+
+    named_system = os.path.basename(package).split("-")[0]
+    if target_system is None:
+        target_system = named_system
+    elif named_system in GLFW_SYSTEM_FAMILY and named_system != target_system:
+        raise PackagingError(
+            f"glfw package {package} is named for {named_system} but targets {target_system}")
+
+    if target_system not in GLFW_SYSTEM_FAMILY:
+        raise PackagingError(f"cannot establish the texture family of glfw package {package}")
+
+    return GLFW_SYSTEM_FAMILY[target_system]
+
+
 ANDROID_ASSET_ROOT = "assets/"
 ANDROID_DIR_MANIFEST = "_dir_manifest.txt"
 
@@ -94,7 +122,7 @@ def strip_internal_state(package, internal_prefix):
     return stripped
 
 
-def package_cooked(package, framework, image_dir):
+def package_cooked(package, framework, image_dir, target_system=None):
     """Returns the number of image files placed into the archive. Raises
     PackagingError on contract violations.
 
@@ -117,6 +145,11 @@ def package_cooked(package, framework, image_dir):
         if internal_prefix:
             strip_internal_state(package, internal_prefix)
         return 0
+
+    family = texture_family(framework, package, target_system)
+    dropped_families = tuple(prefix for name, prefix in TEXTURE_FAMILY_DIRS.items() if name != family)
+    image_files = {relative: path for relative, path in image_files.items()
+                   if not relative.startswith(dropped_families)}
 
     claimed = {relative.split("/")[0] for relative in image_files} & set(BUILD_OWNED_SUBTREES)
     if claimed:
@@ -161,10 +194,12 @@ def main():
     parser.add_argument("--framework", required=True, choices=sorted(PACKED_ROOT))
     parser.add_argument("--package", required=True, help="product archive (zip/apk/ipa)")
     parser.add_argument("--cooked", required=True, help="cooked content image directory")
+    parser.add_argument("--target-system", choices=sorted(GLFW_SYSTEM_FAMILY),
+                        help="glfw target system; checked against a recognized archive name")
     args = parser.parse_args()
 
     try:
-        package_cooked(args.package, args.framework, args.cooked)
+        package_cooked(args.package, args.framework, args.cooked, args.target_system)
     except PackagingError as error:
         sys.exit(str(error))
 

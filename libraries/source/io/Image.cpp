@@ -4,6 +4,7 @@
 #include "core/Logger.h"
 #include "core/task/TaskManager.h"
 #include "io/ImageTypes.h"
+#include "io/TextureCompression.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -87,6 +88,16 @@ void ConvertPixelsToRGBA8(const uint8_t *source_data, uint8_t *dest, uint32_t pi
 template <typename T> auto OwnStbiPixels(T *pixels)
 {
     return std::unique_ptr<T, decltype(&stbi_image_free)>(pixels, stbi_image_free);
+}
+
+uint32_t FinishContentHash(CRC32 &hasher, uint32_t width, uint32_t height, PixelFormat format)
+{
+    const std::array<uint32_t, 3> meta{width, height, static_cast<uint32_t>(format)};
+    hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
+
+    uint32_t hash = 0;
+    hasher.getHash(reinterpret_cast<unsigned char *>(&hash));
+    return hash;
 }
 } // namespace
 
@@ -192,8 +203,28 @@ bool Image2D::LoadFromFile(const std::string &file_path)
     return true;
 }
 
+const Image2D &Image2D::EnsureDecoded() const
+{
+    ASSERT(IsCompressedFormat(pixel_format_) && decode_cache_);
+    std::call_once(decode_cache_->once,
+                   [this] { decode_cache_->image = std::make_shared<Image2D>(TextureCompression::Decode(*this)); });
+    return *decode_cache_->image;
+}
+
+uint32_t Image2D::GetContentHash() const
+{
+    CRC32 hasher;
+    hasher.add(pixels_.data(), pixels_.size());
+    return FinishContentHash(hasher, width_, height_, pixel_format_);
+}
+
 bool Image2D::WriteToFile(const Path &file_path) const
 {
+    if (IsCompressedFormat(pixel_format_))
+    {
+        return EnsureDecoded().WriteToFile(file_path);
+    }
+
     std::vector<char> buffer;
     auto *custom_data = static_cast<void *>(&buffer);
 
@@ -338,11 +369,7 @@ uint32_t Image2DCube::GetContentHash() const
     {
         hasher.add(face->GetRawData(), face->GetStorageSize());
     }
-    const std::array<uint32_t, 3> meta{GetWidth(), GetHeight(), static_cast<uint32_t>(GetFormat())};
-    hasher.add(meta.data(), meta.size() * sizeof(uint32_t));
-
-    uint32_t hash = 0;
-    hasher.getHash(reinterpret_cast<unsigned char *>(&hash));
+    const uint32_t hash = FinishContentHash(hasher, GetWidth(), GetHeight(), GetFormat());
 
     content_hash_.store(hash, std::memory_order_relaxed);
     content_hash_valid_.store(true, std::memory_order_release);

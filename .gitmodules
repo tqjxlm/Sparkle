@@ -61,3 +61,9 @@
 [submodule "thirdparty/NRD"]
 	path = thirdparty/NRD
 	url = https://github.com/NVIDIA-RTX/NRD.git
+[submodule "thirdparty/astc-encoder"]
+	path = thirdparty/astc-encoder
+	url = https://github.com/ARM-software/astc-encoder.git
+[submodule "thirdparty/bc7enc_rdo"]
+	path = thirdparty/bc7enc_rdo
+	url = https://github.com/richgel999/bc7enc_rdo.git

@@ -11,9 +11,14 @@ class CookArtifactStore
 public:
     // Resolves packaged content before the writable internal cache. An unresolved key
     // uses its logical identity; a resolved key may reuse identical relocated content.
+    // rebuild_cache skips only the writable cache because packaged artifacts cannot be
+    // rebuilt in place.
     [[nodiscard]] static CookPayload Load(const CookArtifactKey &key);
 
     // Only resolved, non-empty outputs can be persisted.
     static bool Save(const CookArtifactKey &key, const CookPayload &payload);
+
+    // logical identity of an artifact as keyed in cooked/manifest.json
+    [[nodiscard]] static std::string GetManifestKey(const CookArtifactKey &key);
 };
 } // namespace sparkle

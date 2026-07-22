@@ -20,6 +20,8 @@
 #include "application/NativeView.h"
 #include "core/Logger.h"
 
+#include <string_view>
+
 namespace sparkle
 {
 constexpr unsigned HeadlessFramesInFlight = 2;
@@ -179,6 +181,30 @@ bool VulkanRHI::HasPhysicalGpu()
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &properties);
     return properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU;
+}
+
+bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
+{
+    if (IsCompressedFormat(format))
+    {
+        // the Apple Paravirtual device (macOS CI runners) advertises compressed formats
+        // through MoltenVK but its buffer-to-image copies produce blank texels; the same
+        // device handles them correctly through native Metal shared-storage uploads
+        VkPhysicalDeviceProperties device_properties;
+        vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &device_properties);
+        if (std::string_view(device_properties.deviceName).find("Paravirtual") != std::string_view::npos)
+        {
+            return false;
+        }
+    }
+
+    VkFormatProperties properties;
+    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
+
+    constexpr VkFormatFeatureFlags Required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                              VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+                                              VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    return (properties.optimalTilingFeatures & Required) == Required;
 }
 
 uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const

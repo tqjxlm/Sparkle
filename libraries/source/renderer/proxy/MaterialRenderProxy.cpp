@@ -27,12 +27,15 @@ RHIResourceRef<RHIImage> MaterialRenderProxy::CreateAndRegisterTexture(RHIContex
 {
     if (!image)
     {
+        // the raster passes may bind this sampler for the whole material, so it must
+        // sample real material textures correctly
         return rhi->GetOrCreateDummyTexture(RHIImage::Attribute{
             .format = PixelFormat::R8G8B8A8Srgb,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+                        .filtering_method_min = RHISampler::FilteringMethod::Linear,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
+                        .max_lod = RHISampler::SamplerAttribute::UnclampedLod},
             .usages = RHIImage::ImageUsage::Texture,
         });
     }

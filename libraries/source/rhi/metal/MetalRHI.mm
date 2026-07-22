@@ -115,6 +115,27 @@ bool MetalRHI::SupportsHardwareRayTracing()
     return context->GetDevice().supportsRaytracing;
 }
 
+bool MetalRHI::SupportsSampledFormat(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::ASTC4x4Srgb:
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::ASTC6x6Srgb:
+    case PixelFormat::ASTC6x6Unorm:
+        return [context->GetDevice() supportsFamily:MTLGPUFamilyApple2];
+    case PixelFormat::BC7Srgb:
+    case PixelFormat::BC7Unorm:
+#if FRAMEWORK_MACOS
+        return context->GetDevice().supportsBCTextureCompression;
+#else
+        return false;
+#endif
+    default:
+        return true;
+    }
+}
+
 bool MetalRHI::BeginFrameInternal()
 {
     context->BeginFrame();

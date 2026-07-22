@@ -113,6 +113,20 @@ inline MTLPixelFormat GetMetalPixelFormat(PixelFormat format)
         return MTLPixelFormatR32Float;
     case PixelFormat::RGBAUInt32:
         return MTLPixelFormatRGBA32Uint;
+    case PixelFormat::ASTC4x4Srgb:
+        return MTLPixelFormatASTC_4x4_sRGB;
+    case PixelFormat::ASTC4x4Unorm:
+        return MTLPixelFormatASTC_4x4_LDR;
+    case PixelFormat::ASTC6x6Srgb:
+        return MTLPixelFormatASTC_6x6_sRGB;
+    case PixelFormat::ASTC6x6Unorm:
+        return MTLPixelFormatASTC_6x6_LDR;
+#if FRAMEWORK_MACOS
+    case PixelFormat::BC7Srgb:
+        return MTLPixelFormatBC7_RGBAUnorm_sRGB;
+    case PixelFormat::BC7Unorm:
+        return MTLPixelFormatBC7_RGBAUnorm;
+#endif
     default:
         UnImplemented(format);
     }

@@ -9,7 +9,9 @@ usd_round_trip,,x,,,,x
 input_injection,x,x,x,x,x,x
 cooker_request,x,,,,,x
 image_io,x,x,x,x,x,x
+texture_compression,x,x,x,x,x,x
 usd_loader_semantics,x,x,x,,,x
+usd_loader_semantics_rebuild,,,,,,
 scene_load_failure,x,x,x,x,x,x
 render_target_pool,x,x,x,x,x,x
 dynamic_buffer_reuse,x,x,x,x,x,x

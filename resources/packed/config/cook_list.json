@@ -1,5 +1,8 @@
 {
     "scenes": [
-        "TestScene.usda"
+        "TestScene.usda",
+        "tests/nested/a/scene.usda",
+        "tests/nested/b/scene.usda",
+        "tests/gltf_external/scene.gltf"
     ]
 }

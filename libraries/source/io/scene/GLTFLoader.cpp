@@ -6,6 +6,7 @@
 #include "io/ImageTypes.h"
 #include "io/Material.h"
 #include "io/Mesh.h"
+#include "io/TextureCookJob.h"
 #include "scene/component/primitive/MeshPrimitive.h"
 #include "scene/material/MaterialManager.h"
 #include "scene/material/PbrMaterial.h"
@@ -269,7 +270,9 @@ static std::shared_ptr<Image2D> CreateImage2D(const tinygltf::Image &image, bool
     return std::make_shared<Image2D>(image.width, image.height, format, image.image);
 }
 
-static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint32_t texture_index, bool is_linear)
+static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint32_t texture_index,
+                                              TextureCompression::Profile profile, const std::string &model_dir,
+                                              PathType path_type)
 {
     if (texture_index == UINT_MAX)
     {
@@ -277,7 +280,42 @@ static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint
     }
     auto image_index = static_cast<unsigned>(model.textures[texture_index].source);
     auto image = model.images[image_index];
-    return CreateImage2D(image, is_linear);
+
+    // artifact identities exist only for packaged, non-embedded images; anything else
+    // loads raw
+    std::string identity;
+    if (path_type == PathType::Resource && !image.uri.empty())
+    {
+        identity = MakeTextureIdentity(model_dir, image.uri);
+    }
+
+    // tinygltf keeps the image entry with no pixels when the external file is missing;
+    // inside a stripped package the cooked artifact fully replaces the source, so
+    // resolve by identity alone
+    if (image.image.empty())
+    {
+        if (identity.empty())
+        {
+            Log(Error, "GLTFLoader: texture image has no data: {}", image.uri);
+            return nullptr;
+        }
+        return ResolveMaterialTexture(nullptr, identity, profile);
+    }
+
+    const bool is_linear = profile != TextureCompression::Profile::Color;
+    auto image2d = CreateImage2D(image, is_linear);
+
+    if (identity.empty())
+    {
+        return image2d;
+    }
+
+    if (image2d)
+    {
+        image2d->SetName(identity);
+    }
+
+    return ResolveMaterialTexture(image2d, identity, profile);
 }
 
 static std::shared_ptr<Mesh> LoadPrimitive(const tinygltf::Model &model, const tinygltf::Primitive &primitive,
@@ -426,7 +464,8 @@ static std::shared_ptr<Mesh> LoadPrimitive(const tinygltf::Model &model, const t
     return loaded_mesh_ptr;
 }
 
-static std::vector<std::shared_ptr<Material>> LoadMaterials(const tinygltf::Model &model)
+static std::vector<std::shared_ptr<Material>> LoadMaterials(const tinygltf::Model &model, const std::string &model_dir,
+                                                            PathType path_type)
 {
     auto &material_manager = MaterialManager::Instance();
 
@@ -437,22 +476,25 @@ static std::vector<std::shared_ptr<Material>> LoadMaterials(const tinygltf::Mode
 
         if (material.pbrMetallicRoughness.baseColorTexture.index >= 0)
         {
-            auto base_color_texture = CreateTexture(
-                model, static_cast<unsigned>(material.pbrMetallicRoughness.baseColorTexture.index), false);
+            auto base_color_texture =
+                CreateTexture(model, static_cast<unsigned>(material.pbrMetallicRoughness.baseColorTexture.index),
+                              TextureCompression::Profile::Color, model_dir, path_type);
             raw_material.base_color_texture = base_color_texture;
             raw_material.base_color = utilities::Vector2Vec3(material.pbrMetallicRoughness.baseColorFactor);
         }
 
         if (material.normalTexture.index >= 0)
         {
-            auto normal_map = CreateTexture(model, static_cast<unsigned>(material.normalTexture.index), true);
+            auto normal_map = CreateTexture(model, static_cast<unsigned>(material.normalTexture.index),
+                                            TextureCompression::Profile::Normal, model_dir, path_type);
             raw_material.normal_texture = normal_map;
         }
 
         if (material.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0)
         {
             auto metallic_roughness_texture = CreateTexture(
-                model, static_cast<unsigned>(material.pbrMetallicRoughness.metallicRoughnessTexture.index), true);
+                model, static_cast<unsigned>(material.pbrMetallicRoughness.metallicRoughnessTexture.index),
+                TextureCompression::Profile::Data, model_dir, path_type);
             raw_material.metallic_roughness_texture = metallic_roughness_texture;
             raw_material.metallic = static_cast<float>(material.pbrMetallicRoughness.metallicFactor);
             raw_material.roughness = static_cast<float>(material.pbrMetallicRoughness.roughnessFactor);
@@ -460,7 +502,8 @@ static std::vector<std::shared_ptr<Material>> LoadMaterials(const tinygltf::Mode
 
         if (material.emissiveTexture.index >= 0)
         {
-            auto emissive_texture = CreateTexture(model, static_cast<unsigned>(material.emissiveTexture.index), false);
+            auto emissive_texture = CreateTexture(model, static_cast<unsigned>(material.emissiveTexture.index),
+                                                  TextureCompression::Profile::Color, model_dir, path_type);
             raw_material.emissive_texture = emissive_texture;
             raw_material.emissive_color = utilities::Vector2Vec3(material.emissiveFactor);
         }
@@ -583,7 +626,7 @@ std::shared_ptr<SceneNode> GLTFLoader::Load(Scene *scene)
         nodes_to_traverse_ref = &model.scenes[scene_to_display].nodes;
     }
 
-    auto materials = LoadMaterials(model);
+    auto materials = LoadMaterials(model, asset_root_.path.parent_path().generic_string(), asset_root_.type);
 
     for (auto i : *nodes_to_traverse_ref)
     {

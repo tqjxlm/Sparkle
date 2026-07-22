@@ -27,6 +27,8 @@ FILE(GLOB THIRD_PARTY_SOURCES
     imgui/misc/cpp/imgui_stdlib.cpp
     spirv_reflect/spirv_reflect.cpp
     hash-library/src/*.cpp
+    bc7enc_rdo/bc7enc.cpp
+    bc7enc_rdo/bc7decomp.cpp
 )
 
 if (GLFW)
@@ -164,6 +166,23 @@ else()
     target_compile_definitions(sparkle PRIVATE ENABLE_PROFILER=0)
 endif()
 
+# ------------------ astcenc (ASTC texture encoder/decoder) ------------------
+
+# one explicit SIMD backend per target arch. never ISA_NATIVE: released binaries must not
+# carry -march=native. UNIVERSAL_BUILD (Darwin default) builds every ISA; force single-arch.
+set(ASTCENC_CLI OFF CACHE BOOL "" FORCE)
+set(ASTCENC_UNIVERSAL_BUILD OFF CACHE BOOL "" FORCE)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
+    set(ASTCENC_ISA_NEON ON CACHE BOOL "" FORCE)
+    set(SPARKLE_ASTCENC_TARGET astcenc-neon-static)
+else()
+    set(ASTCENC_ISA_SSE41 ON CACHE BOOL "" FORCE)
+    set(SPARKLE_ASTCENC_TARGET astcenc-sse4.1-static)
+endif()
+add_subdirectory(astc-encoder)
+suppress_warnings(${SPARKLE_ASTCENC_TARGET})
+target_link_libraries(sparkle_thirdparty PUBLIC ${SPARKLE_ASTCENC_TARGET})
+
 # ------------------ NRD (NVIDIA Real-time Denoiser) ------------------
 
 # Real-time GI denoiser. Native-API path: its SPIR-V shaders are cross-compiled to Metal by our shader
@@ -257,6 +276,8 @@ target_include_directories(sparkle_thirdparty SYSTEM PUBLIC
     xoshiro_cpp
     hash-library/include
     IconFontCppHeaders
+    astc-encoder/Source
+    bc7enc_rdo
 )
 
 target_link_libraries(sparkle PUBLIC sparkle_thirdparty)
