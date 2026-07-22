@@ -184,8 +184,9 @@ jobs:
         run: python3 dev/check_tidy.py
 
   # stages: build (every product in parallel, the heavy stage) -> cook (macos-release,
-  # on the macos runners' real Metal GPU) -> release (swap in the cooked content image
-  # and re-sign; on ubuntu unless apple signing needs a macos runner) -> test (the
+  # on the macos runners' real Metal GPU, one content image per cook target) -> release
+  # (swap in the product's own image and re-sign; on ubuntu unless apple signing needs
+  # a macos runner) -> test (the
   # products tests/coverage.csv covers). Debug builds are compile gates only: nothing
   # releases or tests them. every edge is a real needs edge; jobs are unrolled from the
   # product table because needs cannot target a single matrix cell.
@@ -252,7 +253,7 @@ COOK_JOB = """
           # a hung app never fails the step on its own; kill it so the diagnostics below run
           ( sleep 900 && echo "cook watchdog fired" && pkill -f sparkle.app/Contents/MacOS/sparkle ) &
           WATCHDOG=$!
-          if ! python3 build.py --framework macos --config Release --stage cook ${{ steps.setup-environment.outputs.build-args }}; then
+          if ! python3 build.py --framework macos --config Release --stage cook --cook_targets @cook_targets@ ${{ steps.setup-environment.outputs.build-args }}; then
             kill $WATCHDOG 2>/dev/null || true
             echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
             echo "=== crash reports ==="
@@ -261,12 +262,14 @@ COOK_JOB = """
             exit 1
           fi
           kill $WATCHDOG 2>/dev/null || true
-          test -f build_system/macos/output/cooked_image/cooked/manifest.json
+          for target in @cook_target_list@; do
+            test -f "build_system/macos/output/cooked_image/$target/cooked/manifest.json"
+          done
 
-      - name: Upload cooked content image
+      - name: Upload cooked content images
         uses: actions/upload-artifact@v7
         with:
-          name: cooked-shared
+          name: cooked-images
           path: build_system/macos/output/cooked_image
 """
 
@@ -508,6 +511,26 @@ def host(product):
     return product["os"].removesuffix("-latest")
 
 
+# must match COOK_TARGETS in build.py (runner labels say ubuntu, targets say linux)
+RUNNER_SYSTEM = {"macos-latest": "macos", "windows-latest": "windows", "ubuntu-latest": "linux"}
+
+
+def product_cook_target(product):
+    if product["framework"] != "glfw":
+        return product["framework"]
+    return f"{RUNNER_SYSTEM[product['os']]}-glfw"
+
+
+def cook_targets():
+    """Every cook-target identity the shipped products need, in stable order."""
+    targets = []
+    for product in PRODUCTS:
+        target = product_cook_target(product)
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
 def slug(stage, product, config=None):
     parts = [stage, host(product), product["framework"], product.get("abi"),
              config.lower() if config else None]
@@ -612,7 +635,8 @@ def jobs():
         for config in product.get("build_types", ("Debug", "Release")):
             generated.append((slug("build", product, config),
                               build_job(product, config)))
-    generated.append(("cook", COOK_JOB))
+    generated.append(("cook", render(COOK_JOB, cook_targets="+".join(cook_targets()),
+                                     cook_target_list=" ".join(cook_targets()))))
     for product in PRODUCTS:
         if "Release" not in product.get("build_types", ("Release",)):
             continue

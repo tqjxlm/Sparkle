@@ -5,6 +5,7 @@
 #include <atomic>
 
 #include "core/Logger.h"
+#include "core/cook/CookArtifactStore.h"
 #include "core/cook/Cooker.h"
 #include "core/math/Utilities.h"
 #include "core/task/TaskManager.h"
@@ -184,6 +185,14 @@ CookJobResult SkyLightCookJob::Execute()
     return CookJobResult::Success(std::move(payload));
 }
 
+CookArtifactKey SkyMapLookupKey(const std::string &sky_map_path)
+{
+    return {.type = SkyLightCookJob::Type,
+            .version = SkyLightCookJob::Version,
+            .source_name = std::filesystem::path(sky_map_path).lexically_normal().generic_string(),
+            .source_hash = std::nullopt};
+}
+
 } // namespace
 
 SkyLight::SkyLight() = default;
@@ -191,6 +200,12 @@ SkyLight::SkyLight() = default;
 SkyLight::~SkyLight()
 {
     node_->GetScene()->GetRenderProxy()->SetSkyLight(nullptr);
+}
+
+std::string SkyLight::GetCookManifestKey() const
+{
+    ASSERT(HasSkyMap());
+    return CookArtifactStore::GetManifestKey(SkyMapLookupKey(sky_map_path_));
 }
 
 void SkyLight::SetSkyMap(const std::string &file_path)
@@ -230,11 +245,8 @@ void SkyLight::RequestCook()
     auto delivery_started = std::make_shared<std::atomic<bool>>(false);
 
     const auto source_path = sky_map_path_;
-    const auto source_name = std::filesystem::path(source_path).lexically_normal().generic_string();
-    const CookArtifactKey lookup_key{.type = SkyLightCookJob::Type,
-                                     .version = SkyLightCookJob::Version,
-                                     .source_name = source_name,
-                                     .source_hash = std::nullopt};
+    const auto lookup_key = SkyMapLookupKey(source_path);
+    const auto source_name = lookup_key.source_name;
 
     cook_handle_ = std::make_unique<CookHandle>(Cooker::Request(
         lookup_key,

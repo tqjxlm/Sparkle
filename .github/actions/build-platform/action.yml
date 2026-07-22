@@ -81,7 +81,12 @@ runs:
       shell: bash
       env:
         SPARKLE_BUILD_JOBS: 8
-      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --stage build --stage package ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }}
+      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --stage build ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }}
+
+    # the raw build product; the release stage swaps in the cooked content image
+    - name: Archive build product
+      shell: bash
+      run: python3 dev/archive_product.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }}
 
     - name: Check Android task graph
       if: inputs.framework == 'android' && inputs.build-type == 'Debug'

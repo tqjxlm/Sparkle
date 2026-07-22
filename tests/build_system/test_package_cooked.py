@@ -1,6 +1,7 @@
 """Tests for the cooked-content packaging module."""
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -14,6 +15,8 @@ SPEC = importlib.util.spec_from_file_location(
 package_cooked = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = package_cooked
 SPEC.loader.exec_module(package_cooked)
+
+TARGET = "linux-glfw"
 
 
 class PackageCookedTest(unittest.TestCase):
@@ -32,11 +35,14 @@ class PackageCookedTest(unittest.TestCase):
             for name in extra_entries:
                 zip_file.writestr(name, "state")
 
-    def make_image(self, extra_files=()):
+    def make_image(self, target=TARGET, extra_files=()):
         os.makedirs(os.path.join(self.image, "cooked", "skylight"))
         os.makedirs(os.path.join(self.image, "config"))
         with open(os.path.join(self.image, "cooked", "manifest.json"), "w") as manifest:
             manifest.write("{}")
+        if target is not None:
+            with open(os.path.join(self.image, "cooked", "content_target.json"), "w") as marker:
+                json.dump({"target": target}, marker)
         with open(os.path.join(self.image, "cooked", "skylight", "sky.cook"), "w") as artifact:
             artifact.write("payload")
         with open(os.path.join(self.image, "config", "cook_list.json"), "w") as config:
@@ -59,11 +65,12 @@ class PackageCookedTest(unittest.TestCase):
         self.make_package()
         self.make_image()
 
-        count = package_cooked.package_cooked(self.package, "glfw", self.image)
+        count = package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
 
-        self.assertEqual(count, 3)
+        self.assertEqual(count, 4)
         entries = self.entries()
         self.assertIn("build/packed/cooked/skylight/sky.cook", entries)
+        self.assertIn("build/packed/cooked/content_target.json", entries)
         self.assertNotIn("build/packed/models/stale.bin", entries)
         self.assertEqual(self.read_entry("build/packed/config/cook_list.json"),
                          '{"from": "image"}')
@@ -72,62 +79,46 @@ class PackageCookedTest(unittest.TestCase):
         self.make_package()
         self.make_image()
 
-        package_cooked.package_cooked(self.package, "glfw", self.image)
+        package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
 
         self.assertIn("build/packed/shaders/forward.spv", self.entries())
         self.assertIn("build/sparkle", self.entries())
 
-    def test_glfw_product_name_selects_bc_family(self):
+    def test_rejects_an_image_declared_for_another_target(self):
         self.make_package()
-        self.make_image(extra_files=["cooked/texture_astc/material.cook",
-                                     "cooked/texture_bc/material.cook"])
+        self.make_image(target="android")
 
-        package_cooked.package_cooked(self.package, "glfw", self.image)
+        with self.assertRaises(package_cooked.PackagingError):
+            package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
 
-        entries = self.entries()
-        self.assertIn("build/packed/cooked/texture_bc/material.cook", entries)
-        self.assertNotIn("build/packed/cooked/texture_astc/material.cook", entries)
+    def test_rejects_an_image_without_a_target_marker(self):
+        self.make_package()
+        self.make_image(target=None)
 
-    def test_cli_explicit_target_selects_astc_for_renamed_glfw_archive(self):
+        with self.assertRaises(package_cooked.PackagingError):
+            package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
+
+    def test_cli_packages_a_renamed_archive_with_an_explicit_target(self):
         self.package = os.path.join(self.directory.name, "renamed.zip")
         self.make_package()
-        self.make_image(extra_files=["cooked/texture_astc/material.cook",
-                                     "cooked/texture_bc/material.cook"])
+        self.make_image()
 
         completed = subprocess.run(
             [sys.executable, package_cooked.__file__, "--framework", "glfw",
              "--package", self.package, "--cooked", self.image,
-             "--target-system", "macos"],
+             "--target", TARGET],
             capture_output=True, text=True, check=False)
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        entries = self.entries()
-        self.assertIn("build/packed/cooked/texture_astc/material.cook", entries)
-        self.assertNotIn("build/packed/cooked/texture_bc/material.cook", entries)
-
-    def test_rejects_glfw_name_that_disagrees_with_explicit_target(self):
-        self.make_package()
-        self.make_image()
-
-        with self.assertRaises(package_cooked.PackagingError):
-            package_cooked.package_cooked(
-                self.package, "glfw", self.image, target_system="macos")
-
-    def test_rejects_renamed_glfw_archive_without_an_explicit_target(self):
-        self.package = os.path.join(self.directory.name, "renamed.zip")
-        self.make_package()
-        self.make_image()
-
-        with self.assertRaises(package_cooked.PackagingError):
-            package_cooked.package_cooked(self.package, "glfw", self.image)
+        self.assertIn("build/packed/cooked/skylight/sky.cook", self.entries())
 
     def test_replacement_is_idempotent(self):
         self.make_package()
         self.make_image()
 
-        package_cooked.package_cooked(self.package, "glfw", self.image)
+        package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
         first = sorted(self.entries())
-        package_cooked.package_cooked(self.package, "glfw", self.image)
+        package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
 
         self.assertEqual(sorted(self.entries()), first)
 
@@ -136,26 +127,24 @@ class PackageCookedTest(unittest.TestCase):
         self.make_image(extra_files=["shaders/rogue.spv"])
 
         with self.assertRaises(package_cooked.PackagingError):
-            package_cooked.package_cooked(self.package, "glfw", self.image)
+            package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
 
     def test_strips_internal_runtime_state(self):
         self.make_package(extra_entries=["build/generated/logs/output.log",
                                          "build/generated/cooked/manifest.json"])
         self.make_image()
 
-        package_cooked.package_cooked(self.package, "glfw", self.image)
+        package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
 
         self.assertNotIn("build/generated/logs/output.log", self.entries())
         self.assertNotIn("build/generated/cooked/manifest.json", self.entries())
 
-    def test_missing_image_warns_but_keeps_the_raw_package(self):
-        self.make_package(extra_entries=["build/generated/logs/output.log"])
+    def test_missing_image_is_an_error(self):
+        self.make_package()
 
-        count = package_cooked.package_cooked(self.package, "glfw", self.image)
-
-        self.assertEqual(count, 0)
+        with self.assertRaises(package_cooked.PackagingError):
+            package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
         self.assertIn("build/packed/models/stale.bin", self.entries())
-        self.assertNotIn("build/generated/logs/output.log", self.entries())
 
     def test_android_dir_manifests_cover_the_final_tree(self):
         self.make_package(prefix="assets/packed/",
@@ -163,9 +152,9 @@ class PackageCookedTest(unittest.TestCase):
                                          "assets/packed/_dir_manifest.txt",
                                          "assets/packed/shaders/_dir_manifest.txt",
                                          "assets/packed/models/_dir_manifest.txt"])
-        self.make_image()
+        self.make_image(target="android")
 
-        package_cooked.package_cooked(self.package, "android", self.image)
+        package_cooked.package_cooked(self.package, "android", self.image, "android")
 
         entries = self.entries()
         self.assertEqual(sorted(entries), sorted(set(entries)))
@@ -183,7 +172,7 @@ class PackageCookedTest(unittest.TestCase):
         self.make_image()
 
         with self.assertRaises(package_cooked.PackagingError):
-            package_cooked.package_cooked(self.package, "glfw", self.image)
+            package_cooked.package_cooked(self.package, "glfw", self.image, TARGET)
 
 
 if __name__ == "__main__":

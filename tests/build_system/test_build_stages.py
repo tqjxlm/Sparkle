@@ -58,10 +58,10 @@ class ValidateStagesTest(unittest.TestCase):
         self.assertEqual(build_script.cooker_framework("ios"), "glfw")
         self.assertEqual(build_script.cooker_framework("macos"), "macos")
 
-    def test_default_image_dir_follows_the_host_cooker(self):
+    def test_default_image_dir_is_the_targets_image_under_the_host_cooker(self):
         with patch.object(build_script, "HOST_COOK_FRAMEWORK", "glfw"):
             self.assertTrue(build_script.default_cooked_image_dir("android")
-                            .endswith("cooked_image"))
+                            .endswith(os.path.join("glfw", "output", "cooked_image", "android")))
 
     def test_products_are_named_by_target_except_glfw(self):
         self.assertEqual(build_script.product_name("android", "Release", ".apk"),
@@ -70,28 +70,46 @@ class ValidateStagesTest(unittest.TestCase):
                          "macos-Release.zip")
         self.assertIn("-glfw-Release.zip", build_script.product_name("glfw", "Release", ".zip"))
 
+    def validate(self, stages, framework, cooked=None):
+        build_script.validate_stages(stages, {"framework": framework, "cooked": cooked})
+
     def test_cook_for_cross_target_needs_the_host_cooker_binary(self):
         with self.missing_binary():
             with self.assertRaises(RuntimeError):
-                build_script.validate_stages(["build", "cook"], "android")
+                self.validate(["build", "cook"], "android")
         with self.existing_binary():
-            build_script.validate_stages(["build", "cook"], "android")
+            self.validate(["build", "cook"], "android")
 
     def test_cook_without_build_needs_an_existing_binary(self):
         with self.missing_binary():
             with self.assertRaises(RuntimeError):
-                build_script.validate_stages(["cook"], "glfw")
+                self.validate(["cook"], "glfw")
 
     def test_cook_without_build_accepts_an_existing_binary(self):
         with self.existing_binary():
-            build_script.validate_stages(["cook"], "glfw")
+            self.validate(["cook"], "glfw")
 
     def test_cook_with_build_stage_needs_no_binary_for_host_frameworks(self):
         with self.missing_binary():
-            build_script.validate_stages(["build", "cook"], "glfw")
+            self.validate(["build", "cook"], "glfw")
 
-    def test_package_alone_is_valid_for_any_framework(self):
-        build_script.validate_stages(["package"], "android")
+    def test_package_without_an_image_fails(self):
+        with self.assertRaises(RuntimeError):
+            self.validate(["package"], "android",
+                          cooked=os.path.join(tempfile.gettempdir(), "no-such-image"))
+
+    def test_package_with_an_existing_image_is_valid(self):
+        image = tempfile.TemporaryDirectory()
+        self.addCleanup(image.cleanup)
+        os.makedirs(os.path.join(image.name, "cooked"))
+        with open(os.path.join(image.name, "cooked", "manifest.json"), "w") as manifest:
+            manifest.write("{}")
+        self.validate(["package"], "android", cooked=image.name)
+
+    def test_package_after_cook_needs_no_preexisting_image(self):
+        with self.existing_binary():
+            self.validate(["cook", "package"], "glfw",
+                          cooked=os.path.join(tempfile.gettempdir(), "no-such-image"))
 
 
 class SetupTest(unittest.TestCase):
@@ -159,17 +177,18 @@ class PackageProjectTest(unittest.TestCase):
         os.makedirs(os.path.join(self.image, "cooked"))
         with open(os.path.join(self.image, "cooked", "manifest.json"), "w") as manifest:
             manifest.write("{}")
+        with open(os.path.join(self.image, "cooked", "content_target.json"), "w") as marker:
+            marker.write('{"target": "android"}')
 
         args = self.package(self.image)
 
         self.assertEqual(self.builder.resigned, [self.product])
         self.assertEqual(args["product_path"], self.product)
 
-    def test_no_cooked_content_skips_resign_but_records_the_product(self):
-        args = self.package(self.image)
-
+    def test_missing_image_fails_the_package_stage(self):
+        with self.assertRaises(RuntimeError):
+            self.package(self.image)
         self.assertEqual(self.builder.resigned, [])
-        self.assertEqual(args["product_path"], self.product)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,10 @@ public:
         return sky_map_path_;
     }
 
+    // manifest key of the cooked sky map cube, produced as a scene-load side effect;
+    // cook plans must record it so packaged targets ship the artifact
+    [[nodiscard]] std::string GetCookManifestKey() const;
+
     void OnAttach() override;
 
     [[nodiscard]] const std::shared_ptr<Image2DCube> &GetCubeMap() const
