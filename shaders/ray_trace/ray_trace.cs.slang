@@ -38,6 +38,9 @@ struct Camera
     uint spp;
     uint enable_nee;
     uint write_gbuffer;
+    float2 frame_jitter;
+    uint use_frame_jitter;
+    uint padding;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
@@ -282,7 +285,8 @@ float2 EnvBRDFApprox(float NoV, float roughness)
 void WritePrimaryHitGBuffer(uint2 pixel)
 {
     float2 pixel_size = 1.f / (float2(camera.resolution) - 1);
-    float2 uv = (float2(pixel) + 0.5f) * pixel_size;
+    float2 primary_jitter = use_frame_jitter != 0 ? frame_jitter : float2(0.f, 0.f);
+    float2 uv = (float2(pixel) + 0.5f + primary_jitter) * pixel_size;
     uv.y = 1.0f - uv.y;
 
     RayDesc ray_desc;
@@ -562,7 +566,7 @@ float3 ComputeFrameRadiance(uint2 pixel, uint seed, float2 pixel_size, out float
     for (uint i = 0; i < spp; i++)
     {
         // anti-aliasing
-        float2 antialiasing_noise = float2(RandomUnit(), RandomUnit());
+        float2 antialiasing_noise = use_frame_jitter != 0 ? 0.5f + frame_jitter : float2(RandomUnit(), RandomUnit());
         float2 uv = (float2(pixel.x, pixel.y) + antialiasing_noise) * pixel_size;
 
         // invert Y

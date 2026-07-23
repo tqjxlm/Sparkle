@@ -36,7 +36,7 @@ def main():
     else:
         motion_flags = ["--sweep_step_degrees", "0.0", "--sweep_pitch_step_degrees", "2.0"]
 
-    run_sweep(args.framework, ["--max_spp", "1", "--nrd", "true"] + motion_flags + list(passthrough),
+    run_sweep(args.framework, ["--max_spp", "1", "--denoiser", "nrd"] + motion_flags + list(passthrough),
               skip_build=args.skip_build, headless=args.headless)
 
     import numpy as np

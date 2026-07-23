@@ -108,7 +108,7 @@ def main():
         run_test_case(
             args.framework,
             "screenshot",
-            ["--clear_screenshots", "true", "--pipeline", "gpu", "--nrd", "true",
+            ["--clear_screenshots", "true", "--pipeline", "gpu", "--denoiser", "nrd",
              "--nrd_debug", view, "--max_spp", str(args.spp)],
             headless=args.headless,
             skip_build=skip_build,

@@ -3,6 +3,7 @@
 #include "renderer/renderer/Renderer.h"
 
 #include "core/Timer.h"
+#include "renderer/denoiser/DenoiserConfig.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
@@ -11,6 +12,8 @@
 namespace sparkle
 {
 class SkyRenderProxy;
+class RHIDenoiser;
+class PathTracingDenoiserInputs;
 
 class GPURenderer : public Renderer
 {
@@ -35,7 +38,11 @@ private:
 
     void InitSceneRenderResources();
 
-    void BindNrdGBuffer();
+    void BindDenoiserInputs();
+
+    [[nodiscard]] RHIDenoiser *GetOrCreateDenoiser(DenoiserProvider provider);
+
+    [[nodiscard]] RHIDenoiser *SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective);
 
     void BindBindlessResources();
 
@@ -55,7 +62,9 @@ private:
 
     RHIResourceRef<RHIImage> scene_texture_;
     RHIResourceRef<RHIRenderTarget> scene_rt_;
-    std::unique_ptr<class NrdDenoiser> nrd_;
+    std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
+    std::unique_ptr<RHIDenoiser> nrd_denoiser_;
+    std::unique_ptr<RHIDenoiser> metalfx_denoiser_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
 
     RHIResourceRef<RHIImage> tone_mapping_output_;
@@ -69,22 +78,18 @@ private:
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
-    // Tracks the denoiser enable state to detect a runtime toggle (control panel): on change, lazily
-    // allocate NRD resources.
-    bool nrd_enabled_last_ = false;
-
-    // Enable state sampled once per frame (in Update): the control panel may flip the config at any
-    // time, and the G-buffer write flag, the denoiser passes, and the tone-mapping source must agree
-    // within a frame.
-    bool nrd_frame_active_ = false;
-
+    RHIDenoiser *frame_denoiser_ = nullptr;
+    RHIDenoiser *active_denoiser_ = nullptr;
+    DenoiserProvider effective_provider_ = DenoiserProvider::Off;
+    DenoiserProvider frame_provider_ = DenoiserProvider::Off;
+    DenoiserProvider requested_provider_ = DenoiserProvider::Off;
+    bool nrd_failed_ = false;
+    bool metalfx_failed_ = false;
     bool gbuffer_write_this_frame_ = false;
-
-    // Enabling NRD on a converged frame must restart accumulation, but the restart is deferred to the
-    // next Update so the whole frame snapshot (write_gbuffer, dispatch gate, UBO) sees it coherently.
-    bool nrd_enable_restart_pending_ = false;
-
+    bool denoiser_reset_this_frame_ = false;
+    bool final_frame_this_frame_ = false;
     bool scene_ready_last_ = false;
+    uint32_t jitter_index_ = 0;
 
     struct ComputePerformanceRecord
     {

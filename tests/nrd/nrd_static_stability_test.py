@@ -109,7 +109,7 @@ def main():
         render_test_support.get_screenshot_dir(args.framework), "static_stability")
     os.makedirs(work_dir, exist_ok=True)
 
-    configs = [("raw", []), ("nrd", ["--nrd", "true"])]
+    configs = [("raw", []), ("nrd", ["--denoiser", "nrd"])]
     rows = []
     for i, (name, extra) in enumerate(configs):
         run_static(args, extra, skip_build=(args.skip_build or i > 0), passthrough=list(passthrough))

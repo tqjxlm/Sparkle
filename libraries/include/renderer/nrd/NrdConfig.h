@@ -22,8 +22,7 @@ enum class NrdDebugMode : uint8_t
     Validation       // NRD's built-in validation overlay (OUT_VALIDATION; needs CommonSettings::enableValidation)
 };
 
-// Self-contained config for the NRD denoiser on the gpu path tracer. All NRD switches live here, not
-// in RenderConfig.
+// NRD-specific algorithm and debug settings for the gpu path tracer.
 struct NrdConfig : public ConfigCollection
 {
     void Init();
@@ -34,9 +33,7 @@ struct NrdConfig : public ConfigCollection
     // reads only that snapshot.
     static NrdConfig &Get();
 
-    bool enabled = false;
     bool stabilization = true;
-    bool radiance_fp16 = true;
     NrdDebugMode debug_mode = NrdDebugMode::None;
 
 protected:

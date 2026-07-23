@@ -59,7 +59,7 @@ def main():
 
     # raw realizations calibrate the metric: raw is unbiased, so its "systematic" is the noise floor
     # that M realizations cannot subtract; the denoiser's real error is its EXCESS over that floor.
-    for arm, extra in [("nrd", ["--nrd", "true"]), ("raw", [])]:
+    for arm, extra in [("nrd", ["--denoiser", "nrd"]), ("raw", [])]:
         for m in range(args.realizations):
             run(args, ["--max_spp", "1", "--random_seed_offset", str(m * SEED_STRIDE)] + extra
                 + list(passthrough), True)

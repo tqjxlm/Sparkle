@@ -2,7 +2,7 @@
 
 #include "core/Profiler.h"
 #include "renderer/BindlessManager.h"
-#include "renderer/nrd/NrdDenoiser.h"
+#include "renderer/denoiser/DenoiserFactory.h"
 #include "renderer/pass/ClearTexturePass.h"
 #include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/ToneMappingPass.h"
@@ -12,11 +12,35 @@
 #include "renderer/proxy/MeshRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
+#include "renderer/resource/PathTracingDenoiserInputs.h"
 #include "rhi/RHI.h"
+#include "rhi/RHIDenoiser.h"
 #include "rhi/RHIRayTracing.h"
 
 namespace sparkle
 {
+namespace
+{
+float Halton(uint32_t index, uint32_t base)
+{
+    float result = 0.f;
+    float fraction = 1.f;
+    while (index > 0)
+    {
+        fraction /= static_cast<float>(base);
+        result += fraction * static_cast<float>(index % base);
+        index /= base;
+    }
+    return result;
+}
+
+Vector2 GetMetalFxJitter(uint32_t index)
+{
+    const uint32_t sequence_index = index % 32 + 1;
+    return {Halton(sequence_index, 2) - 0.5f, Halton(sequence_index, 3) - 0.5f};
+}
+} // namespace
+
 class RayTracingComputeShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(RayTracingComputeShader, RHIShaderStage::Compute, "shaders/ray_trace/ray_trace.cs.slang",
@@ -59,6 +83,9 @@ class RayTracingComputeShader : public RHIShaderInfo
         uint32_t spp;
         uint32_t enable_nee;
         uint32_t write_gbuffer;
+        Vector2 frame_jitter;
+        uint32_t use_frame_jitter;
+        uint32_t padding;
     };
 };
 
@@ -115,17 +142,11 @@ void GPURenderer::InitRenderResources()
     tone_mapping_rt_ = rhi_->GetRenderTargetPool().Acquire(tone_mapping_rt_attribute, "ToneMappingRT");
     tone_mapping_output_ = tone_mapping_rt_->GetColorImage(0);
 
-    // Create the denoiser before the path-tracer pipeline so its G-buffer targets exist and can
-    // be bound into the compute shader in InitSceneRenderResources().
-    nrd_ = PipelinePass::Create<NrdDenoiser>(render_config_, rhi_, scene_texture_);
+    denoiser_inputs_ = std::make_unique<PathTracingDenoiserInputs>(rhi_, resolution_.scene);
 
     InitSceneRenderResources();
 
-    nrd_enabled_last_ = nrd_->IsActive() && nrd_->GetOutput();
-    auto tone_mapping_input = nrd_enabled_last_ ? nrd_->GetOutput() : scene_texture_;
-
-    tone_mapping_pass_ =
-        PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, tone_mapping_input, tone_mapping_rt_);
+    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_texture_, tone_mapping_rt_);
 
     clear_pass_ = PipelinePass::Create<ClearTexturePass>(render_config_, rhi_, Vector4::Zero(),
                                                          RHIImageLayout::StorageWrite, scene_rt_);
@@ -152,31 +173,6 @@ void GPURenderer::Render()
 
     auto *camera = scene_render_proxy_->GetCamera();
 
-    bool nrd_on = nrd_frame_active_;
-    if (nrd_on != nrd_enabled_last_)
-    {
-        if (nrd_on)
-        {
-            nrd_->EnsureEnabledResources();
-            BindNrdGBuffer();
-            nrd_->RequestReset(); // freshly-allocated history is garbage; start clean
-            // enabling after the render freeze: no pass would ever write the NRD output, so restart
-            // accumulation (it re-converges through the handoff)
-            if (!camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel)
-            {
-                nrd_enable_restart_pending_ = true;
-            }
-            // this frame's Update snapshot predates the enable (write_gbuffer = 0), so the dispatch
-            // would leave the fresh G-buffer unwritten and its undefined contents would poison
-            // ReBLUR's history: activate only on a frame that writes it
-            nrd_on = gbuffer_write_this_frame_;
-        }
-        nrd_on = nrd_on && nrd_->GetOutput();
-        tone_mapping_pass_->SetInput(nrd_on ? nrd_->GetOutput() : scene_texture_);
-        nrd_enabled_last_ = nrd_on;
-    }
-    nrd_on = nrd_enabled_last_;
-
     if (camera->NeedClear())
     {
         clear_pass_->Render();
@@ -188,14 +184,6 @@ void GPURenderer::Render()
     const bool accumulation_complete =
         !camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
 
-    // Frames rendered before the scene is fully loaded are dark/incomplete; keep resetting denoiser
-    // history until then so they never enter the temporal accumulation. Once ready, NRD accumulates
-    // (and reprojects under camera motion) normally — camera movement does not force a history reset.
-    if (!Renderer::IsReadyForAutoScreenshot())
-    {
-        nrd_->RequestReset();
-    }
-
     // base pass: render to texture
     if (tlas_->HasInstances() && !accumulation_complete && !AccumulationPaused())
     {
@@ -203,11 +191,9 @@ void GPURenderer::Render()
                                     .after_stage = RHIPipelineStage::Top,
                                     .before_stage = RHIPipelineStage::ComputeShader});
 
-        // once the real G-buffer targets exist they stay bound to this pipeline as storage images, so
-        // every dispatch needs them in a writable layout, even when the shader skips the write
-        if (nrd_->GetOutput())
+        if (denoiser_inputs_->IsAllocated())
         {
-            nrd_->BeginGBufferWrite();
+            denoiser_inputs_->BeginWrite();
         }
 
         rhi_->BeginComputePass(compute_pass_);
@@ -216,15 +202,39 @@ void GPURenderer::Render()
 
         rhi_->EndComputePass(compute_pass_);
 
-        const auto scene_consumer_stage = nrd_on ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
+        const auto scene_consumer_stage =
+            frame_denoiser_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
 
         scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::ComputeShader,
                                     .before_stage = scene_consumer_stage});
 
-        if (nrd_on)
+        if (final_frame_this_frame_ && frame_denoiser_ && !gbuffer_write_this_frame_)
         {
-            nrd_->Render();
+            tone_mapping_pass_->SetInput(scene_texture_);
+        }
+        else if (frame_denoiser_ && gbuffer_write_this_frame_)
+        {
+            const bool encoded = frame_denoiser_->Encode(denoiser_inputs_->GetInputs(scene_texture_.get()));
+            if (encoded && frame_denoiser_->GetOutput())
+            {
+                active_denoiser_ = frame_denoiser_;
+                effective_provider_ = frame_provider_;
+                tone_mapping_pass_->SetInput(final_frame_this_frame_ ? scene_texture_ : frame_denoiser_->GetOutput());
+            }
+            else
+            {
+                if (frame_provider_ == DenoiserProvider::Nrd)
+                {
+                    nrd_failed_ = true;
+                }
+                else if (frame_provider_ == DenoiserProvider::MetalFx)
+                {
+                    metalfx_failed_ = true;
+                }
+                Log(Error, "Denoiser {} failed while encoding; the next frame will select a fallback",
+                    frame_denoiser_->GetName());
+            }
         }
     }
 
@@ -277,13 +287,34 @@ void GPURenderer::Update()
 {
     PROFILE_SCOPE("GPURenderer::Update");
 
-    nrd_->SampleConfig();
-    nrd_frame_active_ = nrd_->IsActive();
+    auto *camera = scene_render_proxy_->GetCamera();
+    const DenoiserProvider requested = DenoiserConfig::Get().provider;
+    DenoiserProvider selected_provider = DenoiserProvider::Off;
+    RHIDenoiser *selected_denoiser = SelectDenoiser(requested, selected_provider);
 
-    if (nrd_enable_restart_pending_)
+    const bool selection_changed = requested != requested_provider_ || selected_denoiser != frame_denoiser_;
+    requested_provider_ = requested;
+    frame_provider_ = selected_provider;
+    frame_denoiser_ = selected_denoiser;
+    denoiser_reset_this_frame_ = selection_changed;
+
+    if (requested == DenoiserProvider::Off)
     {
-        nrd_enable_restart_pending_ = false;
-        scene_render_proxy_->GetCamera()->MarkPixelDirty();
+        active_denoiser_ = nullptr;
+        effective_provider_ = DenoiserProvider::Off;
+        tone_mapping_pass_->SetInput(scene_texture_);
+    }
+    else if (selection_changed)
+    {
+        jitter_index_ = 0;
+        camera->MarkPixelDirty();
+    }
+
+    if (frame_denoiser_ && frame_denoiser_->NeedsInputs() &&
+        denoiser_inputs_->EnsureAllocated(DenoiserConfig::Get().radiance_fp16 ? PixelFormat::RGBAFloat16
+                                                                              : PixelFormat::RGBAFloat))
+    {
+        BindDenoiserInputs();
     }
 
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
@@ -326,7 +357,12 @@ void GPURenderer::Update()
 
     bool need_rebuild_tlas = false;
     std::unordered_set<uint32_t> primitives_to_update;
-    for (const auto &[type, primitive, from, to] : scene_render_proxy_->GetPrimitiveChangeList())
+    const auto &primitive_changes = scene_render_proxy_->GetPrimitiveChangeList();
+    if (!primitive_changes.empty())
+    {
+        denoiser_reset_this_frame_ = true;
+    }
+    for (const auto &[type, primitive, from, to] : primitive_changes)
     {
         switch (type)
         {
@@ -375,8 +411,6 @@ void GPURenderer::Update()
         tlas_->Update(primitives_to_update);
     }
 
-    auto *camera = scene_render_proxy_->GetCamera();
-
     // Restart accumulation from seed 0 when the scene finishes loading: the warm-up frame count is
     // I/O-timing dependent, and converged captures must be bit-reproducible run-to-run.
     const bool scene_ready = Renderer::IsReadyForAutoScreenshot();
@@ -391,9 +425,6 @@ void GPURenderer::Update()
     // per-clear counter replays the SAME noise every frame under camera motion (clear per frame ->
     // seed pinned), and temporal denoisers cannot average correlated noise.
     auto time_seed = seed_counter_ + render_config_.random_seed_offset;
-
-    nrd_->UpdateFrameData(render_config_, scene_render_proxy_);
-    gbuffer_write_this_frame_ = nrd_frame_active_ && nrd_->NeedsGBuffer();
 
     const auto frame_index = rhi_->GetFrameIndex();
 
@@ -431,6 +462,28 @@ void GPURenderer::Update()
     // recorded regardless of mode so toggling dynamic_spp never pairs a timestamp with the wrong spp
     performance_history_[frame_index].spp = will_dispatch ? spp : 0;
 
+    const bool use_frame_jitter = frame_provider_ == DenoiserProvider::MetalFx;
+    const Vector2 frame_jitter = use_frame_jitter ? GetMetalFxJitter(jitter_index_) : Vector2::Zero();
+    final_frame_this_frame_ =
+        will_dispatch && camera->GetCumulatedSampleCount() + spp >= render_config_.max_sample_per_pixel;
+    if (frame_denoiser_)
+    {
+        frame_denoiser_->UpdateFrameData({
+            .view = camera->GetViewMatrix(),
+            .projection = camera->GetProjectionMatrix(),
+            .jitter = frame_jitter,
+            .exposure = camera->GetAttribute().exposure,
+            .near_plane = camera->GetNear(),
+            .far_plane = camera->GetFar(),
+            .accumulated_samples = camera->GetCumulatedSampleCount(),
+            .samples_this_frame = will_dispatch ? spp : 0,
+            .maximum_samples = render_config_.max_sample_per_pixel,
+            .reset_history = denoiser_reset_this_frame_ || !scene_ready,
+            .final_frame = final_frame_this_frame_,
+        });
+    }
+    gbuffer_write_this_frame_ = will_dispatch && frame_denoiser_ != nullptr && frame_denoiser_->NeedsInputs();
+
     RayTracingComputeShader::UniformBufferData ubo{
         .camera = camera->GetUniformBufferData(render_config_),
         .view_projection = camera->GetViewProjectionMatrix(),
@@ -440,11 +493,18 @@ void GPURenderer::Update()
         .spp = spp,
         .enable_nee = render_config_.enable_nee ? 1u : 0,
         .write_gbuffer = gbuffer_write_this_frame_ ? 1u : 0u,
+        .frame_jitter = frame_jitter,
+        .use_frame_jitter = use_frame_jitter ? 1u : 0u,
+        .padding = 0,
     };
 
     if (will_dispatch)
     {
         seed_counter_ += spp;
+        if (use_frame_jitter)
+        {
+            ++jitter_index_;
+        }
         camera->AccumulateSample(spp);
         last_second_total_spp_ += spp;
     }
@@ -512,7 +572,7 @@ void GPURenderer::InitSceneRenderResources()
     cs_resources->imageData().BindResource(scene_texture_->GetDefaultView(rhi_));
     cs_resources->tlas().BindResource(tlas_);
 
-    BindNrdGBuffer();
+    BindDenoiserInputs();
 
     auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::R8G8B8A8Srgb,
@@ -541,15 +601,88 @@ void GPURenderer::InitSceneRenderResources()
     BindBindlessResources();
 }
 
-void GPURenderer::BindNrdGBuffer()
+void GPURenderer::BindDenoiserInputs()
 {
     auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
-    cs_resources->gRadiance().BindResource(nrd_->GetRadiance()->GetDefaultView(rhi_));
-    cs_resources->gNormalDepth().BindResource(nrd_->GetNormalDepth()->GetDefaultView(rhi_));
-    cs_resources->gAlbedoObj().BindResource(nrd_->GetAlbedoObj()->GetDefaultView(rhi_));
-    cs_resources->gMotion().BindResource(nrd_->GetMotion()->GetDefaultView(rhi_));
-    cs_resources->gRadianceSpecular().BindResource(nrd_->GetRadianceSpecular()->GetDefaultView(rhi_));
-    cs_resources->gSpecAlbedo().BindResource(nrd_->GetSpecAlbedo()->GetDefaultView(rhi_));
+    cs_resources->gRadiance().BindResource(denoiser_inputs_->GetNoisyRadianceHitDistance()->GetDefaultView(rhi_));
+    cs_resources->gNormalDepth().BindResource(denoiser_inputs_->GetNormalViewDepth()->GetDefaultView(rhi_));
+    cs_resources->gAlbedoObj().BindResource(denoiser_inputs_->GetAlbedoObjectId()->GetDefaultView(rhi_));
+    cs_resources->gMotion().BindResource(denoiser_inputs_->GetMotionHitMetallic()->GetDefaultView(rhi_));
+    cs_resources->gRadianceSpecular().BindResource(
+        denoiser_inputs_->GetNoisySpecularRadianceHitDistance()->GetDefaultView(rhi_));
+    cs_resources->gSpecAlbedo().BindResource(denoiser_inputs_->GetSpecularAlbedoRoughness()->GetDefaultView(rhi_));
+}
+
+RHIDenoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
+{
+    std::unique_ptr<RHIDenoiser> *slot = nullptr;
+    bool *failed = nullptr;
+    if (provider == DenoiserProvider::Nrd)
+    {
+        slot = &nrd_denoiser_;
+        failed = &nrd_failed_;
+    }
+    else if (provider == DenoiserProvider::MetalFx)
+    {
+        slot = &metalfx_denoiser_;
+        failed = &metalfx_failed_;
+    }
+    else
+    {
+        return nullptr;
+    }
+
+    if (*failed)
+    {
+        return nullptr;
+    }
+    if (!*slot)
+    {
+        const DenoiserConfig &config = DenoiserConfig::Get();
+        RHIDenoiserDesc desc{
+            .input_size = resolution_.scene,
+            .output_size = resolution_.output,
+            .radiance_format = config.radiance_fp16 ? PixelFormat::RGBAFloat16 : PixelFormat::RGBAFloat,
+            .max_frames_in_flight = rhi_->GetMaxFramesInFlight(),
+            .synchronous_initialization = config.metalfx_sync_init,
+        };
+        *slot = CreateDenoiser(provider, desc, rhi_);
+        if (!*slot || !(*slot)->IsReady())
+        {
+            *failed = true;
+            Log(Warn, "Denoiser provider {} is unavailable for {}x{} -> {}x{}",
+                provider == DenoiserProvider::MetalFx ? "MetalFX" : "NRD", desc.input_size.x(), desc.input_size.y(),
+                desc.output_size.x(), desc.output_size.y());
+            slot->reset();
+            return nullptr;
+        }
+    }
+    return slot->get();
+}
+
+RHIDenoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective)
+{
+    effective = DenoiserProvider::Off;
+    if (requested == DenoiserProvider::Off)
+    {
+        return nullptr;
+    }
+
+    if (requested == DenoiserProvider::MetalFx || requested == DenoiserProvider::Auto)
+    {
+        if (RHIDenoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::MetalFx))
+        {
+            effective = DenoiserProvider::MetalFx;
+            return denoiser;
+        }
+    }
+
+    if (RHIDenoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::Nrd))
+    {
+        effective = DenoiserProvider::Nrd;
+        return denoiser;
+    }
+    return nullptr;
 }
 
 void GPURenderer::BindBindlessResources()

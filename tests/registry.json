@@ -180,6 +180,7 @@
     {
         "name": "nrd_runtime_toggle",
         "test_case": "nrd_runtime_toggle",
-        "description": "Runtime NRD enable during and after accumulation."
+        "description": "Runtime NRD provider selection during and after accumulation.",
+        "app_args": ["--denoiser", "off"]
     }
 ]

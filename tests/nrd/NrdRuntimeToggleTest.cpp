@@ -4,7 +4,7 @@
 #include "application/RenderFramework.h"
 #include "core/ConfigManager.h"
 #include "core/Logger.h"
-#include "renderer/nrd/NrdConfig.h"
+#include "renderer/denoiser/DenoiserConfig.h"
 
 #include <format>
 #include <memory>
@@ -16,10 +16,15 @@ namespace sparkle
 // switch to gpu, then enable NRD mid-accumulation (memory-recycling repro); gpu: enable on a
 // converged frame (render-freeze arm).
 //
-// Usage: --test_case nrd_runtime_toggle --pipeline [forward|gpu] --nrd false
+// Usage: --test_case nrd_runtime_toggle --pipeline [forward|gpu] --denoiser off
 class NrdRuntimeToggleTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("denoiser", std::string("off"));
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *rf = app.GetRenderFramework();
@@ -31,9 +36,9 @@ public:
             {
                 return Result::Pending;
             }
-            if (NrdConfig::Get().enabled)
+            if (DenoiserConfig::Get().provider != DenoiserProvider::Off)
             {
-                Log(Error, "{}: NRD is already enabled; run with --nrd false", GetName());
+                Log(Error, "{}: a denoiser is already enabled; run with --denoiser off", GetName());
                 return Result::Fail;
             }
             auto *pipeline = ConfigManager::Instance().GetConfig<std::string>("pipeline");
@@ -114,7 +119,7 @@ private:
 
     void EnableNrd()
     {
-        EnforceConfig("nrd", true);
+        EnforceConfig("denoiser", std::string("nrd"));
         Log(Info, "{}: NRD enabled at runtime", GetName());
         phase_ = Phase::Capture;
     }

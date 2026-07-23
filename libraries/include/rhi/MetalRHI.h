@@ -75,6 +75,9 @@ public:
 
     std::unique_ptr<RHINrdBackend> CreateNrdBackend() override;
 
+    std::unique_ptr<RHIDenoiser> CreatePlatformDenoiser(RHIPlatformDenoiser provider,
+                                                        const RHIDenoiserDesc &desc) override;
+
 protected:
     [[nodiscard]] bool BeginFrameInternal() override;
     void EndFrameInternal() override;
