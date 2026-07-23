@@ -53,6 +53,9 @@ public:
     // the RGB9E5 packed format on desktop (no BC HDR encoder is vendored)
     [[nodiscard]] static PixelFormat SelectHdrFormat(Family family);
 
+    // inverse of SelectHdrFormat: the family a cooked HDR cube belongs to, read from its format
+    [[nodiscard]] static Family FamilyFromHdrFormat(PixelFormat format);
+
     // encodes one RGBAFloat16 image into the target HDR format's tightly-packed single-mip
     // bytes. target must be R9G9B9E5Float or an HDR ASTC format. returns empty on failure
     [[nodiscard]] static std::vector<uint8_t> EncodeHdrFace(const Image2D &source, PixelFormat target_format);

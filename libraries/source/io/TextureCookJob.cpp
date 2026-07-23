@@ -35,6 +35,13 @@ const char *GetProfileName(TextureCompression::Profile profile)
         return "";
     }
 }
+
+constexpr const char *EmbeddedIdentityPrefix = "@embedded-";
+
+bool IsEmbeddedTextureIdentity(const std::string &name)
+{
+    return name.find(EmbeddedIdentityPrefix) != std::string::npos;
+}
 } // namespace
 
 const char *TextureCookJob::GetTypeName(TextureCompression::Family family)
@@ -112,10 +119,22 @@ std::string MakeTextureIdentity(const std::filesystem::path &scene_parent, const
     return identity;
 }
 
+std::string MakeEmbeddedTextureIdentity(const std::filesystem::path &scene_parent, uint32_t content_hash)
+{
+    const auto name = std::string(EmbeddedIdentityPrefix) + std::to_string(content_hash);
+    auto identity = (scene_parent / name).lexically_normal().generic_string();
+    if (HasTexturePathRoot(identity) || identity.starts_with("../"))
+    {
+        return {};
+    }
+    return identity;
+}
+
 bool IsCookableMaterialTexture(const Image2D &image)
 {
+    const auto &name = image.GetName();
     return (image.GetFormat() == PixelFormat::R8G8B8A8Srgb || image.GetFormat() == PixelFormat::R8G8B8A8Unorm) &&
-           IsCompressibleImagePath(image.GetName());
+           (IsCompressibleImagePath(name) || IsEmbeddedTextureIdentity(name));
 }
 
 std::shared_ptr<Image2D> ResolveMaterialTexture(const std::shared_ptr<Image2D> &source, const std::string &identity,

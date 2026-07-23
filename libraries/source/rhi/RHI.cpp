@@ -141,8 +141,20 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
         return nullptr;
     }
 
+    std::array<const Image2D *, Image2DCube::FaceId::Count> upload_faces;
+    const bool decode = IsCompressedFormat(image->GetFormat()) && !SupportsSampledFormat(image->GetFormat());
+    if (decode)
+    {
+        Log(Warn, "texture cube {} uploads uncompressed: device cannot sample {}", name, Enum2Str(image->GetFormat()));
+    }
+    for (auto i = 0u; i < Image2DCube::FaceId::Count; i++)
+    {
+        const auto &face = image->GetFace(static_cast<Image2DCube::FaceId>(i));
+        upload_faces[i] = decode ? &face.EnsureDecoded() : &face;
+    }
+
     RHIImage::Attribute attribute;
-    attribute.format = image->GetFormat();
+    attribute.format = upload_faces[0]->GetFormat();
     attribute.width = image->GetWidth();
     attribute.height = image->GetHeight();
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
@@ -157,7 +169,7 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
     std::array<const uint8_t *, 6> data;
     for (auto i = 0u; i < Image2DCube::FaceId::Count; i++)
     {
-        data[i] = image->GetFace(static_cast<Image2DCube::FaceId>(i)).GetRawData();
+        data[i] = upload_faces[i]->GetRawData();
     }
     rhi_image->UploadFaces(data);
 

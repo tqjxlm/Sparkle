@@ -281,10 +281,11 @@ static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint
     auto image_index = static_cast<unsigned>(model.textures[texture_index].source);
     auto image = model.images[image_index];
 
-    // artifact identities exist only for packaged, non-embedded images; anything else
-    // loads raw
+    // a file-backed image carries an authored path; data-URI and buffer-view images are
+    // embedded and take a content identity below
     std::string identity;
-    if (path_type == PathType::Resource && !image.uri.empty())
+    const bool has_authored_path = !image.uri.empty() && !image.uri.starts_with("data:");
+    if (path_type == PathType::Resource && has_authored_path)
     {
         identity = MakeTextureIdentity(model_dir, image.uri);
     }
@@ -304,6 +305,13 @@ static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint
 
     const bool is_linear = profile != TextureCompression::Profile::Color;
     auto image2d = CreateImage2D(image, is_linear);
+
+    // a packaged image with pixels but no authored path is embedded in the container; give it
+    // a content identity so it cooks like a file-backed texture
+    if (identity.empty() && path_type == PathType::Resource && image2d && image2d->IsValid())
+    {
+        identity = MakeEmbeddedTextureIdentity(model_dir, image2d->GetContentHash());
+    }
 
     if (identity.empty())
     {

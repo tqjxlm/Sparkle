@@ -10,6 +10,7 @@
 #include "core/math/Utilities.h"
 #include "core/task/TaskManager.h"
 #include "io/Image.h"
+#include "io/TextureCompression.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/IblSettings.h"
@@ -23,14 +24,31 @@ constexpr Scalar MaxSkyBrightness = 100.f;
 
 namespace
 {
+struct SkyLightPayloadHeader
+{
+    uint32_t format;
+};
+
+const char *GetSkyLightCookType(TextureCompression::Family family)
+{
+    switch (family)
+    {
+    case TextureCompression::Family::Astc:
+        return "skylight_astc";
+    case TextureCompression::Family::Bc:
+        return "skylight_bc";
+    }
+    UnImplemented(family);
+    return "skylight";
+}
+
 class SkyLightCookJob : public CookJob
 {
 public:
-    static constexpr const char *Type = "skylight";
-    static constexpr uint32_t Version = 1;
+    static constexpr uint32_t Version = 2;
 
-    SkyLightCookJob(std::shared_ptr<const Image2D> sky_map, std::string source_name)
-        : sky_map_(std::move(sky_map)), source_name_(std::move(source_name))
+    SkyLightCookJob(std::shared_ptr<const Image2D> sky_map, std::string source_name, TextureCompression::Family family)
+        : sky_map_(std::move(sky_map)), source_name_(std::move(source_name)), family_(family)
     {
         CRC32 hasher;
         hasher.add(sky_map_->GetRawData(), sky_map_->GetStorageSize());
@@ -42,7 +60,7 @@ public:
 
     [[nodiscard]] const char *GetType() const override
     {
-        return Type;
+        return GetSkyLightCookType(family_);
     }
 
     [[nodiscard]] uint32_t GetVersion() const override
@@ -71,6 +89,8 @@ private:
     std::shared_ptr<const Image2D> sky_map_;
 
     std::string source_name_;
+
+    TextureCompression::Family family_;
 
     uint32_t source_hash_ = 0;
 
@@ -164,16 +184,35 @@ CookJobResult SkyLightCookJob::Execute()
     Log(Info, "sky map cook ok. max brightness {}. max brightness direction {}. sun brightness {}", max_brightness,
         utilities::VectorToString(utilities::ToDegree(sun_direction)), utilities::VectorToString(sun_brightness));
 
-    const size_t face_size = CubeMapSize * CubeMapSize * GetPixelSize(PixelFormat::RGBAFloat16);
+    const PixelFormat format = TextureCompression::SelectHdrFormat(family_);
+    const size_t face_size = GetImageMipByteSize(format, CubeMapSize, CubeMapSize);
 
-    std::vector<char> payload(6 * face_size + 2 * sizeof(float) * 3);
+    std::array<std::vector<uint8_t>, Image2DCube::FaceId::Count> encoded_faces;
+    std::vector<std::shared_ptr<TaskFuture<void>>> encode_tasks(Image2DCube::FaceId::Count);
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
+    {
+        encode_tasks[id] = TaskManager::RunInWorkerThread([&cube_map, &encoded_faces, format, id]() {
+            encoded_faces[id] =
+                TextureCompression::EncodeHdrFace(cube_map.GetFace(static_cast<Image2DCube::FaceId>(id)), format);
+        });
+    }
+    TaskManager::OnAll(encode_tasks)->Wait();
+
+    std::vector<char> payload(sizeof(SkyLightPayloadHeader) + 6 * face_size + 2 * sizeof(float) * 3);
     char *ptr = payload.data();
+
+    const SkyLightPayloadHeader header{.format = static_cast<uint32_t>(format)};
+    std::memcpy(ptr, &header, sizeof(header));
+    ptr += sizeof(header);
 
     for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
     {
-        auto face_id = static_cast<Image2DCube::FaceId>(id);
-        const auto &face = cube_map.GetFace(face_id);
-        std::memcpy(ptr, face.GetRawData(), face_size);
+        if (encoded_faces[id].size() != face_size)
+        {
+            Log(Error, "failed to encode sky cube face {} as {}", id, Enum2Str(format));
+            return CookJobResult::Failure();
+        }
+        std::memcpy(ptr, encoded_faces[id].data(), face_size);
         ptr += face_size;
     }
 
@@ -185,12 +224,33 @@ CookJobResult SkyLightCookJob::Execute()
     return CookJobResult::Success(std::move(payload));
 }
 
-CookArtifactKey SkyMapLookupKey(const std::string &sky_map_path)
+CookArtifactKey SkyMapLookupKey(const std::string &sky_map_path, TextureCompression::Family family)
 {
-    return {.type = SkyLightCookJob::Type,
+    return {.type = GetSkyLightCookType(family),
             .version = SkyLightCookJob::Version,
             .source_name = std::filesystem::path(sky_map_path).lexically_normal().generic_string(),
             .source_hash = std::nullopt};
+}
+
+std::shared_ptr<Image2DCube> MakeCubeFromFaces(const char *face_data, PixelFormat format, const std::string &cube_name)
+{
+    const size_t face_size = GetImageMipByteSize(format, CubeMapSize, CubeMapSize);
+    std::array<std::unique_ptr<Image2D>, Image2DCube::FaceId::Count> faces;
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
+    {
+        std::vector<uint8_t> face_payload(face_size);
+        std::memcpy(face_payload.data(), face_data + static_cast<size_t>(id) * face_size, face_size);
+        if (IsCompressedFormat(format))
+        {
+            faces[id] = std::make_unique<Image2D>(CubeMapSize, CubeMapSize, format, 1, std::move(face_payload), cube_name);
+        }
+        else
+        {
+            faces[id] = std::make_unique<Image2D>(CubeMapSize, CubeMapSize, format, face_payload);
+            faces[id]->SetName(cube_name);
+        }
+    }
+    return std::make_shared<Image2DCube>(std::move(faces), cube_name);
 }
 
 } // namespace
@@ -205,7 +265,39 @@ SkyLight::~SkyLight()
 std::string SkyLight::GetCookManifestKey() const
 {
     ASSERT(HasSkyMap());
-    return CookArtifactStore::GetManifestKey(SkyMapLookupKey(sky_map_path_));
+    return CookArtifactStore::GetManifestKey(SkyMapLookupKey(sky_map_path_, TextureCompression::PlatformFamily));
+}
+
+std::shared_ptr<Image2DCube> SkyLight::CookCubeForFamily(const std::string &sky_map_path,
+                                                         TextureCompression::Family family,
+                                                         std::string &out_manifest_key)
+{
+    const auto key = SkyMapLookupKey(sky_map_path, family);
+    out_manifest_key = CookArtifactStore::GetManifestKey(key);
+
+    auto result = Cooker::CookNow(key, [&sky_map_path, &key, family]() -> std::shared_ptr<CookJob> {
+        auto sky_map = std::make_shared<Image2D>();
+        if (!sky_map->LoadFromFile(sky_map_path))
+        {
+            return nullptr;
+        }
+        return std::make_shared<SkyLightCookJob>(std::move(sky_map), key.source_name, family);
+    });
+    if (!result.HasPayload())
+    {
+        return nullptr;
+    }
+
+    const PixelFormat format = TextureCompression::SelectHdrFormat(family);
+    const size_t expected_size =
+        sizeof(SkyLightPayloadHeader) + 6 * GetImageMipByteSize(format, CubeMapSize, CubeMapSize) + 2 * sizeof(float) * 3;
+    if (result.payload.size() != expected_size)
+    {
+        Log(Error, "sky cube payload size mismatch for {}: {} vs {}", sky_map_path, result.payload.size(),
+            expected_size);
+        return nullptr;
+    }
+    return MakeCubeFromFaces(result.payload.data() + sizeof(SkyLightPayloadHeader), format, key.source_name + "_CubeMap");
 }
 
 void SkyLight::SetSkyMap(const std::string &file_path)
@@ -245,7 +337,7 @@ void SkyLight::RequestCook()
     auto delivery_started = std::make_shared<std::atomic<bool>>(false);
 
     const auto source_path = sky_map_path_;
-    const auto lookup_key = SkyMapLookupKey(source_path);
+    const auto lookup_key = SkyMapLookupKey(source_path, TextureCompression::PlatformFamily);
     const auto source_name = lookup_key.source_name;
 
     cook_handle_ = std::make_unique<CookHandle>(Cooker::Request(
@@ -256,7 +348,8 @@ void SkyLight::RequestCook()
             {
                 return nullptr;
             }
-            return std::make_shared<SkyLightCookJob>(std::move(sky_map), source_name);
+            return std::make_shared<SkyLightCookJob>(std::move(sky_map), source_name,
+                                                     TextureCompression::PlatformFamily);
         },
         [this, source_path, scene_task, cook_succeeded, delivery_started](CookResult result) {
             delivery_started->store(true);
@@ -338,26 +431,39 @@ void SkyLight::OnAttach()
 
 void SkyLight::ApplyCookedData(const std::vector<char> &payload)
 {
-    const size_t face_size = CubeMapSize * CubeMapSize * GetPixelSize(PixelFormat::RGBAFloat16);
-    const size_t expected_size = 6 * face_size + 2 * sizeof(float) * 3;
+    if (payload.size() < sizeof(SkyLightPayloadHeader))
+    {
+        Log(Error, "sky light artifact header is truncated");
+        cube_map_.reset();
+        return;
+    }
 
-    ASSERT_F(payload.size() == expected_size, "sky light artifact size mismatch. loaded {}. expected {}.",
-             payload.size(), expected_size);
+    SkyLightPayloadHeader header{};
+    std::memcpy(&header, payload.data(), sizeof(header));
+    const PixelFormat format = static_cast<PixelFormat>(header.format);
+    const PixelFormat expected_format = TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily);
+    if (header.format >= static_cast<uint32_t>(PixelFormat::Count) || format != expected_format)
+    {
+        Log(Error, "sky light artifact format {} does not match expected {}", header.format, Enum2Str(expected_format));
+        cube_map_.reset();
+        return;
+    }
+
+    const size_t face_size = GetImageMipByteSize(format, CubeMapSize, CubeMapSize);
+    const size_t expected_size = sizeof(header) + 6 * face_size + 2 * sizeof(float) * 3;
+    if (payload.size() != expected_size)
+    {
+        Log(Error, "sky light artifact size mismatch. loaded {}. expected {}.", payload.size(), expected_size);
+        cube_map_.reset();
+        return;
+    }
 
     const auto source_name = std::filesystem::path(sky_map_path_).lexically_normal().generic_string();
+    const auto cube_name = source_name + "_CubeMap";
 
-    cube_map_ =
-        std::make_shared<Image2DCube>(CubeMapSize, CubeMapSize, PixelFormat::RGBAFloat16, source_name + "_CubeMap");
-
-    const char *ptr = payload.data();
-
-    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
-    {
-        auto face_id = static_cast<Image2DCube::FaceId>(id);
-        auto &face = cube_map_->GetFace(face_id);
-        std::memcpy(const_cast<uint8_t *>(face.GetRawData()), ptr, face_size);
-        ptr += face_size;
-    }
+    const char *ptr = payload.data() + sizeof(header);
+    cube_map_ = MakeCubeFromFaces(ptr, format, cube_name);
+    ptr += 6 * face_size;
 
     std::memcpy(sun_brightness_.data(), ptr, sizeof(float) * 3);
     ptr += sizeof(float) * 3;

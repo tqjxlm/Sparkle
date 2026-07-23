@@ -62,8 +62,14 @@ void ForEachMaterialTexture(
 // (absolute or leading ..), which makes the texture non-packageable
 [[nodiscard]] std::string MakeTextureIdentity(const std::filesystem::path &scene_parent, const std::string &authored);
 
-// a cookable material texture is an 8-bit image whose name is its packed-relative
-// source path (set by the scene loaders)
+// identity for an embedded (in-container, no authored path) texture: a content hash under
+// the scene parent, so identical embedded images share one artifact. carries no source file,
+// so the artifact is additive rather than replacing a packed asset
+[[nodiscard]] std::string MakeEmbeddedTextureIdentity(const std::filesystem::path &scene_parent,
+                                                      uint32_t content_hash);
+
+// a cookable material texture is an 8-bit image whose name is a packed-relative source path
+// or an embedded-texture identity (set by the scene loaders)
 [[nodiscard]] bool IsCookableMaterialTexture(const Image2D &image);
 
 // resolves a loader-produced material texture to its cooked block-compressed form for

@@ -9,7 +9,30 @@
 
 namespace sparkle
 {
-IblEnvCookJob::IblEnvCookJob(std::shared_ptr<const Image2DCube> env_map) : env_map_(std::move(env_map))
+namespace
+{
+// the CPU cook and the GPU env upload must sample identical data for parity, and a
+// block-compressed cube would decode on every one of the cook's millions of texel taps.
+// directly-sampled formats (RGB9E5) pass through
+std::shared_ptr<const Image2DCube> DecodeEnvIfCompressed(std::shared_ptr<const Image2DCube> env_map)
+{
+    if (!IsCompressedFormat(env_map->GetFormat()))
+    {
+        return env_map;
+    }
+
+    std::array<std::unique_ptr<Image2D>, Image2DCube::FaceId::Count> faces;
+    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
+    {
+        faces[id] = std::make_unique<Image2D>(env_map->GetFace(static_cast<Image2DCube::FaceId>(id)).EnsureDecoded());
+    }
+    return std::make_shared<Image2DCube>(std::move(faces), env_map->GetName());
+}
+} // namespace
+
+IblEnvCookJob::IblEnvCookJob(std::shared_ptr<const Image2DCube> env_map)
+    : family_(TextureCompression::FamilyFromHdrFormat(env_map->GetFormat())),
+      env_map_(DecodeEnvIfCompressed(std::move(env_map)))
 {
     ASSERT(env_map_->GetWidth() == env_map_->GetHeight());
 
@@ -18,7 +41,7 @@ IblEnvCookJob::IblEnvCookJob(std::shared_ptr<const Image2DCube> env_map) : env_m
 
 std::string IblEnvCookJob::GetSourceName() const
 {
-    return env_map_->GetName();
+    return env_map_->GetName() + "#" + TextureCompression::GetFamilyName(family_);
 }
 
 CookJobResult IblDiffuseCookJob::Execute()

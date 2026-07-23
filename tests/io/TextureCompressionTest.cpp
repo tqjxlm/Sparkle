@@ -61,6 +61,14 @@ class TextureCompressionTest : public TestCase
         }
         success &= Expect(MakeTextureIdentity("", "").empty(), "empty authored path yields no identity");
 
+        success &= Expect(MakeEmbeddedTextureIdentity("models/foo", 0xABCD1234u) == "models/foo/@embedded-2882343476",
+                          "embedded identity is a content hash under the scene parent");
+        Image2D embedded_image(1, 1, PixelFormat::R8G8B8A8Unorm, std::vector<uint8_t>{1, 2, 3, 4});
+        embedded_image.SetName(MakeEmbeddedTextureIdentity("models/foo", 0xABCD1234u));
+        success &= Expect(IsCookableMaterialTexture(embedded_image), "an embedded identity is cookable");
+        Image2D raw_image(1, 1, PixelFormat::R8G8B8A8Unorm, std::vector<uint8_t>{1, 2, 3, 4});
+        success &= Expect(!IsCookableMaterialTexture(raw_image), "an image with no identity is not cookable");
+
         auto source =
             std::make_shared<Image2D>(1, 1, PixelFormat::R8G8B8A8Unorm, std::vector<uint8_t>{32, 64, 128, 255});
         const TextureCookJob color_job(source, "texture.png", TextureCompression::Profile::Color,
@@ -253,9 +261,11 @@ class TextureCompressionTest : public TestCase
         }
 
         Image2D decoded;
+        Vector3 direct_sample = Zeros;
         if (IsCompressedFormat(target))
         {
             const Image2D compressed(Width, Height, target, 1, bytes, "hdr_test");
+            direct_sample = compressed.AccessPixel(Width / 2, Height / 2).head<3>();
             decoded = TextureCompression::Decode(compressed, 0);
         }
         else
@@ -265,6 +275,11 @@ class TextureCompressionTest : public TestCase
         const PixelFormat expected_decoded = IsCompressedFormat(target) ? PixelFormat::RGBAFloat16 : target;
         success &= Expect(decoded.IsValid() && decoded.GetFormat() == expected_decoded,
                           (std::string(label) + ": decode is valid").c_str());
+        if (IsCompressedFormat(target))
+        {
+            success &= Expect(direct_sample == decoded.AccessPixel(Width / 2, Height / 2).head<3>(),
+                              (std::string(label) + ": direct pixel access uses the decoded view").c_str());
+        }
 
         double abs_error = 0.0;
         double signal = 0.0;

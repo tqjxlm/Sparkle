@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/cook/CookJob.h"
+#include "io/TextureCompression.h"
 #include "renderer/resource/IblSettings.h"
 
 #include <atomic>
@@ -28,6 +29,8 @@ public:
     }
 
 protected:
+    TextureCompression::Family family_;
+
     std::shared_ptr<const Image2DCube> env_map_;
 
     uint32_t env_hash_ = 0;
@@ -52,7 +55,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 1;
+        return 2;
     }
 
     [[nodiscard]] float GetProgress() const override
@@ -79,8 +82,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        // version 2: the cross-backend payload layout was harmonized to mip-major
-        return 2;
+        return 3;
     }
 
     [[nodiscard]] float GetProgress() const override;

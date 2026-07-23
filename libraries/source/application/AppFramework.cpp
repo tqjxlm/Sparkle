@@ -339,6 +339,7 @@ static std::string JobManifestKey(const CookJob &job)
 }
 
 using ConsumedSourceMap = std::map<std::string, std::map<TextureCompression::Family, std::set<std::string>>>;
+using FamilyArtifactMap = std::map<TextureCompression::Family, std::set<std::string>>;
 
 static void CollectMaterialTextureJobs(const Scene &scene, const std::set<TextureCompression::Family> &families,
                                        std::vector<std::unique_ptr<CookJob>> &jobs, ConsumedSourceMap &consumed_sources)
@@ -377,7 +378,7 @@ static void CollectMaterialTextureJobs(const Scene &scene, const std::set<Textur
 // read by assemble_cooked_image in build.py; the cook output dir persists across runs,
 // so a smaller result must still overwrite a stale file
 static bool WriteCookProducts(const std::vector<std::string> &targets, const std::set<std::string> &universal_keys,
-                              const ConsumedSourceMap &consumed_sources)
+                              const ConsumedSourceMap &consumed_sources, const FamilyArtifactMap &family_artifacts)
 {
     nlohmann::json json = nlohmann::json::object();
     for (const auto &target : targets)
@@ -385,6 +386,11 @@ static bool WriteCookProducts(const std::vector<std::string> &targets, const std
         const auto family = CookTargetFamilies().at(target);
 
         std::set<std::string> artifacts = universal_keys;
+        if (const auto family_keys = family_artifacts.find(family); family_keys != family_artifacts.end())
+        {
+            artifacts.insert(family_keys->second.begin(), family_keys->second.end());
+        }
+
         nlohmann::json consumed_json = nlohmann::json::object();
         for (const auto &[source, family_keys] : consumed_sources)
         {
@@ -458,46 +464,59 @@ int AppFramework::RunCookMode()
 
     ConsumedSourceMap consumed_texture_sources;
     std::set<std::string> universal_keys;
+    FamilyArtifactMap sky_ibl_artifacts;
 
-    const SceneCooker::JobPlan job_plan{.collect_scene_independent_jobs =
-                                            [&universal_keys](std::vector<std::unique_ptr<CookJob>> &jobs) {
-                                                IblCookPlan::CollectSceneIndependentJobs(jobs);
-                                                for (const auto &job : jobs)
-                                                {
-                                                    universal_keys.insert(JobManifestKey(*job));
-                                                }
-                                                return true;
-                                            },
-                                        .collect_scene_jobs =
-                                            [&consumed_texture_sources, &texture_families, &universal_keys](
-                                                const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
-                                                const auto *sky_light = scene.GetSkyLight();
-                                                CollectMaterialTextureJobs(scene, texture_families, jobs,
-                                                                           consumed_texture_sources);
-                                                const auto family_scoped_jobs = jobs.size();
+    const SceneCooker::JobPlan job_plan{
+        .collect_scene_independent_jobs =
+            [&universal_keys](std::vector<std::unique_ptr<CookJob>> &jobs) {
+                IblCookPlan::CollectSceneIndependentJobs(jobs);
+                for (const auto &job : jobs)
+                {
+                    universal_keys.insert(JobManifestKey(*job));
+                }
+                return true;
+            },
+        .collect_scene_jobs =
+            [&consumed_texture_sources, &texture_families, &sky_ibl_artifacts](
+                const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
+                const auto *sky_light = scene.GetSkyLight();
+                CollectMaterialTextureJobs(scene, texture_families, jobs, consumed_texture_sources);
 
-                                                if (sky_light != nullptr)
-                                                {
-                                                    const auto &environment = sky_light->GetCubeMap();
-                                                    if (!environment)
-                                                    {
-                                                        return !sky_light->HasSkyMap();
-                                                    }
-                                                    // no job produces the sky cube: it cooked during scene load
-                                                    universal_keys.insert(sky_light->GetCookManifestKey());
-                                                    IblCookPlan::CollectEnvironmentJobs(environment, jobs);
-                                                }
+                if (sky_light == nullptr || !sky_light->HasSkyMap())
+                {
+                    return true;
+                }
 
-                                                for (auto i = family_scoped_jobs; i < jobs.size(); i++)
-                                                {
-                                                    universal_keys.insert(JobManifestKey(*jobs[i]));
-                                                }
-                                                return true;
-                                            }};
+                // the sky cube and its IBL are family-scoped: a build cooks one per requested
+                // family so mixed-family target sets ship the format each target can sample
+                const auto sky_map_path = sky_light->GetSkyMapPath();
+                for (auto family : texture_families)
+                {
+                    std::string sky_key;
+                    auto cube = SkyLight::CookCubeForFamily(sky_map_path, family, sky_key);
+                    if (!cube)
+                    {
+                        Log(Error, "failed to cook sky cube {} for {}", sky_map_path,
+                            TextureCompression::GetFamilyName(family));
+                        return false;
+                    }
+                    sky_ibl_artifacts[family].insert(sky_key);
+
+                    std::vector<std::unique_ptr<CookJob>> env_jobs;
+                    IblCookPlan::CollectEnvironmentJobs(cube, env_jobs);
+                    for (auto &job : env_jobs)
+                    {
+                        sky_ibl_artifacts[family].insert(JobManifestKey(*job));
+                        jobs.push_back(std::move(job));
+                    }
+                }
+                return true;
+            }};
 
     auto exit_code = SceneCooker::Run(app_config_.scene, job_plan, accelerator);
 
-    if (exit_code == 0 && !WriteCookProducts(cook_targets, universal_keys, consumed_texture_sources))
+    if (exit_code == 0 &&
+        !WriteCookProducts(cook_targets, universal_keys, consumed_texture_sources, sky_ibl_artifacts))
     {
         Log(Error, "failed to write the cook products manifest");
         exit_code = 1;

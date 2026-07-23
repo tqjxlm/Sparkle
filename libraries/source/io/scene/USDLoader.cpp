@@ -251,7 +251,11 @@ static std::shared_ptr<Image2D> CreateTexture(const USDLoaderContext &ctx, size_
         return texture;
     }
 
-    const std::string identity = MakeTextureIdentity(ctx.asset_root.path.parent_path(), image.asset_identifier);
+    std::string identity = MakeTextureIdentity(ctx.asset_root.path.parent_path(), image.asset_identifier);
+    if (identity.empty() && texture && texture->IsValid())
+    {
+        identity = MakeEmbeddedTextureIdentity(ctx.asset_root.path.parent_path(), texture->GetContentHash());
+    }
     if (identity.empty())
     {
         return texture;

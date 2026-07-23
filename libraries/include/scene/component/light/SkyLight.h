@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/task/TaskFuture.h"
+#include "io/TextureCompression.h"
 #include "scene/component/light/LightSource.h"
 
 namespace sparkle
@@ -42,6 +43,12 @@ public:
     // manifest key of the cooked sky map cube, produced as a scene-load side effect;
     // cook plans must record it so packaged targets ship the artifact
     [[nodiscard]] std::string GetCookManifestKey() const;
+
+    // build-time cross-family cook: cooks and saves the sky cube for one family, returning it
+    // for IBL enumeration. out_manifest_key receives the artifact's manifest key. null on failure
+    [[nodiscard]] static std::shared_ptr<Image2DCube> CookCubeForFamily(const std::string &sky_map_path,
+                                                                        TextureCompression::Family family,
+                                                                        std::string &out_manifest_key);
 
     void OnAttach() override;
 

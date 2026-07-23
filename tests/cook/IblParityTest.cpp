@@ -8,6 +8,7 @@
 #include "core/math/Types.h"
 #include "core/task/TaskManager.h"
 #include "io/Image.h"
+#include "io/TextureCompression.h"
 #include "renderer/resource/IblBrdfCookJob.h"
 #include "renderer/resource/IblEnvCookJobs.h"
 #include "scene/Scene.h"
@@ -44,6 +45,12 @@ protected:
             }
 
             const auto &env_map = sky_light->GetCubeMap();
+            if (env_map->GetFormat() != TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily))
+            {
+                Log(Error, "sky cube format is {}, expected {}", Enum2Str(env_map->GetFormat()),
+                    Enum2Str(TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily)));
+                return Result::Fail;
+            }
 
             auto brdf_job = std::make_unique<IblBrdfCookJob>();
             auto diffuse_job = std::make_unique<IblDiffuseCookJob>(env_map);
