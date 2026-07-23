@@ -139,6 +139,30 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     return all_extension_good;
 }
 
+static bool DeviceSupportsAstcHdr(VkPhysicalDevice device)
+{
+    uint32_t extension_count = 0;
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
+    std::vector<VkExtensionProperties> extensions(extension_count);
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, extensions.data());
+
+    const bool has_extension = std::ranges::any_of(extensions, [](const auto &extension) {
+        return strcmp(extension.extensionName, VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME) == 0;
+    });
+    if (!has_extension)
+    {
+        return false;
+    }
+
+    VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT astc_hdr_features{};
+    astc_hdr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 device_features{};
+    device_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    device_features.pNext = &astc_hdr_features;
+    vkGetPhysicalDeviceFeatures2(device, &device_features);
+    return astc_hdr_features.textureCompressionASTC_HDR == VK_TRUE;
+}
+
 static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
 {
     if (!CheckDeviceExtensionSupport(device, ray_tracing_extensions))
@@ -747,6 +771,11 @@ bool VulkanContext::PickPhysicalDevice()
         {
             physical_device_ = device;
             enable_ray_tracing_ = can_enable_ray_tracing;
+            supports_astc_hdr_ = DeviceSupportsAstcHdr(device);
+            if (supports_astc_hdr_)
+            {
+                device_extensions_.push_back(VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME);
+            }
 
             VkPhysicalDeviceProperties device_properties;
             vkGetPhysicalDeviceProperties(physical_device_, &device_properties);
@@ -907,6 +936,14 @@ bool VulkanContext::CreateLogicalDevice()
     VkPhysicalDeviceRayQueryFeaturesKHR enabled_ray_query_features{};
     VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing_features{};
     VkPhysicalDeviceRobustness2FeaturesEXT enabled_robustness_features{};
+    VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT enabled_astc_hdr_features{};
+
+    if (supports_astc_hdr_)
+    {
+        enabled_astc_hdr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES_EXT;
+        enabled_astc_hdr_features.textureCompressionASTC_HDR = VK_TRUE;
+        ChainVkStructurePtr(create_info, enabled_astc_hdr_features);
+    }
 
     if (rhi_->SupportsHardwareRayTracing())
     {

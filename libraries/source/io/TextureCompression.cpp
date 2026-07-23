@@ -158,6 +158,10 @@ std::vector<uint8_t> ToRgba8(const std::vector<float> &linear, bool srgb)
 
 astcenc_profile GetAstcProfile(PixelFormat format)
 {
+    if (IsHDRCompressedFormat(format))
+    {
+        return ASTCENC_PRF_HDR;
+    }
     return IsSRGBFormat(format) ? ASTCENC_PRF_LDR_SRGB : ASTCENC_PRF_LDR;
 }
 
@@ -173,6 +177,22 @@ bool EncodeAstcMip(const uint8_t *rgba, unsigned width, unsigned height, astcenc
     if (status != ASTCENC_SUCCESS)
     {
         Log(Error, "astc encode failed: {}", astcenc_get_error_string(status));
+        return false;
+    }
+    return astcenc_compress_reset(context) == ASTCENC_SUCCESS;
+}
+
+bool EncodeAstcHdrMip(const Half *fp16, unsigned width, unsigned height, astcenc_context *context, uint8_t *out,
+                      size_t out_size)
+{
+    void *slice = const_cast<Half *>(fp16);
+    astcenc_image image{.dim_x = width, .dim_y = height, .dim_z = 1, .data_type = ASTCENC_TYPE_F16, .data = &slice};
+    const astcenc_swizzle swizzle{ASTCENC_SWZ_R, ASTCENC_SWZ_G, ASTCENC_SWZ_B, ASTCENC_SWZ_A};
+
+    const auto status = astcenc_compress_image(context, &image, &swizzle, out, out_size, 0);
+    if (status != ASTCENC_SUCCESS)
+    {
+        Log(Error, "astc hdr encode failed: {}", astcenc_get_error_string(status));
         return false;
     }
     return astcenc_compress_reset(context) == ASTCENC_SUCCESS;
@@ -239,6 +259,41 @@ bool DecodeAstcMip(const uint8_t *blocks, size_t blocks_size, unsigned width, un
     if (status != ASTCENC_SUCCESS)
     {
         Log(Error, "astc decode failed: {}", astcenc_get_error_string(status));
+        return false;
+    }
+    return true;
+}
+
+bool DecodeAstcHdrMip(const uint8_t *blocks, size_t blocks_size, unsigned width, unsigned height, PixelFormat format,
+                      Half *out_fp16)
+{
+    astcenc_config config;
+    const unsigned block_dim = GetBlockDim(format);
+    auto status = astcenc_config_init(GetAstcProfile(format), block_dim, block_dim, 1, ASTCENC_PRE_MEDIUM,
+                                      ASTCENC_FLG_DECOMPRESS_ONLY, &config);
+    if (status != ASTCENC_SUCCESS)
+    {
+        Log(Error, "astc hdr decode config failed: {}", astcenc_get_error_string(status));
+        return false;
+    }
+
+    astcenc_context *context = nullptr;
+    status = astcenc_context_alloc(&config, 1, &context, nullptr);
+    if (status != ASTCENC_SUCCESS)
+    {
+        Log(Error, "astc hdr decode context failed: {}", astcenc_get_error_string(status));
+        return false;
+    }
+
+    void *slice = out_fp16;
+    astcenc_image image{.dim_x = width, .dim_y = height, .dim_z = 1, .data_type = ASTCENC_TYPE_F16, .data = &slice};
+    const astcenc_swizzle swizzle{ASTCENC_SWZ_R, ASTCENC_SWZ_G, ASTCENC_SWZ_B, ASTCENC_SWZ_A};
+
+    status = astcenc_decompress_image(context, blocks, blocks_size, &image, &swizzle, 0);
+    astcenc_context_free(context);
+    if (status != ASTCENC_SUCCESS)
+    {
+        Log(Error, "astc hdr decode failed: {}", astcenc_get_error_string(status));
         return false;
     }
     return true;
@@ -342,6 +397,65 @@ PixelFormat TextureCompression::SelectFormat(Profile profile, Family family)
         UnImplemented(family);
         return PixelFormat::Count;
     }
+}
+
+PixelFormat TextureCompression::SelectHdrFormat(Family family)
+{
+    switch (family)
+    {
+    case Family::Astc:
+        return PixelFormat::ASTC6x6HDR;
+    case Family::Bc:
+        return PixelFormat::R9G9B9E5Float;
+    }
+    UnImplemented(family);
+    return PixelFormat::Count;
+}
+
+std::vector<uint8_t> TextureCompression::EncodeHdrFace(const Image2D &source, PixelFormat target_format)
+{
+    ASSERT(source.GetFormat() == PixelFormat::RGBAFloat16);
+
+    const unsigned width = source.GetWidth();
+    const unsigned height = source.GetHeight();
+
+    if (target_format == PixelFormat::R9G9B9E5Float)
+    {
+        Image2D packed(width, height, PixelFormat::R9G9B9E5Float);
+        for (unsigned y = 0; y < height; y++)
+        {
+            for (unsigned x = 0; x < width; x++)
+            {
+                packed.SetPixel(x, y, Vector3(source.AccessPixel(x, y).head<3>()));
+            }
+        }
+        std::vector<uint8_t> bytes(packed.GetStorageSize());
+        memcpy(bytes.data(), packed.GetRawData(), bytes.size());
+        return bytes;
+    }
+
+    ASSERT(IsHDRCompressedFormat(target_format));
+
+    astcenc_config config;
+    const unsigned block_dim = GetBlockDim(target_format);
+    auto status =
+        astcenc_config_init(GetAstcProfile(target_format), block_dim, block_dim, 1, ASTCENC_PRE_MEDIUM, 0, &config);
+    astcenc_context *context = nullptr;
+    if (status == ASTCENC_SUCCESS)
+    {
+        status = astcenc_context_alloc(&config, 1, &context, nullptr);
+    }
+    if (status != ASTCENC_SUCCESS)
+    {
+        Log(Error, "astc hdr encoder setup failed: {}", astcenc_get_error_string(status));
+        return {};
+    }
+
+    std::vector<uint8_t> blocks(GetImageMipByteSize(target_format, width, height));
+    const bool ok = EncodeAstcHdrMip(reinterpret_cast<const Half *>(source.GetRawData()), width, height, context,
+                                     blocks.data(), blocks.size());
+    astcenc_context_free(context);
+    return ok ? blocks : std::vector<uint8_t>{};
 }
 
 std::vector<char> TextureCompression::Encode(const Image2D &source, Profile profile, Family family)
@@ -487,6 +601,19 @@ Image2D TextureCompression::Decode(const Image2D &compressed, unsigned mip_level
     }
     const size_t mip_size = GetImageMipByteSize(format, width, height);
     const auto *mip_data = compressed.GetRawData() + mip_offset;
+
+    if (IsHDRCompressedFormat(format))
+    {
+        std::vector<uint8_t> fp16(static_cast<size_t>(width) * height * GetPixelSize(PixelFormat::RGBAFloat16));
+        if (!DecodeAstcHdrMip(mip_data, mip_size, width, height, format, reinterpret_cast<Half *>(fp16.data())))
+        {
+            memset(fp16.data(), 0, fp16.size());
+        }
+        Image2D decoded_hdr(width, height, PixelFormat::RGBAFloat16, fp16);
+        decoded_hdr.SetName(compressed.GetName());
+        return decoded_hdr;
+    }
+
     std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
     switch (format)
     {

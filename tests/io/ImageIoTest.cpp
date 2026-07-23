@@ -4,6 +4,8 @@
 #include "core/Logger.h"
 #include "io/Image.h"
 
+#include <cstring>
+
 namespace sparkle
 {
 class ImageIoTest : public TestCase
@@ -18,6 +20,7 @@ public:
         bool success = VerifyDefaultImage();
         success &= VerifyLdrContentDetection(file_manager);
         success &= VerifyHdrContentDetection();
+        success &= VerifyRGB9E5Conformance();
 
         RemoveIfPresent(file_manager, LdrPath);
         RemoveIfPresent(file_manager, HdrPath);
@@ -76,6 +79,37 @@ private:
             const Vector3 actual = image.AccessPixel(0, 0).head<3>();
             success &= Expect((actual - ExpectedHdrColor).cwiseAbs().maxCoeff() < 0.02f,
                               "HDR values survive encode and half-float conversion");
+        }
+
+        return success;
+    }
+
+    static bool VerifyRGB9E5Conformance()
+    {
+        Image2D image(1, 1, PixelFormat::R9G9B9E5Float);
+        bool success = Expect(image.GetStorageSize() == GetPixelSize(PixelFormat::R9G9B9E5Float),
+                              "RGB9E5 storage is one packed word per texel");
+
+        struct TestVector
+        {
+            Vector3 color;
+            uint32_t packed;
+        };
+
+        for (const auto &[color, expected] :
+             {TestVector{Vector3::Zero(), 0x00000000u}, TestVector{Vector3::Ones(), 0x84020100u},
+              TestVector{Vector3{0.5f, 1.f, 2.f}, 0x8c010040u}})
+        {
+            image.SetPixel(0, 0, color);
+            uint32_t packed = 0;
+            memcpy(&packed, image.GetRawData(), sizeof(packed));
+            success &= Expect(packed == expected, "RGB9E5 matches the packed wire format");
+
+            std::vector<uint8_t> bytes(sizeof(expected));
+            memcpy(bytes.data(), &expected, sizeof(expected));
+            const Image2D encoded(1, 1, PixelFormat::R9G9B9E5Float, bytes);
+            const Vector3 decoded = encoded.AccessPixel(0, 0).head<3>();
+            success &= Expect(decoded == color, "RGB9E5 decodes a packed wire-format value");
         }
 
         return success;

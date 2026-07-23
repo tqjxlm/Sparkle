@@ -49,6 +49,14 @@ public:
 
     [[nodiscard]] static PixelFormat SelectFormat(Profile profile, Family family);
 
+    // the HDR format a family carries for sky and IBL cube maps: ASTC-HDR on Apple/Android,
+    // the RGB9E5 packed format on desktop (no BC HDR encoder is vendored)
+    [[nodiscard]] static PixelFormat SelectHdrFormat(Family family);
+
+    // encodes one RGBAFloat16 image into the target HDR format's tightly-packed single-mip
+    // bytes. target must be R9G9B9E5Float or an HDR ASTC format. returns empty on failure
+    [[nodiscard]] static std::vector<uint8_t> EncodeHdrFace(const Image2D &source, PixelFormat target_format);
+
     // source must be an uncompressed RGBA8 image. returns empty on failure
     [[nodiscard]] static std::vector<char> Encode(const Image2D &source, Profile profile, Family family);
 

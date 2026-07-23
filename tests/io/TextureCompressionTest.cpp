@@ -34,6 +34,9 @@ class TextureCompressionTest : public TestCase
         {
             success &= VerifyOddMipEdges(family);
         }
+        success &= VerifyHdrRoundTrip(PixelFormat::ASTC4x4HDR, "hdr astc 4x4");
+        success &= VerifyHdrRoundTrip(PixelFormat::ASTC6x6HDR, "hdr astc 6x6");
+        success &= VerifyHdrRoundTrip(PixelFormat::R9G9B9E5Float, "hdr bc");
 
         return success ? Result::Pass : Result::Fail;
     }
@@ -215,6 +218,83 @@ class TextureCompressionTest : public TestCase
                                   std::abs(green_mean - expected_green) < CodecTolerance,
                               (label + " " + std::to_string(mip) + ": final row and column preserve area").c_str());
         }
+        return success;
+    }
+
+    static Image2D MakeHdrSource()
+    {
+        Image2D source(Width, Height, PixelFormat::RGBAFloat16);
+        for (unsigned y = 0; y < Height; y++)
+        {
+            for (unsigned x = 0; x < Width; x++)
+            {
+                const float u = static_cast<float>(x) / static_cast<float>(Width);
+                const float v = static_cast<float>(y) / static_cast<float>(Height);
+                const float dx = u - 0.5f;
+                const float dy = v - 0.5f;
+                const float sun = 6.f * std::exp(-(dx * dx + dy * dy) * 40.f);
+                source.SetPixel(
+                    x, y,
+                    Vector3{0.2f + u * 3.f + sun, 0.2f + v * 1.5f + sun, 0.2f + (1.f - u) * (1.f - v) * 2.f + sun});
+            }
+        }
+        return source;
+    }
+
+    static bool VerifyHdrRoundTrip(PixelFormat target, const char *label)
+    {
+        const auto source = MakeHdrSource();
+
+        const auto bytes = TextureCompression::EncodeHdrFace(source, target);
+        bool success = Expect(!bytes.empty(), (std::string(label) + ": encode produced bytes").c_str());
+        if (!success)
+        {
+            return false;
+        }
+
+        Image2D decoded;
+        if (IsCompressedFormat(target))
+        {
+            const Image2D compressed(Width, Height, target, 1, bytes, "hdr_test");
+            decoded = TextureCompression::Decode(compressed, 0);
+        }
+        else
+        {
+            decoded = Image2D(Width, Height, target, bytes);
+        }
+        const PixelFormat expected_decoded = IsCompressedFormat(target) ? PixelFormat::RGBAFloat16 : target;
+        success &= Expect(decoded.IsValid() && decoded.GetFormat() == expected_decoded,
+                          (std::string(label) + ": decode is valid").c_str());
+
+        double abs_error = 0.0;
+        double signal = 0.0;
+        float max_error = 0.f;
+        float source_peak = 0.f;
+        float decoded_peak = 0.f;
+        for (unsigned y = 0; y < Height; y++)
+        {
+            for (unsigned x = 0; x < Width; x++)
+            {
+                const Vector3 reference = source.AccessPixel(x, y).head<3>();
+                const Vector3 restored = decoded.AccessPixel(x, y).head<3>();
+                abs_error += (restored - reference).cwiseAbs().sum();
+                signal += reference.cwiseAbs().sum();
+                max_error = std::max(max_error, (restored - reference).cwiseAbs().maxCoeff());
+                source_peak = std::max(source_peak, reference.maxCoeff());
+                decoded_peak = std::max(decoded_peak, restored.maxCoeff());
+            }
+        }
+        const double relative = signal > 0.0 ? abs_error / signal : 0.0;
+        const float peak_relative_error = source_peak > 0.f ? max_error / source_peak : 0.f;
+        const float peak_retention = source_peak > 0.f ? decoded_peak / source_peak : 1.f;
+        Log(Info, "TextureCompressionTest: {} mean relative error {:.4f}, max/peak {:.4f}, peak retention {:.4f}",
+            label, relative, peak_relative_error, peak_retention);
+        success &=
+            Expect(relative < 0.05, (std::string(label) + ": HDR round-trip within 5% mean relative error").c_str());
+        success &= Expect(peak_relative_error < 0.1f,
+                          (std::string(label) + ": worst channel error is below 10% of peak").c_str());
+        success &= Expect(peak_retention > 0.9f && peak_retention < 1.1f,
+                          (std::string(label) + ": highlight peak is retained within 10%").c_str());
         return success;
     }
 

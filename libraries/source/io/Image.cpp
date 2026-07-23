@@ -101,6 +101,53 @@ uint32_t FinishContentHash(CRC32 &hasher, uint32_t width, uint32_t height, Pixel
 }
 } // namespace
 
+Vector4 Image2D::UnpackRGB9E5(uint32_t packed)
+{
+    constexpr int MantissaBits = 9;
+    constexpr int ExponentBias = 15;
+
+    const auto r_mantissa = static_cast<float>(packed & 0x1ffu);
+    const auto g_mantissa = static_cast<float>((packed >> 9) & 0x1ffu);
+    const auto b_mantissa = static_cast<float>((packed >> 18) & 0x1ffu);
+    const auto exponent = static_cast<int>((packed >> 27) & 0x1fu);
+
+    const float scale = std::exp2(static_cast<float>(exponent - ExponentBias - MantissaBits));
+    return {r_mantissa * scale, g_mantissa * scale, b_mantissa * scale, 1.f};
+}
+
+uint32_t Image2D::PackRGB9E5(const Vector3 &linear)
+{
+    constexpr int MantissaBits = 9;
+    constexpr int ExponentBias = 15;
+    constexpr int MaxExponent = 31;
+    constexpr float MaxValue = 511.f / 512.f * 65536.f;
+
+    const float r = std::clamp(linear.x(), 0.f, MaxValue);
+    const float g = std::clamp(linear.y(), 0.f, MaxValue);
+    const float b = std::clamp(linear.z(), 0.f, MaxValue);
+    const float max_channel = std::max({r, g, b});
+
+    if (max_channel < std::exp2(static_cast<float>(-ExponentBias - MantissaBits)))
+    {
+        return 0;
+    }
+
+    int exponent = std::max(-ExponentBias - 1, static_cast<int>(std::floor(std::log2(max_channel)))) + 1 + ExponentBias;
+    float denom = std::exp2(static_cast<float>(exponent - ExponentBias - MantissaBits));
+    if (static_cast<int>(std::floor(max_channel / denom + 0.5f)) == (1 << MantissaBits))
+    {
+        denom *= 2.f;
+        exponent += 1;
+    }
+    exponent = std::clamp(exponent, 0, MaxExponent);
+
+    const auto to_mantissa = [denom](float value) {
+        return std::min(511u, static_cast<uint32_t>(std::floor(value / denom + 0.5f)));
+    };
+
+    return (static_cast<uint32_t>(exponent) << 27) | (to_mantissa(b) << 18) | (to_mantissa(g) << 9) | to_mantissa(r);
+}
+
 Image2D Image2D::CreateFromRawPixels(const uint8_t *data, unsigned width, unsigned height, PixelFormat source_format)
 {
     Image2D image(width, height, PixelFormat::R8G8B8A8Srgb);
@@ -231,7 +278,13 @@ bool Image2D::WriteToFile(const Path &file_path) const
     int encode_success = 0;
     if (IsHDRFormat(pixel_format_))
     {
-        if (pixel_format_ == PixelFormat::RGBAFloat16)
+        if (pixel_format_ == PixelFormat::RGBAFloat)
+        {
+            encode_success = stbi_write_hdr_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
+                                                    static_cast<int>(height_), static_cast<int>(channel_count_),
+                                                    reinterpret_cast<const float *>(pixels_.data()));
+        }
+        else
         {
             Image2D full_precision_image(width_, height_, PixelFormat::RGBAFloat);
             if (full_precision_image.CopyFrom(*this))
@@ -241,12 +294,6 @@ bool Image2D::WriteToFile(const Path &file_path) const
                                            static_cast<int>(height_), static_cast<int>(channel_count_),
                                            reinterpret_cast<const float *>(full_precision_image.pixels_.data()));
             }
-        }
-        else
-        {
-            encode_success = stbi_write_hdr_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
-                                                    static_cast<int>(height_), static_cast<int>(channel_count_),
-                                                    reinterpret_cast<const float *>(pixels_.data()));
         }
     }
     else
