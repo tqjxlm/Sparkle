@@ -18,7 +18,7 @@ public:
     void Render() override;
 
 protected:
-    RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write) override;
+    RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format) override;
 
 private:
 };

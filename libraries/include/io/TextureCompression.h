@@ -60,6 +60,16 @@ public:
     // bytes. target must be R9G9B9E5Float or an HDR ASTC format. returns empty on failure
     [[nodiscard]] static std::vector<uint8_t> EncodeHdrFace(const Image2D &source, PixelFormat target_format);
 
+    // encodes an RGBAFloat16 cube map (RHIImage byte order: mip-major, 6 faces inside each mip)
+    // into a self-describing payload (PayloadHeader + the same mip-major faces, compressed).
+    // returns empty on failure
+    [[nodiscard]] static std::vector<char> EncodeHdrCube(const uint8_t *fp16, unsigned width, unsigned height,
+                                                         unsigned mip_count, PixelFormat target_format);
+
+    // inverse of EncodeHdrCube: decodes a payload back to RGBAFloat16 cube bytes in RHIImage byte
+    // order, for the software-sampling fallback and cook parity checks. returns empty on failure
+    [[nodiscard]] static std::vector<uint8_t> DecodeHdrCube(const std::vector<char> &payload);
+
     // source must be an uncompressed RGBA8 image. returns empty on failure
     [[nodiscard]] static std::vector<char> Encode(const Image2D &source, Profile profile, Family family);
 

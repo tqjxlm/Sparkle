@@ -55,7 +55,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 2;
+        return 3;
     }
 
     [[nodiscard]] float GetProgress() const override
@@ -82,7 +82,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 3;
+        return 4;
     }
 
     [[nodiscard]] float GetProgress() const override;

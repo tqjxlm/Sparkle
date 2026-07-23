@@ -2,12 +2,14 @@
 
 #include "core/Exception.h"
 #include "core/Logger.h"
+#include "core/task/TaskManager.h"
 
 #include <astcenc.h>
 #include <bc7decomp.h>
 #include <bc7enc.h>
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -471,6 +473,120 @@ std::vector<uint8_t> TextureCompression::EncodeHdrFace(const Image2D &source, Pi
                                      blocks.data(), blocks.size());
     astcenc_context_free(context);
     return ok ? blocks : std::vector<uint8_t>{};
+}
+
+std::vector<char> TextureCompression::EncodeHdrCube(const uint8_t *fp16, unsigned width, unsigned height,
+                                                    unsigned mip_count, PixelFormat target_format)
+{
+    struct FaceJob
+    {
+        size_t in_offset;
+        size_t out_offset;
+        unsigned width;
+        unsigned height;
+    };
+
+    std::vector<FaceJob> face_jobs;
+    size_t in_offset = 0;
+    size_t out_offset = sizeof(PayloadHeader);
+    for (unsigned mip = 0; mip < mip_count; mip++)
+    {
+        const unsigned mip_width = MipDim(width, mip);
+        const unsigned mip_height = MipDim(height, mip);
+        const size_t fp16_face_size =
+            static_cast<size_t>(mip_width) * mip_height * GetPixelSize(PixelFormat::RGBAFloat16);
+        const size_t compressed_face_size = GetImageMipByteSize(target_format, mip_width, mip_height);
+        for (unsigned face = 0; face < 6; face++)
+        {
+            face_jobs.push_back({in_offset, out_offset, mip_width, mip_height});
+            in_offset += fp16_face_size;
+            out_offset += compressed_face_size;
+        }
+    }
+
+    std::vector<char> payload(out_offset);
+    const PayloadHeader header{
+        .format = static_cast<uint32_t>(target_format), .width = width, .height = height, .mip_count = mip_count};
+    std::memcpy(payload.data(), &header, sizeof(header));
+
+    std::atomic<bool> success{true};
+    TaskManager::ParallelFor(0u, static_cast<unsigned>(face_jobs.size()), [&](unsigned index) {
+        const auto &job = face_jobs[index];
+        const size_t fp16_face_size =
+            static_cast<size_t>(job.width) * job.height * GetPixelSize(PixelFormat::RGBAFloat16);
+        const Image2D fp16_face(job.width, job.height, PixelFormat::RGBAFloat16,
+                                std::vector<uint8_t>(fp16 + job.in_offset, fp16 + job.in_offset + fp16_face_size));
+        const auto encoded = EncodeHdrFace(fp16_face, target_format);
+        if (encoded.size() != GetImageMipByteSize(target_format, job.width, job.height))
+        {
+            success.store(false);
+            return;
+        }
+        std::memcpy(payload.data() + job.out_offset, encoded.data(), encoded.size());
+    }).wait();
+
+    return success.load() ? payload : std::vector<char>{};
+}
+
+std::vector<uint8_t> TextureCompression::DecodeHdrCube(const std::vector<char> &payload)
+{
+    if (payload.size() < sizeof(PayloadHeader))
+    {
+        return {};
+    }
+    PayloadHeader header;
+    std::memcpy(&header, payload.data(), sizeof(header));
+    const auto format = static_cast<PixelFormat>(header.format);
+    if (header.format >= static_cast<uint32_t>(PixelFormat::Count) || !IsHDRFormat(format))
+    {
+        return {};
+    }
+
+    size_t fp16_total = 0;
+    size_t compressed_total = 0;
+    for (unsigned mip = 0; mip < header.mip_count; mip++)
+    {
+        const unsigned mip_width = MipDim(header.width, mip);
+        const unsigned mip_height = MipDim(header.height, mip);
+        fp16_total += 6 * static_cast<size_t>(mip_width) * mip_height * GetPixelSize(PixelFormat::RGBAFloat16);
+        compressed_total += 6 * GetImageMipByteSize(format, mip_width, mip_height);
+    }
+    if (payload.size() != sizeof(PayloadHeader) + compressed_total)
+    {
+        return {};
+    }
+
+    std::vector<uint8_t> fp16(fp16_total);
+    size_t in_offset = sizeof(PayloadHeader);
+    size_t out_offset = 0;
+    for (unsigned mip = 0; mip < header.mip_count; mip++)
+    {
+        const unsigned mip_width = MipDim(header.width, mip);
+        const unsigned mip_height = MipDim(header.height, mip);
+        const size_t fp16_face_size =
+            static_cast<size_t>(mip_width) * mip_height * GetPixelSize(PixelFormat::RGBAFloat16);
+        const size_t compressed_face_size = GetImageMipByteSize(format, mip_width, mip_height);
+        for (unsigned face = 0; face < 6; face++)
+        {
+            std::vector<uint8_t> blocks(payload.begin() + static_cast<std::ptrdiff_t>(in_offset),
+                                        payload.begin() + static_cast<std::ptrdiff_t>(in_offset + compressed_face_size));
+            Image2D fp16_face(mip_width, mip_height, PixelFormat::RGBAFloat16);
+            if (IsCompressedFormat(format))
+            {
+                const Image2D compressed(mip_width, mip_height, format, 1, std::move(blocks), "ibl_cube");
+                fp16_face = Decode(compressed, 0);
+            }
+            else
+            {
+                const Image2D packed(mip_width, mip_height, format, blocks);
+                fp16_face.CopyFrom(packed);
+            }
+            std::memcpy(fp16.data() + out_offset, fp16_face.GetRawData(), fp16_face_size);
+            in_offset += compressed_face_size;
+            out_offset += fp16_face_size;
+        }
+    }
+    return fp16;
 }
 
 std::vector<char> TextureCompression::Encode(const Image2D &source, Profile profile, Family family)

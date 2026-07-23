@@ -103,7 +103,13 @@ CookJobResult IblDiffuseCookJob::Execute()
         cooked_rows_++;
     }).wait();
 
-    return CookJobResult::Success(std::move(payload));
+    auto compressed = TextureCompression::EncodeHdrCube(reinterpret_cast<const uint8_t *>(payload.data()), Resolution,
+                                                        Resolution, 1, TextureCompression::SelectHdrFormat(family_));
+    if (compressed.empty())
+    {
+        return CookJobResult::Failure();
+    }
+    return CookJobResult::Success(std::move(compressed));
 }
 
 float IblSpecularCookJob::GetProgress() const
@@ -222,6 +228,12 @@ CookJobResult IblSpecularCookJob::Execute()
         level_offset += 6 * face_size;
     }
 
-    return CookJobResult::Success(std::move(payload));
+    auto compressed = TextureCompression::EncodeHdrCube(reinterpret_cast<const uint8_t *>(payload.data()), MapSize,
+                                                        MapSize, MipLevelCount, TextureCompression::SelectHdrFormat(family_));
+    if (compressed.empty())
+    {
+        return CookJobResult::Failure();
+    }
+    return CookJobResult::Success(std::move(compressed));
 }
 } // namespace sparkle

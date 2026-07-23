@@ -149,18 +149,32 @@ private:
         return all_loaded;
     }
 
+    // compressed IBL artifacts (diffuse/specular) decode to fp16 before comparison; the fp16
+    // BRDF LUT passes through
+    [[nodiscard]] static std::vector<uint8_t> DecodeToFp16(const std::vector<char> &payload)
+    {
+        auto decoded = TextureCompression::DecodeHdrCube(payload);
+        if (!decoded.empty())
+        {
+            return decoded;
+        }
+        return {payload.begin(), payload.end()};
+    }
+
     [[nodiscard]] static bool Compare(const ParityCase &parity_case)
     {
-        if (parity_case.cpu_payload.size() != parity_case.gpu_payload.size())
+        const auto cpu_fp16 = DecodeToFp16(parity_case.cpu_payload);
+        const auto gpu_fp16 = DecodeToFp16(parity_case.gpu_payload);
+        if (cpu_fp16.size() != gpu_fp16.size())
         {
-            Log(Error, "{} payload size mismatch. cpu {}. gpu {}.", parity_case.label, parity_case.cpu_payload.size(),
-                parity_case.gpu_payload.size());
+            Log(Error, "{} payload size mismatch. cpu {}. gpu {}.", parity_case.label, cpu_fp16.size(),
+                gpu_fp16.size());
             return false;
         }
 
-        const auto *cpu = reinterpret_cast<const Half *>(parity_case.cpu_payload.data());
-        const auto *gpu = reinterpret_cast<const Half *>(parity_case.gpu_payload.data());
-        const size_t total = parity_case.cpu_payload.size() / sizeof(Half);
+        const auto *cpu = reinterpret_cast<const Half *>(cpu_fp16.data());
+        const auto *gpu = reinterpret_cast<const Half *>(gpu_fp16.data());
+        const size_t total = cpu_fp16.size() / sizeof(Half);
 
         double abs_sum = 0.0;
         float abs_max = 0.f;

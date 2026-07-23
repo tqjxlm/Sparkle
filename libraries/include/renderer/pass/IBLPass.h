@@ -14,7 +14,7 @@ namespace sparkle
 class IBLPass : public PipelinePass
 {
 public:
-    IBLPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &env_map);
+    IBLPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &env_map, PixelFormat target_format);
 
     ~IBLPass() override;
 
@@ -50,7 +50,9 @@ protected:
 
     void PrepareForCooking();
 
-    virtual RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write) = 0;
+    virtual RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format) = 0;
+
+    PixelFormat target_format_;
 
     RHIResourceRef<RHIImage> ibl_image_;
 
@@ -73,6 +75,10 @@ protected:
 
 private:
     void Finalize();
+
+    // builds the resident IBL cube from a compressed artifact payload: the native compressed
+    // cube, or an fp16 decode where the device cannot sample the format. null on a bad payload
+    RHIResourceRef<RHIImage> MakeIblResource(const std::vector<char> &payload);
 
     bool is_ready_ = false;
 

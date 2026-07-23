@@ -4,6 +4,7 @@
 #include "core/cook/CookArtifactStore.h"
 #include "core/cook/Cooker.h"
 #include "core/task/TaskManager.h"
+#include "io/TextureCompression.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/pass/IBLBrdfPass.h"
 #include "renderer/pass/IBLDiffusePass.h"
@@ -97,11 +98,14 @@ void ImageBasedLighting::InitRenderResources(RHIContext *ctx, const RenderConfig
         }
     };
 
+    const auto ibl_format = TextureCompression::SelectHdrFormat(
+        TextureCompression::FamilyFromHdrFormat(env_map_cpu_->GetFormat()));
+
     ibl_brdf_pass_ = CreatePass<IBLBrdfPass>(config, allow_gpu_cook, MakeCookArtifactKey(*brdf_job), on_ready, ctx);
-    ibl_diffuse_pass_ =
-        CreatePass<IBLDiffusePass>(config, allow_gpu_cook, MakeCookArtifactKey(*diffuse_job), on_ready, ctx, env_map_);
+    ibl_diffuse_pass_ = CreatePass<IBLDiffusePass>(config, allow_gpu_cook, MakeCookArtifactKey(*diffuse_job), on_ready,
+                                                   ctx, env_map_, ibl_format);
     ibl_specular_pass_ = CreatePass<IBLSpecularPass>(config, allow_gpu_cook, MakeCookArtifactKey(*specular_job),
-                                                     on_ready, ctx, env_map_);
+                                                     on_ready, ctx, env_map_, ibl_format);
 
     if (!allow_gpu_cook)
     {
