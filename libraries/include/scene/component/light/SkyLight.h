@@ -1,12 +1,18 @@
 #pragma once
 
+#include "core/cook/CookArtifact.h"
 #include "core/task/TaskFuture.h"
 #include "scene/component/light/LightSource.h"
+
+#include <functional>
+#include <future>
 
 namespace sparkle
 {
 class CookHandle;
 class Image2DCube;
+class SceneAsyncTask;
+struct CookResult;
 
 class SkyLight : public LightSourceComponent
 {
@@ -39,9 +45,16 @@ public:
         return sky_map_path_;
     }
 
-    // manifest key of the cooked sky map cube, produced as a scene-load side effect;
-    // cook plans must record it so packaged targets ship the artifact
-    [[nodiscard]] std::string GetCookManifestKey() const;
+    // identity of the fp16 master sky cube artifact: shared pool content that family
+    // transcodes derive from; it does not ship in target images
+    [[nodiscard]] static CookArtifactKey MasterCookKey(const std::string &sky_map_path);
+
+    // build-time master cook (store hit or cook now). empty payload on failure
+    [[nodiscard]] static CookResult CookMasterPayload(const std::string &sky_map_path);
+
+    // the cube map a sky payload carries (fp16 master or family transcode). null on a bad payload
+    [[nodiscard]] static std::shared_ptr<Image2DCube> MakeCubeFromPayload(const std::vector<char> &payload,
+                                                                          const std::string &sky_map_path);
 
     void OnAttach() override;
 
@@ -70,9 +83,20 @@ protected:
     std::unique_ptr<RenderProxy> CreateRenderProxy() override;
 
 private:
+    // retires the request chain exactly once, on the main thread
+    using SkyCookFinish = std::function<void(bool)>;
+
     void RequestCook();
 
-    void ApplyCookedData(const std::vector<char> &payload);
+    void ProbeArtifact(const CookArtifactKey &key, const SkyCookFinish &finish, std::function<void()> on_miss);
+
+    void RequestMasterCook(const SkyCookFinish &finish);
+
+    void DeliverCookedResult(CookResult result, const SkyCookFinish &finish);
+
+    void ApplyCookedResult(CookResult result, const SkyCookFinish &finish);
+
+    [[nodiscard]] bool ApplyCookedData(const std::vector<char> &payload);
 
     Vector3 color_ = Vector3(0.5f, 0.7f, 1.0f);
 
@@ -81,6 +105,11 @@ private:
     std::shared_ptr<Image2DCube> cube_map_;
 
     std::unique_ptr<CookHandle> cook_handle_;
+
+    // OnCooked future for the whole lookup chain: a per-request CookHandle delivery would
+    // fire on an intermediate probe, before the payload is applied
+    std::shared_ptr<std::promise<void>> cooked_promise_;
+    std::shared_ptr<TaskFuture<>> cooked_future_;
 
     Vector3 sun_brightness_ = Ones;
 

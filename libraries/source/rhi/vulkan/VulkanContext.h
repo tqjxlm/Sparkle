@@ -90,6 +90,11 @@ public:
         return supports_subgroup_quad_ops_;
     }
 
+    [[nodiscard]] bool SupportsAstcHdr() const
+    {
+        return supports_astc_hdr_;
+    }
+
     bool Init();
 
     void BeginCommandBuffer();
@@ -361,6 +366,7 @@ private:
 
     CommandState command_state_;
     bool enable_ray_tracing_ = false;
+    bool supports_astc_hdr_ = false;
 
     VulkanRHI *rhi_;
 

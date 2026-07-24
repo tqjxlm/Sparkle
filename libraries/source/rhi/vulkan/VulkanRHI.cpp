@@ -185,6 +185,11 @@ bool VulkanRHI::HasPhysicalGpu()
 
 bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
 {
+    if (format == PixelFormat::ASTC4x4HDR && !context->SupportsAstcHdr())
+    {
+        return false;
+    }
+
     if (IsCompressedFormat(format))
     {
         // the Apple Paravirtual device (macOS CI runners) advertises compressed formats

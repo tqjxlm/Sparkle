@@ -106,7 +106,7 @@ public:
     // content identity over pixels, dimensions and format
     [[nodiscard]] uint32_t GetContentHash() const;
 
-    // decoded RGBA8 view of a block-compressed image, built once on first use
+    // decoded view of a block-compressed image, built once on first use
     [[nodiscard]] const Image2D &EnsureDecoded() const;
 
     [[nodiscard]] Vector3 Sample(const Vector2 &uv) const
@@ -185,6 +185,11 @@ public:
 
     [[nodiscard]] Vector4 AccessPixel(unsigned x, unsigned y) const
     {
+        if (IsCompressedFormat(pixel_format_))
+        {
+            return EnsureDecoded().AccessPixel(x, y);
+        }
+
         switch (pixel_format_)
         {
         case PixelFormat::R8G8B8A8Srgb:
@@ -318,6 +323,17 @@ public:
         for (auto &face : faces_)
         {
             face = std::make_unique<Image2D>(width, height, format);
+        }
+    }
+
+    Image2DCube(std::array<std::unique_ptr<Image2D>, 6> faces, std::string name)
+        : faces_(std::move(faces)), name_(std::move(name))
+    {
+        ASSERT(faces_[0]);
+        for (const auto &face : faces_)
+        {
+            ASSERT(face && face->GetWidth() == faces_[0]->GetWidth() && face->GetHeight() == faces_[0]->GetHeight() &&
+                   face->GetFormat() == faces_[0]->GetFormat());
         }
     }
 

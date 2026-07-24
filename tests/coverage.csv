@@ -2,7 +2,8 @@ case,windows-glfw-release,macos-macos-release,macos-glfw-release,macos-ios-relea
 smoke,,,,,,
 forward_render_static,x,x,x,x,x,x
 forward_render_static_halfres,x,x,x,x,x,x
-deferred_render_static,x,x,x,x,x,x
+deferred_render_static,x,x,x,x,,x
+deferred_render_static_emulated,,,,,x,
 camera_nudge_return,x,x,x,x,x,x
 primitive_move,x,x,x,x,x,x
 usd_round_trip,,x,,,,x
@@ -10,6 +11,7 @@ input_injection,x,x,x,x,x,x
 cooker_request,x,,,,,x
 image_io,x,x,x,x,x,x
 texture_compression,x,x,x,x,x,x
+sky_compression,x,x,x,x,x,x
 usd_loader_semantics,x,x,x,,,x
 usd_loader_semantics_rebuild,,,,,,
 scene_load_failure,x,x,x,x,x,x

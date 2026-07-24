@@ -5,6 +5,7 @@
 #include "core/cook/Cooker.h"
 
 #include <atomic>
+#include <string_view>
 
 namespace sparkle
 {
@@ -34,6 +35,14 @@ const char *GetProfileName(TextureCompression::Profile profile)
         UnImplemented(profile);
         return "";
     }
+}
+
+constexpr const char *EmbeddedIdentityPrefix = "@embedded-";
+
+bool IsEmbeddedTextureIdentity(const std::string &name)
+{
+    const auto filename_start = name.find_last_of('/') + 1;
+    return std::string_view(name).substr(filename_start).starts_with(EmbeddedIdentityPrefix);
 }
 } // namespace
 
@@ -112,10 +121,22 @@ std::string MakeTextureIdentity(const std::filesystem::path &scene_parent, const
     return identity;
 }
 
+std::string MakeEmbeddedTextureIdentity(const std::filesystem::path &scene_parent, uint32_t content_hash)
+{
+    const auto name = std::string(EmbeddedIdentityPrefix) + std::to_string(content_hash);
+    auto identity = (scene_parent / name).lexically_normal().generic_string();
+    if (HasTexturePathRoot(identity) || identity.starts_with("../"))
+    {
+        return {};
+    }
+    return identity;
+}
+
 bool IsCookableMaterialTexture(const Image2D &image)
 {
+    const auto &name = image.GetName();
     return (image.GetFormat() == PixelFormat::R8G8B8A8Srgb || image.GetFormat() == PixelFormat::R8G8B8A8Unorm) &&
-           IsCompressibleImagePath(image.GetName());
+           (IsCompressibleImagePath(name) || IsEmbeddedTextureIdentity(name));
 }
 
 std::shared_ptr<Image2D> ResolveMaterialTexture(const std::shared_ptr<Image2D> &source, const std::string &identity,

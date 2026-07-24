@@ -29,7 +29,13 @@ FILE(GLOB THIRD_PARTY_SOURCES
     hash-library/src/*.cpp
     bc7enc_rdo/bc7enc.cpp
     bc7enc_rdo/bc7decomp.cpp
+    ConvectionKernels/ConvectionKernels_*.cpp
 )
+
+# pre-defining the config include guard keeps CVTT on its scalar path everywhere: the
+# SSE2 path encodes BC6H at ~3.4x the error of scalar at every quality setting
+FILE(GLOB CVTT_SOURCES ConvectionKernels/ConvectionKernels_*.cpp)
+set_source_files_properties(${CVTT_SOURCES} PROPERTIES COMPILE_DEFINITIONS __CVTT_CONFIG_H__)
 
 if (GLFW)
     FILE(GLOB IMGUI_SOURCES
@@ -278,6 +284,7 @@ target_include_directories(sparkle_thirdparty SYSTEM PUBLIC
     IconFontCppHeaders
     astc-encoder/Source
     bc7enc_rdo
+    ConvectionKernels
 )
 
 target_link_libraries(sparkle PUBLIC sparkle_thirdparty)

@@ -97,7 +97,8 @@ bool WriteFileAtomically(const std::string &relative_path, const char *data, siz
     return !rename_error;
 }
 
-CookPayload TryLoadManifestEntry(const nlohmann::json &entry, const CookArtifactKey &key, PathType path_type)
+CookPayload TryLoadManifestEntry(const nlohmann::json &entry, const CookArtifactKey &key, PathType path_type,
+                                 uint32_t *resolved_hash)
 {
     if (!entry.is_object())
     {
@@ -129,11 +130,16 @@ CookPayload TryLoadManifestEntry(const nlohmann::json &entry, const CookArtifact
         return {};
     }
 
+    if (resolved_hash != nullptr)
+    {
+        *resolved_hash = entry_hash;
+    }
+
     Log(Info, "cook artifact hit ({}): {}", path_type == PathType::Resource ? "packaged" : "cached", artifact_file);
     return StripHeader(std::move(data));
 }
 
-CookPayload LoadFromStores(const CookArtifactKey &key, bool skip_internal_cache)
+CookPayload LoadFromStores(const CookArtifactKey &key, bool skip_internal_cache, uint32_t *resolved_hash)
 {
     const auto manifest_key = CookArtifactStore::GetManifestKey(key);
 
@@ -149,7 +155,7 @@ CookPayload LoadFromStores(const CookArtifactKey &key, bool skip_internal_cache)
         const auto entry = manifest.find(manifest_key);
         if (entry != manifest.end())
         {
-            if (auto payload = TryLoadManifestEntry(*entry, key, path_type); !payload.empty())
+            if (auto payload = TryLoadManifestEntry(*entry, key, path_type, resolved_hash); !payload.empty())
             {
                 return payload;
             }
@@ -168,7 +174,7 @@ CookPayload LoadFromStores(const CookArtifactKey &key, bool skip_internal_cache)
                 continue;
             }
 
-            if (auto payload = TryLoadManifestEntry(*candidate, key, path_type); !payload.empty())
+            if (auto payload = TryLoadManifestEntry(*candidate, key, path_type, resolved_hash); !payload.empty())
             {
                 return payload;
             }
@@ -184,13 +190,13 @@ std::string CookArtifactStore::GetManifestKey(const CookArtifactKey &key)
     return key.type + ":" + key.source_name;
 }
 
-CookPayload CookArtifactStore::Load(const CookArtifactKey &key)
+CookPayload CookArtifactStore::Load(const CookArtifactKey &key, uint32_t *resolved_hash)
 {
     auto *rebuild_config = ConfigManager::Instance().GetConfig<bool>("rebuild_cache");
     const bool skip_internal_cache = rebuild_config != nullptr && rebuild_config->Get();
 
     std::shared_lock<std::shared_mutex> lock(GetManifestMutex());
-    return LoadFromStores(key, skip_internal_cache);
+    return LoadFromStores(key, skip_internal_cache, resolved_hash);
 }
 
 bool CookArtifactStore::Save(const CookArtifactKey &key, const CookPayload &payload)

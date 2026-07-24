@@ -4,6 +4,8 @@
 #include "core/Logger.h"
 #include "io/Image.h"
 
+#include <cstring>
+
 namespace sparkle
 {
 class ImageIoTest : public TestCase

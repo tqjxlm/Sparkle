@@ -67,3 +67,6 @@
 [submodule "thirdparty/bc7enc_rdo"]
 	path = thirdparty/bc7enc_rdo
 	url = https://github.com/richgel999/bc7enc_rdo.git
+[submodule "thirdparty/ConvectionKernels"]
+	path = thirdparty/ConvectionKernels
+	url = https://github.com/elasota/ConvectionKernels.git

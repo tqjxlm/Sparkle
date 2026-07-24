@@ -14,7 +14,9 @@
 #include "core/Path.h"
 #include "core/Profiler.h"
 #include "core/cook/CookArtifactStore.h"
+#include "core/cook/Cooker.h"
 #include "core/task/TaskManager.h"
+#include "io/HdrCubeTranscodeJob.h"
 #include "io/TextureCookJob.h"
 #include "renderer/denoiser/DenoiserConfig.h"
 #include "renderer/nrd/NrdConfig.h"
@@ -340,6 +342,65 @@ static std::string JobManifestKey(const CookJob &job)
 }
 
 using ConsumedSourceMap = std::map<std::string, std::map<TextureCompression::Family, std::set<std::string>>>;
+using FamilyArtifactMap = std::map<TextureCompression::Family, std::set<std::string>>;
+
+struct PendingHdrTranscode
+{
+    std::string master_type;
+    std::string source_name;
+    CookArtifactKey master_key;
+    // the sky map source hash for the sky entry; zero for the IBL entries, whose
+    // transcode hash chains from the family sky cube cooked before them
+    uint32_t origin_hash = 0;
+};
+
+// derives the per-family HDR cube artifacts from the fp16 masters the run produced
+static bool CookHdrTranscodes(const std::vector<PendingHdrTranscode> &pending,
+                              const std::set<TextureCompression::Family> &families, FamilyArtifactMap &family_artifacts)
+{
+    for (auto family : families)
+    {
+        uint32_t family_sky_cube_hash = 0;
+        for (const auto &entry : pending)
+        {
+            auto master = CookArtifactStore::Load(entry.master_key);
+            if (master.empty())
+            {
+                Log(Error, "missing master artifact for {}", entry.source_name);
+                return false;
+            }
+
+            const bool is_sky = entry.origin_hash != 0;
+            const auto origin_hash = is_sky ? entry.origin_hash : family_sky_cube_hash;
+            ASSERT_F(origin_hash != 0, "sky transcode must precede the IBL transcodes");
+
+            const auto source_hash = HdrCubeTranscodeJob::MakeSourceHash(origin_hash, entry.master_key.version);
+            auto job = std::make_shared<HdrCubeTranscodeJob>(entry.master_type, family, entry.source_name,
+                                                             std::move(master), source_hash);
+            const auto key = MakeCookArtifactKey(*job);
+            auto result = Cooker::CookNow(key, [&job]() { return job; });
+            if (!result.HasPayload())
+            {
+                Log(Error, "failed to transcode {} for {}", entry.source_name,
+                    TextureCompression::GetFamilyName(family));
+                return false;
+            }
+
+            if (is_sky)
+            {
+                auto family_cube = SkyLight::MakeCubeFromPayload(result.payload, entry.source_name);
+                if (!family_cube)
+                {
+                    return false;
+                }
+                family_sky_cube_hash = family_cube->GetContentHash();
+            }
+
+            family_artifacts[family].insert(CookArtifactStore::GetManifestKey(key));
+        }
+    }
+    return true;
+}
 
 static void CollectMaterialTextureJobs(const Scene &scene, const std::set<TextureCompression::Family> &families,
                                        std::vector<std::unique_ptr<CookJob>> &jobs, ConsumedSourceMap &consumed_sources)
@@ -378,7 +439,7 @@ static void CollectMaterialTextureJobs(const Scene &scene, const std::set<Textur
 // read by assemble_cooked_image in build.py; the cook output dir persists across runs,
 // so a smaller result must still overwrite a stale file
 static bool WriteCookProducts(const std::vector<std::string> &targets, const std::set<std::string> &universal_keys,
-                              const ConsumedSourceMap &consumed_sources)
+                              const ConsumedSourceMap &consumed_sources, const FamilyArtifactMap &family_artifacts)
 {
     nlohmann::json json = nlohmann::json::object();
     for (const auto &target : targets)
@@ -386,6 +447,11 @@ static bool WriteCookProducts(const std::vector<std::string> &targets, const std
         const auto family = CookTargetFamilies().at(target);
 
         std::set<std::string> artifacts = universal_keys;
+        if (const auto family_keys = family_artifacts.find(family); family_keys != family_artifacts.end())
+        {
+            artifacts.insert(family_keys->second.begin(), family_keys->second.end());
+        }
+
         nlohmann::json consumed_json = nlohmann::json::object();
         for (const auto &[source, family_keys] : consumed_sources)
         {
@@ -459,46 +525,66 @@ int AppFramework::RunCookMode()
 
     ConsumedSourceMap consumed_texture_sources;
     std::set<std::string> universal_keys;
+    std::vector<PendingHdrTranscode> pending_transcodes;
 
-    const SceneCooker::JobPlan job_plan{.collect_scene_independent_jobs =
-                                            [&universal_keys](std::vector<std::unique_ptr<CookJob>> &jobs) {
-                                                IblCookPlan::CollectSceneIndependentJobs(jobs);
-                                                for (const auto &job : jobs)
-                                                {
-                                                    universal_keys.insert(JobManifestKey(*job));
-                                                }
-                                                return true;
-                                            },
-                                        .collect_scene_jobs =
-                                            [&consumed_texture_sources, &texture_families, &universal_keys](
-                                                const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
-                                                const auto *sky_light = scene.GetSkyLight();
-                                                CollectMaterialTextureJobs(scene, texture_families, jobs,
-                                                                           consumed_texture_sources);
-                                                const auto family_scoped_jobs = jobs.size();
+    const SceneCooker::JobPlan job_plan{
+        .collect_scene_independent_jobs =
+            [&universal_keys](std::vector<std::unique_ptr<CookJob>> &jobs) {
+                IblCookPlan::CollectSceneIndependentJobs(jobs);
+                for (const auto &job : jobs)
+                {
+                    universal_keys.insert(JobManifestKey(*job));
+                }
+                return true;
+            },
+        .collect_scene_jobs =
+            [&consumed_texture_sources, &texture_families,
+             &pending_transcodes](const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
+                const auto *sky_light = scene.GetSkyLight();
+                CollectMaterialTextureJobs(scene, texture_families, jobs, consumed_texture_sources);
 
-                                                if (sky_light != nullptr)
-                                                {
-                                                    const auto &environment = sky_light->GetCubeMap();
-                                                    if (!environment)
-                                                    {
-                                                        return !sky_light->HasSkyMap();
-                                                    }
-                                                    // no job produces the sky cube: it cooked during scene load
-                                                    universal_keys.insert(sky_light->GetCookManifestKey());
-                                                    IblCookPlan::CollectEnvironmentJobs(environment, jobs);
-                                                }
+                if (sky_light == nullptr || !sky_light->HasSkyMap())
+                {
+                    return true;
+                }
 
-                                                for (auto i = family_scoped_jobs; i < jobs.size(); i++)
-                                                {
-                                                    universal_keys.insert(JobManifestKey(*jobs[i]));
-                                                }
-                                                return true;
-                                            }};
+                // the fp16 sky and IBL masters cook once; the per-family transcodes derive
+                // from them after the run so mixed-family target sets ship the format each
+                // target can sample
+                const auto sky_map_path = sky_light->GetSkyMapPath();
+                auto master = SkyLight::CookMasterPayload(sky_map_path);
+                auto cube = master.HasPayload() && master.source_hash
+                                ? SkyLight::MakeCubeFromPayload(master.payload, sky_map_path)
+                                : nullptr;
+                if (!cube)
+                {
+                    Log(Error, "failed to cook sky cube {}", sky_map_path);
+                    return false;
+                }
+
+                const auto sky_key = SkyLight::MasterCookKey(sky_map_path);
+                pending_transcodes.push_back({sky_key.type, sky_key.source_name, sky_key, *master.source_hash});
+
+                std::vector<std::unique_ptr<CookJob>> env_jobs;
+                IblCookPlan::CollectEnvironmentJobs(cube, env_jobs);
+                for (auto &job : env_jobs)
+                {
+                    pending_transcodes.push_back({job->GetType(), job->GetSourceName(), MakeCookArtifactKey(*job), 0});
+                    jobs.push_back(std::move(job));
+                }
+                return true;
+            }};
 
     auto exit_code = SceneCooker::Run(app_config_.scene, job_plan, accelerator);
 
-    if (exit_code == 0 && !WriteCookProducts(cook_targets, universal_keys, consumed_texture_sources))
+    FamilyArtifactMap hdr_family_artifacts;
+    if (exit_code == 0 && !CookHdrTranscodes(pending_transcodes, texture_families, hdr_family_artifacts))
+    {
+        exit_code = 1;
+    }
+
+    if (exit_code == 0 &&
+        !WriteCookProducts(cook_targets, universal_keys, consumed_texture_sources, hdr_family_artifacts))
     {
         Log(Error, "failed to write the cook products manifest");
         exit_code = 1;

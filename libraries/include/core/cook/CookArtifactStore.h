@@ -13,7 +13,7 @@ public:
     // uses its logical identity; a resolved key may reuse identical relocated content.
     // rebuild_cache skips only the writable cache because packaged artifacts cannot be
     // rebuilt in place.
-    [[nodiscard]] static CookPayload Load(const CookArtifactKey &key);
+    [[nodiscard]] static CookPayload Load(const CookArtifactKey &key, uint32_t *resolved_hash = nullptr);
 
     // Only resolved, non-empty outputs can be persisted.
     static bool Save(const CookArtifactKey &key, const CookPayload &payload);

@@ -122,7 +122,7 @@ void IBLSpecularPass::CookOnTheFly(const RenderConfig &config, unsigned samples_
     }
 }
 
-RHIResourceRef<RHIImage> IBLSpecularPass::CreateIBLMap(bool for_cooking, bool allow_write)
+RHIResourceRef<RHIImage> IBLSpecularPass::CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format)
 {
     RHIImage::Attribute output_attribute;
     output_attribute.width =
@@ -139,9 +139,11 @@ RHIResourceRef<RHIImage> IBLSpecularPass::CreateIBLMap(bool for_cooking, bool al
     }
     else
     {
-        output_attribute.format = PixelFormat::RGBAFloat16;
-        output_attribute.usages =
-            RHIImage::ImageUsage::TransferDst | RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferSrc;
+        output_attribute.format = resource_format;
+        output_attribute.usages = IsCompressedFormat(resource_format)
+                                      ? (RHIImage::ImageUsage::TransferDst | RHIImage::ImageUsage::Texture)
+                                      : (RHIImage::ImageUsage::TransferDst | RHIImage::ImageUsage::Texture |
+                                         RHIImage::ImageUsage::TransferSrc);
     }
 
     if (allow_write)

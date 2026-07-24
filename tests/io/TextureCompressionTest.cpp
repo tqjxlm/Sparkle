@@ -34,6 +34,8 @@ class TextureCompressionTest : public TestCase
         {
             success &= VerifyOddMipEdges(family);
         }
+        success &= VerifyHdrRoundTrip(PixelFormat::ASTC4x4HDR, "hdr astc 4x4");
+        success &= VerifyHdrRoundTrip(PixelFormat::BC6HUfloat, "hdr bc6h");
 
         return success ? Result::Pass : Result::Fail;
     }
@@ -57,6 +59,14 @@ class TextureCompressionTest : public TestCase
                               ("absolute identity is rejected: " + absolute).c_str());
         }
         success &= Expect(MakeTextureIdentity("", "").empty(), "empty authored path yields no identity");
+
+        success &= Expect(MakeEmbeddedTextureIdentity("models/foo", 0xABCD1234u) == "models/foo/@embedded-2882343476",
+                          "embedded identity is a content hash under the scene parent");
+        Image2D embedded_image(1, 1, PixelFormat::R8G8B8A8Unorm, std::vector<uint8_t>{1, 2, 3, 4});
+        embedded_image.SetName(MakeEmbeddedTextureIdentity("models/foo", 0xABCD1234u));
+        success &= Expect(IsCookableMaterialTexture(embedded_image), "an embedded identity is cookable");
+        Image2D raw_image(1, 1, PixelFormat::R8G8B8A8Unorm, std::vector<uint8_t>{1, 2, 3, 4});
+        success &= Expect(!IsCookableMaterialTexture(raw_image), "an image with no identity is not cookable");
 
         auto source =
             std::make_shared<Image2D>(1, 1, PixelFormat::R8G8B8A8Unorm, std::vector<uint8_t>{32, 64, 128, 255});
@@ -215,6 +225,77 @@ class TextureCompressionTest : public TestCase
                                   std::abs(green_mean - expected_green) < CodecTolerance,
                               (label + " " + std::to_string(mip) + ": final row and column preserve area").c_str());
         }
+        return success;
+    }
+
+    static Image2D MakeHdrSource()
+    {
+        Image2D source(Width, Height, PixelFormat::RGBAFloat16);
+        for (unsigned y = 0; y < Height; y++)
+        {
+            for (unsigned x = 0; x < Width; x++)
+            {
+                const float u = static_cast<float>(x) / static_cast<float>(Width);
+                const float v = static_cast<float>(y) / static_cast<float>(Height);
+                const float dx = u - 0.5f;
+                const float dy = v - 0.5f;
+                const float sun = 6.f * std::exp(-(dx * dx + dy * dy) * 40.f);
+                source.SetPixel(
+                    x, y,
+                    Vector3{0.2f + u * 3.f + sun, 0.2f + v * 1.5f + sun, 0.2f + (1.f - u) * (1.f - v) * 2.f + sun});
+            }
+        }
+        return source;
+    }
+
+    static bool VerifyHdrRoundTrip(PixelFormat target, const char *label)
+    {
+        const auto source = MakeHdrSource();
+
+        const auto bytes = TextureCompression::EncodeHdrFace(source, target);
+        bool success = Expect(!bytes.empty(), (std::string(label) + ": encode produced bytes").c_str());
+        if (!success)
+        {
+            return false;
+        }
+
+        const Image2D compressed(Width, Height, target, 1, bytes, "hdr_test");
+        const Vector3 direct_sample = compressed.AccessPixel(Width / 2, Height / 2).head<3>();
+        const Image2D decoded = TextureCompression::Decode(compressed, 0);
+        success &= Expect(decoded.IsValid() && decoded.GetFormat() == PixelFormat::RGBAFloat16,
+                          (std::string(label) + ": decode is valid").c_str());
+        success &= Expect(direct_sample == decoded.AccessPixel(Width / 2, Height / 2).head<3>(),
+                          (std::string(label) + ": direct pixel access uses the decoded view").c_str());
+
+        double abs_error = 0.0;
+        double signal = 0.0;
+        float max_error = 0.f;
+        float source_peak = 0.f;
+        float decoded_peak = 0.f;
+        for (unsigned y = 0; y < Height; y++)
+        {
+            for (unsigned x = 0; x < Width; x++)
+            {
+                const Vector3 reference = source.AccessPixel(x, y).head<3>();
+                const Vector3 restored = decoded.AccessPixel(x, y).head<3>();
+                abs_error += (restored - reference).cwiseAbs().sum();
+                signal += reference.cwiseAbs().sum();
+                max_error = std::max(max_error, (restored - reference).cwiseAbs().maxCoeff());
+                source_peak = std::max(source_peak, reference.maxCoeff());
+                decoded_peak = std::max(decoded_peak, restored.maxCoeff());
+            }
+        }
+        const double relative = signal > 0.0 ? abs_error / signal : 0.0;
+        const float peak_relative_error = source_peak > 0.f ? max_error / source_peak : 0.f;
+        const float peak_retention = source_peak > 0.f ? decoded_peak / source_peak : 1.f;
+        Log(Info, "TextureCompressionTest: {} mean relative error {:.4f}, max/peak {:.4f}, peak retention {:.4f}",
+            label, relative, peak_relative_error, peak_retention);
+        success &=
+            Expect(relative < 0.05, (std::string(label) + ": HDR round-trip within 5% mean relative error").c_str());
+        success &= Expect(peak_relative_error < 0.1f,
+                          (std::string(label) + ": worst channel error is below 10% of peak").c_str());
+        success &= Expect(peak_retention > 0.9f && peak_retention < 1.1f,
+                          (std::string(label) + ": highlight peak is retained within 10%").c_str());
         return success;
     }
 

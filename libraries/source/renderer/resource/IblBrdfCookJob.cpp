@@ -2,6 +2,7 @@
 
 #include "core/math/Types.h"
 #include "core/task/TaskManager.h"
+#include "io/TextureCompression.h"
 #include "renderer/resource/IblCookMath.h"
 
 #include <cstring>
@@ -66,6 +67,7 @@ CookJobResult IblBrdfCookJob::Execute()
         cooked_rows_++;
     }).wait();
 
-    return CookJobResult::Success(std::move(payload));
+    return CookJobResult::Success(TextureCompression::WrapFp16Payload(reinterpret_cast<const uint8_t *>(payload.data()),
+                                                                      payload.size(), Resolution, Resolution, 1));
 }
 } // namespace sparkle

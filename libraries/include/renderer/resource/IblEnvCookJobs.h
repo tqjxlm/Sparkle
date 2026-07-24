@@ -52,7 +52,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 1;
+        return 4;
     }
 
     [[nodiscard]] float GetProgress() const override
@@ -79,8 +79,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        // version 2: the cross-backend payload layout was harmonized to mip-major
-        return 2;
+        return 5;
     }
 
     [[nodiscard]] float GetProgress() const override;

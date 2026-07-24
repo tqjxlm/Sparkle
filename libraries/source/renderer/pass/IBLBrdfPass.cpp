@@ -35,7 +35,7 @@ IBLBrdfPass::IBLBrdfPass(RHIContext *ctx) : IBLPass(ctx, nullptr)
 
 IBLBrdfPass::~IBLBrdfPass() = default;
 
-RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_write)
+RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format)
 {
     RHIImage::Attribute output_attribute;
     output_attribute.width = IblSettings::BrdfMapSize;
@@ -49,7 +49,7 @@ RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_
     }
     else
     {
-        output_attribute.format = PixelFormat::RGBAFloat16;
+        output_attribute.format = resource_format;
         output_attribute.usages =
             RHIImage::ImageUsage::TransferDst | RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferSrc;
     }

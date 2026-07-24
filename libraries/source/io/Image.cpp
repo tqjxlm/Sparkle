@@ -231,7 +231,13 @@ bool Image2D::WriteToFile(const Path &file_path) const
     int encode_success = 0;
     if (IsHDRFormat(pixel_format_))
     {
-        if (pixel_format_ == PixelFormat::RGBAFloat16)
+        if (pixel_format_ == PixelFormat::RGBAFloat)
+        {
+            encode_success = stbi_write_hdr_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
+                                                    static_cast<int>(height_), static_cast<int>(channel_count_),
+                                                    reinterpret_cast<const float *>(pixels_.data()));
+        }
+        else
         {
             Image2D full_precision_image(width_, height_, PixelFormat::RGBAFloat);
             if (full_precision_image.CopyFrom(*this))
@@ -241,12 +247,6 @@ bool Image2D::WriteToFile(const Path &file_path) const
                                            static_cast<int>(height_), static_cast<int>(channel_count_),
                                            reinterpret_cast<const float *>(full_precision_image.pixels_.data()));
             }
-        }
-        else
-        {
-            encode_success = stbi_write_hdr_to_func(&WriteImageData, custom_data, static_cast<int>(width_),
-                                                    static_cast<int>(height_), static_cast<int>(channel_count_),
-                                                    reinterpret_cast<const float *>(pixels_.data()));
         }
     }
     else

@@ -74,7 +74,8 @@ void FinishInFlight(const std::string &in_flight_key, CookResult result)
     ASSERT(!subscribers.empty());
     for (size_t i = 0; i + 1 < subscribers.size(); i++)
     {
-        subscribers[i](CookResult{.status = result.status, .payload = result.payload});
+        subscribers[i](
+            CookResult{.status = result.status, .payload = result.payload, .source_hash = result.source_hash});
     }
     subscribers.back()(std::move(result));
 }
@@ -84,11 +85,16 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
 {
     Timer timer;
 
+    if (!make_job)
+    {
+        return {.status = CookResult::Status::JobUnavailable, .payload = {}, .source_hash = std::nullopt};
+    }
+
     auto job = make_job();
     if (!job)
     {
         Log(Error, "cannot cook {}: {}: source job creation failed", lookup_key.type, lookup_key.source_name);
-        return {.status = CookResult::Status::JobUnavailable, .payload = {}};
+        return {.status = CookResult::Status::JobUnavailable, .payload = {}, .source_hash = std::nullopt};
     }
 
     const auto key = MakeCookArtifactKey(*job);
@@ -98,12 +104,13 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
     if (identity_mismatch)
     {
         Log(Error, "cook job identity does not match lookup key: {}:{}", lookup_key.type, lookup_key.source_name);
-        return {.status = CookResult::Status::IdentityMismatch, .payload = {}};
+        return {.status = CookResult::Status::IdentityMismatch, .payload = {}, .source_hash = std::nullopt};
     }
 
-    if (auto payload = CookArtifactStore::Load(key); !payload.empty())
+    uint32_t resolved_hash = 0;
+    if (auto payload = CookArtifactStore::Load(key, &resolved_hash); !payload.empty())
     {
-        return {.status = CookResult::Status::Ready, .payload = std::move(payload)};
+        return {.status = CookResult::Status::Ready, .payload = std::move(payload), .source_hash = resolved_hash};
     }
 
     Log(Info, "cooking {}: {}", key.type, key.source_name);
@@ -115,7 +122,7 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
     if (!job_result.IsSuccess() || job_result.GetPayload().empty())
     {
         Log(Error, "cook produced no data {}: {}", key.type, key.source_name);
-        return {.status = CookResult::Status::ExecutionFailed, .payload = {}};
+        return {.status = CookResult::Status::ExecutionFailed, .payload = {}, .source_hash = std::nullopt};
     }
 
     auto payload = job_result.TakePayload();
@@ -124,7 +131,8 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
     Log(Info, "cook finished {}: {}. took {:.2f}s", key.type, key.source_name, timer.ElapsedSecond());
 
     return {.status = saved ? CookResult::Status::Ready : CookResult::Status::StoreFailed,
-            .payload = std::move(payload)};
+            .payload = std::move(payload),
+            .source_hash = key.source_hash};
 }
 } // namespace
 
@@ -132,9 +140,10 @@ CookResult Cooker::CookNow(const CookArtifactKey &lookup_key, const CookJobFacto
 {
     // resolve the logical key first, exactly like Request: a hit must not construct the
     // job, whose source-derived identity would otherwise override the manifest's
-    if (auto payload = CookArtifactStore::Load(lookup_key); !payload.empty())
+    uint32_t resolved_hash = 0;
+    if (auto payload = CookArtifactStore::Load(lookup_key, &resolved_hash); !payload.empty())
     {
-        return {.status = CookResult::Status::Ready, .payload = std::move(payload)};
+        return {.status = CookResult::Status::Ready, .payload = std::move(payload), .source_hash = resolved_hash};
     }
 
     auto done_promise = std::make_shared<std::promise<void>>();
@@ -176,9 +185,10 @@ CookHandle Cooker::Request(const CookArtifactKey &lookup_key, CookJobFactory job
             false);
     };
 
-    if (auto payload = CookArtifactStore::Load(lookup_key); !payload.empty())
+    uint32_t resolved_hash = 0;
+    if (auto payload = CookArtifactStore::Load(lookup_key, &resolved_hash); !payload.empty())
     {
-        deliver({.status = CookResult::Status::Ready, .payload = std::move(payload)});
+        deliver({.status = CookResult::Status::Ready, .payload = std::move(payload), .source_hash = resolved_hash});
         return CookHandle(state);
     }
 

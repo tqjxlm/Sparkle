@@ -4,6 +4,8 @@
 #include "core/cook/CookArtifactStore.h"
 #include "core/cook/Cooker.h"
 #include "core/task/TaskManager.h"
+#include "io/HdrCubeTranscodeJob.h"
+#include "io/TextureCompression.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/pass/IBLBrdfPass.h"
 #include "renderer/pass/IBLDiffusePass.h"
@@ -19,25 +21,36 @@ namespace sparkle
 {
 namespace
 {
+// lookup order: the family transcode (what packaged images and cook-warmed dev pools
+// resolve, keeping every context on the shipped encoding the ground truths reflect), then
+// the fp16 master, then cook the master on a full miss
 template <class Pass, class... Args>
-std::unique_ptr<Pass> CreatePass(const RenderConfig &config, bool allow_gpu_cook, const CookArtifactKey &key,
-                                 std::function<void()> on_ready, Args &&...args)
+std::unique_ptr<Pass> CreatePass(const RenderConfig &config, bool allow_gpu_cook, const CookArtifactKey &master_key,
+                                 const CookArtifactKey &transcode_key, std::function<void()> on_ready, Args &&...args)
 {
     auto pass = std::make_unique<Pass>(std::forward<Args>(args)...);
 
-    if (auto payload = CookArtifactStore::Load(key); !payload.empty() && pass->ApplyArtifact(payload))
+    for (const auto *key : {&transcode_key, &master_key})
     {
-        return pass;
+        if (key->type.empty())
+        {
+            continue;
+        }
+        if (auto payload = CookArtifactStore::Load(*key); !payload.empty() && pass->ApplyArtifact(payload))
+        {
+            return pass;
+        }
     }
 
-    Log(Info, "no valid ibl artifact for {}, will cook at runtime", key.source_name);
+    Log(Info, "no valid ibl artifact for {}, will cook at runtime", master_key.source_name);
 
     if (allow_gpu_cook)
     {
-        pass->SetArtifactReadyCallback([key, ready_callback = std::move(on_ready)](std::vector<char> artifact_payload) {
-            CookArtifactStore::Save(key, artifact_payload);
-            ready_callback();
-        });
+        pass->SetArtifactReadyCallback(
+            [master_key, ready_callback = std::move(on_ready)](std::vector<char> artifact_payload) {
+                CookArtifactStore::Save(master_key, artifact_payload);
+                ready_callback();
+            });
         pass->InitRenderResources(config);
     }
 
@@ -97,11 +110,18 @@ void ImageBasedLighting::InitRenderResources(RHIContext *ctx, const RenderConfig
         }
     };
 
-    ibl_brdf_pass_ = CreatePass<IBLBrdfPass>(config, allow_gpu_cook, MakeCookArtifactKey(*brdf_job), on_ready, ctx);
-    ibl_diffuse_pass_ =
-        CreatePass<IBLDiffusePass>(config, allow_gpu_cook, MakeCookArtifactKey(*diffuse_job), on_ready, ctx, env_map_);
+    const auto transcode_key = [this](const CookJob &job) {
+        auto key =
+            HdrCubeTranscodeJob::MakeLookupKey(job.GetType(), TextureCompression::PlatformFamily, job.GetSourceName());
+        key.source_hash = HdrCubeTranscodeJob::MakeSourceHash(env_map_cpu_->GetContentHash(), job.GetVersion());
+        return key;
+    };
+
+    ibl_brdf_pass_ = CreatePass<IBLBrdfPass>(config, allow_gpu_cook, MakeCookArtifactKey(*brdf_job), {}, on_ready, ctx);
+    ibl_diffuse_pass_ = CreatePass<IBLDiffusePass>(config, allow_gpu_cook, MakeCookArtifactKey(*diffuse_job),
+                                                   transcode_key(*diffuse_job), on_ready, ctx, env_map_);
     ibl_specular_pass_ = CreatePass<IBLSpecularPass>(config, allow_gpu_cook, MakeCookArtifactKey(*specular_job),
-                                                     on_ready, ctx, env_map_);
+                                                     transcode_key(*specular_job), on_ready, ctx, env_map_);
 
     if (!allow_gpu_cook)
     {
