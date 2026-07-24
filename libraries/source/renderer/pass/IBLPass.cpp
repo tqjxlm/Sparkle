@@ -19,7 +19,9 @@ void IBLPass::Finalize()
     ASSERT(!is_ready_);
 
     auto cooked_ibl_image = ibl_image_;
-    auto fp16_image = CreateIBLMap(false, false, PixelFormat::RGBAFloat16);
+    // allow_write must stay on: MoltenVK's converting blit into a non-UAV destination
+    // leaves regions of the readback image unwritten (garbage fp16 texels)
+    auto fp16_image = CreateIBLMap(false, true, PixelFormat::RGBAFloat16);
 
     rhi_->BeginCommandBuffer();
 
