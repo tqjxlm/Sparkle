@@ -53,12 +53,14 @@ public:
     // the RGB9E5 packed format on desktop (no BC HDR encoder is vendored)
     [[nodiscard]] static PixelFormat SelectHdrFormat(Family family);
 
-    // inverse of SelectHdrFormat: the family a cooked HDR cube belongs to, read from its format
-    [[nodiscard]] static Family FamilyFromHdrFormat(PixelFormat format);
-
     // encodes one RGBAFloat16 image into the target HDR format's tightly-packed single-mip
     // bytes. target must be R9G9B9E5Float or an HDR ASTC format. returns empty on failure
     [[nodiscard]] static std::vector<uint8_t> EncodeHdrFace(const Image2D &source, PixelFormat target_format);
+
+    // wraps RGBAFloat16 image bytes (RHIImage byte order) in the self-describing payload
+    // container: the master form of the sky and IBL cube artifacts
+    [[nodiscard]] static std::vector<char> WrapFp16Payload(const uint8_t *fp16, size_t size, unsigned width,
+                                                           unsigned height, unsigned mip_count);
 
     // encodes an RGBAFloat16 cube map (RHIImage byte order: mip-major, 6 faces inside each mip)
     // into a self-describing payload (PayloadHeader + the same mip-major faces, compressed).
@@ -66,8 +68,13 @@ public:
     [[nodiscard]] static std::vector<char> EncodeHdrCube(const uint8_t *fp16, unsigned width, unsigned height,
                                                          unsigned mip_count, PixelFormat target_format);
 
+    // re-encodes an fp16 master cube payload into a family HDR format; bytes after the cube
+    // region (e.g. the sky payload's sun stats) carry over verbatim. returns empty on failure
+    [[nodiscard]] static std::vector<char> TranscodeHdrCube(const std::vector<char> &master, PixelFormat target_format);
+
     // inverse of EncodeHdrCube: decodes a payload back to RGBAFloat16 cube bytes in RHIImage byte
-    // order, for the software-sampling fallback and cook parity checks. returns empty on failure
+    // order, ignoring bytes after the cube region, for the software-sampling fallback and cook
+    // parity checks. returns empty on failure
     [[nodiscard]] static std::vector<uint8_t> DecodeHdrCube(const std::vector<char> &payload);
 
     // source must be an uncompressed RGBA8 image. returns empty on failure

@@ -14,7 +14,7 @@ namespace sparkle
 class IBLPass : public PipelinePass
 {
 public:
-    IBLPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &env_map, PixelFormat target_format);
+    IBLPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &env_map);
 
     ~IBLPass() override;
 
@@ -34,8 +34,8 @@ public:
 
     virtual void CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch) = 0;
 
-    // Consume a payload produced by the matching CPU cook job. Render thread only.
-    // Returns false when the payload does not match this pass's resource layout.
+    // Consume a self-describing payload: the fp16 master or a family transcode. Render
+    // thread only. Returns false when the payload does not match this pass's resource layout.
     bool ApplyArtifact(const std::vector<char> &payload);
 
     // Receives the compact payload after GPU generation. Persistence belongs to the
@@ -51,8 +51,6 @@ protected:
     void PrepareForCooking();
 
     virtual RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format) = 0;
-
-    PixelFormat target_format_;
 
     RHIResourceRef<RHIImage> ibl_image_;
 
@@ -76,8 +74,8 @@ protected:
 private:
     void Finalize();
 
-    // builds the resident IBL cube from a compressed artifact payload: the native compressed
-    // cube, or an fp16 decode where the device cannot sample the format. null on a bad payload
+    // builds the resident image from an artifact payload: native when the device samples the
+    // payload's format, an fp16 decode otherwise. null on a bad payload
     RHIResourceRef<RHIImage> MakeIblResource(const std::vector<char> &payload);
 
     bool is_ready_ = false;

@@ -3,36 +3,14 @@
 #include "core/Exception.h"
 #include "core/task/TaskManager.h"
 #include "io/Image.h"
+#include "io/TextureCompression.h"
 #include "renderer/resource/IblCookMath.h"
 
 #include <cstring>
 
 namespace sparkle
 {
-namespace
-{
-// the CPU cook and the GPU env upload must sample identical data for parity, and a
-// block-compressed cube would decode on every one of the cook's millions of texel taps.
-// directly-sampled formats (RGB9E5) pass through
-std::shared_ptr<const Image2DCube> DecodeEnvIfCompressed(std::shared_ptr<const Image2DCube> env_map)
-{
-    if (!IsCompressedFormat(env_map->GetFormat()))
-    {
-        return env_map;
-    }
-
-    std::array<std::unique_ptr<Image2D>, Image2DCube::FaceId::Count> faces;
-    for (unsigned id = 0; id < Image2DCube::FaceId::Count; id++)
-    {
-        faces[id] = std::make_unique<Image2D>(env_map->GetFace(static_cast<Image2DCube::FaceId>(id)).EnsureDecoded());
-    }
-    return std::make_shared<Image2DCube>(std::move(faces), env_map->GetName());
-}
-} // namespace
-
-IblEnvCookJob::IblEnvCookJob(std::shared_ptr<const Image2DCube> env_map)
-    : family_(TextureCompression::FamilyFromHdrFormat(env_map->GetFormat())),
-      env_map_(DecodeEnvIfCompressed(std::move(env_map)))
+IblEnvCookJob::IblEnvCookJob(std::shared_ptr<const Image2DCube> env_map) : env_map_(std::move(env_map))
 {
     ASSERT(env_map_->GetWidth() == env_map_->GetHeight());
 
@@ -41,7 +19,7 @@ IblEnvCookJob::IblEnvCookJob(std::shared_ptr<const Image2DCube> env_map)
 
 std::string IblEnvCookJob::GetSourceName() const
 {
-    return env_map_->GetName() + "#" + TextureCompression::GetFamilyName(family_);
+    return env_map_->GetName();
 }
 
 CookJobResult IblDiffuseCookJob::Execute()
@@ -103,13 +81,8 @@ CookJobResult IblDiffuseCookJob::Execute()
         cooked_rows_++;
     }).wait();
 
-    auto compressed = TextureCompression::EncodeHdrCube(reinterpret_cast<const uint8_t *>(payload.data()), Resolution,
-                                                        Resolution, 1, TextureCompression::SelectHdrFormat(family_));
-    if (compressed.empty())
-    {
-        return CookJobResult::Failure();
-    }
-    return CookJobResult::Success(std::move(compressed));
+    return CookJobResult::Success(TextureCompression::WrapFp16Payload(reinterpret_cast<const uint8_t *>(payload.data()),
+                                                                      payload.size(), Resolution, Resolution, 1));
 }
 
 float IblSpecularCookJob::GetProgress() const
@@ -228,12 +201,7 @@ CookJobResult IblSpecularCookJob::Execute()
         level_offset += 6 * face_size;
     }
 
-    auto compressed = TextureCompression::EncodeHdrCube(reinterpret_cast<const uint8_t *>(payload.data()), MapSize,
-                                                        MapSize, MipLevelCount, TextureCompression::SelectHdrFormat(family_));
-    if (compressed.empty())
-    {
-        return CookJobResult::Failure();
-    }
-    return CookJobResult::Success(std::move(compressed));
+    return CookJobResult::Success(TextureCompression::WrapFp16Payload(reinterpret_cast<const uint8_t *>(payload.data()),
+                                                                      payload.size(), MapSize, MapSize, MipLevelCount));
 }
 } // namespace sparkle

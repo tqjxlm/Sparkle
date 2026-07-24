@@ -26,9 +26,11 @@ protected:
     {
         EnforceConfig("pipeline", std::string("forward"));
 
-        // start cold so the artifacts under test come from this binary's GPU cook
+        // start cold so the artifacts under test come from this binary's GPU cook; the
+        // family transcodes must go too or the runtime lookup would resolve them first
         auto *file_manager = FileManager::GetNativeFileManager();
-        for (const char *type : {"ibl_brdf", "ibl_diffuse", "ibl_specular"})
+        for (const char *type : {"ibl_brdf", "ibl_diffuse", "ibl_specular", "ibl_diffuse_astc", "ibl_diffuse_bc",
+                                 "ibl_specular_astc", "ibl_specular_bc"})
         {
             std::filesystem::remove_all(file_manager->ResolvePath(Path::Internal(std::string("cooked/") + type)));
         }
@@ -45,10 +47,9 @@ protected:
             }
 
             const auto &env_map = sky_light->GetCubeMap();
-            if (env_map->GetFormat() != TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily))
+            if (env_map->GetFormat() != PixelFormat::RGBAFloat16)
             {
-                Log(Error, "sky cube format is {}, expected {}", Enum2Str(env_map->GetFormat()),
-                    Enum2Str(TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily)));
+                Log(Error, "sky cube format is {}, expected the fp16 master", Enum2Str(env_map->GetFormat()));
                 return Result::Fail;
             }
 
@@ -149,32 +150,21 @@ private:
         return all_loaded;
     }
 
-    // compressed IBL artifacts (diffuse/specular) decode to fp16 before comparison; the fp16
-    // BRDF LUT passes through
-    [[nodiscard]] static std::vector<uint8_t> DecodeToFp16(const std::vector<char> &payload)
-    {
-        auto decoded = TextureCompression::DecodeHdrCube(payload);
-        if (!decoded.empty())
-        {
-            return decoded;
-        }
-        return {payload.begin(), payload.end()};
-    }
-
     [[nodiscard]] static bool Compare(const ParityCase &parity_case)
     {
-        const auto cpu_fp16 = DecodeToFp16(parity_case.cpu_payload);
-        const auto gpu_fp16 = DecodeToFp16(parity_case.gpu_payload);
-        if (cpu_fp16.size() != gpu_fp16.size())
+        constexpr size_t HeaderSize = sizeof(TextureCompression::PayloadHeader);
+        if (parity_case.cpu_payload.size() != parity_case.gpu_payload.size() ||
+            parity_case.cpu_payload.size() <= HeaderSize)
         {
-            Log(Error, "{} payload size mismatch. cpu {}. gpu {}.", parity_case.label, cpu_fp16.size(),
-                gpu_fp16.size());
+            Log(Error, "{} payload size mismatch. cpu {}. gpu {}.", parity_case.label, parity_case.cpu_payload.size(),
+                parity_case.gpu_payload.size());
             return false;
         }
 
-        const auto *cpu = reinterpret_cast<const Half *>(cpu_fp16.data());
-        const auto *gpu = reinterpret_cast<const Half *>(gpu_fp16.data());
-        const size_t total = cpu_fp16.size() / sizeof(Half);
+        // both producers emit header-wrapped fp16 masters; compare the pixels behind the header
+        const auto *cpu = reinterpret_cast<const Half *>(parity_case.cpu_payload.data() + HeaderSize);
+        const auto *gpu = reinterpret_cast<const Half *>(parity_case.gpu_payload.data() + HeaderSize);
+        const size_t total = (parity_case.cpu_payload.size() - HeaderSize) / sizeof(Half);
 
         double abs_sum = 0.0;
         float abs_max = 0.f;

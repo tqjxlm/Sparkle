@@ -55,15 +55,13 @@ CookJobResult IblCookAccelerator::TryCook(const CookJob &job, RHIContext *rhi, c
     if (const auto *diffuse = dynamic_cast<const IblDiffuseCookJob *>(&job))
     {
         auto env_rhi = CreateEnvironmentMap(rhi, diffuse->env_map_.get(), diffuse->GetSourceName());
-        const auto format = TextureCompression::SelectHdrFormat(diffuse->family_);
-        return DrivePassToCompletion(rhi, std::make_unique<IBLDiffusePass>(rhi, env_rhi, format), config);
+        return DrivePassToCompletion(rhi, std::make_unique<IBLDiffusePass>(rhi, env_rhi), config);
     }
 
     if (const auto *specular = dynamic_cast<const IblSpecularCookJob *>(&job))
     {
         auto env_rhi = CreateEnvironmentMap(rhi, specular->env_map_.get(), specular->GetSourceName());
-        const auto format = TextureCompression::SelectHdrFormat(specular->family_);
-        return DrivePassToCompletion(rhi, std::make_unique<IBLSpecularPass>(rhi, env_rhi, format), config);
+        return DrivePassToCompletion(rhi, std::make_unique<IBLSpecularPass>(rhi, env_rhi), config);
     }
 
     return CookJobResult::Unsupported();

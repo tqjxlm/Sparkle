@@ -414,21 +414,6 @@ PixelFormat TextureCompression::SelectHdrFormat(Family family)
     return PixelFormat::Count;
 }
 
-TextureCompression::Family TextureCompression::FamilyFromHdrFormat(PixelFormat format)
-{
-    switch (format)
-    {
-    case PixelFormat::ASTC4x4HDR:
-    case PixelFormat::ASTC6x6HDR:
-        return Family::Astc;
-    case PixelFormat::R9G9B9E5Float:
-        return Family::Bc;
-    default:
-        UnImplemented(format);
-        return Family::Bc;
-    }
-}
-
 std::vector<uint8_t> TextureCompression::EncodeHdrFace(const Image2D &source, PixelFormat target_format)
 {
     ASSERT(source.GetFormat() == PixelFormat::RGBAFloat16);
@@ -528,6 +513,54 @@ std::vector<char> TextureCompression::EncodeHdrCube(const uint8_t *fp16, unsigne
     return success.load() ? payload : std::vector<char>{};
 }
 
+std::vector<char> TextureCompression::WrapFp16Payload(const uint8_t *fp16, size_t size, unsigned width, unsigned height,
+                                                      unsigned mip_count)
+{
+    std::vector<char> payload(sizeof(PayloadHeader) + size);
+    const PayloadHeader header{.format = static_cast<uint32_t>(PixelFormat::RGBAFloat16),
+                               .width = width,
+                               .height = height,
+                               .mip_count = mip_count};
+    std::memcpy(payload.data(), &header, sizeof(header));
+    std::memcpy(payload.data() + sizeof(header), fp16, size);
+    return payload;
+}
+
+std::vector<char> TextureCompression::TranscodeHdrCube(const std::vector<char> &master, PixelFormat target_format)
+{
+    if (master.size() < sizeof(PayloadHeader))
+    {
+        return {};
+    }
+    PayloadHeader header;
+    std::memcpy(&header, master.data(), sizeof(header));
+    if (static_cast<PixelFormat>(header.format) != PixelFormat::RGBAFloat16)
+    {
+        return {};
+    }
+
+    size_t fp16_total = 0;
+    for (unsigned mip = 0; mip < header.mip_count; mip++)
+    {
+        fp16_total += 6 * static_cast<size_t>(MipDim(header.width, mip)) * MipDim(header.height, mip) *
+                      GetPixelSize(PixelFormat::RGBAFloat16);
+    }
+    if (master.size() < sizeof(PayloadHeader) + fp16_total)
+    {
+        return {};
+    }
+
+    auto payload = EncodeHdrCube(reinterpret_cast<const uint8_t *>(master.data()) + sizeof(PayloadHeader), header.width,
+                                 header.height, header.mip_count, target_format);
+    if (payload.empty())
+    {
+        return {};
+    }
+    payload.insert(payload.end(), master.begin() + static_cast<std::ptrdiff_t>(sizeof(PayloadHeader) + fp16_total),
+                   master.end());
+    return payload;
+}
+
 std::vector<uint8_t> TextureCompression::DecodeHdrCube(const std::vector<char> &payload)
 {
     if (payload.size() < sizeof(PayloadHeader))
@@ -551,12 +584,18 @@ std::vector<uint8_t> TextureCompression::DecodeHdrCube(const std::vector<char> &
         fp16_total += 6 * static_cast<size_t>(mip_width) * mip_height * GetPixelSize(PixelFormat::RGBAFloat16);
         compressed_total += 6 * GetImageMipByteSize(format, mip_width, mip_height);
     }
-    if (payload.size() != sizeof(PayloadHeader) + compressed_total)
+    if (payload.size() < sizeof(PayloadHeader) + compressed_total)
     {
         return {};
     }
 
     std::vector<uint8_t> fp16(fp16_total);
+    if (format == PixelFormat::RGBAFloat16)
+    {
+        std::memcpy(fp16.data(), payload.data() + sizeof(PayloadHeader), fp16_total);
+        return fp16;
+    }
+
     size_t in_offset = sizeof(PayloadHeader);
     size_t out_offset = 0;
     for (unsigned mip = 0; mip < header.mip_count; mip++)
@@ -569,7 +608,8 @@ std::vector<uint8_t> TextureCompression::DecodeHdrCube(const std::vector<char> &
         for (unsigned face = 0; face < 6; face++)
         {
             std::vector<uint8_t> blocks(payload.begin() + static_cast<std::ptrdiff_t>(in_offset),
-                                        payload.begin() + static_cast<std::ptrdiff_t>(in_offset + compressed_face_size));
+                                        payload.begin() +
+                                            static_cast<std::ptrdiff_t>(in_offset + compressed_face_size));
             Image2D fp16_face(mip_width, mip_height, PixelFormat::RGBAFloat16);
             if (IsCompressedFormat(format))
             {

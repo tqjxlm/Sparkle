@@ -145,7 +145,12 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
     const bool decode = IsCompressedFormat(image->GetFormat()) && !SupportsSampledFormat(image->GetFormat());
     if (decode)
     {
-        Log(Warn, "texture cube {} uploads uncompressed: device cannot sample {}", name, Enum2Str(image->GetFormat()));
+        static std::unordered_set<std::string> warned_cubes;
+        if (warned_cubes.insert(name).second)
+        {
+            Log(Warn, "texture cube {} uploads uncompressed: device cannot sample {}", name,
+                Enum2Str(image->GetFormat()));
+        }
     }
     for (auto i = 0u; i < Image2DCube::FaceId::Count; i++)
     {

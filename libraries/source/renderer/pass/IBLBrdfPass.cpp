@@ -29,7 +29,7 @@ public:
     };
 };
 
-IBLBrdfPass::IBLBrdfPass(RHIContext *ctx) : IBLPass(ctx, nullptr, PixelFormat::RGBAFloat16)
+IBLBrdfPass::IBLBrdfPass(RHIContext *ctx) : IBLPass(ctx, nullptr)
 {
 }
 

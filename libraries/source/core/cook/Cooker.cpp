@@ -84,6 +84,11 @@ CookResult ExecuteAndStore(const CookArtifactKey &lookup_key, const Cooker::Cook
 {
     Timer timer;
 
+    if (!make_job)
+    {
+        return {.status = CookResult::Status::JobUnavailable, .payload = {}};
+    }
+
     auto job = make_job();
     if (!job)
     {

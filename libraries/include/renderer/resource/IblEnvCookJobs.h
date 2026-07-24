@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/cook/CookJob.h"
-#include "io/TextureCompression.h"
 #include "renderer/resource/IblSettings.h"
 
 #include <atomic>
@@ -29,8 +28,6 @@ public:
     }
 
 protected:
-    TextureCompression::Family family_;
-
     std::shared_ptr<const Image2DCube> env_map_;
 
     uint32_t env_hash_ = 0;
@@ -55,7 +52,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 3;
+        return 4;
     }
 
     [[nodiscard]] float GetProgress() const override
@@ -82,7 +79,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 4;
+        return 5;
     }
 
     [[nodiscard]] float GetProgress() const override;

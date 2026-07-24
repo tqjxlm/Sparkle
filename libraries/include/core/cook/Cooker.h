@@ -115,7 +115,8 @@ public:
     // Resolves an artifact before constructing its source-dependent job. On a miss the
     // factory and job both run off the main thread. This gives cache hits and fresh cooks
     // the same handle, completion, and main-thread delivery contract without loading raw
-    // source data merely to perform a lookup.
+    // source data merely to perform a lookup. A null factory makes the request a pure
+    // artifact lookup: a miss delivers JobUnavailable without an error.
     using CookJobFactory = std::function<std::shared_ptr<CookJob>()>;
 
     static CookHandle Request(const CookArtifactKey &lookup_key, CookJobFactory job_factory,

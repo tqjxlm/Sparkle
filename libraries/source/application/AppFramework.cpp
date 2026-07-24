@@ -14,7 +14,9 @@
 #include "core/Path.h"
 #include "core/Profiler.h"
 #include "core/cook/CookArtifactStore.h"
+#include "core/cook/Cooker.h"
 #include "core/task/TaskManager.h"
+#include "io/HdrCubeTranscodeJob.h"
 #include "io/TextureCookJob.h"
 #include "renderer/denoiser/DenoiserConfig.h"
 #include "renderer/nrd/NrdConfig.h"
@@ -342,6 +344,44 @@ static std::string JobManifestKey(const CookJob &job)
 using ConsumedSourceMap = std::map<std::string, std::map<TextureCompression::Family, std::set<std::string>>>;
 using FamilyArtifactMap = std::map<TextureCompression::Family, std::set<std::string>>;
 
+struct PendingHdrTranscode
+{
+    std::string master_type;
+    std::string source_name;
+    CookArtifactKey master_key;
+};
+
+// derives the per-family HDR cube artifacts from the fp16 masters the run produced. the
+// job carries the master payload hash, so an edited master re-transcodes on a warm pool
+static bool CookHdrTranscodes(const std::vector<PendingHdrTranscode> &pending,
+                              const std::set<TextureCompression::Family> &families, FamilyArtifactMap &family_artifacts)
+{
+    for (const auto &entry : pending)
+    {
+        auto master = CookArtifactStore::Load(entry.master_key);
+        if (master.empty())
+        {
+            Log(Error, "missing master artifact for {}", entry.source_name);
+            return false;
+        }
+
+        for (auto family : families)
+        {
+            auto job = std::make_shared<HdrCubeTranscodeJob>(entry.master_type, family, entry.source_name, master);
+            const auto key = MakeCookArtifactKey(*job);
+            auto result = Cooker::CookNow(key, [&job]() { return job; });
+            if (!result.HasPayload())
+            {
+                Log(Error, "failed to transcode {} for {}", entry.source_name,
+                    TextureCompression::GetFamilyName(family));
+                return false;
+            }
+            family_artifacts[family].insert(CookArtifactStore::GetManifestKey(key));
+        }
+    }
+    return true;
+}
+
 static void CollectMaterialTextureJobs(const Scene &scene, const std::set<TextureCompression::Family> &families,
                                        std::vector<std::unique_ptr<CookJob>> &jobs, ConsumedSourceMap &consumed_sources)
 {
@@ -465,7 +505,7 @@ int AppFramework::RunCookMode()
 
     ConsumedSourceMap consumed_texture_sources;
     std::set<std::string> universal_keys;
-    FamilyArtifactMap sky_ibl_artifacts;
+    std::vector<PendingHdrTranscode> pending_transcodes;
 
     const SceneCooker::JobPlan job_plan{
         .collect_scene_independent_jobs =
@@ -478,8 +518,8 @@ int AppFramework::RunCookMode()
                 return true;
             },
         .collect_scene_jobs =
-            [&consumed_texture_sources, &texture_families, &sky_ibl_artifacts](
-                const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
+            [&consumed_texture_sources, &texture_families,
+             &pending_transcodes](const Scene &scene, std::vector<std::unique_ptr<CookJob>> &jobs) {
                 const auto *sky_light = scene.GetSkyLight();
                 CollectMaterialTextureJobs(scene, texture_families, jobs, consumed_texture_sources);
 
@@ -488,36 +528,42 @@ int AppFramework::RunCookMode()
                     return true;
                 }
 
-                // the sky cube and its IBL are family-scoped: a build cooks one per requested
-                // family so mixed-family target sets ship the format each target can sample
+                // the fp16 sky and IBL masters cook once; the per-family transcodes derive
+                // from them after the run so mixed-family target sets ship the format each
+                // target can sample
                 const auto sky_map_path = sky_light->GetSkyMapPath();
-                for (auto family : texture_families)
+                auto master_payload = SkyLight::CookMasterPayload(sky_map_path);
+                auto cube =
+                    master_payload.empty() ? nullptr : SkyLight::MakeCubeFromPayload(master_payload, sky_map_path);
+                if (!cube)
                 {
-                    std::string sky_key;
-                    auto cube = SkyLight::CookCubeForFamily(sky_map_path, family, sky_key);
-                    if (!cube)
-                    {
-                        Log(Error, "failed to cook sky cube {} for {}", sky_map_path,
-                            TextureCompression::GetFamilyName(family));
-                        return false;
-                    }
-                    sky_ibl_artifacts[family].insert(sky_key);
+                    Log(Error, "failed to cook sky cube {}", sky_map_path);
+                    return false;
+                }
 
-                    std::vector<std::unique_ptr<CookJob>> env_jobs;
-                    IblCookPlan::CollectEnvironmentJobs(cube, env_jobs);
-                    for (auto &job : env_jobs)
-                    {
-                        sky_ibl_artifacts[family].insert(JobManifestKey(*job));
-                        jobs.push_back(std::move(job));
-                    }
+                const auto sky_key = SkyLight::MasterCookKey(sky_map_path);
+                pending_transcodes.push_back({sky_key.type, sky_key.source_name, sky_key});
+
+                std::vector<std::unique_ptr<CookJob>> env_jobs;
+                IblCookPlan::CollectEnvironmentJobs(cube, env_jobs);
+                for (auto &job : env_jobs)
+                {
+                    pending_transcodes.push_back({job->GetType(), job->GetSourceName(), MakeCookArtifactKey(*job)});
+                    jobs.push_back(std::move(job));
                 }
                 return true;
             }};
 
     auto exit_code = SceneCooker::Run(app_config_.scene, job_plan, accelerator);
 
+    FamilyArtifactMap hdr_family_artifacts;
+    if (exit_code == 0 && !CookHdrTranscodes(pending_transcodes, texture_families, hdr_family_artifacts))
+    {
+        exit_code = 1;
+    }
+
     if (exit_code == 0 &&
-        !WriteCookProducts(cook_targets, universal_keys, consumed_texture_sources, sky_ibl_artifacts))
+        !WriteCookProducts(cook_targets, universal_keys, consumed_texture_sources, hdr_family_artifacts))
     {
         Log(Error, "failed to write the cook products manifest");
         exit_code = 1;

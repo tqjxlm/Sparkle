@@ -23,7 +23,7 @@ public:
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 1;
+        return 2;
     }
 
     [[nodiscard]] std::string GetSourceName() const override

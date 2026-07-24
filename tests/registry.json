@@ -128,7 +128,7 @@
     {
         "name": "sky_compression",
         "test_case": "sky_compression",
-        "description": "Cooked sky cube format, encoded face storage, CPU sampling, and native-or-fallback GPU upload."
+        "description": "The fp16 master sky cube (format, CPU sampling, GPU upload) and the family transcode round-trip including stats carry-over."
     },
     {
         "name": "scene_load_failure",
