@@ -111,6 +111,10 @@ inline MTLPixelFormat GetMetalPixelFormat(PixelFormat format)
         return MTLPixelFormatR32Uint;
     case PixelFormat::R32Float:
         return MTLPixelFormatR32Float;
+    case PixelFormat::R16Float:
+        return MTLPixelFormatR16Float;
+    case PixelFormat::RGFloat16:
+        return MTLPixelFormatRG16Float;
     case PixelFormat::RGBAUInt32:
         return MTLPixelFormatRGBA32Uint;
     case PixelFormat::ASTC4x4Srgb:

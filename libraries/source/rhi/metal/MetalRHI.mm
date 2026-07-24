@@ -5,6 +5,7 @@
 #include "MetalBuffer.h"
 #include "MetalComputePass.h"
 #include "MetalContext.h"
+#include "MetalFxDenoiser.h"
 #include "MetalImage.h"
 #include "MetalNrdBackend.h"
 #include "MetalPipelineState.h"
@@ -137,6 +138,21 @@ bool MetalRHI::SupportsSampledFormat(PixelFormat format)
     default:
         return true;
     }
+}
+
+std::unique_ptr<RHIDenoiser> MetalRHI::CreatePlatformDenoiser(RHIPlatformDenoiser provider, const RHIDenoiserDesc &desc)
+{
+    if (provider != RHIPlatformDenoiser::MetalFx)
+    {
+        return nullptr;
+    }
+
+    auto denoiser = std::make_unique<MetalFxDenoiser>(this, desc);
+    if (!denoiser->IsReady())
+    {
+        return nullptr;
+    }
+    return denoiser;
 }
 
 bool MetalRHI::BeginFrameInternal()

@@ -6,6 +6,7 @@
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIConfig.h"
+#include "rhi/RHIDenoiser.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHINrdBackend.h"
 #include "rhi/RHIPIpelineState.h"
@@ -212,6 +213,11 @@ public:
     // NVIDIA NRD backend (Metal only): compiles NRD's SPIR-V shaders and drives its dispatches. Null on
     // backends without an NRD path.
     virtual std::unique_ptr<RHINrdBackend> CreateNrdBackend()
+    {
+        return nullptr;
+    }
+
+    virtual std::unique_ptr<RHIDenoiser> CreatePlatformDenoiser(RHIPlatformDenoiser, const RHIDenoiserDesc &)
     {
         return nullptr;
     }

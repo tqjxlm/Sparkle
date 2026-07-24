@@ -35,7 +35,7 @@ static ConfigValue<bool> config_sweep_converged("sweep_capture_converged",
 // uncaptured so the captured frames are motion steady state, then captures NumFrames frames one small
 // yaw step apart.
 //
-// Usage: --test_case denoiser_sweep --pipeline gpu --framework macos [--nrd true] --max_spp 1
+// Usage: --test_case denoiser_sweep --pipeline gpu --framework macos [--denoiser nrd] --max_spp 1
 class DenoiserSweepTest : public TestCase
 {
 public:

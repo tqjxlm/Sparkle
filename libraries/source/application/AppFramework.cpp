@@ -16,6 +16,7 @@
 #include "core/cook/CookArtifactStore.h"
 #include "core/task/TaskManager.h"
 #include "io/TextureCookJob.h"
+#include "renderer/denoiser/DenoiserConfig.h"
 #include "renderer/nrd/NrdConfig.h"
 #include "renderer/resource/IblCookAccelerator.h"
 #include "renderer/resource/IblCookPlan.h"
@@ -615,9 +616,8 @@ void AppFramework::DrawUi()
     {
         ui_manager_->RequestWindowDraw({[this]() {
             static std::vector<std::pair<const char *, ConfigCollection *>> configs{
-                {"App", &app_config_},
-                {"Render", &render_config_},
-                {"RHI", &rhi_config_},
+                {"App", &app_config_},      {"Render", &render_config_},
+                {"RHI", &rhi_config_},      {"Denoiser", &DenoiserConfig::Get()},
                 {"NRD", &NrdConfig::Get()},
             };
 

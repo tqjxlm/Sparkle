@@ -1,14 +1,14 @@
 """NRD gate suite: the one command CI (and pre-push discipline) runs to protect the denoiser.
 
 Runs, in order (single build, then --skip_build throughout):
-  1. converged flicker gate : nrd_static_stability_test --settle 2000 (asserts nrd == raw baseline;
+  1. converged flicker gate : denoiser_static_stability_test --settle 2000 (asserts nrd == raw baseline;
      guards the convergence handoff + output stabilization).
-  2. firefly gate           : nrd_static_stability_test --settle 150 captures, then
-     nrd_preconv_quality --assert_fireflies 100 (healthy = ~3 spiking pixels, broken = ~750;
+  2. firefly gate           : denoiser_static_stability_test --settle 150 captures, then
+     denoiser_preconv_quality --assert_fireflies 100 (healthy = ~3 spiking pixels, broken = ~750;
      guards the zero-firefly stack against knob/protocol regressions).
-  3. motion noise gate      : nrd_motion_test (asserts denoised motion noise < 0.02 vs raw 0.18;
+  3. motion noise gate      : denoiser_motion_test (asserts denoised motion noise < 0.02 vs raw 0.18;
      guards reprojection, the hitT protocol, and seed independence).
-  4. pitch motion gate      : nrd_motion_test --axis pitch (vertical motion exercises NRD's
+  4. pitch motion gate      : denoiser_motion_test --axis pitch (vertical motion exercises NRD's
      matrix-derived reprojection, which yaw cannot regress).
 
 --allow_unsupported: if the GPU lacks hardware ray tracing (virtualized CI runners), exit 0 with
@@ -19,7 +19,7 @@ ran against a forward render that trivially passes". The probe therefore require
 "effective pipeline: Gpu" log line (RenderConfig::Validate) as positive proof; if the marker is
 missing for any other reason than the fallback warning, the suite fails loudly.
 
-Run:  python3 tests/nrd/run_nrd_gates.py [--skip_build] [--allow_unsupported]
+Run:  python3 tests/denoiser/run_denoiser_gates.py [--skip_build] [--allow_unsupported]
 """
 
 import argparse
@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import sys
 
-from nrd_common import PROJECT_ROOT, render_test_support
+from denoiser_common import PROJECT_ROOT, render_test_support
 
 
 def run(cmd, capture=False):
@@ -44,6 +44,7 @@ def run(cmd, capture=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--framework", default="macos")
+    parser.add_argument("--denoiser", default="nrd", help="denoiser backend to gate")
     parser.add_argument("--skip_build", action="store_true")
     parser.add_argument("--allow_unsupported", action="store_true")
     args = parser.parse_args()
@@ -71,23 +72,26 @@ def main():
     shutil.copy(render_test_support.find_screenshot(args.framework),
                 os.path.join(stability_dir, "gt.png"))
 
+    denoiser = ["--denoiser", args.denoiser]
     gates = [
-        [py, "tests/nrd/nrd_static_stability_test.py", "--framework", args.framework, "--headless",
-         "--skip_build", "--settle", "2000"],
-        [py, "tests/nrd/nrd_static_stability_test.py", "--framework", args.framework, "--headless",
-         "--skip_build", "--settle", "150"],
-        [py, "tests/nrd/nrd_preconv_quality.py", "--framework", args.framework, "--assert_fireflies", "100"],
-        [py, "tests/nrd/nrd_motion_test.py", "--framework", args.framework, "--headless", "--skip_build"],
-        [py, "tests/nrd/nrd_motion_test.py", "--framework", args.framework, "--headless", "--skip_build",
-         "--axis", "pitch"],
+        [py, "tests/denoiser/denoiser_static_stability_test.py", "--framework", args.framework, "--headless",
+         "--skip_build", "--settle", "2000"] + denoiser,
+        [py, "tests/denoiser/denoiser_static_stability_test.py", "--framework", args.framework, "--headless",
+         "--skip_build", "--settle", "150"] + denoiser,
+        [py, "tests/denoiser/denoiser_preconv_quality.py", "--framework", args.framework,
+         "--assert_fireflies", "100"] + denoiser,
+        [py, "tests/denoiser/denoiser_motion_test.py", "--framework", args.framework, "--headless",
+         "--skip_build"] + denoiser,
+        [py, "tests/denoiser/denoiser_motion_test.py", "--framework", args.framework, "--headless", "--skip_build",
+         "--axis", "pitch"] + denoiser,
     ]
     for gate in gates:
         code, _ = run(gate)
         if code != 0:
-            print(f"\nNRD GATES: FAIL ({' '.join(gate)})")
+            print(f"\nDENOISER GATES ({args.denoiser}): FAIL ({' '.join(gate)})")
             sys.exit(1)
 
-    print("\nNRD GATES: ALL PASS")
+    print(f"\nDENOISER GATES ({args.denoiser}): ALL PASS")
 
 
 if __name__ == "__main__":

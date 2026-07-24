@@ -183,8 +183,9 @@
         "description": "Cooked ReBLUR pipelines compile to PSOs on the current GPU. Apple platforms only."
     },
     {
-        "name": "nrd_runtime_toggle",
-        "test_case": "nrd_runtime_toggle",
-        "description": "Runtime NRD enable during and after accumulation."
+        "name": "denoiser_runtime_toggle",
+        "test_case": "denoiser_runtime_toggle",
+        "description": "Runtime denoiser provider selection during and after accumulation.",
+        "app_args": ["--denoiser", "off"]
     }
 ]
