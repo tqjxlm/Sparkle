@@ -214,8 +214,8 @@ std::optional<SkyPayloadView> ParseSkyPayload(const std::vector<char> &payload)
     }
 
     const auto format = static_cast<PixelFormat>(header.format);
-    const bool known_format = format == PixelFormat::RGBAFloat16 ||
-                              format == TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily);
+    // not platform-scoped: the cook process parses every target family's transcode on one host
+    const bool known_format = format == PixelFormat::RGBAFloat16 || IsHDRCompressedFormat(format);
     if (!known_format || header.width != CubeMapSize || header.height != CubeMapSize || header.mip_count != 1)
     {
         return std::nullopt;
