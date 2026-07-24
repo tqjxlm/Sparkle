@@ -30,6 +30,7 @@ def parse_args():
                    choices=render_test_support.SUPPORTED_FRAMEWORKS)
     p.add_argument("--settle", type=int, default=16,
                    help="frames to accumulate before capturing (16 = early transient; 2000 = converged)")
+    p.add_argument("--denoiser", default="nrd", help="denoiser backend for the denoised arm")
     p.add_argument("--headless", action="store_true")
     p.add_argument("--skip_build", action="store_true")
     return p.parse_known_args()
@@ -109,7 +110,7 @@ def main():
         render_test_support.get_screenshot_dir(args.framework), "static_stability")
     os.makedirs(work_dir, exist_ok=True)
 
-    configs = [("raw", []), ("nrd", ["--denoiser", "nrd"])]
+    configs = [("raw", []), (args.denoiser, ["--denoiser", args.denoiser])]
     rows = []
     for i, (name, extra) in enumerate(configs):
         run_static(args, extra, skip_build=(args.skip_build or i > 0), passthrough=list(passthrough))
@@ -120,12 +121,13 @@ def main():
 
     print(f"\nmontage written: {build_montage(rows, work_dir)}", flush=True)
 
-    # converged-window gate: NRD must reach the vanilla renderer's zero-flicker baseline
+    # converged-window gate: the denoiser must reach the vanilla renderer's zero-flicker baseline
     if args.settle >= 1000:
         limit = max(0.0006, 2.0 * float(results["raw"].mean()))
-        nrd_mean = float(results["nrd"].mean())
-        ok = nrd_mean <= limit
-        print(f"converged flicker gate: nrd={nrd_mean:.4f} limit={limit:.4f} -> {'PASS' if ok else 'FAIL'}")
+        denoised_mean = float(results[args.denoiser].mean())
+        ok = denoised_mean <= limit
+        print(f"converged flicker gate: {args.denoiser}={denoised_mean:.4f} limit={limit:.4f} "
+              f"-> {'PASS' if ok else 'FAIL'}")
         sys.exit(0 if ok else 1)
 
 

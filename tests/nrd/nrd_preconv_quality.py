@@ -70,8 +70,9 @@ def main():
     parser.add_argument("--framework", default="macos",
                         choices=render_test_support.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--gt", default=None, help="converged raw reference png")
+    parser.add_argument("--denoiser", default="nrd", help="denoised arm to analyze (capture prefix)")
     parser.add_argument("--assert_fireflies", type=int, default=0,
-                        help="fail if the nrd arm has more temporally spiking pixels than this (0 = report only)")
+                        help="fail if the denoised arm has more temporally spiking pixels than this (0 = report only)")
     args = parser.parse_args()
 
     import numpy as np
@@ -84,13 +85,14 @@ def main():
     print(f"(firefly = temporal max-median spike > {FIREFLY_SPIKE}; red channel of preconv_<cfg>.png = "
           f"spikes x4, green = low-freq patches x8)")
     counts = {}
-    for name in ["raw", "nrd"]:
+    for name in ["raw", args.denoiser]:
         frames = np.stack([load_image(os.path.join(work_dir, f"{name}_{k}.png")) for k in range(NUM_FRAMES)])
         counts[name] = analyze(name, frames, gt, work_dir)
 
     if args.assert_fireflies > 0:
-        ok = counts["nrd"] <= args.assert_fireflies
-        print(f"firefly gate: nrd={counts['nrd']} limit={args.assert_fireflies} -> {'PASS' if ok else 'FAIL'}")
+        ok = counts[args.denoiser] <= args.assert_fireflies
+        print(f"firefly gate: {args.denoiser}={counts[args.denoiser]} limit={args.assert_fireflies} "
+              f"-> {'PASS' if ok else 'FAIL'}")
         sys.exit(0 if ok else 1)
 
 

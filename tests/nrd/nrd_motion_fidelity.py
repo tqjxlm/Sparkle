@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--framework", default="macos",
                         choices=render_test_support.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--realizations", type=int, default=8)
+    parser.add_argument("--denoiser", default="nrd", help="denoiser backend under test")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--skip_build", action="store_true")
     args, passthrough = parser.parse_known_args()
@@ -59,7 +60,7 @@ def main():
 
     # raw realizations calibrate the metric: raw is unbiased, so its "systematic" is the noise floor
     # that M realizations cannot subtract; the denoiser's real error is its EXCESS over that floor.
-    for arm, extra in [("nrd", ["--denoiser", "nrd"]), ("raw", [])]:
+    for arm, extra in [(args.denoiser, ["--denoiser", args.denoiser]), ("raw", [])]:
         for m in range(args.realizations):
             run(args, ["--max_spp", "1", "--random_seed_offset", str(m * SEED_STRIDE)] + extra
                 + list(passthrough), True)
@@ -78,10 +79,10 @@ def main():
         stderr = reals.std(axis=0) / np.sqrt(args.realizations)
         return mean, np.maximum(np.abs(mean - gt) - 2.0 * stderr, 0.0)
 
-    mean, systematic = stats("nrd")
+    mean, systematic = stats(args.denoiser)
     raw_mean, raw_systematic = stats("raw")
 
-    print(f"\n==== NRD motion-phase fidelity (M={args.realizations}, pose = last sweep capture) ====")
+    print(f"\n==== {args.denoiser} motion-phase fidelity (M={args.realizations}, pose = last sweep capture) ====")
     print(f"{'region':>14} | {'bias':>8} {'systematic':>10} {'noise_floor':>11} {'excess':>8} {'sharpness':>9}")
     for name, (ys, xs) in REGIONS.items():
         bias = float((mean - gt)[ys, xs].mean())

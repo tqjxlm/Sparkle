@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--skip_build", action="store_true")
     parser.add_argument("--axis", default="yaw", choices=["yaw", "pitch"])
+    parser.add_argument("--denoiser", default="nrd", help="denoiser backend under test")
     args, passthrough = parser.parse_known_args()
 
     if args.axis == "yaw":
@@ -36,7 +37,7 @@ def main():
     else:
         motion_flags = ["--sweep_step_degrees", "0.0", "--sweep_pitch_step_degrees", "2.0"]
 
-    run_sweep(args.framework, ["--max_spp", "1", "--denoiser", "nrd"] + motion_flags + list(passthrough),
+    run_sweep(args.framework, ["--max_spp", "1", "--denoiser", args.denoiser] + motion_flags + list(passthrough),
               skip_build=args.skip_build, headless=args.headless)
 
     import numpy as np
@@ -58,7 +59,7 @@ def main():
 
     gate = NOISE_GATES[args.axis]
     ok = noise < gate
-    print(f"nrd motion ({args.axis}): noise={noise:.4f} flicker={flicker:.4f}")
+    print(f"{args.denoiser} motion ({args.axis}): noise={noise:.4f} flicker={flicker:.4f}")
     print(f"motion noise gate ({args.axis}): {noise:.4f} < {gate} -> {'PASS' if ok else 'FAIL'}")
     sys.exit(0 if ok else 1)
 

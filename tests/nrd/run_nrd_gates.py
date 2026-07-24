@@ -44,6 +44,7 @@ def run(cmd, capture=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--framework", default="macos")
+    parser.add_argument("--denoiser", default="nrd", help="denoiser backend to gate")
     parser.add_argument("--skip_build", action="store_true")
     parser.add_argument("--allow_unsupported", action="store_true")
     args = parser.parse_args()
@@ -71,23 +72,26 @@ def main():
     shutil.copy(render_test_support.find_screenshot(args.framework),
                 os.path.join(stability_dir, "gt.png"))
 
+    denoiser = ["--denoiser", args.denoiser]
     gates = [
         [py, "tests/nrd/nrd_static_stability_test.py", "--framework", args.framework, "--headless",
-         "--skip_build", "--settle", "2000"],
+         "--skip_build", "--settle", "2000"] + denoiser,
         [py, "tests/nrd/nrd_static_stability_test.py", "--framework", args.framework, "--headless",
-         "--skip_build", "--settle", "150"],
-        [py, "tests/nrd/nrd_preconv_quality.py", "--framework", args.framework, "--assert_fireflies", "100"],
-        [py, "tests/nrd/nrd_motion_test.py", "--framework", args.framework, "--headless", "--skip_build"],
+         "--skip_build", "--settle", "150"] + denoiser,
+        [py, "tests/nrd/nrd_preconv_quality.py", "--framework", args.framework,
+         "--assert_fireflies", "100"] + denoiser,
+        [py, "tests/nrd/nrd_motion_test.py", "--framework", args.framework, "--headless",
+         "--skip_build"] + denoiser,
         [py, "tests/nrd/nrd_motion_test.py", "--framework", args.framework, "--headless", "--skip_build",
-         "--axis", "pitch"],
+         "--axis", "pitch"] + denoiser,
     ]
     for gate in gates:
         code, _ = run(gate)
         if code != 0:
-            print(f"\nNRD GATES: FAIL ({' '.join(gate)})")
+            print(f"\nDENOISER GATES ({args.denoiser}): FAIL ({' '.join(gate)})")
             sys.exit(1)
 
-    print("\nNRD GATES: ALL PASS")
+    print(f"\nDENOISER GATES ({args.denoiser}): ALL PASS")
 
 
 if __name__ == "__main__":
