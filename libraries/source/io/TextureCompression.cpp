@@ -409,9 +409,10 @@ PixelFormat TextureCompression::SelectHdrFormat(Family family)
         return PixelFormat::ASTC6x6HDR;
     case Family::Bc:
         return PixelFormat::R9G9B9E5Float;
+    default:
+        UnImplemented(family);
+        return PixelFormat::Count;
     }
-    UnImplemented(family);
-    return PixelFormat::Count;
 }
 
 std::vector<uint8_t> TextureCompression::EncodeHdrFace(const Image2D &source, PixelFormat target_format)
