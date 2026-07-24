@@ -24,6 +24,18 @@
         }
     },
     {
+        "name": "deferred_render_static_emulated",
+        "test_case": "screenshot",
+        "description": "The deferred still frame on the android emulator, which renders through the host's software rasterizer and cannot sample ASTC-HDR (textures take the CPU-decode fallback). Its output legitimately sits ~0.022 mean FLIP from the device-captured ground truth (0.007 before HDR compression), so the gate widens to 0.03 - still far below any pipeline breakage.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "deferred", "--flip_threshold", "0.03"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
         "name": "forward_render_static_halfres",
         "test_case": "screenshot",
         "description": "Still frame on the forward pipeline at render_scale 0.5. The output must stay at full resolution (size mismatch fails the evaluator) and FLIP-match the full-resolution ground truth within an upsampling-softness allowance.",
