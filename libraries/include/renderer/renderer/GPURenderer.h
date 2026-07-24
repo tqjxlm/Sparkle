@@ -79,8 +79,6 @@ private:
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
     RHIDenoiser *frame_denoiser_ = nullptr;
-    RHIDenoiser *active_denoiser_ = nullptr;
-    DenoiserProvider effective_provider_ = DenoiserProvider::Off;
     DenoiserProvider frame_provider_ = DenoiserProvider::Off;
     DenoiserProvider requested_provider_ = DenoiserProvider::Off;
     bool nrd_failed_ = false;
@@ -89,7 +87,6 @@ private:
     bool denoiser_reset_this_frame_ = false;
     bool final_frame_this_frame_ = false;
     bool scene_ready_last_ = false;
-    uint32_t jitter_index_ = 0;
 
     struct ComputePerformanceRecord
     {

@@ -19,28 +19,6 @@
 
 namespace sparkle
 {
-namespace
-{
-float Halton(uint32_t index, uint32_t base)
-{
-    float result = 0.f;
-    float fraction = 1.f;
-    while (index > 0)
-    {
-        fraction /= static_cast<float>(base);
-        result += fraction * static_cast<float>(index % base);
-        index /= base;
-    }
-    return result;
-}
-
-Vector2 GetMetalFxJitter(uint32_t index)
-{
-    const uint32_t sequence_index = index % 32 + 1;
-    return {Halton(sequence_index, 2) - 0.5f, Halton(sequence_index, 3) - 0.5f};
-}
-} // namespace
-
 class RayTracingComputeShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(RayTracingComputeShader, RHIShaderStage::Compute, "shaders/ray_trace/ray_trace.cs.slang",
@@ -83,9 +61,6 @@ class RayTracingComputeShader : public RHIShaderInfo
         uint32_t spp;
         uint32_t enable_nee;
         uint32_t write_gbuffer;
-        Vector2 frame_jitter;
-        uint32_t use_frame_jitter;
-        uint32_t padding;
     };
 };
 
@@ -209,7 +184,9 @@ void GPURenderer::Render()
                                     .after_stage = RHIPipelineStage::ComputeShader,
                                     .before_stage = scene_consumer_stage});
 
-        if (final_frame_this_frame_ && frame_denoiser_ && !gbuffer_write_this_frame_)
+        // an encoded frame is displayed as-is even when it completes max_spp: the max_spp=1 motion
+        // harnesses film the denoiser, and NRD's final resolve equals the accumulator bit-exactly
+        if (frame_denoiser_ && !gbuffer_write_this_frame_)
         {
             tone_mapping_pass_->SetInput(scene_texture_);
         }
@@ -218,9 +195,7 @@ void GPURenderer::Render()
             const bool encoded = frame_denoiser_->Encode(denoiser_inputs_->GetInputs(scene_texture_.get()));
             if (encoded && frame_denoiser_->GetOutput())
             {
-                active_denoiser_ = frame_denoiser_;
-                effective_provider_ = frame_provider_;
-                tone_mapping_pass_->SetInput(final_frame_this_frame_ ? scene_texture_ : frame_denoiser_->GetOutput());
+                tone_mapping_pass_->SetInput(frame_denoiser_->GetOutput());
             }
             else
             {
@@ -300,13 +275,10 @@ void GPURenderer::Update()
 
     if (requested == DenoiserProvider::Off)
     {
-        active_denoiser_ = nullptr;
-        effective_provider_ = DenoiserProvider::Off;
         tone_mapping_pass_->SetInput(scene_texture_);
     }
     else if (selection_changed)
     {
-        jitter_index_ = 0;
         camera->MarkPixelDirty();
     }
 
@@ -462,8 +434,6 @@ void GPURenderer::Update()
     // recorded regardless of mode so toggling dynamic_spp never pairs a timestamp with the wrong spp
     performance_history_[frame_index].spp = will_dispatch ? spp : 0;
 
-    const bool use_frame_jitter = frame_provider_ == DenoiserProvider::MetalFx;
-    const Vector2 frame_jitter = use_frame_jitter ? GetMetalFxJitter(jitter_index_) : Vector2::Zero();
     final_frame_this_frame_ =
         will_dispatch && camera->GetCumulatedSampleCount() + spp >= render_config_.max_sample_per_pixel;
     if (frame_denoiser_)
@@ -471,12 +441,9 @@ void GPURenderer::Update()
         frame_denoiser_->UpdateFrameData({
             .view = camera->GetViewMatrix(),
             .projection = camera->GetProjectionMatrix(),
-            .jitter = frame_jitter,
             .exposure = camera->GetAttribute().exposure,
-            .near_plane = camera->GetNear(),
             .far_plane = camera->GetFar(),
             .accumulated_samples = camera->GetCumulatedSampleCount(),
-            .samples_this_frame = will_dispatch ? spp : 0,
             .maximum_samples = render_config_.max_sample_per_pixel,
             .reset_history = denoiser_reset_this_frame_ || !scene_ready,
             .final_frame = final_frame_this_frame_,
@@ -493,18 +460,11 @@ void GPURenderer::Update()
         .spp = spp,
         .enable_nee = render_config_.enable_nee ? 1u : 0,
         .write_gbuffer = gbuffer_write_this_frame_ ? 1u : 0u,
-        .frame_jitter = frame_jitter,
-        .use_frame_jitter = use_frame_jitter ? 1u : 0u,
-        .padding = 0,
     };
 
     if (will_dispatch)
     {
         seed_counter_ += spp;
-        if (use_frame_jitter)
-        {
-            ++jitter_index_;
-        }
         camera->AccumulateSample(spp);
         last_second_total_spp_ += spp;
     }

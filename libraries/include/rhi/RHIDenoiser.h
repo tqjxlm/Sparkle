@@ -37,12 +37,9 @@ struct RHIDenoiserFrameData
 {
     Mat4 view;
     Mat4 projection;
-    Vector2 jitter = Vector2::Zero();
     float exposure = 1.f;
-    float near_plane = 0.f;
     float far_plane = 0.f;
     uint32_t accumulated_samples = 0;
-    uint32_t samples_this_frame = 0;
     uint32_t maximum_samples = 0;
     bool reset_history = false;
     bool final_frame = false;

@@ -73,7 +73,7 @@ class MetalFxPrepareShader : public RHIShaderInfo
     BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
 
     USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
-    USE_SHADER_RESOURCE(noisyRadianceHitDistance, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(sceneRadiance, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(normalViewDepth, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(albedoObjectId, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(motionHitMetallic, RHIShaderResourceReflection::ResourceType::Texture2D)
@@ -169,7 +169,7 @@ struct MetalFxDenoiser::Impl
 
     bool BindInputs(const RHIDenoiserInputs &inputs)
     {
-        if (!inputs.noisy_radiance_hit_distance || !inputs.normal_view_depth || !inputs.albedo_object_id ||
+        if (!inputs.accumulated_radiance || !inputs.normal_view_depth || !inputs.albedo_object_id ||
             !inputs.motion_hit_metallic || !inputs.specular_albedo_roughness)
         {
             Log(Error, "MetalFX: missing required path-tracing input");
@@ -179,7 +179,7 @@ struct MetalFxDenoiser::Impl
         const auto valid_input = [this](const RHIImage *image, PixelFormat format, const char *name) {
             const auto attributes = image->GetAttributes();
             if (attributes.width == desc.input_size.x() && attributes.height == desc.input_size.y() &&
-                attributes.format == format)
+                (format == PixelFormat::Count || attributes.format == format))
             {
                 return true;
             }
@@ -187,7 +187,7 @@ struct MetalFxDenoiser::Impl
             Log(Error, "MetalFX: {} does not match the denoiser input descriptor", name);
             return false;
         };
-        if (!valid_input(inputs.noisy_radiance_hit_distance, desc.radiance_format, "noisy radiance") ||
+        if (!valid_input(inputs.accumulated_radiance, PixelFormat::Count, "accumulated radiance") ||
             !valid_input(inputs.normal_view_depth, PixelFormat::RGBAFloat, "normal and depth") ||
             !valid_input(inputs.albedo_object_id, PixelFormat::RGBAFloat, "albedo and object ID") ||
             !valid_input(inputs.motion_hit_metallic, PixelFormat::RGBAFloat16, "motion and hit state") ||
@@ -197,8 +197,7 @@ struct MetalFxDenoiser::Impl
         }
 
         auto *resources = prepare_pipeline->GetShaderResource<MetalFxPrepareShader>();
-        resources->noisyRadianceHitDistance().BindResource(inputs.noisy_radiance_hit_distance->GetDefaultView(rhi),
-                                                           true);
+        resources->sceneRadiance().BindResource(inputs.accumulated_radiance->GetDefaultView(rhi), true);
         resources->normalViewDepth().BindResource(inputs.normal_view_depth->GetDefaultView(rhi), true);
         resources->albedoObjectId().BindResource(inputs.albedo_object_id->GetDefaultView(rhi), true);
         resources->motionHitMetallic().BindResource(inputs.motion_hit_metallic->GetDefaultView(rhi), true);
@@ -209,6 +208,7 @@ struct MetalFxDenoiser::Impl
     RHIContext *rhi;
     RHIDenoiserDesc desc;
     RHIDenoiserFrameData frame;
+    float uploaded_exposure = -1.f;
     bool ready = false;
     bool reset_history = true;
 
@@ -234,7 +234,7 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc)
     : impl_(std::make_unique<Impl>(rhi, desc))
 {
 #if SPARKLE_HAS_METALFX_DENOISED
-    if (@available(macOS 26.0, iOS 18.0, *))
+    if (@available(macOS 26.0, iOS 26.0, *))
     {
         if (desc.input_size.x() == 0 || desc.input_size.y() == 0 || desc.output_size.x() == 0 ||
             desc.output_size.y() == 0)
@@ -252,8 +252,8 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc)
 
         const float min_scale = [MTLFXTemporalDenoisedScalerDescriptor supportedInputContentMinScaleForDevice:device];
         const float max_scale = [MTLFXTemporalDenoisedScalerDescriptor supportedInputContentMaxScaleForDevice:device];
-        const float scale_x = static_cast<float>(desc.input_size.x()) / static_cast<float>(desc.output_size.x());
-        const float scale_y = static_cast<float>(desc.input_size.y()) / static_cast<float>(desc.output_size.y());
+        const float scale_x = static_cast<float>(desc.output_size.x()) / static_cast<float>(desc.input_size.x());
+        const float scale_y = static_cast<float>(desc.output_size.y()) / static_cast<float>(desc.input_size.y());
         if (scale_x < min_scale || scale_x > max_scale || scale_y < min_scale || scale_y > max_scale)
         {
             Log(Info, "MetalFX: requested input scales [{}, {}] are outside supported range [{}, {}]", scale_x, scale_y,
@@ -337,7 +337,7 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc)
     }
     else
     {
-        Log(Info, "MetalFX: temporal denoised scaling requires macOS 26 or iOS 18");
+        Log(Info, "MetalFX: temporal denoised scaling requires macOS 26 or iOS 26");
     }
 #else
     (void)desc;
@@ -358,7 +358,11 @@ bool MetalFxDenoiser::IsReady() const
 
 bool MetalFxDenoiser::NeedsInputs() const
 {
-    return impl_->ready && !impl_->frame.final_frame;
+    // hand the final frame to the accumulator only when it is converged enough to be the better
+    // image; below that (e.g. the max_spp=1 motion harnesses) the denoised output stays on screen
+    constexpr uint32_t HandoffMinSamples = 512;
+    const bool handoff = impl_->frame.final_frame && impl_->frame.maximum_samples >= HandoffMinSamples;
+    return impl_->ready && !handoff;
 }
 
 const char *MetalFxDenoiser::GetName() const
@@ -388,8 +392,8 @@ bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
         .projection = impl_->frame.projection, .resolution = size, .far_depth = 1.f};
     impl_->prepare_ubo->Upload(impl_->rhi, &ubo);
 
-    for (RHIImage *input : {inputs.noisy_radiance_hit_distance, inputs.normal_view_depth, inputs.albedo_object_id,
-                            inputs.motion_hit_metallic, inputs.specular_albedo_roughness})
+    for (RHIImage *input : {inputs.normal_view_depth, inputs.albedo_object_id, inputs.motion_hit_metallic,
+                            inputs.specular_albedo_roughness})
     {
         input->Transition({.target_layout = RHIImageLayout::Read,
                            .after_stage = RHIPipelineStage::ComputeShader,
@@ -416,7 +420,7 @@ bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
     }
 
 #if SPARKLE_HAS_METALFX_DENOISED
-    if (@available(macOS 26.0, iOS 18.0, *))
+    if (@available(macOS 26.0, iOS 26.0, *))
     {
         id<MTLFXTemporalDenoisedScaler> scaler = impl_->scaler;
         if (!scaler)
@@ -424,11 +428,17 @@ bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
             return false;
         }
 
-        const Half exposure(std::max(impl_->frame.exposure, 0.f));
-        [impl_->exposure_texture replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
-                                   mipmapLevel:0
-                                     withBytes:&exposure
-                                   bytesPerRow:sizeof(exposure)];
+        // CPU-writing a shared texture races frames in flight that still read it: only rewrite on change
+        const float exposure_value = std::max(impl_->frame.exposure, 0.f);
+        if (exposure_value != impl_->uploaded_exposure)
+        {
+            const Half exposure(exposure_value);
+            [impl_->exposure_texture replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
+                                       mipmapLevel:0
+                                         withBytes:&exposure
+                                       bytesPerRow:sizeof(exposure)];
+            impl_->uploaded_exposure = exposure_value;
+        }
 
         scaler.colorTexture = impl_->color->GetResource();
         scaler.depthTexture = impl_->depth->GetResource();
@@ -440,8 +450,8 @@ bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
         scaler.outputTexture = impl_->output->GetResource();
         scaler.exposureTexture = impl_->exposure_texture;
         scaler.preExposure = 1.f;
-        scaler.jitterOffsetX = impl_->frame.jitter.x();
-        scaler.jitterOffsetY = impl_->frame.jitter.y();
+        scaler.jitterOffsetX = 0.f;
+        scaler.jitterOffsetY = 0.f;
         scaler.motionVectorScaleX = static_cast<float>(size.x());
         scaler.motionVectorScaleY = static_cast<float>(size.y());
         scaler.shouldResetHistory = impl_->reset_history || impl_->frame.reset_history;
