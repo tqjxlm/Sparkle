@@ -355,7 +355,7 @@ void SkyLight::ProbeArtifact(const CookArtifactKey &key, const SkyCookFinish &fi
 {
     auto probe_ran = std::make_shared<std::atomic<bool>>(false);
     cook_handle_ = std::make_unique<CookHandle>(
-        Cooker::Request(key, nullptr, [this, finish, probe_ran, on_miss = std::move(on_miss)](CookResult result) {
+        Cooker::Request(key, nullptr, [this, finish, probe_ran, miss = std::move(on_miss)](CookResult result) {
             probe_ran->store(true);
             if (result.HasPayload())
             {
@@ -363,7 +363,7 @@ void SkyLight::ProbeArtifact(const CookArtifactKey &key, const SkyCookFinish &fi
             }
             else
             {
-                on_miss();
+                miss();
             }
         }));
 
