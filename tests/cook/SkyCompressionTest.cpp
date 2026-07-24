@@ -7,6 +7,7 @@
 #include "io/TextureCompression.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
+#include "rhi/RHI.h"
 #include "scene/Scene.h"
 #include "scene/component/light/SkyLight.h"
 
@@ -28,8 +29,12 @@ public:
             return Result::Pending;
         }
 
+        // a dev pool resolves the fp16 master; a packaged image carries only the transcode
         const auto &cube = sky_light->GetCubeMap();
-        bool success = Expect(cube->GetFormat() == PixelFormat::RGBAFloat16, "sky cube is the fp16 master");
+        const auto transcode_format = TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily);
+        const bool is_master = cube->GetFormat() == PixelFormat::RGBAFloat16;
+        bool success = Expect(is_master || cube->GetFormat() == transcode_format,
+                              "sky cube is the fp16 master or the family transcode");
 
         const std::array<Vector3, 6> directions{Right, -Right, Up, -Up, Front, -Front};
         for (const auto &direction : directions)
@@ -39,8 +44,11 @@ public:
                               "CPU sky sampling returns finite non-negative HDR");
         }
 
-        success &= Expect(sky_proxy->GetSkyMap()->GetAttributes().format == PixelFormat::RGBAFloat16,
-                          "GPU sky cube uploads the fp16 master");
+        const PixelFormat expected_upload = is_master || !app.GetRHI()->SupportsSampledFormat(transcode_format)
+                                                ? PixelFormat::RGBAFloat16
+                                                : transcode_format;
+        success &= Expect(sky_proxy->GetSkyMap()->GetAttributes().format == expected_upload,
+                          "GPU sky cube uploads natively or falls back to fp16");
 
         success &= VerifyTranscode(*cube);
 
