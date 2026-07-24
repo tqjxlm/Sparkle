@@ -177,11 +177,10 @@ void EncodeBc6hMip(const uint8_t *fp16, unsigned width, unsigned height, uint8_t
     const auto *pixels = reinterpret_cast<const int16_t *>(fp16);
 
     // radiance data, not display color: the default luma-derived channel weights would
-    // starve red and blue of error budget. the fast flags keep the cook inside CI's
-    // watchdog window (4.4x speedup); renders measure ~0.006 mean FLIP above the
-    // exhaustive search, still far inside the 0.02 screenshot gate
+    // starve red and blue of error budget. a single refine round keeps the cook inside
+    // CI's watchdog window at 2.7x the default speed while measuring within 4% of the
+    // exhaustive search's error; BC6H_FastIndexing costs real quality and stays off
     cvtt::Options options;
-    options.flags = cvtt::Flags::Fastest;
     options.refineRoundsBC6H = 1;
     options.redWeight = 1.f;
     options.greenWeight = 1.f;
