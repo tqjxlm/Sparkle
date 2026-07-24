@@ -95,7 +95,7 @@ The color input is the progressive accumulator, not the per-frame noisy radiance
 
 MetalFX availability is both SDK- and runtime-gated. The Metal RHI checks OS availability, device support, supported input scale (as output over input extent), texture formats and usage flags, and scaler creation. Unsupported or failed configurations follow the normal provider fallback order. `--metalfx_sync_init true` requests synchronous scaler compilation during renderer initialization; the default permits asynchronous initialization.
 
-On the frame accumulation completes, the display hands off to the accumulator only when `max_spp` is at least 512 (mirroring NRD's handoff opt-out); below that the accumulator is noisier than the denoised output, and harnesses film the denoiser. Scene changes reset temporal history; deforming-geometry motion is unavailable. Changing render scale or output resolution recreates the renderer and scaler rather than using per-frame dynamic resolution.
+A resolve pass cross-fades the scaler output into the accumulator over the same sample window as NRD's handoff, so the display equals the accumulator (nearest-upsampled at sub-native render scales, exactly matching the tone-mapping upsample) when the window closes and the switch to the accumulator is step-free; the scaler stops encoding past the window. `max_spp` below the window opts out — the accumulator is noisier than the denoised output there, and the max_spp=1 harnesses film the denoiser. Scene changes reset temporal history; deforming-geometry motion is unavailable. Changing render scale or output resolution recreates the renderer and scaler rather than using per-frame dynamic resolution.
 
 ## Tests
 

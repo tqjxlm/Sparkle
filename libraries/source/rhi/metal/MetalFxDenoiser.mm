@@ -20,6 +20,7 @@
 #endif
 
 #include <algorithm>
+#include <vector>
 
 namespace sparkle
 {
@@ -98,10 +99,84 @@ public:
     };
 };
 
+class MetalFxResolveShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(MetalFxResolveShader, RHIShaderStage::Compute, "shaders/metalfx/metalfx_resolve.cs.slang",
+                     "shader_main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::DynamicUniformBuffer)
+    USE_SHADER_RESOURCE(scalerOutput, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(sceneAccum, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(outColor, RHIShaderResourceReflection::ResourceType::StorageImage2D)
+
+    END_SHADER_RESOURCE_TABLE
+
+public:
+    struct UniformBufferData
+    {
+        Vector2UInt output_resolution;
+        Vector2UInt input_resolution;
+        float handoff_weight = 0.f;
+        float padding0 = 0.f;
+        float padding1 = 0.f;
+        float padding2 = 0.f;
+    };
+};
+
 struct MetalFxDenoiser::Impl
 {
     explicit Impl(RHIContext *in_rhi, const RHIDenoiserDesc &in_desc) : rhi(in_rhi), desc(in_desc)
     {
+        slot_ran_prepare.resize(desc.max_frames_in_flight, 0);
+        slot_ran_resolve.resize(desc.max_frames_in_flight, 0);
+    }
+
+    struct StageTiming
+    {
+        double sum_ms = 0.0;
+        uint32_t count = 0;
+    };
+
+    // a frame slot's GPU time belongs to the previous submission that used that slot, so each frame
+    // harvests the slot's pending times before recording which stages it dispatches into the slot
+    void SampleGpuTimings(bool will_run_resolve)
+    {
+        const auto slot = rhi->GetFrameIndex();
+
+        auto accumulate = [](StageTiming &timing, float time_ms) {
+            if (time_ms >= 0.f)
+            {
+                timing.sum_ms += static_cast<double>(time_ms);
+                timing.count++;
+            }
+        };
+
+        if (slot_ran_prepare[slot])
+        {
+            accumulate(prepare_timing, prepare_pass->GetExecutionTime(slot));
+        }
+        if (slot_ran_resolve[slot])
+        {
+            accumulate(resolve_timing, resolve_pass->GetExecutionTime(slot));
+        }
+        slot_ran_prepare[slot] = 1;
+        slot_ran_resolve[slot] = will_run_resolve ? 1 : 0;
+
+        constexpr uint32_t TimingLogFrameInterval = 300;
+        if (prepare_timing.count != last_timing_log_count && prepare_timing.count % TimingLogFrameInterval == 0)
+        {
+            last_timing_log_count = prepare_timing.count;
+            LogGpuTimings("running");
+        }
+    }
+
+    void LogGpuTimings(const char *tag) const
+    {
+        Log(Info, "[MetalFxPerf] {} prepare {:.3f} ms (n={}) resolve {:.3f} ms (n={})", tag,
+            prepare_timing.count ? prepare_timing.sum_ms / prepare_timing.count : 0.0, prepare_timing.count,
+            resolve_timing.count ? resolve_timing.sum_ms / resolve_timing.count : 0.0, resolve_timing.count);
     }
 
     RHIResourceRef<MetalImage> CreatePreparedTexture(PixelFormat format, MTLTextureUsage required_usage, bool writable,
@@ -167,6 +242,57 @@ struct MetalFxDenoiser::Impl
         prepare_pass = rhi->CreateComputePass("MetalFxPreparePass", true);
     }
 
+    void CreateResolvePipeline()
+    {
+        resolved_output = rhi->CreateImage(
+            RHIImage::Attribute{
+                .format = PixelFormat::RGBAFloat16,
+                .sampler = GetPreparedSampler(),
+                .width = desc.output_size.x(),
+                .height = desc.output_size.y(),
+                .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
+                .memory_properties = RHIMemoryProperty::DeviceLocal,
+                .mip_levels = 1,
+                .msaa_samples = 1,
+            },
+            "MetalFxResolvedOutput");
+
+        resolve_ubo = rhi->CreateBuffer({.size = sizeof(MetalFxResolveShader::UniformBufferData),
+                                         .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                         .mem_properties = RHIMemoryProperty::None,
+                                         .is_dynamic = true},
+                                        "MetalFxResolveUBO");
+        resolve_shader = rhi->CreateShader<MetalFxResolveShader>();
+        resolve_pipeline = rhi->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "MetalFxResolvePipeline");
+        resolve_pipeline->SetShader<RHIShaderStage::Compute>(resolve_shader);
+        resolve_pipeline->Compile();
+
+        auto *resources = resolve_pipeline->GetShaderResource<MetalFxResolveShader>();
+        resources->ubo().BindResource(resolve_ubo);
+        resources->scalerOutput().BindResource(output->GetDefaultView(rhi));
+        resources->outColor().BindResource(resolved_output->GetDefaultView(rhi));
+
+        resolve_pass = rhi->CreateComputePass("MetalFxResolvePass", true);
+    }
+
+    struct HandoffWindow
+    {
+        bool applies;
+        float start;
+        float end;
+    };
+
+    [[nodiscard]] HandoffWindow ComputeHandoffWindow() const
+    {
+        // max_spp below the window opts out: the max_spp=1 motion harnesses film the denoiser output
+        constexpr float HandoffStartSamples = 512.f;
+        constexpr float HandoffEndSamples = 2048.f;
+        const bool applies = static_cast<float>(frame.maximum_samples) >= HandoffStartSamples;
+        const float end =
+            applies ? std::min(HandoffEndSamples, static_cast<float>(frame.maximum_samples)) : HandoffEndSamples;
+        return {.applies = applies, .start = std::min(HandoffStartSamples, 0.25f * end), .end = end};
+    }
+
     bool BindInputs(const RHIDenoiserInputs &inputs)
     {
         if (!inputs.accumulated_radiance || !inputs.normal_view_depth || !inputs.albedo_object_id ||
@@ -223,11 +349,24 @@ struct MetalFxDenoiser::Impl
     RHIResourceRef<MetalImage> normal;
     RHIResourceRef<MetalImage> roughness;
     RHIResourceRef<MetalImage> output;
+    RHIResourceRef<RHIImage> resolved_output;
 
     RHIResourceRef<RHIBuffer> prepare_ubo;
     RHIResourceRef<RHIShader> prepare_shader;
     RHIResourceRef<RHIPipelineState> prepare_pipeline;
     RHIResourceRef<RHIComputePass> prepare_pass;
+
+    RHIResourceRef<RHIBuffer> resolve_ubo;
+    RHIResourceRef<RHIShader> resolve_shader;
+    RHIResourceRef<RHIPipelineState> resolve_pipeline;
+    RHIResourceRef<RHIComputePass> resolve_pass;
+
+    StageTiming prepare_timing;
+    StageTiming resolve_timing;
+    std::vector<uint8_t> slot_ran_prepare;
+    std::vector<uint8_t> slot_ran_resolve;
+    uint32_t last_timing_log_count = 0;
+    bool display_scaler_output = false;
 };
 
 MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc)
@@ -331,6 +470,7 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc)
         impl_->exposure_texture.label = @"MetalFxExposure";
 
         impl_->CreatePreparePipeline();
+        impl_->CreateResolvePipeline();
         impl_->ready = true;
         Log(Info, "MetalFX: temporal denoised scaler ready, input [{} x {}], output [{} x {}]", desc.input_size.x(),
             desc.input_size.y(), desc.output_size.x(), desc.output_size.y());
@@ -349,7 +489,13 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc)
 #endif
 }
 
-MetalFxDenoiser::~MetalFxDenoiser() = default;
+MetalFxDenoiser::~MetalFxDenoiser()
+{
+    if (impl_->ready)
+    {
+        impl_->LogGpuTimings("final");
+    }
+}
 
 bool MetalFxDenoiser::IsReady() const
 {
@@ -358,11 +504,8 @@ bool MetalFxDenoiser::IsReady() const
 
 bool MetalFxDenoiser::NeedsInputs() const
 {
-    // hand the final frame to the accumulator only when it is converged enough to be the better
-    // image; below that (e.g. the max_spp=1 motion harnesses) the denoised output stays on screen
-    constexpr uint32_t HandoffMinSamples = 512;
-    const bool handoff = impl_->frame.final_frame && impl_->frame.maximum_samples >= HandoffMinSamples;
-    return impl_->ready && !handoff;
+    const Impl::HandoffWindow window = impl_->ComputeHandoffWindow();
+    return impl_->ready && (!window.applies || static_cast<float>(impl_->frame.accumulated_samples) < window.end);
 }
 
 const char *MetalFxDenoiser::GetName() const
@@ -372,7 +515,11 @@ const char *MetalFxDenoiser::GetName() const
 
 RHIResourceRef<RHIImage> MetalFxDenoiser::GetOutput() const
 {
-    return impl_->output;
+    if (impl_->display_scaler_output)
+    {
+        return impl_->output;
+    }
+    return impl_->resolved_output;
 }
 
 void MetalFxDenoiser::UpdateFrameData(const RHIDenoiserFrameData &frame)
@@ -459,14 +606,53 @@ bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
         scaler.worldToViewMatrix = ToSimdMatrix(impl_->frame.view);
         scaler.viewToClipMatrix = ToSimdMatrix(impl_->frame.projection);
 
+        // frame.final_frame pins the weight to exactly 1 so the frozen frame IS the accumulator
+        const Impl::HandoffWindow window = impl_->ComputeHandoffWindow();
+        float weight = 0.f;
+        if (window.applies)
+        {
+            weight = impl_->frame.final_frame
+                         ? 1.f
+                         : std::clamp((static_cast<float>(impl_->frame.accumulated_samples) - window.start) /
+                                          (window.end - window.start),
+                                      0.f, 1.f);
+        }
+        const bool run_resolve = weight > 0.f;
+        impl_->SampleGpuTimings(run_resolve);
+
         id<MTLCommandBuffer> command_buffer = context->GetCurrentCommandBuffer();
         [command_buffer pushDebugGroup:@"MetalFX temporal denoised scaler"];
         [scaler encodeToCommandBuffer:command_buffer];
         [command_buffer popDebugGroup];
 
-        impl_->output->Transition({.target_layout = RHIImageLayout::Read,
-                                   .after_stage = RHIPipelineStage::ComputeShader,
-                                   .before_stage = RHIPipelineStage::PixelShader});
+        impl_->display_scaler_output = !run_resolve;
+        impl_->output->Transition(
+            {.target_layout = RHIImageLayout::Read,
+             .after_stage = RHIPipelineStage::ComputeShader,
+             .before_stage = run_resolve ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader});
+        if (run_resolve)
+        {
+            const auto &output_size = impl_->desc.output_size;
+            MetalFxResolveShader::UniformBufferData resolve_ubo_data{
+                .output_resolution = output_size, .input_resolution = size, .handoff_weight = weight};
+            impl_->resolve_ubo->Upload(impl_->rhi, &resolve_ubo_data);
+
+            auto *resolve_resources = impl_->resolve_pipeline->GetShaderResource<MetalFxResolveShader>();
+            resolve_resources->sceneAccum().BindResource(inputs.accumulated_radiance->GetDefaultView(impl_->rhi), true);
+
+            impl_->resolved_output->Transition({.target_layout = RHIImageLayout::StorageWrite,
+                                                .after_stage = RHIPipelineStage::Top,
+                                                .before_stage = RHIPipelineStage::ComputeShader});
+
+            impl_->rhi->BeginComputePass(impl_->resolve_pass);
+            impl_->rhi->DispatchCompute(impl_->resolve_pipeline, {output_size.x(), output_size.y(), 1u},
+                                        {16u, 16u, 1u});
+            impl_->rhi->EndComputePass(impl_->resolve_pass);
+
+            impl_->resolved_output->Transition({.target_layout = RHIImageLayout::Read,
+                                                .after_stage = RHIPipelineStage::ComputeShader,
+                                                .before_stage = RHIPipelineStage::PixelShader});
+        }
         impl_->reset_history = false;
         return true;
     }
