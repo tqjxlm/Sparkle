@@ -5,6 +5,7 @@
 #include "core/cook/Cooker.h"
 
 #include <atomic>
+#include <string_view>
 
 namespace sparkle
 {
@@ -40,7 +41,8 @@ constexpr const char *EmbeddedIdentityPrefix = "@embedded-";
 
 bool IsEmbeddedTextureIdentity(const std::string &name)
 {
-    return name.find(EmbeddedIdentityPrefix) != std::string::npos;
+    const auto filename_start = name.find_last_of('/') + 1;
+    return std::string_view(name).substr(filename_start).starts_with(EmbeddedIdentityPrefix);
 }
 } // namespace
 

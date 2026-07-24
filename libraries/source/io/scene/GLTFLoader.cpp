@@ -308,7 +308,7 @@ static std::shared_ptr<Image2D> CreateTexture(const tinygltf::Model &model, uint
 
     // a packaged image with pixels but no authored path is embedded in the container; give it
     // a content identity so it cooks like a file-backed texture
-    if (identity.empty() && path_type == PathType::Resource && image2d && image2d->IsValid())
+    if (!has_authored_path && path_type == PathType::Resource && image2d && image2d->IsValid())
     {
         identity = MakeEmbeddedTextureIdentity(model_dir, image2d->GetContentHash());
     }
