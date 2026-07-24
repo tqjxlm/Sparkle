@@ -349,9 +349,9 @@ struct PendingHdrTranscode
     std::string master_type;
     std::string source_name;
     CookArtifactKey master_key;
-    // content hash of the fp16 master cube for the sky entry; zero for the IBL entries,
-    // whose transcode hash chains from the family sky cube cooked before them
-    uint32_t master_cube_hash = 0;
+    // the sky map source hash for the sky entry; zero for the IBL entries, whose
+    // transcode hash chains from the family sky cube cooked before them
+    uint32_t origin_hash = 0;
 };
 
 // derives the per-family HDR cube artifacts from the fp16 masters the run produced
@@ -370,8 +370,8 @@ static bool CookHdrTranscodes(const std::vector<PendingHdrTranscode> &pending,
                 return false;
             }
 
-            const bool is_sky = entry.master_cube_hash != 0;
-            const auto origin_hash = is_sky ? entry.master_cube_hash : family_sky_cube_hash;
+            const bool is_sky = entry.origin_hash != 0;
+            const auto origin_hash = is_sky ? entry.origin_hash : family_sky_cube_hash;
             ASSERT_F(origin_hash != 0, "sky transcode must precede the IBL transcodes");
 
             const auto source_hash = HdrCubeTranscodeJob::MakeSourceHash(origin_hash, entry.master_key.version);
@@ -552,9 +552,10 @@ int AppFramework::RunCookMode()
                 // from them after the run so mixed-family target sets ship the format each
                 // target can sample
                 const auto sky_map_path = sky_light->GetSkyMapPath();
-                auto master_payload = SkyLight::CookMasterPayload(sky_map_path);
-                auto cube =
-                    master_payload.empty() ? nullptr : SkyLight::MakeCubeFromPayload(master_payload, sky_map_path);
+                auto master = SkyLight::CookMasterPayload(sky_map_path);
+                auto cube = master.HasPayload() && master.source_hash
+                                ? SkyLight::MakeCubeFromPayload(master.payload, sky_map_path)
+                                : nullptr;
                 if (!cube)
                 {
                     Log(Error, "failed to cook sky cube {}", sky_map_path);
@@ -562,7 +563,7 @@ int AppFramework::RunCookMode()
                 }
 
                 const auto sky_key = SkyLight::MasterCookKey(sky_map_path);
-                pending_transcodes.push_back({sky_key.type, sky_key.source_name, sky_key, cube->GetContentHash()});
+                pending_transcodes.push_back({sky_key.type, sky_key.source_name, sky_key, *master.source_hash});
 
                 std::vector<std::unique_ptr<CookJob>> env_jobs;
                 IblCookPlan::CollectEnvironmentJobs(cube, env_jobs);

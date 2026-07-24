@@ -271,10 +271,10 @@ CookArtifactKey SkyLight::MasterCookKey(const std::string &sky_map_path)
             .source_hash = std::nullopt};
 }
 
-std::vector<char> SkyLight::CookMasterPayload(const std::string &sky_map_path)
+CookResult SkyLight::CookMasterPayload(const std::string &sky_map_path)
 {
     const auto key = MasterCookKey(sky_map_path);
-    auto result = Cooker::CookNow(key, [&sky_map_path, &key]() -> std::shared_ptr<CookJob> {
+    return Cooker::CookNow(key, [&sky_map_path, &key]() -> std::shared_ptr<CookJob> {
         auto sky_map = std::make_shared<Image2D>();
         if (!sky_map->LoadFromFile(sky_map_path))
         {
@@ -282,7 +282,6 @@ std::vector<char> SkyLight::CookMasterPayload(const std::string &sky_map_path)
         }
         return std::make_shared<SkyLightCookJob>(std::move(sky_map), key.source_name);
     });
-    return std::move(result.payload);
 }
 
 std::shared_ptr<Image2DCube> SkyLight::MakeCubeFromPayload(const std::vector<char> &payload,
@@ -414,17 +413,17 @@ void SkyLight::RequestMasterCook(const SkyCookFinish &finish)
 
 void SkyLight::DeliverCookedResult(CookResult result, const SkyCookFinish &finish)
 {
-    // a master delivery re-probes the family transcode by content before applying fp16:
-    // relocated sources (e.g. usd exports) alias to the shipped encoding this way
-    if (result.HasPayload())
+    // a master delivery re-probes the family transcode by the master's SOURCE hash before
+    // applying fp16: relocated sources (e.g. usd exports) alias to the shipped encoding.
+    // the master cube itself cannot key the alias — its bytes are not deterministic
+    // across cook platforms (libm differences in the projection math)
+    if (result.HasPayload() && result.source_hash)
     {
         if (const auto view = ParseSkyPayload(result.payload); view && !IsCompressedFormat(view->format))
         {
-            auto master_cube = MakeCubeFromFaces(view->faces, view->format, "sky_master_probe");
             auto alias_key = HdrCubeTranscodeJob::MakeLookupKey(
                 SkyLightCookJob::Type, TextureCompression::PlatformFamily, MasterCookKey(sky_map_path_).source_name);
-            alias_key.source_hash =
-                HdrCubeTranscodeJob::MakeSourceHash(master_cube->GetContentHash(), SkyLightCookJob::Version);
+            alias_key.source_hash = HdrCubeTranscodeJob::MakeSourceHash(*result.source_hash, SkyLightCookJob::Version);
 
             auto master_result = std::make_shared<CookResult>(std::move(result));
             ProbeArtifact(alias_key, finish,

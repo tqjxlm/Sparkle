@@ -8,6 +8,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 
 namespace sparkle
 {
@@ -88,6 +89,10 @@ struct CookResult
 
     Status status = Status::ExecutionFailed;
     CookPayload payload;
+
+    // what the payload resolved with (manifest entry or executed job), not the request
+    // key's; enables content-addressed follow-up lookups without reloading sources
+    std::optional<uint32_t> source_hash;
 
     [[nodiscard]] bool IsSuccess() const
     {

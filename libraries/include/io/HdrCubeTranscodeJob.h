@@ -22,8 +22,9 @@ public:
                                                        TextureCompression::Family family,
                                                        const std::string &source_name);
 
-    // origin_content_hash is the cube content the runtime consumer already holds (fp16
-    // master cube for sky, family sky cube for IBL), so relocated sources alias by hash
+    // origin_content_hash must be resolvable by the runtime consumer without cooking any
+    // master AND deterministic across cook platforms: the sky map source hash for sky
+    // transcodes, the family sky cube (encoded bytes) for IBL transcodes
     [[nodiscard]] static uint32_t MakeSourceHash(uint32_t origin_content_hash, uint32_t master_version);
 
     [[nodiscard]] const char *GetType() const override

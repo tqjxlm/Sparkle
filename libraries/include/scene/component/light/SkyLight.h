@@ -49,8 +49,8 @@ public:
     // transcodes derive from; it does not ship in target images
     [[nodiscard]] static CookArtifactKey MasterCookKey(const std::string &sky_map_path);
 
-    // build-time master cook (store hit or cook now). empty on failure
-    [[nodiscard]] static std::vector<char> CookMasterPayload(const std::string &sky_map_path);
+    // build-time master cook (store hit or cook now). empty payload on failure
+    [[nodiscard]] static CookResult CookMasterPayload(const std::string &sky_map_path);
 
     // the cube map a sky payload carries (fp16 master or family transcode). null on a bad payload
     [[nodiscard]] static std::shared_ptr<Image2DCube> MakeCubeFromPayload(const std::vector<char> &payload,
