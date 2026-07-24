@@ -169,12 +169,15 @@ public:
 private:
     template <typename TaskFunc> void DispatchOrEnqueueTask(TaskFunc &&task, ThreadName thread_name)
     {
-        if (!IsReady())
         {
-            // if current future is not ready, enqueue the task to be executed when it is ready.
+            // the readiness check must happen under the lock: a completion between an
+            // unlocked check and the append would drain callbacks_ first and lose the task
             std::scoped_lock<std::mutex> lock(mutex_);
-            callbacks_.emplace_back(std::forward<TaskFunc>(task), thread_name);
-            return;
+            if (!IsReady())
+            {
+                callbacks_.emplace_back(std::forward<TaskFunc>(task), thread_name);
+                return;
+            }
         }
 
         // if ready, dispatch its callbacks to the target thread
