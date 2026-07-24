@@ -492,9 +492,14 @@ def pull_test_artifacts():
     local_log = os.path.join(logs_dir, f"output_{int(time.time() * 1000)}.log")
     adb("pull", f"{DEVICE_FILES_DIR}/logs/output.log", local_log, check=False)
 
+    # a failed pull must not leave a stale screenshot; captures/ accumulates across cases
     screenshots_dir = os.path.join(DEVICE_OUTPUT_DIR, "screenshots")
-    shutil.rmtree(screenshots_dir, ignore_errors=True)
-    os.makedirs(screenshots_dir)
+    os.makedirs(screenshots_dir, exist_ok=True)
+    for entry in os.listdir(screenshots_dir):
+        if entry == "captures":
+            continue
+        path = os.path.join(screenshots_dir, entry)
+        shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
     adb("pull", f"{DEVICE_FILES_DIR}/screenshots/.", screenshots_dir, check=False)
 
 
