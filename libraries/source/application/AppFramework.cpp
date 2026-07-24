@@ -349,25 +349,34 @@ struct PendingHdrTranscode
     std::string master_type;
     std::string source_name;
     CookArtifactKey master_key;
+    // content hash of the fp16 master cube for the sky entry; zero for the IBL entries,
+    // whose transcode hash chains from the family sky cube cooked before them
+    uint32_t master_cube_hash = 0;
 };
 
-// derives the per-family HDR cube artifacts from the fp16 masters the run produced. the
-// job carries the master payload hash, so an edited master re-transcodes on a warm pool
+// derives the per-family HDR cube artifacts from the fp16 masters the run produced
 static bool CookHdrTranscodes(const std::vector<PendingHdrTranscode> &pending,
                               const std::set<TextureCompression::Family> &families, FamilyArtifactMap &family_artifacts)
 {
-    for (const auto &entry : pending)
+    for (auto family : families)
     {
-        auto master = CookArtifactStore::Load(entry.master_key);
-        if (master.empty())
+        uint32_t family_sky_cube_hash = 0;
+        for (const auto &entry : pending)
         {
-            Log(Error, "missing master artifact for {}", entry.source_name);
-            return false;
-        }
+            auto master = CookArtifactStore::Load(entry.master_key);
+            if (master.empty())
+            {
+                Log(Error, "missing master artifact for {}", entry.source_name);
+                return false;
+            }
 
-        for (auto family : families)
-        {
-            auto job = std::make_shared<HdrCubeTranscodeJob>(entry.master_type, family, entry.source_name, master);
+            const bool is_sky = entry.master_cube_hash != 0;
+            const auto origin_hash = is_sky ? entry.master_cube_hash : family_sky_cube_hash;
+            ASSERT_F(origin_hash != 0, "sky transcode must precede the IBL transcodes");
+
+            const auto source_hash = HdrCubeTranscodeJob::MakeSourceHash(origin_hash, entry.master_key.version);
+            auto job = std::make_shared<HdrCubeTranscodeJob>(entry.master_type, family, entry.source_name,
+                                                             std::move(master), source_hash);
             const auto key = MakeCookArtifactKey(*job);
             auto result = Cooker::CookNow(key, [&job]() { return job; });
             if (!result.HasPayload())
@@ -376,6 +385,17 @@ static bool CookHdrTranscodes(const std::vector<PendingHdrTranscode> &pending,
                     TextureCompression::GetFamilyName(family));
                 return false;
             }
+
+            if (is_sky)
+            {
+                auto family_cube = SkyLight::MakeCubeFromPayload(result.payload, entry.source_name);
+                if (!family_cube)
+                {
+                    return false;
+                }
+                family_sky_cube_hash = family_cube->GetContentHash();
+            }
+
             family_artifacts[family].insert(CookArtifactStore::GetManifestKey(key));
         }
     }
@@ -542,13 +562,13 @@ int AppFramework::RunCookMode()
                 }
 
                 const auto sky_key = SkyLight::MasterCookKey(sky_map_path);
-                pending_transcodes.push_back({sky_key.type, sky_key.source_name, sky_key});
+                pending_transcodes.push_back({sky_key.type, sky_key.source_name, sky_key, cube->GetContentHash()});
 
                 std::vector<std::unique_ptr<CookJob>> env_jobs;
                 IblCookPlan::CollectEnvironmentJobs(cube, env_jobs);
                 for (auto &job : env_jobs)
                 {
-                    pending_transcodes.push_back({job->GetType(), job->GetSourceName(), MakeCookArtifactKey(*job)});
+                    pending_transcodes.push_back({job->GetType(), job->GetSourceName(), MakeCookArtifactKey(*job), 0});
                     jobs.push_back(std::move(job));
                 }
                 return true;

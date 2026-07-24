@@ -414,6 +414,30 @@ void SkyLight::RequestMasterCook(const SkyCookFinish &finish)
 
 void SkyLight::DeliverCookedResult(CookResult result, const SkyCookFinish &finish)
 {
+    // a master delivery re-probes the family transcode by content before applying fp16:
+    // relocated sources (e.g. usd exports) alias to the shipped encoding this way
+    if (result.HasPayload())
+    {
+        if (const auto view = ParseSkyPayload(result.payload); view && !IsCompressedFormat(view->format))
+        {
+            auto master_cube = MakeCubeFromFaces(view->faces, view->format, "sky_master_probe");
+            auto alias_key = HdrCubeTranscodeJob::MakeLookupKey(
+                SkyLightCookJob::Type, TextureCompression::PlatformFamily, MasterCookKey(sky_map_path_).source_name);
+            alias_key.source_hash =
+                HdrCubeTranscodeJob::MakeSourceHash(master_cube->GetContentHash(), SkyLightCookJob::Version);
+
+            auto master_result = std::make_shared<CookResult>(std::move(result));
+            ProbeArtifact(alias_key, finish,
+                          [this, master_result, finish]() { ApplyCookedResult(std::move(*master_result), finish); });
+            return;
+        }
+    }
+
+    ApplyCookedResult(std::move(result), finish);
+}
+
+void SkyLight::ApplyCookedResult(CookResult result, const SkyCookFinish &finish)
+{
     bool applied = false;
     if (result.HasPayload())
     {

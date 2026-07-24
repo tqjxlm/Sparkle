@@ -93,7 +93,7 @@ private:
         master.insert(master.end(), tail.begin(), tail.end());
 
         HdrCubeTranscodeJob job("skylight", TextureCompression::PlatformFamily, "sky_compression_test",
-                                std::move(master));
+                                std::move(master), 0);
         auto result = job.Execute();
         bool success = Expect(result.IsSuccess() && !result.GetPayload().empty(), "transcode job produces a payload");
         if (!success)

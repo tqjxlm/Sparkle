@@ -94,6 +94,8 @@ private:
 
     void DeliverCookedResult(CookResult result, const SkyCookFinish &finish);
 
+    void ApplyCookedResult(CookResult result, const SkyCookFinish &finish);
+
     [[nodiscard]] bool ApplyCookedData(const std::vector<char> &payload);
 
     Vector3 color_ = Vector3(0.5f, 0.7f, 1.0f);

@@ -15,12 +15,16 @@ public:
     static constexpr uint32_t Version = 5;
 
     HdrCubeTranscodeJob(const std::string &master_type, TextureCompression::Family family, std::string source_name,
-                        std::vector<char> master_payload);
+                        std::vector<char> master_payload, uint32_t source_hash);
 
     // identity-only key for runtime artifact lookups
     [[nodiscard]] static CookArtifactKey MakeLookupKey(const std::string &master_type,
                                                        TextureCompression::Family family,
                                                        const std::string &source_name);
+
+    // origin_content_hash is the cube content the runtime consumer already holds (fp16
+    // master cube for sky, family sky cube for IBL), so relocated sources alias by hash
+    [[nodiscard]] static uint32_t MakeSourceHash(uint32_t origin_content_hash, uint32_t master_version);
 
     [[nodiscard]] const char *GetType() const override
     {
