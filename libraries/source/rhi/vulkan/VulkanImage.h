@@ -218,8 +218,6 @@ inline VkFormat GetVkPixelFormat(PixelFormat format)
         return VK_FORMAT_BC7_UNORM_BLOCK;
     case PixelFormat::R9G9B9E5Float:
         return VK_FORMAT_E5B9G9R9_UFLOAT_PACK32;
-    case PixelFormat::ASTC4x4HDR:
-        return VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK;
     case PixelFormat::ASTC6x6HDR:
         return VK_FORMAT_ASTC_6x6_SFLOAT_BLOCK;
     default:
@@ -336,8 +334,6 @@ inline PixelFormat VkFormatToPixelFormat(VkFormat format)
         return PixelFormat::BC7Unorm;
     case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:
         return PixelFormat::R9G9B9E5Float;
-    case VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK:
-        return PixelFormat::ASTC4x4HDR;
     case VK_FORMAT_ASTC_6x6_SFLOAT_BLOCK:
         return PixelFormat::ASTC6x6HDR;
     default:

@@ -34,7 +34,6 @@ class TextureCompressionTest : public TestCase
         {
             success &= VerifyOddMipEdges(family);
         }
-        success &= VerifyHdrRoundTrip(PixelFormat::ASTC4x4HDR, "hdr astc 4x4");
         success &= VerifyHdrRoundTrip(PixelFormat::ASTC6x6HDR, "hdr astc 6x6");
         success &= VerifyHdrRoundTrip(PixelFormat::R9G9B9E5Float, "hdr bc");
 

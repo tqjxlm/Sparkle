@@ -133,8 +133,6 @@ inline MTLPixelFormat GetMetalPixelFormat(PixelFormat format)
 #endif
     case PixelFormat::R9G9B9E5Float:
         return MTLPixelFormatRGB9E5Float;
-    case PixelFormat::ASTC4x4HDR:
-        return MTLPixelFormatASTC_4x4_HDR;
     case PixelFormat::ASTC6x6HDR:
         return MTLPixelFormatASTC_6x6_HDR;
     default:
