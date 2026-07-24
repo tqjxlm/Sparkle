@@ -125,10 +125,11 @@ bool MetalRHI::SupportsSampledFormat(PixelFormat format)
     case PixelFormat::ASTC6x6Srgb:
     case PixelFormat::ASTC6x6Unorm:
         return [context->GetDevice() supportsFamily:MTLGPUFamilyApple2];
-    case PixelFormat::ASTC6x6HDR:
+    case PixelFormat::ASTC4x4HDR:
         return [context->GetDevice() supportsFamily:MTLGPUFamilyApple6];
     case PixelFormat::BC7Srgb:
     case PixelFormat::BC7Unorm:
+    case PixelFormat::BC6HUfloat:
 #if FRAMEWORK_MACOS
         return context->GetDevice().supportsBCTextureCompression;
 #else

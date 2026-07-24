@@ -27,8 +27,8 @@ enum class PixelFormat : uint8_t
     BC7Unorm,
     R16Float,
     RGFloat16,
-    R9G9B9E5Float,
-    ASTC6x6HDR,
+    BC6HUfloat,
+    ASTC4x4HDR,
     Count
 };
 
@@ -43,7 +43,8 @@ constexpr bool IsCompressedFormat(PixelFormat format)
     case PixelFormat::ASTC6x6Unorm:
     case PixelFormat::BC7Srgb:
     case PixelFormat::BC7Unorm:
-    case PixelFormat::ASTC6x6HDR:
+    case PixelFormat::BC6HUfloat:
+    case PixelFormat::ASTC4x4HDR:
         return true;
     default:
         return false;
@@ -59,10 +60,11 @@ constexpr unsigned GetBlockDim(PixelFormat format)
     case PixelFormat::ASTC4x4Unorm:
     case PixelFormat::BC7Srgb:
     case PixelFormat::BC7Unorm:
+    case PixelFormat::BC6HUfloat:
+    case PixelFormat::ASTC4x4HDR:
         return 4;
     case PixelFormat::ASTC6x6Srgb:
     case PixelFormat::ASTC6x6Unorm:
-    case PixelFormat::ASTC6x6HDR:
         return 6;
     default:
         UnImplemented(format);
@@ -80,7 +82,8 @@ constexpr unsigned GetBlockByteSize(PixelFormat format)
     case PixelFormat::ASTC6x6Unorm:
     case PixelFormat::BC7Srgb:
     case PixelFormat::BC7Unorm:
-    case PixelFormat::ASTC6x6HDR:
+    case PixelFormat::BC6HUfloat:
+    case PixelFormat::ASTC4x4HDR:
         return 16;
     default:
         UnImplemented(format);
@@ -106,8 +109,8 @@ constexpr unsigned GetFormatChannelCount(PixelFormat format)
     case PixelFormat::ASTC6x6Unorm:
     case PixelFormat::BC7Srgb:
     case PixelFormat::BC7Unorm:
-    case PixelFormat::R9G9B9E5Float:
-    case PixelFormat::ASTC6x6HDR:
+    case PixelFormat::BC6HUfloat:
+    case PixelFormat::ASTC4x4HDR:
         return 4;
     case PixelFormat::D24S8:
         return 2;
@@ -135,7 +138,6 @@ constexpr unsigned GetPixelSize(PixelFormat format)
     case PixelFormat::R8G8B8A8Srgb:
     case PixelFormat::R8G8B8A8Unorm:
     case PixelFormat::R10G10B10A2Unorm:
-    case PixelFormat::R9G9B9E5Float:
     case PixelFormat::D24S8:
     case PixelFormat::D32:
     case PixelFormat::R32UInt:
@@ -203,8 +205,8 @@ constexpr bool IsSRGBFormat(PixelFormat pixel_format)
     case PixelFormat::ASTC4x4Unorm:
     case PixelFormat::ASTC6x6Unorm:
     case PixelFormat::BC7Unorm:
-    case PixelFormat::R9G9B9E5Float:
-    case PixelFormat::ASTC6x6HDR:
+    case PixelFormat::BC6HUfloat:
+    case PixelFormat::ASTC4x4HDR:
         return false;
     case PixelFormat::Count:
     default:
@@ -239,8 +241,8 @@ constexpr bool IsSwizzeldFormat(PixelFormat pixel_format)
     case PixelFormat::ASTC6x6Unorm:
     case PixelFormat::BC7Srgb:
     case PixelFormat::BC7Unorm:
-    case PixelFormat::R9G9B9E5Float:
-    case PixelFormat::ASTC6x6HDR:
+    case PixelFormat::BC6HUfloat:
+    case PixelFormat::ASTC4x4HDR:
         return false;
     case PixelFormat::Count:
     default:
@@ -256,8 +258,8 @@ constexpr bool IsHDRFormat(PixelFormat format)
     {
     case PixelFormat::RGBAFloat:
     case PixelFormat::RGBAFloat16:
-    case PixelFormat::R9G9B9E5Float:
-    case PixelFormat::ASTC6x6HDR:
+    case PixelFormat::BC6HUfloat:
+    case PixelFormat::ASTC4x4HDR:
         return true;
     default:
         return false;
@@ -267,6 +269,6 @@ constexpr bool IsHDRFormat(PixelFormat format)
 // HDR block-compressed formats decode to RGBAFloat16 rather than RGBA8
 constexpr bool IsHDRCompressedFormat(PixelFormat format)
 {
-    return format == PixelFormat::ASTC6x6HDR;
+    return format == PixelFormat::BC6HUfloat || format == PixelFormat::ASTC4x4HDR;
 }
 } // namespace sparkle

@@ -4,6 +4,7 @@
 #include "core/Logger.h"
 #include "core/task/TaskManager.h"
 
+#include <ConvectionKernels.h>
 #include <astcenc.h>
 #include <bc7decomp.h>
 #include <bc7enc.h>
@@ -160,11 +161,120 @@ std::vector<uint8_t> ToRgba8(const std::vector<float> &linear, bool srgb)
 
 astcenc_profile GetAstcProfile(PixelFormat format)
 {
-    if (IsHDRCompressedFormat(format))
+    if (format == PixelFormat::ASTC4x4HDR)
     {
         return ASTCENC_PRF_HDR;
     }
     return IsSRGBFormat(format) ? ASTCENC_PRF_LDR_SRGB : ASTCENC_PRF_LDR;
+}
+
+// CVTT processes NumParallelBlocks 4x4 blocks per call; edge blocks clamp-repeat the
+// border texel exactly like the ASTC path's sampling assumptions
+void EncodeBc6hMip(const uint8_t *fp16, unsigned width, unsigned height, uint8_t *out)
+{
+    const unsigned blocks_x = (width + 3) / 4;
+    const unsigned blocks_y = (height + 3) / 4;
+    const auto *pixels = reinterpret_cast<const int16_t *>(fp16);
+
+    // radiance data, not display color: the default luma-derived channel weights would
+    // starve red and blue of error budget
+    cvtt::Options options;
+    options.redWeight = 1.f;
+    options.greenWeight = 1.f;
+    options.blueWeight = 1.f;
+
+    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> blocks{};
+    std::array<uint8_t, cvtt::NumParallelBlocks * 16> encoded;
+    std::array<size_t, cvtt::NumParallelBlocks> block_offsets{};
+    unsigned batched = 0;
+
+    auto flush = [&]() {
+        if (batched == 0)
+        {
+            return;
+        }
+        for (unsigned i = batched; i < cvtt::NumParallelBlocks; i++)
+        {
+            blocks[i] = blocks[batched - 1];
+        }
+        cvtt::Kernels::EncodeBC6HU(encoded.data(), blocks.data(), options);
+        for (unsigned i = 0; i < batched; i++)
+        {
+            std::memcpy(out + block_offsets[i], encoded.data() + static_cast<size_t>(i) * 16, 16);
+        }
+        batched = 0;
+    };
+
+    for (unsigned by = 0; by < blocks_y; by++)
+    {
+        for (unsigned bx = 0; bx < blocks_x; bx++)
+        {
+            auto &block = blocks[batched];
+            for (unsigned py = 0; py < 4; py++)
+            {
+                const unsigned sy = std::min(by * 4 + py, height - 1);
+                for (unsigned px = 0; px < 4; px++)
+                {
+                    const unsigned sx = std::min(bx * 4 + px, width - 1);
+                    std::memcpy(block.m_pixels[py * 4 + px], pixels + (static_cast<size_t>(sy) * width + sx) * 4,
+                                4 * sizeof(int16_t));
+                }
+            }
+            block_offsets[batched] = (static_cast<size_t>(by) * blocks_x + bx) * 16;
+            if (++batched == cvtt::NumParallelBlocks)
+            {
+                flush();
+            }
+        }
+    }
+    flush();
+}
+
+void DecodeBc6hMip(const uint8_t *blocks_data, unsigned width, unsigned height, Half *out_fp16)
+{
+    const unsigned blocks_x = (width + 3) / 4;
+    const unsigned blocks_y = (height + 3) / 4;
+    constexpr int16_t OneHalf = 0x3C00;
+
+    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> blocks{};
+    auto *out = reinterpret_cast<int16_t *>(out_fp16);
+
+    const size_t total_blocks = static_cast<size_t>(blocks_x) * blocks_y;
+    for (size_t batch_start = 0; batch_start < total_blocks; batch_start += cvtt::NumParallelBlocks)
+    {
+        const unsigned batch_size =
+            static_cast<unsigned>(std::min<size_t>(cvtt::NumParallelBlocks, total_blocks - batch_start));
+
+        std::array<uint8_t, cvtt::NumParallelBlocks * 16> batch_input{};
+        std::memcpy(batch_input.data(), blocks_data + batch_start * 16, static_cast<size_t>(batch_size) * 16);
+        cvtt::Kernels::DecodeBC6HU(blocks.data(), batch_input.data());
+
+        for (unsigned i = 0; i < batch_size; i++)
+        {
+            const size_t block_index = batch_start + i;
+            const auto bx = static_cast<unsigned>(block_index % blocks_x);
+            const auto by = static_cast<unsigned>(block_index / blocks_x);
+            for (unsigned py = 0; py < 4; py++)
+            {
+                const unsigned sy = by * 4 + py;
+                if (sy >= height)
+                {
+                    break;
+                }
+                for (unsigned px = 0; px < 4; px++)
+                {
+                    const unsigned sx = bx * 4 + px;
+                    if (sx >= width)
+                    {
+                        break;
+                    }
+                    int16_t *texel = out + (static_cast<size_t>(sy) * width + sx) * 4;
+                    std::memcpy(texel, blocks[i].m_pixels[py * 4 + px], 3 * sizeof(int16_t));
+                    texel[3] = OneHalf;
+                }
+            }
+        }
+    }
 }
 
 bool EncodeAstcMip(const uint8_t *rgba, unsigned width, unsigned height, astcenc_context *context, uint8_t *out,
@@ -406,9 +516,9 @@ PixelFormat TextureCompression::SelectHdrFormat(Family family)
     switch (family)
     {
     case Family::Astc:
-        return PixelFormat::ASTC6x6HDR;
+        return PixelFormat::ASTC4x4HDR;
     case Family::Bc:
-        return PixelFormat::R9G9B9E5Float;
+        return PixelFormat::BC6HUfloat;
     default:
         UnImplemented(family);
         return PixelFormat::Count;
@@ -422,22 +532,14 @@ std::vector<uint8_t> TextureCompression::EncodeHdrFace(const Image2D &source, Pi
     const unsigned width = source.GetWidth();
     const unsigned height = source.GetHeight();
 
-    if (target_format == PixelFormat::R9G9B9E5Float)
+    if (target_format == PixelFormat::BC6HUfloat)
     {
-        Image2D packed(width, height, PixelFormat::R9G9B9E5Float);
-        for (unsigned y = 0; y < height; y++)
-        {
-            for (unsigned x = 0; x < width; x++)
-            {
-                packed.SetPixel(x, y, Vector3(source.AccessPixel(x, y).head<3>()));
-            }
-        }
-        std::vector<uint8_t> bytes(packed.GetStorageSize());
-        memcpy(bytes.data(), packed.GetRawData(), bytes.size());
-        return bytes;
+        std::vector<uint8_t> blocks(GetImageMipByteSize(target_format, width, height));
+        EncodeBc6hMip(source.GetRawData(), width, height, blocks.data());
+        return blocks;
     }
 
-    ASSERT(IsHDRCompressedFormat(target_format));
+    ASSERT(target_format == PixelFormat::ASTC4x4HDR);
 
     astcenc_config config;
     const unsigned block_dim = GetBlockDim(target_format);
@@ -777,7 +879,11 @@ Image2D TextureCompression::Decode(const Image2D &compressed, unsigned mip_level
     if (IsHDRCompressedFormat(format))
     {
         std::vector<uint8_t> fp16(static_cast<size_t>(width) * height * GetPixelSize(PixelFormat::RGBAFloat16));
-        if (!DecodeAstcHdrMip(mip_data, mip_size, width, height, format, reinterpret_cast<Half *>(fp16.data())))
+        if (format == PixelFormat::BC6HUfloat)
+        {
+            DecodeBc6hMip(mip_data, width, height, reinterpret_cast<Half *>(fp16.data()));
+        }
+        else if (!DecodeAstcHdrMip(mip_data, mip_size, width, height, format, reinterpret_cast<Half *>(fp16.data())))
         {
             memset(fp16.data(), 0, fp16.size());
         }

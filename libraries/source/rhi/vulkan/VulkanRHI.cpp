@@ -185,7 +185,7 @@ bool VulkanRHI::HasPhysicalGpu()
 
 bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
 {
-    if (IsHDRCompressedFormat(format) && !context->SupportsAstcHdr())
+    if (format == PixelFormat::ASTC4x4HDR && !context->SupportsAstcHdr())
     {
         return false;
     }

@@ -34,8 +34,8 @@ class TextureCompressionTest : public TestCase
         {
             success &= VerifyOddMipEdges(family);
         }
-        success &= VerifyHdrRoundTrip(PixelFormat::ASTC6x6HDR, "hdr astc 6x6");
-        success &= VerifyHdrRoundTrip(PixelFormat::R9G9B9E5Float, "hdr bc");
+        success &= VerifyHdrRoundTrip(PixelFormat::ASTC4x4HDR, "hdr astc 4x4");
+        success &= VerifyHdrRoundTrip(PixelFormat::BC6HUfloat, "hdr bc6h");
 
         return success ? Result::Pass : Result::Fail;
     }
@@ -259,26 +259,13 @@ class TextureCompressionTest : public TestCase
             return false;
         }
 
-        Image2D decoded;
-        Vector3 direct_sample = Zeros;
-        if (IsCompressedFormat(target))
-        {
-            const Image2D compressed(Width, Height, target, 1, bytes, "hdr_test");
-            direct_sample = compressed.AccessPixel(Width / 2, Height / 2).head<3>();
-            decoded = TextureCompression::Decode(compressed, 0);
-        }
-        else
-        {
-            decoded = Image2D(Width, Height, target, bytes);
-        }
-        const PixelFormat expected_decoded = IsCompressedFormat(target) ? PixelFormat::RGBAFloat16 : target;
-        success &= Expect(decoded.IsValid() && decoded.GetFormat() == expected_decoded,
+        const Image2D compressed(Width, Height, target, 1, bytes, "hdr_test");
+        const Vector3 direct_sample = compressed.AccessPixel(Width / 2, Height / 2).head<3>();
+        const Image2D decoded = TextureCompression::Decode(compressed, 0);
+        success &= Expect(decoded.IsValid() && decoded.GetFormat() == PixelFormat::RGBAFloat16,
                           (std::string(label) + ": decode is valid").c_str());
-        if (IsCompressedFormat(target))
-        {
-            success &= Expect(direct_sample == decoded.AccessPixel(Width / 2, Height / 2).head<3>(),
-                              (std::string(label) + ": direct pixel access uses the decoded view").c_str());
-        }
+        success &= Expect(direct_sample == decoded.AccessPixel(Width / 2, Height / 2).head<3>(),
+                          (std::string(label) + ": direct pixel access uses the decoded view").c_str());
 
         double abs_error = 0.0;
         double signal = 0.0;

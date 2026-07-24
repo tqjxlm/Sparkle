@@ -29,6 +29,7 @@ FILE(GLOB THIRD_PARTY_SOURCES
     hash-library/src/*.cpp
     bc7enc_rdo/bc7enc.cpp
     bc7enc_rdo/bc7decomp.cpp
+    ConvectionKernels/ConvectionKernels_*.cpp
 )
 
 if (GLFW)
@@ -278,6 +279,7 @@ target_include_directories(sparkle_thirdparty SYSTEM PUBLIC
     IconFontCppHeaders
     astc-encoder/Source
     bc7enc_rdo
+    ConvectionKernels
 )
 
 target_link_libraries(sparkle PUBLIC sparkle_thirdparty)

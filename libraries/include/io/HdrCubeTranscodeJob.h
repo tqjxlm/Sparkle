@@ -12,7 +12,7 @@ namespace sparkle
 class HdrCubeTranscodeJob : public CookJob
 {
 public:
-    static constexpr uint32_t Version = 3;
+    static constexpr uint32_t Version = 4;
 
     HdrCubeTranscodeJob(const std::string &master_type, TextureCompression::Family family, std::string source_name,
                         std::vector<char> master_payload);

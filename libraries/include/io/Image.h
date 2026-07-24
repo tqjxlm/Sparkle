@@ -177,9 +177,6 @@ public:
             SetPixel<Vector4h>(x, y, color_half);
             break;
         }
-        case PixelFormat::R9G9B9E5Float:
-            SetPixel<uint32_t>(x, y, PackRGB9E5(value));
-            break;
         default:
             UnImplemented(pixel_format_);
             break;
@@ -204,8 +201,6 @@ public:
             return AccessPixel<Vector4>(x, y);
         case PixelFormat::RGBAFloat16:
             return AccessPixel<Vector4h>(x, y).cast<float>();
-        case PixelFormat::R9G9B9E5Float:
-            return UnpackRGB9E5(AccessPixel<uint32_t>(x, y));
         default:
             UnImplemented(pixel_format_);
         }
@@ -238,9 +233,6 @@ private:
     {
         return reinterpret_cast<T *>(pixels_.data() + y * width_ * GetPixelSize(pixel_format_));
     }
-
-    [[nodiscard]] static Vector4 UnpackRGB9E5(uint32_t packed);
-    [[nodiscard]] static uint32_t PackRGB9E5(const Vector3 &linear);
 
     [[nodiscard]] size_t GetExpectedStorageSize() const
     {
