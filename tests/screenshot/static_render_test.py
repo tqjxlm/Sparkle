@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import shutil
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +36,12 @@ def main():
 
     try:
         screenshot = find_screenshot(args.framework)
+        # later cases wipe top-level screenshots; a named copy in a subdirectory
+        # survives into the CI artifacts
+        captures_dir = os.path.join(os.path.dirname(screenshot), "captures")
+        os.makedirs(captures_dir, exist_ok=True)
+        shutil.copy(screenshot, os.path.join(
+            captures_dir, f"{args.scene}_{args.pipeline}_capture.png"))
         print("Downloading ground truth...", flush=True)
         ground_truth = download_ground_truth(
             args.framework, args.scene, args.pipeline)
