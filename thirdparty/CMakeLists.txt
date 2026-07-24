@@ -32,6 +32,11 @@ FILE(GLOB THIRD_PARTY_SOURCES
     ConvectionKernels/ConvectionKernels_*.cpp
 )
 
+# pre-defining the config include guard keeps CVTT on its scalar path everywhere: the
+# SSE2 path encodes BC6H at ~3.4x the error of scalar at every quality setting
+FILE(GLOB CVTT_SOURCES ConvectionKernels/ConvectionKernels_*.cpp)
+set_source_files_properties(${CVTT_SOURCES} PROPERTIES COMPILE_DEFINITIONS __CVTT_CONFIG_H__)
+
 if (GLFW)
     FILE(GLOB IMGUI_SOURCES
         imgui/backends/imgui_impl_vulkan.cpp
