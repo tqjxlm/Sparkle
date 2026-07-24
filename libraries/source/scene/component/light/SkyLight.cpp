@@ -340,14 +340,15 @@ void SkyLight::RequestCook()
         future->OnReady();
     };
 
-    // lookup order: the fp16 master (what a dev pool holds), then the family transcode
-    // (the only artifact a packaged image carries), then cook the master
+    // lookup order: the family transcode (what packaged images and cook-warmed dev pools
+    // resolve, keeping every context on the shipped encoding the ground truths reflect),
+    // then the fp16 master, then cook the master
     const auto master_key = MasterCookKey(sky_map_path_);
     const auto transcode_key = HdrCubeTranscodeJob::MakeLookupKey(
         SkyLightCookJob::Type, TextureCompression::PlatformFamily, master_key.source_name);
 
-    ProbeArtifact(master_key, finish, [this, transcode_key, finish]() {
-        ProbeArtifact(transcode_key, finish, [this, finish]() { RequestMasterCook(finish); });
+    ProbeArtifact(transcode_key, finish, [this, master_key, finish]() {
+        ProbeArtifact(master_key, finish, [this, finish]() { RequestMasterCook(finish); });
     });
 }
 

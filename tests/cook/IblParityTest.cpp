@@ -47,9 +47,11 @@ protected:
             }
 
             const auto &env_map = sky_light->GetCubeMap();
-            if (env_map->GetFormat() != PixelFormat::RGBAFloat16)
+            const auto transcode_format = TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily);
+            if (env_map->GetFormat() != PixelFormat::RGBAFloat16 && env_map->GetFormat() != transcode_format)
             {
-                Log(Error, "sky cube format is {}, expected the fp16 master", Enum2Str(env_map->GetFormat()));
+                Log(Error, "sky cube format is {}, expected the fp16 master or the family transcode",
+                    Enum2Str(env_map->GetFormat()));
                 return Result::Fail;
             }
 

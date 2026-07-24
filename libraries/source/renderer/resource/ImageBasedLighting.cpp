@@ -21,15 +21,16 @@ namespace sparkle
 {
 namespace
 {
-// lookup order: the fp16 master (what a dev pool holds), then the family transcode (the
-// only artifact a packaged image carries), then cook the master on a full miss
+// lookup order: the family transcode (what packaged images and cook-warmed dev pools
+// resolve, keeping every context on the shipped encoding the ground truths reflect), then
+// the fp16 master, then cook the master on a full miss
 template <class Pass, class... Args>
 std::unique_ptr<Pass> CreatePass(const RenderConfig &config, bool allow_gpu_cook, const CookArtifactKey &master_key,
                                  const CookArtifactKey &transcode_key, std::function<void()> on_ready, Args &&...args)
 {
     auto pass = std::make_unique<Pass>(std::forward<Args>(args)...);
 
-    for (const auto *key : {&master_key, &transcode_key})
+    for (const auto *key : {&transcode_key, &master_key})
     {
         if (key->type.empty())
         {
