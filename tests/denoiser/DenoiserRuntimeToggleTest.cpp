@@ -3,23 +3,33 @@
 #include "application/AppFramework.h"
 #include "application/RenderFramework.h"
 #include "core/ConfigManager.h"
+#include "core/ConfigValue.h"
 #include "core/Logger.h"
-#include "renderer/nrd/NrdConfig.h"
+#include "renderer/denoiser/DenoiserConfig.h"
 
 #include <format>
 #include <memory>
 
 namespace sparkle
 {
-// Guards the control-panel flow: NRD resources created at runtime inherit recycled device memory
-// that one history reset cannot purge. The starting pipeline selects the arm — forward: runtime
-// switch to gpu, then enable NRD mid-accumulation (memory-recycling repro); gpu: enable on a
-// converged frame (render-freeze arm).
+static ConfigValue<std::string> config_toggle_denoiser("toggle_denoiser",
+                                                       "denoiser provider denoiser_runtime_toggle enables", "test",
+                                                       "nrd");
+
+// Guards the control-panel flow: denoiser resources created at runtime inherit recycled device
+// memory that one history reset cannot purge. The starting pipeline selects the arm — forward:
+// runtime switch to gpu, then enable the denoiser mid-accumulation (memory-recycling repro); gpu:
+// enable on a converged frame (render-freeze arm).
 //
-// Usage: --test_case nrd_runtime_toggle --pipeline [forward|gpu] --nrd false
-class NrdRuntimeToggleTest : public TestCase
+// Usage: --test_case denoiser_runtime_toggle --pipeline [forward|gpu] --denoiser off [--toggle_denoiser nrd]
+class DenoiserRuntimeToggleTest : public TestCase
 {
 public:
+    void OnEnforceConfigs() override
+    {
+        EnforceConfig("denoiser", std::string("off"));
+    }
+
     Result OnTick(AppFramework &app) override
     {
         auto *rf = app.GetRenderFramework();
@@ -31,9 +41,9 @@ public:
             {
                 return Result::Pending;
             }
-            if (NrdConfig::Get().enabled)
+            if (DenoiserConfig::Get().provider != DenoiserProvider::Off)
             {
-                Log(Error, "{}: NRD is already enabled; run with --nrd false", GetName());
+                Log(Error, "{}: a denoiser is already enabled; run with --denoiser off", GetName());
                 return Result::Fail;
             }
             auto *pipeline = ConfigManager::Instance().GetConfig<std::string>("pipeline");
@@ -59,7 +69,7 @@ public:
                 return Result::Pending;
             }
             tick_ = 0;
-            EnableNrd();
+            EnableDenoiser();
             return Result::Pending;
 
         case Phase::WaitConverged:
@@ -67,7 +77,7 @@ public:
             {
                 return Result::Pending;
             }
-            EnableNrd();
+            EnableDenoiser();
             return Result::Pending;
 
         case Phase::Capture:
@@ -88,7 +98,7 @@ public:
             if (++tick_ >= HoldTicks)
             {
                 tick_ = 0;
-                request_ = rf->RequestTakeScreenshot(std::format("nrd_toggle_{}", capture_idx_));
+                request_ = rf->RequestTakeScreenshot(std::format("denoiser_toggle_{}", capture_idx_));
             }
             return Result::Pending;
 
@@ -112,10 +122,10 @@ private:
         Capture
     };
 
-    void EnableNrd()
+    void EnableDenoiser()
     {
-        EnforceConfig("nrd", true);
-        Log(Info, "{}: NRD enabled at runtime", GetName());
+        EnforceConfig("denoiser", config_toggle_denoiser.Get());
+        Log(Info, "{}: denoiser '{}' enabled at runtime", GetName(), config_toggle_denoiser.Get());
         phase_ = Phase::Capture;
     }
 
@@ -131,5 +141,5 @@ private:
     std::shared_ptr<ScreenshotRequest> request_;
 };
 
-static TestCaseRegistrar<NrdRuntimeToggleTest> nrd_runtime_toggle_registrar("nrd_runtime_toggle");
+static TestCaseRegistrar<DenoiserRuntimeToggleTest> denoiser_runtime_toggle_registrar("denoiser_runtime_toggle");
 } // namespace sparkle

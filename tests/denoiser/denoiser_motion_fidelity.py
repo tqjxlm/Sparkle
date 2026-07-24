@@ -9,16 +9,16 @@ truth. Reported per region (spec cluster / floor / whole):
   * systematic  : RMS of max(|mean - GT| - 2*stderr, 0) — deviation that noise cannot explain.
   * sharpness   : laplacian RMS ratio (mean / GT) — <1 = frosted/over-blurred, ~1 = detail preserved.
 
-Outputs tmp/nrd_diff/motion_fidelity.png (GT | mean | systematic x8) for the semantic gate.
+Outputs tmp/denoiser_diff/motion_fidelity.png (GT | mean | systematic x8) for the semantic gate.
 
-Run:  python3 tests/nrd/nrd_motion_fidelity.py [--skip_build] [--realizations 4] [--headless]
+Run:  python3 tests/denoiser/denoiser_motion_fidelity.py [--skip_build] [--realizations 4] [--headless]
 """
 
 import argparse
 import os
 import shutil
 
-from nrd_common import PROJECT_ROOT, load_image, lum, render_test_support, run_sweep
+from denoiser_common import PROJECT_ROOT, load_image, lum, render_test_support, run_sweep
 
 SEED_STRIDE = 7919
 MOTION_FRAME = 15
@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--framework", default="macos",
                         choices=render_test_support.SUPPORTED_FRAMEWORKS)
     parser.add_argument("--realizations", type=int, default=8)
+    parser.add_argument("--denoiser", default="nrd", help="denoiser backend under test")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--skip_build", action="store_true")
     args, passthrough = parser.parse_known_args()
@@ -59,7 +60,7 @@ def main():
 
     # raw realizations calibrate the metric: raw is unbiased, so its "systematic" is the noise floor
     # that M realizations cannot subtract; the denoiser's real error is its EXCESS over that floor.
-    for arm, extra in [("nrd", ["--nrd", "true"]), ("raw", [])]:
+    for arm, extra in [(args.denoiser, ["--denoiser", args.denoiser]), ("raw", [])]:
         for m in range(args.realizations):
             run(args, ["--max_spp", "1", "--random_seed_offset", str(m * SEED_STRIDE)] + extra
                 + list(passthrough), True)
@@ -78,10 +79,10 @@ def main():
         stderr = reals.std(axis=0) / np.sqrt(args.realizations)
         return mean, np.maximum(np.abs(mean - gt) - 2.0 * stderr, 0.0)
 
-    mean, systematic = stats("nrd")
+    mean, systematic = stats(args.denoiser)
     raw_mean, raw_systematic = stats("raw")
 
-    print(f"\n==== NRD motion-phase fidelity (M={args.realizations}, pose = last sweep capture) ====")
+    print(f"\n==== {args.denoiser} motion-phase fidelity (M={args.realizations}, pose = last sweep capture) ====")
     print(f"{'region':>14} | {'bias':>8} {'systematic':>10} {'noise_floor':>11} {'excess':>8} {'sharpness':>9}")
     for name, (ys, xs) in REGIONS.items():
         bias = float((mean - gt)[ys, xs].mean())
@@ -95,7 +96,7 @@ def main():
     montage = Image.new("RGB", (gt.shape[1] * 3 + 8, gt.shape[0]), (24, 24, 24))
     for i, tile in enumerate(tiles):
         montage.paste(Image.fromarray((np.clip(tile, 0, 1) * 255).astype("uint8")), (i * (gt.shape[1] + 4), 0))
-    out = os.path.join(PROJECT_ROOT, "tmp", "nrd_diff", "motion_fidelity.png")
+    out = os.path.join(PROJECT_ROOT, "tmp", "denoiser_diff", "motion_fidelity.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     montage.save(out)
     print(f"\nmontage written: {out} (GT | mean of {args.realizations} | systematic x8)")

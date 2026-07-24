@@ -200,6 +200,10 @@ inline VkFormat GetVkPixelFormat(PixelFormat format)
         return VK_FORMAT_R32_UINT;
     case PixelFormat::R32Float:
         return VK_FORMAT_R32_SFLOAT;
+    case PixelFormat::R16Float:
+        return VK_FORMAT_R16_SFLOAT;
+    case PixelFormat::RGFloat16:
+        return VK_FORMAT_R16G16_SFLOAT;
     case PixelFormat::ASTC4x4Srgb:
         return VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
     case PixelFormat::ASTC4x4Unorm:
@@ -306,6 +310,10 @@ inline PixelFormat VkFormatToPixelFormat(VkFormat format)
         return PixelFormat::R32UInt;
     case VK_FORMAT_R32_SFLOAT:
         return PixelFormat::R32Float;
+    case VK_FORMAT_R16_SFLOAT:
+        return PixelFormat::R16Float;
+    case VK_FORMAT_R16G16_SFLOAT:
+        return PixelFormat::RGFloat16;
     case VK_FORMAT_R32G32B32A32_UINT:
         return PixelFormat::RGBAUInt32;
     case VK_FORMAT_ASTC_4x4_SRGB_BLOCK:

@@ -384,6 +384,7 @@ elseif(MACOS)
         "-framework AppKit"
         "-framework MetalKit"
         "-framework Metal"
+        "-framework MetalFX"
         "-framework GameController"
         "-framework MetalPerformanceShaders"
     )
@@ -417,10 +418,13 @@ elseif(IOS)
     )
 
     if(PLATFORM MATCHES "SIMULATOR")
+        target_compile_definitions(sparkle PRIVATE SPARKLE_DISABLE_METALFX=1)
+
         # simulator bundles never install on a device: build unsigned
         set(IOS_TARGET_PLATFORMS "iphonesimulator")
         set(CODE_SIGN_STYLE XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO")
     else()
+        set(LIBRARIES ${LIBRARIES} "-framework MetalFX")
         set(IOS_TARGET_PLATFORMS "iphoneos")
 
         if(DEFINED ENV{APPLE_DEVELOPER_TEAM_ID})
