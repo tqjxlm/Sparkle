@@ -1,6 +1,6 @@
 """Pre-convergence quality metrics: edge fireflies + low-frequency patches.
 
-Consumes the frame sequences captured by nrd_static_stability_test.py (static camera, early window,
+Consumes the frame sequences captured by denoiser_static_stability_test.py (static camera, early window,
 --settle 16) plus a converged raw reference, and reports per config:
 
   * firefly_count / firefly_energy : per-pixel temporal spike = max - median luminance over the sequence;
@@ -11,7 +11,7 @@ Consumes the frame sequences captured by nrd_static_stability_test.py (static ca
     isolates the low-frequency shadow patches from pixel noise.
   * patch_flicker_rms : RMS of the 16x16 box-filtered temporal std — the patches' breathing.
 
-Run:  python3 tests/nrd/nrd_preconv_quality.py [--gt <converged raw png>]
+Run:  python3 tests/denoiser/denoiser_preconv_quality.py [--gt <converged raw png>]
       (expects <screenshots>/static_stability/{raw,nrd}_{0..15}.png from a --settle 16 run)
 """
 
@@ -19,7 +19,7 @@ import argparse
 import os
 import sys
 
-from nrd_common import NUM_FRAMES, load_image, lum, render_test_support
+from denoiser_common import NUM_FRAMES, load_image, lum, render_test_support
 
 FIREFLY_SPIKE = 0.10
 

@@ -9,16 +9,16 @@ truth. Reported per region (spec cluster / floor / whole):
   * systematic  : RMS of max(|mean - GT| - 2*stderr, 0) — deviation that noise cannot explain.
   * sharpness   : laplacian RMS ratio (mean / GT) — <1 = frosted/over-blurred, ~1 = detail preserved.
 
-Outputs tmp/nrd_diff/motion_fidelity.png (GT | mean | systematic x8) for the semantic gate.
+Outputs tmp/denoiser_diff/motion_fidelity.png (GT | mean | systematic x8) for the semantic gate.
 
-Run:  python3 tests/nrd/nrd_motion_fidelity.py [--skip_build] [--realizations 4] [--headless]
+Run:  python3 tests/denoiser/denoiser_motion_fidelity.py [--skip_build] [--realizations 4] [--headless]
 """
 
 import argparse
 import os
 import shutil
 
-from nrd_common import PROJECT_ROOT, load_image, lum, render_test_support, run_sweep
+from denoiser_common import PROJECT_ROOT, load_image, lum, render_test_support, run_sweep
 
 SEED_STRIDE = 7919
 MOTION_FRAME = 15
@@ -96,7 +96,7 @@ def main():
     montage = Image.new("RGB", (gt.shape[1] * 3 + 8, gt.shape[0]), (24, 24, 24))
     for i, tile in enumerate(tiles):
         montage.paste(Image.fromarray((np.clip(tile, 0, 1) * 255).astype("uint8")), (i * (gt.shape[1] + 4), 0))
-    out = os.path.join(PROJECT_ROOT, "tmp", "nrd_diff", "motion_fidelity.png")
+    out = os.path.join(PROJECT_ROOT, "tmp", "denoiser_diff", "motion_fidelity.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     montage.save(out)
     print(f"\nmontage written: {out} (GT | mean of {args.realizations} | systematic x8)")

@@ -8,7 +8,7 @@ Rows: raw (no denoiser) plus each backend from --denoisers. Columns:
   * yaw/pitch noise      : the motion-gate statistic at max_spp 1 (continuous 2 deg/frame rotation).
   * frame cost           : wall-clock delta vs the raw arm over --perf_frames identical static frames.
 
-Run:  python3 tests/nrd/denoiser_compare.py [--denoisers nrd,metalfx] [--skip_build] [--headless]
+Run:  python3 tests/denoiser/denoiser_compare.py [--denoisers nrd,metalfx] [--skip_build] [--headless]
       [--perf_frames 2000] [--render_scale 1.0]
 """
 
@@ -17,7 +17,7 @@ import os
 import shutil
 import time
 
-from nrd_common import (
+from denoiser_common import (
     NUM_FRAMES,
     load_image,
     load_sweep_frames,

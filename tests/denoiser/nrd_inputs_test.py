@@ -18,7 +18,7 @@ calibrated on post-tonemap values.
   DenoisedDiff    ReBLUR output: smooth, colorful, structured (proves dispatches wrote real data)
   DenoisedSpec    ReBLUR output: finite, structured
 
-Run:  python3 tests/nrd/nrd_inputs_test.py [--skip_build] [--spp 16] [--views ViewZ,MotionVector]
+Run:  python3 tests/denoiser/nrd_inputs_test.py [--skip_build] [--spp 16] [--views ViewZ,MotionVector]
 """
 
 import argparse
@@ -26,7 +26,7 @@ import os
 import shutil
 import sys
 
-from nrd_common import load_image, lum, render_test_support, run_test_case  # noqa: E402
+from denoiser_common import load_image, lum, render_test_support, run_test_case  # noqa: E402
 
 
 def stats_of(path):

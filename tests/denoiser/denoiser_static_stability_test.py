@@ -9,17 +9,17 @@ frames, no convergence hold) for nrd / raw, then reports and visualizes:
     (specular objects? floor? everywhere? block patterns?).
   * consecutive diff tiles : amplified |f9 - f8| — WHAT a single frame-to-frame change looks like.
 
-Montage -> tmp/nrd_diff/static_stability_montage.png (rows: raw / nrd).
+Montage -> tmp/denoiser_diff/static_stability_montage.png (rows: raw / nrd).
 
-Run: python3 tests/nrd/nrd_static_stability_test.py --framework macos --headless [--skip_build]
+Run: python3 tests/denoiser/denoiser_static_stability_test.py --framework macos --headless [--skip_build]
 """
 
 import argparse
 import os
 import sys
 
-import nrd_common
-from nrd_common import NUM_FRAMES, PROJECT_ROOT, render_test_support, run_sweep
+import denoiser_common
+from denoiser_common import NUM_FRAMES, PROJECT_ROOT, render_test_support, run_sweep
 
 SETTLE = 16
 
@@ -60,7 +60,7 @@ def collect(framework, prefix, work_dir):
 
 def load(paths):
     import numpy as np
-    return np.stack([nrd_common.load_image(p) for p in paths])
+    return np.stack([denoiser_common.load_image(p) for p in paths])
 
 
 def analyze(name, frames):
@@ -94,7 +94,7 @@ def build_montage(rows, work_dir):
             x = pad + c * (tw + pad)
             draw.text((x, y + 2), f"{name} | {label}", fill=(255, 255, 255))
             montage.paste(Image.fromarray((img * 255).astype("uint8")), (x, y + label_h))
-    out = os.path.join(PROJECT_ROOT, "tmp", "nrd_diff", f"static_stability_montage_settle{SETTLE}.png")
+    out = os.path.join(PROJECT_ROOT, "tmp", "denoiser_diff", f"static_stability_montage_settle{SETTLE}.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     montage.save(out)
     return out

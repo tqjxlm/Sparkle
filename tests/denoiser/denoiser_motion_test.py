@@ -11,13 +11,13 @@ passes the yaw arm while failing pitch. The pitch gate is tighter because that f
 subtler: calibration 2026-07-07, healthy 0.0086 vs mirrored-matrix 0.0140 (specular ghosting +
 raw-noise breakthrough), deterministic seeds make the measurement reproducible.
 
-Run:  python3 tests/nrd/nrd_motion_test.py [--framework macos] [--skip_build] [--headless] [--axis yaw|pitch]
+Run:  python3 tests/denoiser/denoiser_motion_test.py [--framework macos] [--skip_build] [--headless] [--axis yaw|pitch]
 """
 
 import argparse
 import sys
 
-from nrd_common import NUM_FRAMES, load_sweep_frames, lum, render_test_support, run_sweep
+from denoiser_common import NUM_FRAMES, load_sweep_frames, lum, render_test_support, run_sweep
 
 NOISE_GATES = {"yaw": 0.02, "pitch": 0.012}
 
