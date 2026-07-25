@@ -122,6 +122,18 @@ std::string ExportTexture(ExportContext &ctx, const Image2D &image)
 
 // authors a UsdUVTexture shader prim that reads primvars:st through a UsdPrimvarReader_float2.
 // returns the texture prim path for connection.
+// output channels of a UsdUVTexture shader. metallic-roughness textures follow the glTF
+// packing the loaders and shaders assume: G is roughness, B is metallic
+constexpr const char *TextureOutputRgb = "outputs:rgb";
+constexpr const char *TextureOutputRoughness = "outputs:g";
+constexpr const char *TextureOutputMetallic = "outputs:b";
+
+// connects one UsdPreviewSurface input to a channel of a texture shader's output
+template <typename Input> void ConnectTexture(Input &input, const tinyusdz::Path &texture_path, const char *channel)
+{
+    input.set_connection(tinyusdz::Path(texture_path.prim_part(), channel));
+}
+
 tinyusdz::Path AddTextureShader(ExportContext &ctx, tinyusdz::Prim &material_prim, const std::string &material_path,
                                 const std::string &shader_name, const Image2D &image)
 {
@@ -206,7 +218,7 @@ std::string ExportMaterial(ExportContext &ctx, Material *material)
     {
         auto texture_path =
             AddTextureShader(ctx, material_prim, material_path, "base_color_tex", *resource.base_color_texture);
-        surface.diffuseColor.set_connection(tinyusdz::Path(texture_path.prim_part(), "outputs:rgb"));
+        ConnectTexture(surface.diffuseColor, texture_path, TextureOutputRgb);
     }
     else
     {
@@ -217,7 +229,7 @@ std::string ExportMaterial(ExportContext &ctx, Material *material)
     {
         auto texture_path =
             AddTextureShader(ctx, material_prim, material_path, "emissive_tex", *resource.emissive_texture);
-        surface.emissiveColor.set_connection(tinyusdz::Path(texture_path.prim_part(), "outputs:rgb"));
+        ConnectTexture(surface.emissiveColor, texture_path, TextureOutputRgb);
     }
     else
     {
@@ -227,16 +239,16 @@ std::string ExportMaterial(ExportContext &ctx, Material *material)
     if (resource.normal_texture)
     {
         auto texture_path = AddTextureShader(ctx, material_prim, material_path, "normal_tex", *resource.normal_texture);
-        surface.normal.set_connection(tinyusdz::Path(texture_path.prim_part(), "outputs:rgb"));
+        ConnectTexture(surface.normal, texture_path, TextureOutputRgb);
     }
 
     if (resource.metallic_roughness_texture)
     {
-        // metallic and roughness are packed into one texture (gltf convention: G=roughness, B=metallic)
+        // metallic and roughness share one texture, read from different channels
         auto texture_path = AddTextureShader(ctx, material_prim, material_path, "metallic_roughness_tex",
                                              *resource.metallic_roughness_texture);
-        surface.metallic.set_connection(tinyusdz::Path(texture_path.prim_part(), "outputs:b"));
-        surface.roughness.set_connection(tinyusdz::Path(texture_path.prim_part(), "outputs:g"));
+        ConnectTexture(surface.metallic, texture_path, TextureOutputMetallic);
+        ConnectTexture(surface.roughness, texture_path, TextureOutputRoughness);
     }
     else
     {
