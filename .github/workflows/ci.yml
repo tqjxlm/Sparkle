@@ -189,22 +189,6 @@ jobs:
           build-type: Release
           abi: simulator
 
-  build-macos-glfw-debug:
-    name: build (macos-latest, glfw, Debug)
-    needs: changes
-    if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
-    runs-on: macos-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Build Platform
-        uses: ./.github/actions/build-platform
-        with:
-          framework: glfw
-          os: macos-latest
-          build-type: Debug
-
   build-macos-glfw-release:
     name: build (macos-latest, glfw, Release)
     needs: changes
@@ -990,7 +974,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-debug, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
+    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

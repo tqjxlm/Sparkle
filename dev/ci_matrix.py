@@ -29,7 +29,11 @@ PRODUCTS = (
     {"os": "macos-latest", "framework": "ios"},
     {"os": "macos-latest", "framework": "ios", "abi": "simulator",
      "build_types": ("Release",)},
-    {"os": "macos-latest", "framework": "glfw"},
+    # glfw builds Debug on windows and ubuntu already; the macos Debug gate would only
+    # add "glfw code that is both apple-specific and Debug-only", which the macos
+    # framework's own Debug build covers on the apple side. Release still builds here
+    # because macos-glfw-release is a test cell (the Vulkan backend on a real GPU)
+    {"os": "macos-latest", "framework": "glfw", "build_types": ("Release",)},
     {"os": "windows-latest", "framework": "glfw"},
     {"os": "ubuntu-latest", "framework": "glfw"},
     {"os": "ubuntu-latest", "framework": "android"},
