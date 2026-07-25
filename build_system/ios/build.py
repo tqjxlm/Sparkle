@@ -6,8 +6,8 @@ import subprocess
 import time
 import zipfile
 
-from build_system.utils import run_command_with_logging, robust_rmtree
-from build_system.builder_interface import FrameworkBuilder
+from build_system.utils import robust_rmtree
+from build_system.xcode_builder import XcodeBuilder, project_dir, output_dir
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -33,8 +33,7 @@ def platform_args(args):
 
 
 def get_project_dir():
-    """Directory for CMake/Xcode project files."""
-    return os.path.join(SCRIPTPATH, "project")
+    return project_dir(SCRIPTPATH)
 
 
 def reset_on_platform_switch(args):
@@ -55,8 +54,7 @@ def reset_on_platform_switch(args):
 
 
 def get_output_dir():
-    """Directory for build output (set by CMake PRODUCT_OUTPUT_DIRECTORY)."""
-    return os.path.join(SCRIPTPATH, "output", "build")
+    return output_dir(SCRIPTPATH)
 
 
 def get_app_path():
@@ -310,92 +308,33 @@ def run_test_case(args):
     return 0 if code == 0 else 1
 
 
-class IosBuilder(FrameworkBuilder):
+class IosBuilder(XcodeBuilder):
     """iOS framework builder implementation."""
 
     def __init__(self):
-        super().__init__("ios")
+        super().__init__("ios", SCRIPTPATH)
 
-    def configure_for_clangd(self, args):
-        """Configure CMake for clangd support."""
-        output_dir = os.path.join(SCRIPTPATH, "clangd")
+    def platform_cmake_args(self, args):
+        return toolchain_args + platform_args(args)
 
-        if args.get("clean", False):
-            robust_rmtree(output_dir)
+    def project_cmake_args(self, args):
+        if not args.get("apple_auto_sign", False):
+            return []
+        if not os.environ.get("APPLE_DEVELOPER_TEAM_ID"):
+            raise RuntimeError(
+                "APPLE_DEVELOPER_TEAM_ID environment variable is not set. "
+                "Please set APPLE_DEVELOPER_TEAM_ID. "
+                "https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
+        return ["-DENABLE_APPLE_AUTO_SIGN=ON"]
 
-        os.makedirs(output_dir, exist_ok=True)
-        os.chdir(output_dir)
+    def extra_build_args(self, args):
+        if args.get("apple_auto_sign", False):
+            return ["--", "-allowProvisioningUpdates"]
+        return []
 
-        compiler_args = ["-DCMAKE_C_COMPILER=/usr/bin/clang",
-                         "-DCMAKE_CXX_COMPILER=/usr/bin/clang++"]
-        generator_args = [f"-DCMAKE_BUILD_TYPE={args['config']}"]
-
-        cmake_cmd = [
-            args["cmake_executable"],
-            "../../..",
-        ] + generator_args + toolchain_args + args["cmake_options"] + compiler_args + platform_args(args)
-
-        print("Configuring CMake for clangd (iOS) with command:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd, env=os.environ.copy())
-        if result.returncode != 0:
-            raise RuntimeError("CMake configure failed.")
-
-        print(f"Configuration complete in {output_dir}")
-
-    def generate_project(self, args):
-        """Generate Xcode project files."""
-        output_dir = get_project_dir()
-
-        if args.get("clean", False):
-            robust_rmtree(output_dir)
-
+    def prepare_project_dir(self, args):
+        super().prepare_project_dir(args)
         reset_on_platform_switch(args)
-        os.chdir(output_dir)
-
-        sign_args = []
-        if args.get("apple_auto_sign", False):
-            team_id = os.environ.get("APPLE_DEVELOPER_TEAM_ID")
-            if team_id:
-                sign_args = ["-DENABLE_APPLE_AUTO_SIGN=ON"]
-            else:
-                raise RuntimeError(
-                    "APPLE_DEVELOPER_TEAM_ID environment variable is not set. "
-                    "Please set APPLE_DEVELOPER_TEAM_ID. "
-                    "https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/")
-
-        generator_args = ["-G Xcode"]
-
-        cmake_cmd = [
-            args["cmake_executable"],
-            "../../..",
-        ] + generator_args + toolchain_args + args["cmake_options"] + sign_args + platform_args(args)
-
-        print("Generating iOS Xcode project with command:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd, env=os.environ.copy())
-        if result.returncode != 0:
-            raise RuntimeError("CMake project generation failed.")
-
-        print(f"Xcode project is generated at {output_dir}. Open with command:")
-        print(f"open {output_dir}/sparkle.xcodeproj")
-
-    def configure_only(self, args):
-        """The Xcode build configures through project generation."""
-        self.generate_project(args)
-
-    def build(self, args):
-        """Build the project."""
-        self.generate_project(args)
-
-        build_cmd = [args["cmake_executable"], "--build", ".", "--config",
-                     args["config"], "--target", "sparkle"]
-
-        if args.get("apple_auto_sign", False):
-            build_cmd += ["--", "-allowProvisioningUpdates"]
-
-        output_dir = get_output_dir()
-        log_file = os.path.join(output_dir, "build.log")
-
-        run_command_with_logging(build_cmd, log_file, "Building iOS project")
 
     def archive(self, args):
         """Archive the built project as an IPA (requires Payload/ directory structure)."""
