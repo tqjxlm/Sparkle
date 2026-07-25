@@ -195,6 +195,11 @@
         "description": "Cooked ReBLUR pipelines compile to PSOs on the current GPU. Apple platforms only."
     },
     {
+        "name": "denoiser_handoff",
+        "test_case": "denoiser_handoff",
+        "description": "The convergence handoff schedule shared by every denoising provider: window bounds, the linear ramp, the final-frame pin, and the opt-out below the window."
+    },
+    {
         "name": "denoiser_runtime_toggle",
         "test_case": "denoiser_runtime_toggle",
         "description": "Runtime denoiser provider selection during and after accumulation.",

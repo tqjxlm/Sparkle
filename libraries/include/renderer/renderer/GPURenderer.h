@@ -12,7 +12,7 @@
 namespace sparkle
 {
 class SkyRenderProxy;
-class RHIDenoiser;
+class Denoiser;
 class PathTracingDenoiserInputs;
 
 class GPURenderer : public Renderer
@@ -40,9 +40,9 @@ private:
 
     void BindDenoiserInputs();
 
-    [[nodiscard]] RHIDenoiser *GetOrCreateDenoiser(DenoiserProvider provider);
+    [[nodiscard]] Denoiser *GetOrCreateDenoiser(DenoiserProvider provider);
 
-    [[nodiscard]] RHIDenoiser *SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective);
+    [[nodiscard]] Denoiser *SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective);
 
     void BindBindlessResources();
 
@@ -63,8 +63,8 @@ private:
     RHIResourceRef<RHIImage> scene_texture_;
     RHIResourceRef<RHIRenderTarget> scene_rt_;
     std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
-    std::unique_ptr<RHIDenoiser> nrd_denoiser_;
-    std::unique_ptr<RHIDenoiser> metalfx_denoiser_;
+    std::unique_ptr<Denoiser> nrd_denoiser_;
+    std::unique_ptr<Denoiser> metalfx_denoiser_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
 
     RHIResourceRef<RHIImage> tone_mapping_output_;
@@ -78,7 +78,7 @@ private:
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
-    RHIDenoiser *frame_denoiser_ = nullptr;
+    Denoiser *frame_denoiser_ = nullptr;
     DenoiserProvider frame_provider_ = DenoiserProvider::Off;
     DenoiserProvider requested_provider_ = DenoiserProvider::Off;
     bool nrd_failed_ = false;

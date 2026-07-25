@@ -1,5 +1,6 @@
 #include "renderer/nrd/NrdDenoiser.h"
 
+#include "renderer/denoiser/DenoiserHandoff.h"
 #include "renderer/nrd/NrdCookedShaders.h"
 #include "rhi/RHI.h"
 
@@ -17,23 +18,11 @@ constexpr float DemodEps = 0.04f;
 constexpr float SkyViewZ = 1e6f;
 constexpr float MotionDisplayScale = 20.f;
 
-// Convergence handoff (ReBLUR's capped history re-blends fresh 1-spp noise forever -> permanent shimmer
-// on a static view): fade the NRD composite into the progressive accumulator as it converges. Start
-// after the accumulator's own grain drops below NRD's noise floor; fully converged by End.
-// Late handoff: the output-stabilization EMA (below) already suppresses ReBLUR's pop/churn in the low-N
-// window, so showing the raw accumulator early only exposes its grain (5-12% at N<400, the "dirty" look).
-// Hand over once the accumulator's grain is near-invisible (~2% at N=2048); convergence to the exact
-// accumulated image is preserved, just later.
-constexpr float HandoffStartSamples = 512.f;
-constexpr float HandoffEndSamples = 2048.f;
-
 // must match the ReblurHitDistanceParameters fed to NRD (SetDenoiserSettings) — the pack shader
 // normalizes hit distances with the same constants ReBLUR denormalizes with.
 constexpr float HitDistA = 3.0f;
 constexpr float HitDistB = 0.1f;
 constexpr float HitDistC = 20.0f;
-
-constexpr uint32_t TimingLogFrameInterval = 300;
 
 void ToLayout(RHIImage *image, RHIImageLayout layout, RHIPipelineStage after, RHIPipelineStage before)
 {
@@ -123,13 +112,12 @@ public:
     };
 };
 
-NrdDenoiser::NrdDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc) : rhi_(rhi), input_size_(desc.input_size)
+NrdDenoiser::NrdDenoiser(RHIContext *rhi, const DenoiserDesc &desc)
+    : rhi_(rhi), input_size_(desc.input_size), timings_(rhi, "NrdPerf", desc.max_frames_in_flight)
 {
     ASSERT(rhi_);
     ASSERT(desc.max_frames_in_flight > 0);
     SampleConfig();
-    slot_ran_reblur_.resize(desc.max_frames_in_flight, 0);
-    slot_ran_resolve_.resize(desc.max_frames_in_flight, 0);
     Initialize();
 }
 
@@ -141,9 +129,9 @@ void NrdDenoiser::SampleConfig()
 
 NrdDenoiser::~NrdDenoiser()
 {
-    if (resolve_timing_.count > 0)
+    if (timings_.HasSamples())
     {
-        LogGpuTimings("final");
+        timings_.LogTimings("final");
     }
 
     if (instance_)
@@ -316,6 +304,10 @@ void NrdDenoiser::Initialize()
     }
     resolve_pass_ = rhi_->CreateComputePass("NrdResolvePass", true);
 
+    timings_.AddStage("pack", pack_pass_);
+    timings_.AddStage("reblur", reblur_pass_);
+    timings_.AddStage("resolve", resolve_pass_);
+
     enabled_resources_ready_ = true;
 }
 
@@ -331,7 +323,7 @@ void NrdDenoiser::EnsureOutputResources(PixelFormat format)
     reset_history_ = true;
 }
 
-void NrdDenoiser::BindInputs(const RHIDenoiserInputs &inputs)
+void NrdDenoiser::BindInputs(const DenoiserInputs &inputs)
 {
     auto *pack_resources = pack_pipeline_->GetShaderResource<NrdPackShader>();
     pack_resources->gRadiance().BindResource(inputs.noisy_radiance_hit_distance->GetDefaultView(rhi_));
@@ -351,17 +343,7 @@ void NrdDenoiser::BindInputs(const RHIDenoiserInputs &inputs)
     resolve_resources->outputHistory().BindResource(output_history_->GetDefaultView(rhi_));
 }
 
-NrdDenoiser::HandoffWindow NrdDenoiser::ComputeHandoffWindow() const
-{
-    // max_spp below the window opts out: the motion harnesses (max_spp=1) rely on the frozen frame
-    // being the last ReBLUR output, not the raw low-spp accumulator
-    const bool applies = static_cast<float>(max_sample_per_pixel_) >= HandoffStartSamples;
-    const float end =
-        applies ? std::min(HandoffEndSamples, static_cast<float>(max_sample_per_pixel_)) : HandoffEndSamples;
-    return {.applies = applies, .start = std::min(HandoffStartSamples, 0.25f * end), .end = end};
-}
-
-void NrdDenoiser::UpdateFrameData(const RHIDenoiserFrameData &frame)
+void NrdDenoiser::UpdateFrameData(const DenoiserFrameData &frame)
 {
     SampleConfig();
     far_plane_ = frame.far_plane;
@@ -373,12 +355,12 @@ void NrdDenoiser::UpdateFrameData(const RHIDenoiserFrameData &frame)
 
     // once fully handed off to the accumulator, ReBLUR is skipped and the resolve ignores the
     // G-buffer, so the path tracer can stop writing it; debug views keep it live
-    const HandoffWindow window = ComputeHandoffWindow();
-    needs_inputs_ = config_.debug_mode != NrdDebugMode::None || !window.applies ||
-                    static_cast<float>(cumulated_samples_) < window.end;
+    const DenoiserHandoff handoff(max_sample_per_pixel_);
+    needs_inputs_ = config_.debug_mode != NrdDebugMode::None || !handoff.Applies() ||
+                    static_cast<float>(cumulated_samples_) < handoff.GetEnd();
 }
 
-bool NrdDenoiser::Encode(const RHIDenoiserInputs &inputs)
+bool NrdDenoiser::Encode(const DenoiserInputs &inputs)
 {
     if (!enabled_resources_ready_)
     {
@@ -409,10 +391,9 @@ bool NrdDenoiser::Encode(const RHIDenoiserInputs &inputs)
     // completes the target (the render freezes after it), the resolve is the last one to ever run: pin
     // the weight to 1 (and beta to 0 below) so the frozen frame IS the accumulator, bit-exact.
     const float post_samples = static_cast<float>(cumulated_samples_) + samples_this_frame;
-    const HandoffWindow window = ComputeHandoffWindow();
-    const bool final_resolve = window.applies && post_samples >= static_cast<float>(max_sample_per_pixel_);
-    const float handoff_weight =
-        final_resolve ? 1.f : std::clamp((post_samples - window.start) / (window.end - window.start), 0.f, 1.f);
+    const DenoiserHandoff handoff(max_sample_per_pixel_);
+    const bool final_resolve = post_samples >= static_cast<float>(max_sample_per_pixel_);
+    const float handoff_weight = handoff.ComputeWeight(post_samples, final_resolve);
 
     // The EMA must track the composite's own convergence: the signal changes by ~spp/N per frame (new
     // samples' weight in the accumulating mean), so the EMA attenuation is set to 3x that rate — fast
@@ -430,7 +411,8 @@ bool NrdDenoiser::Encode(const RHIDenoiserInputs &inputs)
     // camera is static for as long as this branch holds, and any motion resets cumulated_samples_ -> w < 1.
     const bool run_reblur = handoff_weight < 1.f || config_.debug_mode != NrdDebugMode::None;
 
-    SampleGpuTimings(run_reblur);
+    // pack and reblur are dispatched together, so they share one decision; resolve always runs
+    timings_.Sample({run_reblur, run_reblur, true});
 
     if (reset_history_)
     {
@@ -479,46 +461,7 @@ bool NrdDenoiser::Encode(const RHIDenoiserInputs &inputs)
     return true;
 }
 
-void NrdDenoiser::SampleGpuTimings(bool will_run_reblur)
-{
-    const auto slot = rhi_->GetFrameIndex();
-
-    auto accumulate = [](StageTiming &timing, float time_ms) {
-        if (time_ms >= 0.f)
-        {
-            timing.sum_ms += static_cast<double>(time_ms);
-            timing.count++;
-        }
-    };
-
-    if (slot_ran_reblur_[slot])
-    {
-        accumulate(pack_timing_, pack_pass_->GetExecutionTime(slot));
-        accumulate(reblur_timing_, reblur_pass_->GetExecutionTime(slot));
-    }
-    if (slot_ran_resolve_[slot])
-    {
-        accumulate(resolve_timing_, resolve_pass_->GetExecutionTime(slot));
-    }
-    slot_ran_reblur_[slot] = will_run_reblur ? 1 : 0;
-    slot_ran_resolve_[slot] = 1;
-
-    if (reblur_timing_.count != last_timing_log_count_ && reblur_timing_.count % TimingLogFrameInterval == 0)
-    {
-        last_timing_log_count_ = reblur_timing_.count;
-        LogGpuTimings("running");
-    }
-}
-
-void NrdDenoiser::LogGpuTimings(const char *tag) const
-{
-    auto mean = [](const StageTiming &timing) { return timing.count > 0 ? timing.sum_ms / timing.count : -1.0; };
-    Log(Info, "[NrdPerf] {} pack {:.3f} ms (n={}) reblur {:.3f} ms (n={}) resolve {:.3f} ms (n={})", tag,
-        mean(pack_timing_), pack_timing_.count, mean(reblur_timing_), reblur_timing_.count, mean(resolve_timing_),
-        resolve_timing_.count);
-}
-
-void NrdDenoiser::RenderReblur(const RHIDenoiserInputs &inputs, const Vector3UInt &dispatch, const Vector3UInt &group)
+void NrdDenoiser::RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &dispatch, const Vector3UInt &group)
 {
     const auto &attr = output_->GetAttributes();
 

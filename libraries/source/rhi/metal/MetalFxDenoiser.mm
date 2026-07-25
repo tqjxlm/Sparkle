@@ -6,6 +6,9 @@
 #include "MetalImage.h"
 #include "MetalRHIInternal.h"
 #include "core/Logger.h"
+#include "renderer/denoiser/DenoiserFactory.h"
+#include "renderer/denoiser/DenoiserHandoff.h"
+#include "renderer/denoiser/PassTimingAggregator.h"
 #include "rhi/RHI.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIComputePass.h"
@@ -20,7 +23,6 @@
 #endif
 
 #include <algorithm>
-#include <vector>
 
 namespace sparkle
 {
@@ -127,56 +129,9 @@ public:
 
 struct MetalFxDenoiser::Impl
 {
-    explicit Impl(RHIContext *in_rhi, const RHIDenoiserDesc &in_desc) : rhi(in_rhi), desc(in_desc)
+    explicit Impl(RHIContext *in_rhi, const DenoiserDesc &in_desc)
+        : rhi(in_rhi), desc(in_desc), timings(in_rhi, "MetalFxPerf", in_desc.max_frames_in_flight)
     {
-        slot_ran_prepare.resize(desc.max_frames_in_flight, 0);
-        slot_ran_resolve.resize(desc.max_frames_in_flight, 0);
-    }
-
-    struct StageTiming
-    {
-        double sum_ms = 0.0;
-        uint32_t count = 0;
-    };
-
-    // a frame slot's GPU time belongs to the previous submission that used that slot, so each frame
-    // harvests the slot's pending times before recording which stages it dispatches into the slot
-    void SampleGpuTimings(bool will_run_resolve)
-    {
-        const auto slot = rhi->GetFrameIndex();
-
-        auto accumulate = [](StageTiming &timing, float time_ms) {
-            if (time_ms >= 0.f)
-            {
-                timing.sum_ms += static_cast<double>(time_ms);
-                timing.count++;
-            }
-        };
-
-        if (slot_ran_prepare[slot])
-        {
-            accumulate(prepare_timing, prepare_pass->GetExecutionTime(slot));
-        }
-        if (slot_ran_resolve[slot])
-        {
-            accumulate(resolve_timing, resolve_pass->GetExecutionTime(slot));
-        }
-        slot_ran_prepare[slot] = 1;
-        slot_ran_resolve[slot] = will_run_resolve ? 1 : 0;
-
-        constexpr uint32_t TimingLogFrameInterval = 300;
-        if (prepare_timing.count != last_timing_log_count && prepare_timing.count % TimingLogFrameInterval == 0)
-        {
-            last_timing_log_count = prepare_timing.count;
-            LogGpuTimings("running");
-        }
-    }
-
-    void LogGpuTimings(const char *tag) const
-    {
-        Log(Info, "[MetalFxPerf] {} prepare {:.3f} ms (n={}) resolve {:.3f} ms (n={})", tag,
-            prepare_timing.count ? prepare_timing.sum_ms / prepare_timing.count : 0.0, prepare_timing.count,
-            resolve_timing.count ? resolve_timing.sum_ms / resolve_timing.count : 0.0, resolve_timing.count);
     }
 
     RHIResourceRef<MetalImage> CreatePreparedTexture(PixelFormat format, MTLTextureUsage required_usage, bool writable,
@@ -273,27 +228,17 @@ struct MetalFxDenoiser::Impl
         resources->outColor().BindResource(resolved_output->GetDefaultView(rhi));
 
         resolve_pass = rhi->CreateComputePass("MetalFxResolvePass", true);
+
+        timings.AddStage("prepare", prepare_pass);
+        timings.AddStage("resolve", resolve_pass);
     }
 
-    struct HandoffWindow
+    [[nodiscard]] DenoiserHandoff GetHandoff() const
     {
-        bool applies;
-        float start;
-        float end;
-    };
-
-    [[nodiscard]] HandoffWindow ComputeHandoffWindow() const
-    {
-        // max_spp below the window opts out: the max_spp=1 motion harnesses film the denoiser output
-        constexpr float HandoffStartSamples = 512.f;
-        constexpr float HandoffEndSamples = 2048.f;
-        const bool applies = static_cast<float>(frame.maximum_samples) >= HandoffStartSamples;
-        const float end =
-            applies ? std::min(HandoffEndSamples, static_cast<float>(frame.maximum_samples)) : HandoffEndSamples;
-        return {.applies = applies, .start = std::min(HandoffStartSamples, 0.25f * end), .end = end};
+        return DenoiserHandoff(frame.maximum_samples);
     }
 
-    bool BindInputs(const RHIDenoiserInputs &inputs)
+    bool BindInputs(const DenoiserInputs &inputs)
     {
         if (!inputs.accumulated_radiance || !inputs.normal_view_depth || !inputs.albedo_object_id ||
             !inputs.motion_hit_metallic || !inputs.specular_albedo_roughness)
@@ -332,8 +277,8 @@ struct MetalFxDenoiser::Impl
     }
 
     RHIContext *rhi;
-    RHIDenoiserDesc desc;
-    RHIDenoiserFrameData frame;
+    DenoiserDesc desc;
+    DenoiserFrameData frame;
     float uploaded_exposure = -1.f;
     bool ready = false;
     bool reset_history = true;
@@ -361,16 +306,11 @@ struct MetalFxDenoiser::Impl
     RHIResourceRef<RHIPipelineState> resolve_pipeline;
     RHIResourceRef<RHIComputePass> resolve_pass;
 
-    StageTiming prepare_timing;
-    StageTiming resolve_timing;
-    std::vector<uint8_t> slot_ran_prepare;
-    std::vector<uint8_t> slot_ran_resolve;
-    uint32_t last_timing_log_count = 0;
+    PassTimingAggregator timings;
     bool display_scaler_output = false;
 };
 
-MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc)
-    : impl_(std::make_unique<Impl>(rhi, desc))
+MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const DenoiserDesc &desc) : impl_(std::make_unique<Impl>(rhi, desc))
 {
 #if SPARKLE_HAS_METALFX_DENOISED
     if (@available(macOS 26.0, iOS 26.0, *))
@@ -493,7 +433,7 @@ MetalFxDenoiser::~MetalFxDenoiser()
 {
     if (impl_->ready)
     {
-        impl_->LogGpuTimings("final");
+        impl_->timings.LogTimings("final");
     }
 }
 
@@ -504,8 +444,9 @@ bool MetalFxDenoiser::IsReady() const
 
 bool MetalFxDenoiser::NeedsInputs() const
 {
-    const Impl::HandoffWindow window = impl_->ComputeHandoffWindow();
-    return impl_->ready && (!window.applies || static_cast<float>(impl_->frame.accumulated_samples) < window.end);
+    const DenoiserHandoff handoff = impl_->GetHandoff();
+    return impl_->ready &&
+           (!handoff.Applies() || static_cast<float>(impl_->frame.accumulated_samples) < handoff.GetEnd());
 }
 
 const char *MetalFxDenoiser::GetName() const
@@ -522,12 +463,12 @@ RHIResourceRef<RHIImage> MetalFxDenoiser::GetOutput() const
     return impl_->resolved_output;
 }
 
-void MetalFxDenoiser::UpdateFrameData(const RHIDenoiserFrameData &frame)
+void MetalFxDenoiser::UpdateFrameData(const DenoiserFrameData &frame)
 {
     impl_->frame = frame;
 }
 
-bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
+bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
 {
     if (!NeedsInputs() || !impl_->BindInputs(inputs))
     {
@@ -606,19 +547,10 @@ bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
         scaler.worldToViewMatrix = ToSimdMatrix(impl_->frame.view);
         scaler.viewToClipMatrix = ToSimdMatrix(impl_->frame.projection);
 
-        // frame.final_frame pins the weight to exactly 1 so the frozen frame IS the accumulator
-        const Impl::HandoffWindow window = impl_->ComputeHandoffWindow();
-        float weight = 0.f;
-        if (window.applies)
-        {
-            weight = impl_->frame.final_frame
-                         ? 1.f
-                         : std::clamp((static_cast<float>(impl_->frame.accumulated_samples) - window.start) /
-                                          (window.end - window.start),
-                                      0.f, 1.f);
-        }
+        const float weight = impl_->GetHandoff().ComputeWeight(static_cast<float>(impl_->frame.accumulated_samples),
+                                                               impl_->frame.final_frame);
         const bool run_resolve = weight > 0.f;
-        impl_->SampleGpuTimings(run_resolve);
+        impl_->timings.Sample({true, run_resolve});
 
         id<MTLCommandBuffer> command_buffer = context->GetCurrentCommandBuffer();
         [command_buffer pushDebugGroup:@"MetalFX temporal denoised scaler"];
@@ -658,6 +590,16 @@ bool MetalFxDenoiser::Encode(const RHIDenoiserInputs &inputs)
     }
 #endif
     return false;
+}
+
+std::unique_ptr<Denoiser> CreateMetalFxDenoiser(RHIContext *rhi, const DenoiserDesc &desc)
+{
+    auto denoiser = std::make_unique<MetalFxDenoiser>(rhi, desc);
+    if (!denoiser->IsReady())
+    {
+        return nullptr;
+    }
+    return denoiser;
 }
 } // namespace sparkle
 
