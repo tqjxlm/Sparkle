@@ -34,5 +34,9 @@ public:
     [[nodiscard]] static std::vector<std::string> GetCookList(const std::string &scene_override);
 
     static int Run(const std::string &scene_override, const JobPlan &job_plan, const JobAccelerator &accelerator = {});
+
+    // a cook process has no frame loop, so main-thread deliveries only run while a caller
+    // waits on them here
+    static void PumpMainThreadUntil(const std::function<bool()> &done);
 };
 } // namespace sparkle

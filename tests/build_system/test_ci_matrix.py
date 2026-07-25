@@ -77,6 +77,18 @@ class CiPipelineTest(unittest.TestCase):
         finally:
             ci_matrix.covered_triplets = original
 
+    def test_cook_publishes_one_image_artifact_per_target(self):
+        for target in ci_matrix.cook_targets():
+            self.assertIn(f"name: cooked-image-{target}", JOBS["cook"])
+            self.assertIn(f"path: build_system/macos/output/cooked_image/{target}", JOBS["cook"])
+
+    # the generator names the artifacts, the release action consumes them by the same name
+    def test_release_downloads_only_its_own_cooked_image(self):
+        action = os.path.join(PROJECT_ROOT, ".github", "actions", "release-platform", "action.yml")
+        with open(action, encoding="utf-8") as action_file:
+            text = action_file.read()
+        self.assertIn("name: cooked-image-${{ steps.package.outputs.target }}", text)
+
     def test_github_release_needs_every_release(self):
         for job_id in JOBS:
             if job_id.startswith("release-"):

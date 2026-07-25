@@ -266,11 +266,14 @@ COOK_JOB = """
             test -f "build_system/macos/output/cooked_image/$target/cooked/manifest.json"
           done
 
-      - name: Upload cooked content images
+@upload_steps@"""
+
+# one artifact per target: a release node downloads only the image its own product packages
+COOK_UPLOAD_STEP = """      - name: Upload cooked content image (@target@)
         uses: actions/upload-artifact@v7
         with:
-          name: cooked-images
-          path: build_system/macos/output/cooked_image
+          name: cooked-image-@target@
+          path: build_system/macos/output/cooked_image/@target@
 """
 
 RELEASE_JOB = """
@@ -635,8 +638,10 @@ def jobs():
         for config in product.get("build_types", ("Debug", "Release")):
             generated.append((slug("build", product, config),
                               build_job(product, config)))
+    upload_steps = "\n".join(render(COOK_UPLOAD_STEP, target=target) for target in cook_targets())
     generated.append(("cook", render(COOK_JOB, cook_targets="+".join(cook_targets()),
-                                     cook_target_list=" ".join(cook_targets()))))
+                                     cook_target_list=" ".join(cook_targets()),
+                                     upload_steps=upload_steps)))
     for product in PRODUCTS:
         if "Release" not in product.get("build_types", ("Release",)):
             continue

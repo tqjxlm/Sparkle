@@ -2,18 +2,23 @@
 
 #include "core/Logger.h"
 
+#include <algorithm>
+
 namespace sparkle
 {
 TaskDispatcher *TaskDispatcher::instance_ = nullptr;
 
-TaskDispatcher::TaskDispatcher(unsigned int max_parallism)
+TaskDispatcher::TaskDispatcher(unsigned int max_parallism, unsigned int reserved_threads)
 {
     ASSERT(instance_ == nullptr);
     instance_ = this;
 
-    // reserve 2 threads for main and render
-    unsigned max_task_threads = std::min(max_parallism, std::thread::hardware_concurrency()) - 2;
-    ASSERT(max_task_threads > 0);
+    // the caller reserves the threads it drives itself (main, and the render thread when it
+    // runs separately). a host with fewer cores than that still gets one worker: the pool is
+    // where every cook and load task runs, so it can never be empty
+    const unsigned hardware_threads = std::max(1u, std::thread::hardware_concurrency());
+    const unsigned budget = std::min(max_parallism, hardware_threads);
+    const unsigned max_task_threads = budget > reserved_threads ? budget - reserved_threads : 1u;
 
     worker_thread_pool_ = std::make_unique<BS::light_thread_pool>(
         max_task_threads, [](std::size_t idx) { ThreadManager::RegisterTaskThread(idx); });
