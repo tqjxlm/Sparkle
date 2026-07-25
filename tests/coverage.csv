@@ -8,6 +8,7 @@ camera_nudge_return,x,x,x,x,x,x
 primitive_move,x,x,x,x,x,x
 usd_round_trip,,x,,,,
 input_injection,x,x,x,x,x,x
+cook_targets,x,x,x,x,x,x
 cooker_request,x,,,,,x
 image_io,x,x,x,x,x,x
 denoiser_handoff,x,x,x,x,x,x

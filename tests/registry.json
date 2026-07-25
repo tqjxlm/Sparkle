@@ -123,6 +123,11 @@
         "description": "Synthetic mouse and touch sequences through InputManager::Push."
     },
     {
+        "name": "cook_targets",
+        "test_case": "cook_targets",
+        "description": "The generated cook target table and the '+'-separated --cook_targets grammar, including the rejection of an unknown target."
+    },
+    {
         "name": "cooker_request",
         "test_case": "cooker_request",
         "description": "Cooker cache-hit delivery and relocated-content contracts."
