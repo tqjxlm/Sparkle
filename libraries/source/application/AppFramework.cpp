@@ -1039,9 +1039,6 @@ void AppFramework::HandleSceneKey(const KeyEvent &event)
         return;
     }
 
-    const auto action = event.action;
-    const bool shift_on = (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Shift)) != 0;
-
     Key key = event.key;
 #if FRAMEWORK_MACOS
     // support keyboards with no escape key: the backspace key stands in for it
@@ -1051,71 +1048,77 @@ void AppFramework::HandleSceneKey(const KeyEvent &event)
     }
 #endif
 
-    switch (key)
+    // Space is the only binding that tracks the key being held, so it reads the action itself;
+    // every other binding fires once on release. Shift is required where the glyph on the key
+    // needs it: Shift+Equal is the '+' a keyboard without a numpad has.
+    struct Binding
     {
-    case Key::Escape: {
-        if (action == KeyAction::Release)
+        Key key;
+        bool needs_shift;
+        KeyAction action;
+        void (*handler)(AppFramework &app);
+    };
+
+    static constexpr Binding Bindings[] = {
+        {Key::Escape, false, KeyAction::Release, [](AppFramework &) { RequestExit(); }},
+        {Key::Space, false, KeyAction::Press, [](AppFramework &app) { app.HoldAccumulation(); }},
+        {Key::Space, false, KeyAction::Release, [](AppFramework &app) { app.ReleaseAccumulation(); }},
+        {Key::Up, false, KeyAction::Release, [](AppFramework &app) { app.WidenAperture(); }},
+        {Key::Down, false, KeyAction::Release, [](AppFramework &app) { app.NarrowAperture(); }},
+        {Key::P, false, KeyAction::Release, [](AppFramework &app) { app.PrintCameraPosture(); }},
+        {Key::NumpadAdd, false, KeyAction::Release, [](AppFramework &app) { app.AddDebugSphere(); }},
+        {Key::Equal, true, KeyAction::Release, [](AppFramework &app) { app.AddDebugSphere(); }},
+        {Key::Minus, false, KeyAction::Release, [](AppFramework &app) { app.RemoveDebugSphere(); }},
+    };
+
+    const bool shift_on = (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Shift)) != 0;
+
+    for (const Binding &binding : Bindings)
+    {
+        if (binding.key == key && binding.action == event.action && (!binding.needs_shift || shift_on))
         {
-            RequestExit();
+            binding.handler(*this);
         }
-        break;
     }
-    case Key::Space: {
-        render_config_.accumulate_key_held = (action == KeyAction::Press);
-        break;
-    }
-    case Key::Up: {
-        if (action == KeyAction::Release)
-        {
-            camera->SetAperture(camera->GetAttribute().aperture + 1.f);
-        }
-        break;
-    }
-    case Key::Down: {
-        if (action == KeyAction::Release)
-        {
-            camera->SetAperture(camera->GetAttribute().aperture - 1.f);
-        }
-        break;
-    }
-    case Key::P: {
-        if (action == KeyAction::Release)
-        {
-            camera->PrintPosture();
-        }
-        break;
-    }
-    case Key::NumpadAdd: {
-        if (action == KeyAction::Release)
-        {
-            Log(Debug, "Add debug sphere");
-            SceneManager::GenerateRandomSpheres(*main_scene_, 1);
-        }
-        break;
-    }
-    case Key::Equal: {
-        if (shift_on)
-        {
-            // it is actually '+'
-            if (action == KeyAction::Release)
-            {
-                Log(Debug, "Add debug sphere");
-                SceneManager::GenerateRandomSpheres(*main_scene_, 1);
-            }
-        }
-        break;
-    }
-    case Key::Minus: {
-        if (action == KeyAction::Release)
-        {
-            Log(Debug, "Remove debug sphere");
-            SceneManager::RemoveLastDebugSphere(main_scene_.get());
-        }
-        break;
-    }
-    default:
-        break;
-    }
+}
+
+void AppFramework::HoldAccumulation()
+{
+    render_config_.accumulate_key_held = true;
+}
+
+void AppFramework::ReleaseAccumulation()
+{
+    render_config_.accumulate_key_held = false;
+}
+
+void AppFramework::WidenAperture() const
+{
+    auto *camera = GetMainCamera();
+    camera->SetAperture(camera->GetAttribute().aperture + 1.f);
+}
+
+void AppFramework::NarrowAperture() const
+{
+    auto *camera = GetMainCamera();
+    camera->SetAperture(camera->GetAttribute().aperture - 1.f);
+}
+
+void AppFramework::PrintCameraPosture() const
+{
+    GetMainCamera()->PrintPosture();
+}
+
+void AppFramework::AddDebugSphere()
+{
+    Log(Debug, "Add debug sphere");
+    SceneManager::GenerateRandomSpheres(*main_scene_, 1);
+}
+
+void AppFramework::RemoveDebugSphere()
+{
+    Log(Debug, "Remove debug sphere");
+    SceneManager::RemoveLastDebugSphere(main_scene_.get());
 }
 
 void AppFramework::RequestExit()
