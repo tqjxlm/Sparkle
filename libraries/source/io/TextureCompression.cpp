@@ -15,6 +15,7 @@
 
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -172,13 +173,128 @@ astcenc_profile GetAstcProfile(PixelFormat format)
     return IsSRGBFormat(format) ? ASTCENC_PRF_LDR_SRGB : ASTCENC_PRF_LDR;
 }
 
-#if SPARKLE_ISPC_TEXCOMP
-// ispc_texcomp encodes whole blocks out of a surface, so a mip that is not block-aligned is
-// staged into a padded copy whose border repeats, the same texels the scalar encoder below
-// would clamp to. the slow profile measures ~20x the throughput of an exhaustive CVTT search
-// at slightly lower error on sky and IBL content; veryslow buys about another 1% of error
+// radiance data, not display color: the default luma-derived channel weights would starve
+// red and blue of error budget. a single refine round runs at 2.7x the default speed while
+// measuring within 4% of the exhaustive search's error; BC6H_FastIndexing costs real quality
+// and stays off
+cvtt::Options Bc6hOptions()
+{
+    cvtt::Options options;
+    options.refineRoundsBC6H = 1;
+    options.redWeight = 1.f;
+    options.greenWeight = 1.f;
+    options.blueWeight = 1.f;
+    return options;
+}
+
+// edge blocks clamp-repeat the border texel exactly like the ASTC path's sampling assumptions
+void GatherBc6hBlock(const uint8_t *fp16, unsigned width, unsigned height, unsigned block_x, unsigned block_y,
+                     cvtt::PixelBlockF16 &block)
+{
+    const auto *pixels = reinterpret_cast<const int16_t *>(fp16);
+    for (unsigned y = 0; y < 4; y++)
+    {
+        const unsigned source_y = std::min(block_y * 4 + y, height - 1);
+        for (unsigned x = 0; x < 4; x++)
+        {
+            const unsigned source_x = std::min(block_x * 4 + x, width - 1);
+            std::memcpy(block.m_pixels[y * 4 + x], pixels + ((static_cast<size_t>(source_y) * width) + source_x) * 4,
+                        4 * sizeof(int16_t));
+        }
+    }
+}
+
+#if !SPARKLE_ISPC_TEXCOMP
+// CVTT processes NumParallelBlocks 4x4 blocks per call
+void EncodeBc6hMipCvtt(const uint8_t *fp16, unsigned width, unsigned height, uint8_t *out)
+{
+    const unsigned blocks_x = (width + 3) / 4;
+    const unsigned blocks_y = (height + 3) / 4;
+    const auto options = Bc6hOptions();
+
+    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> blocks{};
+    std::array<uint8_t, cvtt::NumParallelBlocks * 16> encoded;
+    std::array<size_t, cvtt::NumParallelBlocks> block_offsets{};
+    unsigned batched = 0;
+
+    auto flush = [&]() {
+        if (batched == 0)
+        {
+            return;
+        }
+        for (unsigned i = batched; i < cvtt::NumParallelBlocks; i++)
+        {
+            blocks[i] = blocks[batched - 1];
+        }
+        cvtt::Kernels::EncodeBC6HU(encoded.data(), blocks.data(), options);
+        for (unsigned i = 0; i < batched; i++)
+        {
+            std::memcpy(out + block_offsets[i], encoded.data() + static_cast<size_t>(i) * 16, 16);
+        }
+        batched = 0;
+    };
+
+    for (unsigned by = 0; by < blocks_y; by++)
+    {
+        for (unsigned bx = 0; bx < blocks_x; bx++)
+        {
+            GatherBc6hBlock(fp16, width, height, bx, by, blocks[batched]);
+            block_offsets[batched] = (static_cast<size_t>(by) * blocks_x + bx) * 16;
+            if (++batched == cvtt::NumParallelBlocks)
+            {
+                flush();
+            }
+        }
+    }
+    flush();
+}
+
+// the portable encoder for frameworks built without ispc kernels
 void EncodeBc6hMip(const uint8_t *fp16, unsigned width, unsigned height, uint8_t *out)
 {
+    EncodeBc6hMipCvtt(fp16, width, height, out);
+}
+#else
+float Bc6hTexelToFloat(int16_t bits)
+{
+    return static_cast<float>(std::bit_cast<Half>(bits));
+}
+
+// absolute rgb error of one encoded block against its source texels, and the signal it
+// carries, both through the spec-exact decode
+std::pair<double, double> Bc6hBlockError(const cvtt::PixelBlockF16 &source, const uint8_t *encoded)
+{
+    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> decoded{};
+    std::array<uint8_t, cvtt::NumParallelBlocks * 16> batch{};
+    std::memcpy(batch.data(), encoded, 16);
+    cvtt::Kernels::DecodeBC6HU(decoded.data(), batch.data());
+
+    double error = 0.0;
+    double signal = 0.0;
+    for (unsigned texel = 0; texel < 16; texel++)
+    {
+        for (unsigned channel = 0; channel < 3; channel++)
+        {
+            const float reference = Bc6hTexelToFloat(source.m_pixels[texel][channel]);
+            const float restored = Bc6hTexelToFloat(decoded[0].m_pixels[texel][channel]);
+            error += std::abs(restored - reference);
+            signal += std::abs(reference);
+        }
+    }
+    return {error, signal};
+}
+
+// ispc_texcomp encodes whole blocks out of a surface, so a mip that is not block-aligned is
+// staged into a padded copy whose border repeats, the same texels the block gather clamps to.
+// its endpoint search gives up ground on blocks holding a concentrated highlight — a sun disk
+// against dim sky — where more search effort does not help; those few blocks re-encode through
+// the exhaustive CVTT search and keep whichever decodes closer. Measured on a downsampled sky
+// face, that is 2 blocks in 1024 and lands below the error of CVTT alone at a sixteenth of its
+// cost; a full-resolution face refines none of them
+void EncodeBc6hMip(const uint8_t *fp16, unsigned width, unsigned height, uint8_t *out)
+{
+    constexpr double RefineErrorThreshold = 0.05;
+
     const unsigned block_dim = GetBlockDim(PixelFormat::BC6HUfloat);
     const unsigned padded_width = (width + block_dim - 1) / block_dim * block_dim;
     const unsigned padded_height = (height + block_dim - 1) / block_dim * block_dim;
@@ -212,72 +328,36 @@ void EncodeBc6hMip(const uint8_t *fp16, unsigned width, unsigned height, uint8_t
                          .stride = static_cast<int32_t>(padded_width * texel_size)};
 
     CompressBlocksBC6H(&surface, out, &settings);
-}
-#else
-// the portable fallback for frameworks built without ispc kernels: CVTT processes
-// NumParallelBlocks 4x4 blocks per call; edge blocks clamp-repeat the border texel exactly
-// like the ASTC path's sampling assumptions
-void EncodeBc6hMip(const uint8_t *fp16, unsigned width, unsigned height, uint8_t *out)
-{
-    const unsigned blocks_x = (width + 3) / 4;
-    const unsigned blocks_y = (height + 3) / 4;
-    const auto *pixels = reinterpret_cast<const int16_t *>(fp16);
 
-    // radiance data, not display color: the default luma-derived channel weights would
-    // starve red and blue of error budget. a single refine round keeps the cook inside
-    // CI's watchdog window at 2.7x the default speed while measuring within 4% of the
-    // exhaustive search's error; BC6H_FastIndexing costs real quality and stays off
-    cvtt::Options options;
-    options.refineRoundsBC6H = 1;
-    options.redWeight = 1.f;
-    options.greenWeight = 1.f;
-    options.blueWeight = 1.f;
-
-    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> blocks{};
-    std::array<uint8_t, cvtt::NumParallelBlocks * 16> encoded;
-    std::array<size_t, cvtt::NumParallelBlocks> block_offsets{};
-    unsigned batched = 0;
-
-    auto flush = [&]() {
-        if (batched == 0)
-        {
-            return;
-        }
-        for (unsigned i = batched; i < cvtt::NumParallelBlocks; i++)
-        {
-            blocks[i] = blocks[batched - 1];
-        }
-        cvtt::Kernels::EncodeBC6HU(encoded.data(), blocks.data(), options);
-        for (unsigned i = 0; i < batched; i++)
-        {
-            std::memcpy(out + block_offsets[i], encoded.data() + static_cast<size_t>(i) * 16, 16);
-        }
-        batched = 0;
-    };
+    const unsigned blocks_x = padded_width / block_dim;
+    const unsigned blocks_y = padded_height / block_dim;
+    const auto options = Bc6hOptions();
 
     for (unsigned by = 0; by < blocks_y; by++)
     {
         for (unsigned bx = 0; bx < blocks_x; bx++)
         {
-            auto &block = blocks[batched];
-            for (unsigned py = 0; py < 4; py++)
+            cvtt::PixelBlockF16 source{};
+            GatherBc6hBlock(pixels, padded_width, padded_height, bx, by, source);
+
+            uint8_t *block = out + ((static_cast<size_t>(by) * blocks_x) + bx) * 16;
+            const auto [error, signal] = Bc6hBlockError(source, block);
+            if (signal <= 0.0 || error <= signal * RefineErrorThreshold)
             {
-                const unsigned sy = std::min(by * 4 + py, height - 1);
-                for (unsigned px = 0; px < 4; px++)
-                {
-                    const unsigned sx = std::min(bx * 4 + px, width - 1);
-                    std::memcpy(block.m_pixels[py * 4 + px], pixels + (static_cast<size_t>(sy) * width + sx) * 4,
-                                4 * sizeof(int16_t));
-                }
+                continue;
             }
-            block_offsets[batched] = (static_cast<size_t>(by) * blocks_x + bx) * 16;
-            if (++batched == cvtt::NumParallelBlocks)
+
+            std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> blocks{};
+            blocks.fill(source);
+            std::array<uint8_t, cvtt::NumParallelBlocks * 16> encoded;
+            cvtt::Kernels::EncodeBC6HU(encoded.data(), blocks.data(), options);
+
+            if (Bc6hBlockError(source, encoded.data()).first < error)
             {
-                flush();
+                std::memcpy(block, encoded.data(), 16);
             }
         }
     }
-    flush();
 }
 #endif
 
