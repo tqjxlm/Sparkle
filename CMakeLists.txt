@@ -124,6 +124,37 @@ add_custom_target(stamp-git-version
 add_dependencies(sparkle stamp-git-version)
 target_sources(sparkle PRIVATE ${GIT_VERSION_SOURCE})
 
+# ------------------ cook target table ------------------
+
+# cook_targets.json is the one source for the cook target -> texture family mapping:
+# build.py and dev/ci_matrix.py read it directly, the engine gets it compiled in from here.
+# CMAKE_CONFIGURE_DEPENDS re-runs cmake when the table changes
+set(COOK_TARGETS_JSON ${CMAKE_SOURCE_DIR}/cook_targets.json)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${COOK_TARGETS_JSON})
+
+file(READ ${COOK_TARGETS_JSON} COOK_TARGETS_CONTENT)
+string(JSON COOK_TARGET_COUNT LENGTH ${COOK_TARGETS_CONTENT})
+math(EXPR COOK_TARGET_LAST "${COOK_TARGET_COUNT} - 1")
+
+set(COOK_TARGET_ENTRIES "")
+
+foreach(index RANGE ${COOK_TARGET_LAST})
+    string(JSON COOK_TARGET MEMBER ${COOK_TARGETS_CONTENT} ${index})
+    string(JSON COOK_FAMILY GET ${COOK_TARGETS_CONTENT} ${COOK_TARGET})
+
+    # the json spells families the way the pipeline does ("astc"); the enum is CamelCase
+    string(SUBSTRING ${COOK_FAMILY} 0 1 COOK_FAMILY_HEAD)
+    string(SUBSTRING ${COOK_FAMILY} 1 -1 COOK_FAMILY_TAIL)
+    string(TOUPPER ${COOK_FAMILY_HEAD} COOK_FAMILY_HEAD)
+
+    string(APPEND COOK_TARGET_ENTRIES
+        "        {\"${COOK_TARGET}\", TextureCompression::Family::${COOK_FAMILY_HEAD}${COOK_FAMILY_TAIL}},\n")
+endforeach()
+
+set(COOK_TARGET_SOURCE ${CMAKE_BINARY_DIR}/generated/CookTargetTable.cpp)
+configure_file(${CMAKE_SOURCE_DIR}/cmake/CookTargetTable.cpp.in ${COOK_TARGET_SOURCE} @ONLY)
+target_sources(sparkle PRIVATE ${COOK_TARGET_SOURCE})
+
 # ------------------ compiler configuration ------------------
 
 # global macro header that should be included in every source file imiplicitly

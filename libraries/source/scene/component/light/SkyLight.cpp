@@ -9,6 +9,7 @@
 #include "core/cook/Cooker.h"
 #include "core/math/Utilities.h"
 #include "core/task/TaskManager.h"
+#include "io/CookTargets.h"
 #include "io/HdrCubeTranscodeJob.h"
 #include "io/Image.h"
 #include "io/TextureCompression.h"
@@ -343,8 +344,8 @@ void SkyLight::RequestCook()
     // resolve, keeping every context on the shipped encoding the ground truths reflect),
     // then the fp16 master, then cook the master
     const auto master_key = MasterCookKey(sky_map_path_);
-    const auto transcode_key = HdrCubeTranscodeJob::MakeLookupKey(
-        SkyLightCookJob::Type, TextureCompression::PlatformFamily, master_key.source_name);
+    const auto transcode_key = HdrCubeTranscodeJob::MakeLookupKey(SkyLightCookJob::Type, CookTargets::PlatformFamily(),
+                                                                  master_key.source_name);
 
     ProbeArtifact(transcode_key, finish, [this, master_key, finish]() {
         ProbeArtifact(master_key, finish, [this, finish]() { RequestMasterCook(finish); });
@@ -421,8 +422,8 @@ void SkyLight::DeliverCookedResult(CookResult result, const SkyCookFinish &finis
     {
         if (const auto view = ParseSkyPayload(result.payload); view && !IsCompressedFormat(view->format))
         {
-            auto alias_key = HdrCubeTranscodeJob::MakeLookupKey(
-                SkyLightCookJob::Type, TextureCompression::PlatformFamily, MasterCookKey(sky_map_path_).source_name);
+            auto alias_key = HdrCubeTranscodeJob::MakeLookupKey(SkyLightCookJob::Type, CookTargets::PlatformFamily(),
+                                                                MasterCookKey(sky_map_path_).source_name);
             alias_key.source_hash = HdrCubeTranscodeJob::MakeSourceHash(*result.source_hash, SkyLightCookJob::Version);
 
             auto master_result = std::make_shared<CookResult>(std::move(result));

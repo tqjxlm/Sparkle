@@ -50,8 +50,16 @@ COOKED_IMAGE_DIR = {
 }
 
 
-# must match CookTargetFamilies in AppFramework.cpp; glfw targets carry the host OS
-COOK_TARGETS = ("android", "ios", "macos", "macos-glfw", "windows-glfw", "linux-glfw")
+def load_cook_target_families():
+    """The cook target -> texture family table. cook_targets.json is the one source: CMake
+    compiles it into the engine and dev/ci_matrix.py splits the cook stage by it."""
+    with open(os.path.join(SCRIPTPATH, "cook_targets.json"), encoding="utf-8") as table_file:
+        return json.load(table_file)
+
+
+COOK_TARGET_FAMILY = load_cook_target_families()
+
+COOK_TARGETS = tuple(COOK_TARGET_FAMILY)
 
 
 def cook_target(framework):

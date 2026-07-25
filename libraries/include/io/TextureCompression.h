@@ -35,16 +35,8 @@ public:
         uint32_t mip_count = 0;
     };
 
-    // desktop GPUs have no ASTC; Apple and Android GPUs prefer ASTC over BC. keyed on
-    // the OS, not the framework: glfw on macOS samples through MoltenVK on an Apple GPU.
-    // must agree per target with CookTargetFamilies in AppFramework.cpp, which decides
-    // the family a target's packaged content carries
-#if defined(__APPLE__) || defined(__ANDROID__)
-    static constexpr Family PlatformFamily = Family::Astc;
-#else
-    static constexpr Family PlatformFamily = Family::Bc;
-#endif
-
+    // desktop GPUs have no ASTC; Apple and Android GPUs prefer ASTC over BC. which family
+    // a target carries is CookTargets' to answer, from cook_targets.json
     [[nodiscard]] static const char *GetFamilyName(Family family);
 
     [[nodiscard]] static PixelFormat SelectFormat(Profile profile, Family family);

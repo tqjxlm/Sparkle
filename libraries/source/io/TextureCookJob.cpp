@@ -3,6 +3,7 @@
 #include "core/Hash.h"
 #include "core/Logger.h"
 #include "core/cook/Cooker.h"
+#include "io/CookTargets.h"
 
 #include <atomic>
 #include <string_view>
@@ -153,7 +154,7 @@ std::shared_ptr<Image2D> ResolveMaterialTexture(const std::shared_ptr<Image2D> &
         return source;
     }
 
-    const CookArtifactKey lookup_key{.type = TextureCookJob::GetTypeName(TextureCompression::PlatformFamily),
+    const CookArtifactKey lookup_key{.type = TextureCookJob::GetTypeName(CookTargets::PlatformFamily()),
                                      .version = TextureCookJob::Version,
                                      .source_name = TextureCookJob::MakeSourceName(identity, profile),
                                      .source_hash = std::nullopt};
@@ -163,7 +164,7 @@ std::shared_ptr<Image2D> ResolveMaterialTexture(const std::shared_ptr<Image2D> &
         {
             return nullptr;
         }
-        return std::make_shared<TextureCookJob>(source, identity, profile, TextureCompression::PlatformFamily);
+        return std::make_shared<TextureCookJob>(source, identity, profile, CookTargets::PlatformFamily());
     });
 
     if (!result.HasPayload())

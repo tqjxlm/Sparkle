@@ -4,6 +4,7 @@
 #include "core/cook/CookArtifactStore.h"
 #include "core/cook/Cooker.h"
 #include "core/task/TaskManager.h"
+#include "io/CookTargets.h"
 #include "io/HdrCubeTranscodeJob.h"
 #include "io/TextureCompression.h"
 #include "renderer/RenderConfig.h"
@@ -112,7 +113,7 @@ void ImageBasedLighting::InitRenderResources(RHIContext *ctx, const RenderConfig
 
     const auto transcode_key = [this](const CookJob &job) {
         auto key =
-            HdrCubeTranscodeJob::MakeLookupKey(job.GetType(), TextureCompression::PlatformFamily, job.GetSourceName());
+            HdrCubeTranscodeJob::MakeLookupKey(job.GetType(), CookTargets::PlatformFamily(), job.GetSourceName());
         key.source_hash = HdrCubeTranscodeJob::MakeSourceHash(env_map_cpu_->GetContentHash(), job.GetVersion());
         return key;
     };
