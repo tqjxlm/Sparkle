@@ -87,7 +87,7 @@ void PathTracingDenoiserInputs::BeginWrite()
     }
 }
 
-RHIDenoiserInputs PathTracingDenoiserInputs::GetInputs(RHIImage *accumulated_radiance) const
+DenoiserInputs PathTracingDenoiserInputs::GetInputs(RHIImage *accumulated_radiance) const
 {
     return {
         .noisy_radiance_hit_distance = noisy_radiance_hit_distance_.get(),

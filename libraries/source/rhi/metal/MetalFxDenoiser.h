@@ -2,16 +2,16 @@
 
 #if FRAMEWORK_APPLE
 
-#include "rhi/RHIDenoiser.h"
+#include "renderer/denoiser/Denoiser.h"
 
 #include <memory>
 
 namespace sparkle
 {
-class MetalFxDenoiser final : public RHIDenoiser
+class MetalFxDenoiser final : public Denoiser
 {
 public:
-    MetalFxDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc);
+    MetalFxDenoiser(RHIContext *rhi, const DenoiserDesc &desc);
 
     ~MetalFxDenoiser() override;
 
@@ -23,9 +23,9 @@ public:
 
     [[nodiscard]] RHIResourceRef<RHIImage> GetOutput() const override;
 
-    void UpdateFrameData(const RHIDenoiserFrameData &frame) override;
+    void UpdateFrameData(const DenoiserFrameData &frame) override;
 
-    bool Encode(const RHIDenoiserInputs &inputs) override;
+    bool Encode(const DenoiserInputs &inputs) override;
 
 private:
     struct Impl;

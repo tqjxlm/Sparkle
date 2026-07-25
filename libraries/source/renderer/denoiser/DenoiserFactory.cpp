@@ -7,7 +7,7 @@
 
 namespace sparkle
 {
-std::unique_ptr<RHIDenoiser> CreateDenoiser(DenoiserProvider provider, const RHIDenoiserDesc &desc, RHIContext *rhi)
+std::unique_ptr<Denoiser> CreateDenoiser(DenoiserProvider provider, const DenoiserDesc &desc, RHIContext *rhi)
 {
     switch (provider)
     {
@@ -22,7 +22,11 @@ std::unique_ptr<RHIDenoiser> CreateDenoiser(DenoiserProvider provider, const RHI
         return denoiser;
     }
     case DenoiserProvider::MetalFx:
-        return rhi->CreatePlatformDenoiser(RHIPlatformDenoiser::MetalFx, desc);
+#if FRAMEWORK_APPLE
+        return CreateMetalFxDenoiser(rhi, desc);
+#else
+        return nullptr;
+#endif
     case DenoiserProvider::Auto:
         Log(Error, "auto is a denoiser selection policy, not a concrete provider");
         return nullptr;

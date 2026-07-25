@@ -2,7 +2,7 @@
 
 #include "core/math/Types.h"
 #include "io/ImageTypes.h"
-#include "rhi/RHIDenoiser.h"
+#include "renderer/denoiser/Denoiser.h"
 #include "rhi/RHIResource.h"
 
 namespace sparkle
@@ -24,7 +24,7 @@ public:
         return allocated_;
     }
 
-    [[nodiscard]] RHIDenoiserInputs GetInputs(RHIImage *accumulated_radiance) const;
+    [[nodiscard]] DenoiserInputs GetInputs(RHIImage *accumulated_radiance) const;
 
     [[nodiscard]] const RHIResourceRef<RHIImage> &GetNoisyRadianceHitDistance() const
     {

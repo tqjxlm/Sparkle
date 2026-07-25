@@ -1,11 +1,12 @@
 #pragma once
 
+#include "renderer/denoiser/PassTimingAggregator.h"
 #include "renderer/nrd/NrdConfig.h"
 
 #include "core/math/Types.h"
+#include "renderer/denoiser/Denoiser.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIComputePass.h"
-#include "rhi/RHIDenoiser.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHINrdBackend.h"
 #include "rhi/RHIPIpelineState.h"
@@ -24,10 +25,10 @@ class RHIContext;
 
 // NVIDIA NRD (ReBLUR_DIFFUSE_SPECULAR) denoiser for the GPU path tracer. The provider-neutral
 // path-tracing inputs are borrowed for each Encode call; this class owns only NRD resources.
-class NrdDenoiser final : public RHIDenoiser
+class NrdDenoiser final : public Denoiser
 {
 public:
-    NrdDenoiser(RHIContext *rhi, const RHIDenoiserDesc &desc);
+    NrdDenoiser(RHIContext *rhi, const DenoiserDesc &desc);
 
     ~NrdDenoiser() override;
 
@@ -51,24 +52,11 @@ public:
         return output_;
     }
 
-    void UpdateFrameData(const RHIDenoiserFrameData &frame) override;
+    void UpdateFrameData(const DenoiserFrameData &frame) override;
 
-    bool Encode(const RHIDenoiserInputs &inputs) override;
+    bool Encode(const DenoiserInputs &inputs) override;
 
 private:
-    struct HandoffWindow
-    {
-        bool applies;
-        float start;
-        float end;
-    };
-
-    struct StageTiming
-    {
-        double sum_ms = 0.0;
-        uint32_t count = 0;
-    };
-
     struct ConfigSnapshot
     {
         bool stabilization;
@@ -81,19 +69,11 @@ private:
 
     void EnsureOutputResources(PixelFormat format);
 
-    void BindInputs(const RHIDenoiserInputs &inputs);
+    void BindInputs(const DenoiserInputs &inputs);
 
     [[nodiscard]] RHIResourceRef<RHIImage> CreateFullScreenTexture(PixelFormat format, const std::string &name) const;
 
-    [[nodiscard]] HandoffWindow ComputeHandoffWindow() const;
-
-    void RenderReblur(const RHIDenoiserInputs &inputs, const Vector3UInt &dispatch, const Vector3UInt &group);
-
-    // A frame slot's GPU time belongs to the previous submission that used that slot, so each frame
-    // harvests the slot's pending times before recording which stages it dispatches into the slot.
-    void SampleGpuTimings(bool will_run_reblur);
-
-    void LogGpuTimings(const char *tag) const;
+    void RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &dispatch, const Vector3UInt &group);
 
     RHIContext *rhi_;
     Vector2UInt input_size_;
@@ -147,11 +127,6 @@ private:
     std::vector<RHINrdBackend::Dispatch> seam_dispatches_;
     std::vector<RHINrdBackend::DispatchResource> seam_resources_;
 
-    StageTiming pack_timing_;
-    StageTiming reblur_timing_;
-    StageTiming resolve_timing_;
-    uint32_t last_timing_log_count_ = 0;
-    std::vector<uint8_t> slot_ran_reblur_;
-    std::vector<uint8_t> slot_ran_resolve_;
+    PassTimingAggregator timings_;
 };
 } // namespace sparkle

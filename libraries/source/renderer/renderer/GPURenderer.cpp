@@ -2,6 +2,7 @@
 
 #include "core/Profiler.h"
 #include "renderer/BindlessManager.h"
+#include "renderer/denoiser/Denoiser.h"
 #include "renderer/denoiser/DenoiserFactory.h"
 #include "renderer/pass/ClearTexturePass.h"
 #include "renderer/pass/ScreenQuadPass.h"
@@ -14,7 +15,6 @@
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/PathTracingDenoiserInputs.h"
 #include "rhi/RHI.h"
-#include "rhi/RHIDenoiser.h"
 #include "rhi/RHIRayTracing.h"
 
 namespace sparkle
@@ -265,7 +265,7 @@ void GPURenderer::Update()
     auto *camera = scene_render_proxy_->GetCamera();
     const DenoiserProvider requested = DenoiserConfig::Get().provider;
     DenoiserProvider selected_provider = DenoiserProvider::Off;
-    RHIDenoiser *selected_denoiser = SelectDenoiser(requested, selected_provider);
+    Denoiser *selected_denoiser = SelectDenoiser(requested, selected_provider);
 
     const bool selection_changed = requested != requested_provider_ || selected_denoiser != frame_denoiser_;
     requested_provider_ = requested;
@@ -573,9 +573,9 @@ void GPURenderer::BindDenoiserInputs()
     cs_resources->gSpecAlbedo().BindResource(denoiser_inputs_->GetSpecularAlbedoRoughness()->GetDefaultView(rhi_));
 }
 
-RHIDenoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
+Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
 {
-    std::unique_ptr<RHIDenoiser> *slot = nullptr;
+    std::unique_ptr<Denoiser> *slot = nullptr;
     bool *failed = nullptr;
     if (provider == DenoiserProvider::Nrd)
     {
@@ -599,7 +599,7 @@ RHIDenoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
     if (!*slot)
     {
         const DenoiserConfig &config = DenoiserConfig::Get();
-        RHIDenoiserDesc desc{
+        DenoiserDesc desc{
             .input_size = resolution_.scene,
             .output_size = resolution_.output,
             .radiance_format = config.radiance_fp16 ? PixelFormat::RGBAFloat16 : PixelFormat::RGBAFloat,
@@ -620,7 +620,7 @@ RHIDenoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
     return slot->get();
 }
 
-RHIDenoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective)
+Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective)
 {
     effective = DenoiserProvider::Off;
     if (requested == DenoiserProvider::Off)
@@ -630,14 +630,14 @@ RHIDenoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserPro
 
     if (requested == DenoiserProvider::MetalFx || requested == DenoiserProvider::Auto)
     {
-        if (RHIDenoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::MetalFx))
+        if (Denoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::MetalFx))
         {
             effective = DenoiserProvider::MetalFx;
             return denoiser;
         }
     }
 
-    if (RHIDenoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::Nrd))
+    if (Denoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::Nrd))
     {
         effective = DenoiserProvider::Nrd;
         return denoiser;

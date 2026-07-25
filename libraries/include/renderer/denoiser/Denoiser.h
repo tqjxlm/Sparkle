@@ -8,12 +8,7 @@ namespace sparkle
 {
 class RHIImage;
 
-enum class RHIPlatformDenoiser : uint8_t
-{
-    MetalFx
-};
-
-struct RHIDenoiserDesc
+struct DenoiserDesc
 {
     Vector2UInt input_size;
     Vector2UInt output_size;
@@ -22,7 +17,7 @@ struct RHIDenoiserDesc
     bool synchronous_initialization = false;
 };
 
-struct RHIDenoiserInputs
+struct DenoiserInputs
 {
     RHIImage *noisy_radiance_hit_distance;
     RHIImage *normal_view_depth;
@@ -33,7 +28,7 @@ struct RHIDenoiserInputs
     RHIImage *accumulated_radiance;
 };
 
-struct RHIDenoiserFrameData
+struct DenoiserFrameData
 {
     Mat4 view;
     Mat4 projection;
@@ -45,17 +40,21 @@ struct RHIDenoiserFrameData
     bool final_frame = false;
 };
 
-class RHIDenoiser
+// One denoising provider for the GPU path tracer. The provider-neutral path-tracing inputs are
+// borrowed for each Encode call; an implementation owns only its own resources. Providers whose
+// implementation needs a platform API live with that backend (see MetalFxDenoiser) but still
+// implement this renderer-level interface, so GPURenderer treats every provider alike.
+class Denoiser
 {
 public:
-    virtual ~RHIDenoiser() = default;
+    virtual ~Denoiser() = default;
 
     [[nodiscard]] virtual bool IsReady() const = 0;
     [[nodiscard]] virtual bool NeedsInputs() const = 0;
     [[nodiscard]] virtual const char *GetName() const = 0;
     [[nodiscard]] virtual RHIResourceRef<RHIImage> GetOutput() const = 0;
 
-    virtual void UpdateFrameData(const RHIDenoiserFrameData &frame) = 0;
-    virtual bool Encode(const RHIDenoiserInputs &inputs) = 0;
+    virtual void UpdateFrameData(const DenoiserFrameData &frame) = 0;
+    virtual bool Encode(const DenoiserInputs &inputs) = 0;
 };
 } // namespace sparkle
