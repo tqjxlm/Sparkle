@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sparkle
@@ -38,6 +39,10 @@ public:
     // desktop GPUs have no ASTC; Apple and Android GPUs prefer ASTC over BC. which family
     // a target carries is CookTargets' to answer, from cook_targets.json
     [[nodiscard]] static const char *GetFamilyName(Family family);
+
+    // artifact type for a family-specific variant of a base type, e.g. skylight -> skylight_astc.
+    // packaging filters a target's artifacts by this suffix
+    [[nodiscard]] static std::string MakeFamilyType(std::string_view base, Family family);
 
     [[nodiscard]] static PixelFormat SelectFormat(Profile profile, Family family);
 

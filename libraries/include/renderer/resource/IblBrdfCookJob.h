@@ -13,17 +13,19 @@ namespace sparkle
 class IblBrdfCookJob : public CookJob
 {
 public:
+    static constexpr const char *Type = "ibl_brdf";
+    static constexpr uint32_t Version = 2;
     static constexpr uint32_t MapSize = IblSettings::BrdfMapSize;
     static constexpr uint32_t TargetSampleCount = IblSettings::TargetSampleCount;
 
     [[nodiscard]] const char *GetType() const override
     {
-        return "ibl_brdf";
+        return Type;
     }
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 2;
+        return Version;
     }
 
     [[nodiscard]] std::string GetSourceName() const override

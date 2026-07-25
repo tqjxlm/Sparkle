@@ -40,6 +40,8 @@ protected:
 class IblDiffuseCookJob : public IblEnvCookJob
 {
 public:
+    static constexpr const char *Type = "ibl_diffuse";
+    static constexpr uint32_t Version = 4;
     static constexpr uint32_t MapSize = IblSettings::DiffuseMapSize;
     static constexpr uint32_t TargetSampleCount = IblSettings::TargetSampleCount;
 
@@ -47,12 +49,12 @@ public:
 
     [[nodiscard]] const char *GetType() const override
     {
-        return "ibl_diffuse";
+        return Type;
     }
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 4;
+        return Version;
     }
 
     [[nodiscard]] float GetProgress() const override
@@ -66,6 +68,8 @@ public:
 class IblSpecularCookJob : public IblEnvCookJob
 {
 public:
+    static constexpr const char *Type = "ibl_specular";
+    static constexpr uint32_t Version = 5;
     static constexpr uint32_t MapSize = IblSettings::SpecularMapSize;
     static constexpr uint32_t TargetSampleCount = IblSettings::TargetSampleCount;
     static constexpr uint8_t MipLevelCount = IblSettings::SpecularMipLevelCount;
@@ -74,12 +78,12 @@ public:
 
     [[nodiscard]] const char *GetType() const override
     {
-        return "ibl_specular";
+        return Type;
     }
 
     [[nodiscard]] uint32_t GetVersion() const override
     {
-        return 5;
+        return Version;
     }
 
     [[nodiscard]] float GetProgress() const override;

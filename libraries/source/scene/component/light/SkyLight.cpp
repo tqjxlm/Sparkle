@@ -344,8 +344,8 @@ void SkyLight::RequestCook()
     // resolve, keeping every context on the shipped encoding the ground truths reflect),
     // then the fp16 master, then cook the master
     const auto master_key = MasterCookKey(sky_map_path_);
-    const auto transcode_key = HdrCubeTranscodeJob::MakeLookupKey(SkyLightCookJob::Type, CookTargets::PlatformFamily(),
-                                                                  master_key.source_name);
+    const auto transcode_key = HdrCubeTranscodeJob::MakeIdentityKey(
+        SkyLightCookJob::Type, CookTargets::PlatformFamily(), master_key.source_name);
 
     ProbeArtifact(transcode_key, finish, [this, master_key, finish]() {
         ProbeArtifact(master_key, finish, [this, finish]() { RequestMasterCook(finish); });
@@ -422,9 +422,9 @@ void SkyLight::DeliverCookedResult(CookResult result, const SkyCookFinish &finis
     {
         if (const auto view = ParseSkyPayload(result.payload); view && !IsCompressedFormat(view->format))
         {
-            auto alias_key = HdrCubeTranscodeJob::MakeLookupKey(SkyLightCookJob::Type, CookTargets::PlatformFamily(),
-                                                                MasterCookKey(sky_map_path_).source_name);
-            alias_key.source_hash = HdrCubeTranscodeJob::MakeSourceHash(*result.source_hash, SkyLightCookJob::Version);
+            const auto alias_key = HdrCubeTranscodeJob::MakeKey(SkyLightCookJob::Type, CookTargets::PlatformFamily(),
+                                                                MasterCookKey(sky_map_path_).source_name,
+                                                                *result.source_hash, SkyLightCookJob::Version);
 
             auto master_result = std::make_shared<CookResult>(std::move(result));
             ProbeArtifact(alias_key, finish,

@@ -112,10 +112,8 @@ void ImageBasedLighting::InitRenderResources(RHIContext *ctx, const RenderConfig
     };
 
     const auto transcode_key = [this](const CookJob &job) {
-        auto key =
-            HdrCubeTranscodeJob::MakeLookupKey(job.GetType(), CookTargets::PlatformFamily(), job.GetSourceName());
-        key.source_hash = HdrCubeTranscodeJob::MakeSourceHash(env_map_cpu_->GetContentHash(), job.GetVersion());
-        return key;
+        return HdrCubeTranscodeJob::MakeKey(job.GetType(), CookTargets::PlatformFamily(), job.GetSourceName(),
+                                            env_map_cpu_->GetContentHash(), job.GetVersion());
     };
 
     ibl_brdf_pass_ = CreatePass<IBLBrdfPass>(config, allow_gpu_cook, MakeCookArtifactKey(*brdf_job), {}, on_ready, ctx);

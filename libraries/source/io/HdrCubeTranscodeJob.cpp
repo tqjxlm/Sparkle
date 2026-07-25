@@ -10,7 +10,7 @@ namespace
 {
 std::string TranscodeType(const std::string &master_type, TextureCompression::Family family)
 {
-    return master_type + "_" + TextureCompression::GetFamilyName(family);
+    return TextureCompression::MakeFamilyType(master_type, family);
 }
 } // namespace
 
@@ -32,13 +32,22 @@ uint32_t HdrCubeTranscodeJob::MakeSourceHash(uint32_t origin_content_hash, uint3
     return hash;
 }
 
-CookArtifactKey HdrCubeTranscodeJob::MakeLookupKey(const std::string &master_type, TextureCompression::Family family,
-                                                   const std::string &source_name)
+CookArtifactKey HdrCubeTranscodeJob::MakeIdentityKey(const std::string &master_type, TextureCompression::Family family,
+                                                     const std::string &source_name)
 {
     return {.type = TranscodeType(master_type, family),
             .version = Version,
             .source_name = source_name,
             .source_hash = std::nullopt};
+}
+
+CookArtifactKey HdrCubeTranscodeJob::MakeKey(const std::string &master_type, TextureCompression::Family family,
+                                             const std::string &source_name, uint32_t origin_content_hash,
+                                             uint32_t master_version)
+{
+    auto key = MakeIdentityKey(master_type, family, source_name);
+    key.source_hash = MakeSourceHash(origin_content_hash, master_version);
+    return key;
 }
 
 CookJobResult HdrCubeTranscodeJob::Execute()

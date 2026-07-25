@@ -33,11 +33,21 @@ public:
     }
 };
 
+// content-addressed key: what the job's own output is stored under
 [[nodiscard]] inline CookArtifactKey MakeCookArtifactKey(const CookJob &job)
 {
     return {.type = job.GetType(),
             .version = job.GetVersion(),
             .source_name = job.GetSourceName(),
             .source_hash = job.GetSourceHash()};
+}
+
+// identity-only key: resolves whatever hash the store holds for this logical artifact
+[[nodiscard]] inline CookArtifactKey MakeCookIdentityKey(const CookJob &job)
+{
+    return {.type = job.GetType(),
+            .version = job.GetVersion(),
+            .source_name = job.GetSourceName(),
+            .source_hash = std::nullopt};
 }
 } // namespace sparkle
