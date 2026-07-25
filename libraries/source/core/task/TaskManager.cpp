@@ -6,12 +6,12 @@ namespace sparkle
 {
 TaskManager *TaskManager::instance_ = nullptr;
 
-TaskManager::TaskManager(unsigned int max_parallism)
+TaskManager::TaskManager(unsigned int max_parallism, unsigned int reserved_threads)
 {
     ASSERT(instance_ == nullptr);
     instance_ = this;
 
-    task_dispatcher_ = std::make_unique<TaskDispatcher>(max_parallism);
+    task_dispatcher_ = std::make_unique<TaskDispatcher>(max_parallism, reserved_threads);
 }
 
 std::shared_ptr<TaskFuture<>> TaskManager::OnAll(const std::vector<std::shared_ptr<TaskFuture<>>> &tasks)

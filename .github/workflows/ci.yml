@@ -364,11 +364,41 @@ jobs:
             test -f "build_system/macos/output/cooked_image/$target/cooked/manifest.json"
           done
 
-      - name: Upload cooked content images
+      - name: Upload cooked content image (macos)
         uses: actions/upload-artifact@v7
         with:
-          name: cooked-images
-          path: build_system/macos/output/cooked_image
+          name: cooked-image-macos
+          path: build_system/macos/output/cooked_image/macos
+
+      - name: Upload cooked content image (ios)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-image-ios
+          path: build_system/macos/output/cooked_image/ios
+
+      - name: Upload cooked content image (macos-glfw)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-image-macos-glfw
+          path: build_system/macos/output/cooked_image/macos-glfw
+
+      - name: Upload cooked content image (windows-glfw)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-image-windows-glfw
+          path: build_system/macos/output/cooked_image/windows-glfw
+
+      - name: Upload cooked content image (linux-glfw)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-image-linux-glfw
+          path: build_system/macos/output/cooked_image/linux-glfw
+
+      - name: Upload cooked content image (android)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-image-android
+          path: build_system/macos/output/cooked_image/android
 
   release-macos-macos:
     name: release (macos-latest, macos, Release)

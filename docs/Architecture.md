@@ -52,7 +52,7 @@ sparkle/
 ├── frameworks/source/    # Platform wrappers (glfw, macos, ios, android)
 ├── shaders/              # Slang shader source
 │   ├── include/          # Shared shader headers
-│   ├── nrd/              # NRD shader cook (see Nrd.md)
+│   ├── nrd/              # NRD shader cook (see Denoiser.md)
 │   ├── ray_trace/        # Path tracer compute shaders
 │   ├── screen/           # Post-processing shaders
 │   ├── standard/         # Vertex/pixel shaders

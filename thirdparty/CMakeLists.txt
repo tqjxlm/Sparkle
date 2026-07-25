@@ -193,7 +193,7 @@ target_link_libraries(sparkle_thirdparty PUBLIC ${SPARKLE_ASTCENC_TARGET})
 
 # Real-time GI denoiser. Native-API path: its SPIR-V shaders are cross-compiled to Metal by our shader
 # pipeline; NRI (D3D/VK-only, unusable on Metal) stays off. Static lib so there is no dylib to bundle.
-# DXC (HLSL->SPIR-V) comes from the Vulkan SDK already in our build deps. See docs/Nrd.md.
+# DXC (HLSL->SPIR-V) comes from the Vulkan SDK already in our build deps. See docs/Denoiser.md.
 set(NRD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
 set(NRD_NRI OFF CACHE BOOL "" FORCE)
 # R10G10B10A2_UNORM (NRD's default): halves the bandwidth of the most-sampled ReBLUR texture vs

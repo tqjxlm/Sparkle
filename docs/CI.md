@@ -12,7 +12,7 @@
 [.github/workflows/ci.yml](../.github/workflows/ci.yml) runs four stages:
 
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything. Debug cells are compile gates only: they ship no release package and therefore run no release or test node, and a product whose Debug gate is already covered by another cell builds Release only (`build_types` in the `PRODUCTS` table of [dev/ci_matrix.py](../dev/ci_matrix.py)).
-* **cook**: one macos-release node runs a single multi-target cook on the runner's Metal GPU, assembles one content image per cook target, and publishes them as the `cooked-images` artifact (see [Cooking.md](Cooking.md)).
+* **cook**: one macos-release node runs a single multi-target cook on the runner's Metal GPU, assembles one content image per cook target, and publishes each as its own `cooked-image-<target>` artifact, so a release node downloads only the image it packages (see [Cooking.md](Cooking.md)).
 * **release**: every released product: replaces each build product's packed content with its own target's image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
 * **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release and ubuntu-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, macos-ios-release inside the iOS Simulator (a dedicated unsigned simulator package), and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
@@ -110,7 +110,7 @@ The iOS cell runs the dedicated unsigned simulator package as spawned headless p
 python3 dev/run_tests.py --framework ios --config Release --width 1565 --height 720
 ```
 
-The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the NRD gate suite (see [Nrd.md](Nrd.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.
+The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the denoiser gate suite (see [Denoiser.md](Denoiser.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.
 
 The paravirtual device also renders MTLHeap-placed resources as solid magenta through MoltenVK without reporting any error, so the test job runs with `MVK_CONFIG_USE_MTLHEAP=0` (dedicated allocations). Real GPUs render identically either way; if a macos-glfw cell ever regresses to uniform magenta screenshots, suspect this class of paravirtual quirk first.
 
