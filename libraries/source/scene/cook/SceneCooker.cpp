@@ -37,7 +37,9 @@ std::vector<std::string> ReadCookList()
     return scenes;
 }
 
-void PumpMainThreadUntil(const std::function<bool()> &done)
+} // namespace
+
+void SceneCooker::PumpMainThreadUntil(const std::function<bool()> &done)
 {
     while (!done())
     {
@@ -45,7 +47,6 @@ void PumpMainThreadUntil(const std::function<bool()> &done)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
-} // namespace
 
 std::vector<std::string> SceneCooker::GetCookList(const std::string &scene_override)
 {

@@ -14,7 +14,8 @@ namespace sparkle
 class TaskManager
 {
 public:
-    explicit TaskManager(unsigned int max_parallism);
+    // reserved_threads are the cores the caller drives itself and keeps out of the pool
+    TaskManager(unsigned int max_parallism, unsigned int reserved_threads);
 
     ~TaskManager()
     {

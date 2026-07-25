@@ -152,7 +152,10 @@ bool AppFramework::InitCore(int argc, const char *const argv[])
     session_manager_->SetLoadLastSession(app_config_.load_last_session);
     session_manager_->LoadLastSessionIfRequested();
 
-    task_manager_ = std::make_unique<TaskManager>(app_config_.max_threads);
+    // cook mode drives the RHI inline from main and runs no frame loop, so only main is
+    // reserved: on a 3-core CI runner that is the difference between one worker and two
+    const unsigned reserved_threads = app_config_.render_thread && !app_config_.cook_mode ? 2u : 1u;
+    task_manager_ = std::make_unique<TaskManager>(app_config_.max_threads, reserved_threads);
     TaskDispatcher::Instance().RegisterTaskQueue(pending_tasks_, ThreadName::Main);
 
 #if ENABLE_PROFILER
@@ -354,52 +357,100 @@ struct PendingHdrTranscode
     uint32_t origin_hash = 0;
 };
 
-// derives the per-family HDR cube artifacts from the fp16 masters the run produced
+// derives the per-family HDR cube artifacts from the fp16 masters the run produced. block
+// encoding dominates a release cook, so the transcodes run as concurrent cook jobs instead
+// of one at a time: the families are independent, while an IBL entry chains from the encoded
+// bytes of the sky cube of its own family and therefore waits for it. deliveries run on the
+// pumping thread, so the callbacks below need no synchronization
 static bool CookHdrTranscodes(const std::vector<PendingHdrTranscode> &pending,
                               const std::set<TextureCompression::Family> &families, FamilyArtifactMap &family_artifacts)
 {
-    for (auto family : families)
-    {
-        uint32_t family_sky_cube_hash = 0;
-        for (const auto &entry : pending)
+    // a transcode holds its fp16 master until it finishes, so cap the concurrent ones
+    constexpr size_t MaxInFlightTranscodes = 4;
+
+    bool failed = false;
+    std::vector<CookHandle> handles;
+    std::map<TextureCompression::Family, uint32_t> family_sky_cube_hashes;
+
+    using PayloadHandler = std::function<bool(const CookPayload &)>;
+
+    auto request = [&](TextureCompression::Family family, const PendingHdrTranscode &entry, uint32_t origin_hash,
+                       PayloadHandler on_payload) {
+        auto master = CookArtifactStore::Load(entry.master_key);
+        if (master.empty())
         {
-            auto master = CookArtifactStore::Load(entry.master_key);
-            if (master.empty())
-            {
-                Log(Error, "missing master artifact for {}", entry.source_name);
-                return false;
-            }
+            Log(Error, "missing master artifact for {}", entry.source_name);
+            failed = true;
+            return;
+        }
 
-            const bool is_sky = entry.origin_hash != 0;
-            const auto origin_hash = is_sky ? entry.origin_hash : family_sky_cube_hash;
-            ASSERT_F(origin_hash != 0, "sky transcode must precede the IBL transcodes");
+        ASSERT_F(origin_hash != 0, "sky transcode must precede the IBL transcodes");
+        const auto source_hash = HdrCubeTranscodeJob::MakeSourceHash(origin_hash, entry.master_key.version);
+        auto job = std::make_shared<HdrCubeTranscodeJob>(entry.master_type, family, entry.source_name,
+                                                         std::move(master), source_hash);
+        const auto key = MakeCookArtifactKey(*job);
 
-            const auto source_hash = HdrCubeTranscodeJob::MakeSourceHash(origin_hash, entry.master_key.version);
-            auto job = std::make_shared<HdrCubeTranscodeJob>(entry.master_type, family, entry.source_name,
-                                                             std::move(master), source_hash);
-            const auto key = MakeCookArtifactKey(*job);
-            auto result = Cooker::CookNow(key, [&job]() { return job; });
-            if (!result.HasPayload())
-            {
-                Log(Error, "failed to transcode {} for {}", entry.source_name,
-                    TextureCompression::GetFamilyName(family));
-                return false;
-            }
+        handles.push_back(Cooker::Request(
+            key, [job]() { return job; },
+            [&failed, &family_artifacts, key, family, source_name = entry.source_name,
+             handle_payload = std::move(on_payload)](CookResult result) {
+                if (!result.HasPayload() || (handle_payload && !handle_payload(result.payload)))
+                {
+                    Log(Error, "failed to transcode {} for {}", source_name, TextureCompression::GetFamilyName(family));
+                    failed = true;
+                    return;
+                }
+                family_artifacts[family].insert(CookArtifactStore::GetManifestKey(key));
+            }));
 
-            if (is_sky)
-            {
-                auto family_cube = SkyLight::MakeCubeFromPayload(result.payload, entry.source_name);
+        SceneCooker::PumpMainThreadUntil([&handles] {
+            std::erase_if(handles, [](const CookHandle &handle) { return handle.OnDelivered()->IsReady(); });
+            return handles.size() < MaxInFlightTranscodes;
+        });
+    };
+
+    auto wait_for_all = [&handles]() {
+        SceneCooker::PumpMainThreadUntil([&handles] {
+            return std::ranges::all_of(handles,
+                                       [](const CookHandle &handle) { return handle.OnDelivered()->IsReady(); });
+        });
+        handles.clear();
+    };
+
+    // one round per sky map: its families' sky cubes first, then every IBL entry the sky
+    // entry introduced, each keyed by the sky cube its own family just produced
+    for (auto entry = pending.begin(); entry != pending.end() && !failed;)
+    {
+        const auto &sky_entry = *entry;
+        ASSERT_F(sky_entry.origin_hash != 0, "a transcode round starts at a sky entry");
+
+        for (auto family : families)
+        {
+            request(family, sky_entry, sky_entry.origin_hash, [&, family](const CookPayload &payload) {
+                auto family_cube = SkyLight::MakeCubeFromPayload(payload, sky_entry.source_name);
                 if (!family_cube)
                 {
                     return false;
                 }
-                family_sky_cube_hash = family_cube->GetContentHash();
-            }
-
-            family_artifacts[family].insert(CookArtifactStore::GetManifestKey(key));
+                family_sky_cube_hashes[family] = family_cube->GetContentHash();
+                return true;
+            });
         }
+        wait_for_all();
+
+        const auto round_end =
+            std::find_if(++entry, pending.end(), [](const PendingHdrTranscode &next) { return next.origin_hash != 0; });
+        for (; entry != round_end && !failed; ++entry)
+        {
+            for (auto family : families)
+            {
+                request(family, *entry, family_sky_cube_hashes[family], {});
+            }
+        }
+        wait_for_all();
     }
-    return true;
+
+    return !failed;
 }
 
 static void CollectMaterialTextureJobs(const Scene &scene, const std::set<TextureCompression::Family> &families,

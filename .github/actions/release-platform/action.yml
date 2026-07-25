@@ -44,12 +44,6 @@ runs:
         name: build-${{ inputs.framework }}-${{ inputs.os }}-${{ inputs.build-type }}${{ inputs.abi != '' && format('-{0}', inputs.abi) || '' }}
         path: build_system/${{ inputs.framework }}/product
 
-    - name: Download cooked content images
-      uses: actions/download-artifact@v8
-      with:
-        name: cooked-images
-        path: cooked
-
     - name: Resolve package path
       id: package
       shell: bash
@@ -71,6 +65,13 @@ runs:
         fi
         echo "target=$target" >> $GITHUB_OUTPUT
         echo "path=$pkg" >> $GITHUB_OUTPUT
+
+    # the cook stage publishes one artifact per target: this product packages only its own
+    - name: Download cooked content image
+      uses: actions/download-artifact@v8
+      with:
+        name: cooked-image-${{ steps.package.outputs.target }}
+        path: cooked/${{ steps.package.outputs.target }}
 
     - name: Package cooked content image
       shell: bash

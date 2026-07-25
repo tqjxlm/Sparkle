@@ -40,7 +40,7 @@ public:
         return *instance_;
     }
 
-    explicit TaskDispatcher(unsigned int max_parallism);
+    TaskDispatcher(unsigned int max_parallism, unsigned int reserved_threads);
 
     ~TaskDispatcher();
 

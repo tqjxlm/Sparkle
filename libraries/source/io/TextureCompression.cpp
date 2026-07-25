@@ -463,6 +463,42 @@ const bc7enc_compress_block_params &GetBc7Params(bool perceptual)
     }();
     return perceptual ? PerceptualParams : LinearParams;
 }
+
+// encodes RGBAFloat16 rows into the HDR block bytes they occupy. blocks compress
+// independently, so a caller may hand over a block-aligned band of a larger image and get
+// exactly that band's bytes
+bool EncodeHdrRows(const uint8_t *fp16, unsigned width, unsigned height, PixelFormat target_format, uint8_t *out,
+                   size_t out_size)
+{
+    ASSERT(out_size == GetImageMipByteSize(target_format, width, height));
+
+    if (target_format == PixelFormat::BC6HUfloat)
+    {
+        EncodeBc6hMip(fp16, width, height, out);
+        return true;
+    }
+
+    ASSERT(target_format == PixelFormat::ASTC4x4HDR);
+
+    astcenc_config config;
+    const unsigned block_dim = GetBlockDim(target_format);
+    auto status =
+        astcenc_config_init(GetAstcProfile(target_format), block_dim, block_dim, 1, ASTCENC_PRE_MEDIUM, 0, &config);
+    astcenc_context *context = nullptr;
+    if (status == ASTCENC_SUCCESS)
+    {
+        status = astcenc_context_alloc(&config, 1, &context, nullptr);
+    }
+    if (status != ASTCENC_SUCCESS)
+    {
+        Log(Error, "astc hdr encoder setup failed: {}", astcenc_get_error_string(status));
+        return false;
+    }
+
+    const bool ok = EncodeAstcHdrMip(reinterpret_cast<const Half *>(fp16), width, height, context, out, out_size);
+    astcenc_context_free(context);
+    return ok;
+}
 } // namespace
 
 const char *TextureCompression::GetFamilyName(Family family)
@@ -535,63 +571,49 @@ std::vector<uint8_t> TextureCompression::EncodeHdrFace(const Image2D &source, Pi
     const unsigned width = source.GetWidth();
     const unsigned height = source.GetHeight();
 
-    if (target_format == PixelFormat::BC6HUfloat)
-    {
-        std::vector<uint8_t> blocks(GetImageMipByteSize(target_format, width, height));
-        EncodeBc6hMip(source.GetRawData(), width, height, blocks.data());
-        return blocks;
-    }
-
-    ASSERT(target_format == PixelFormat::ASTC4x4HDR);
-
-    astcenc_config config;
-    const unsigned block_dim = GetBlockDim(target_format);
-    auto status =
-        astcenc_config_init(GetAstcProfile(target_format), block_dim, block_dim, 1, ASTCENC_PRE_MEDIUM, 0, &config);
-    astcenc_context *context = nullptr;
-    if (status == ASTCENC_SUCCESS)
-    {
-        status = astcenc_context_alloc(&config, 1, &context, nullptr);
-    }
-    if (status != ASTCENC_SUCCESS)
-    {
-        Log(Error, "astc hdr encoder setup failed: {}", astcenc_get_error_string(status));
-        return {};
-    }
-
     std::vector<uint8_t> blocks(GetImageMipByteSize(target_format, width, height));
-    const bool ok = EncodeAstcHdrMip(reinterpret_cast<const Half *>(source.GetRawData()), width, height, context,
-                                     blocks.data(), blocks.size());
-    astcenc_context_free(context);
+    const bool ok = EncodeHdrRows(source.GetRawData(), width, height, target_format, blocks.data(), blocks.size());
     return ok ? blocks : std::vector<uint8_t>{};
 }
 
 std::vector<char> TextureCompression::EncodeHdrCube(const uint8_t *fp16, unsigned width, unsigned height,
                                                     unsigned mip_count, PixelFormat target_format)
 {
-    struct FaceJob
+    // encoding is the dominant cost of a release cook, and the six faces of the largest mip
+    // would cap it to six parallel units: split every face into bands of block rows instead,
+    // sized so a host with many cores still gets several units per face
+    constexpr unsigned BlockRowsPerBand = 16;
+
+    struct BandJob
     {
         size_t in_offset;
         size_t out_offset;
+        size_t out_size;
         unsigned width;
         unsigned height;
     };
 
-    std::vector<FaceJob> face_jobs;
+    const unsigned band_height = BlockRowsPerBand * GetBlockDim(target_format);
+
+    std::vector<BandJob> band_jobs;
     size_t in_offset = 0;
     size_t out_offset = sizeof(PayloadHeader);
     for (unsigned mip = 0; mip < mip_count; mip++)
     {
         const unsigned mip_width = MipDim(width, mip);
         const unsigned mip_height = MipDim(height, mip);
-        const size_t fp16_face_size =
-            static_cast<size_t>(mip_width) * mip_height * GetPixelSize(PixelFormat::RGBAFloat16);
-        const size_t compressed_face_size = GetImageMipByteSize(target_format, mip_width, mip_height);
+        const size_t fp16_row_size = static_cast<size_t>(mip_width) * GetPixelSize(PixelFormat::RGBAFloat16);
         for (unsigned face = 0; face < 6; face++)
         {
-            face_jobs.push_back({in_offset, out_offset, mip_width, mip_height});
-            in_offset += fp16_face_size;
-            out_offset += compressed_face_size;
+            for (unsigned row = 0; row < mip_height; row += band_height)
+            {
+                const unsigned rows = std::min(band_height, mip_height - row);
+                band_jobs.push_back({in_offset + row * fp16_row_size,
+                                     out_offset + GetImageMipByteSize(target_format, mip_width, row),
+                                     GetImageMipByteSize(target_format, mip_width, rows), mip_width, rows});
+            }
+            in_offset += fp16_row_size * mip_height;
+            out_offset += GetImageMipByteSize(target_format, mip_width, mip_height);
         }
     }
 
@@ -601,19 +623,13 @@ std::vector<char> TextureCompression::EncodeHdrCube(const uint8_t *fp16, unsigne
     std::memcpy(payload.data(), &header, sizeof(header));
 
     std::atomic<bool> success{true};
-    TaskManager::ParallelFor(0u, static_cast<unsigned>(face_jobs.size()), [&](unsigned index) {
-        const auto &job = face_jobs[index];
-        const size_t fp16_face_size =
-            static_cast<size_t>(job.width) * job.height * GetPixelSize(PixelFormat::RGBAFloat16);
-        const Image2D fp16_face(job.width, job.height, PixelFormat::RGBAFloat16,
-                                std::vector<uint8_t>(fp16 + job.in_offset, fp16 + job.in_offset + fp16_face_size));
-        const auto encoded = EncodeHdrFace(fp16_face, target_format);
-        if (encoded.size() != GetImageMipByteSize(target_format, job.width, job.height))
+    TaskManager::ParallelFor(0u, static_cast<unsigned>(band_jobs.size()), [&](unsigned index) {
+        const auto &job = band_jobs[index];
+        if (!EncodeHdrRows(fp16 + job.in_offset, job.width, job.height, target_format,
+                           reinterpret_cast<uint8_t *>(payload.data()) + job.out_offset, job.out_size))
         {
             success.store(false);
-            return;
         }
-        std::memcpy(payload.data() + job.out_offset, encoded.data(), encoded.size());
     }).wait();
 
     return success.load() ? payload : std::vector<char>{};
