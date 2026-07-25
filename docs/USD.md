@@ -55,7 +55,7 @@ The `usd_round_trip` test case builds a procedural test scene, renders it, expor
 python3 tests/usd/usd_roundtrip_test.py --framework glfw --headless
 ```
 
-The procedural scene (`BuildTestScene` in [tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)) covers every exportable feature: analytic spheres, mesh primitives, glTF-imported models with full PBR texture sets, dielectric glass, a directional light and a sky light. With an explicit `--scene`, the test round-trips that scene instead (no ground-truth gate). CI runs it on the windows/glfw/Release test job (see [.github/workflows/ci.yml](../.github/workflows/ci.yml)). See [Test.md](Test.md) for general test-case mechanics.
+The procedural scene (`BuildTestScene` in [tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)) covers every exportable feature: analytic spheres, mesh primitives, glTF-imported models with full PBR texture sets, dielectric glass, a directional light and a sky light. With an explicit `--scene`, the test round-trips that scene instead (no ground-truth gate). The round trip is platform-independent (export and import both run on the CPU), so CI evaluates it once, on the macos/macos/Release test job (see [tests/coverage.csv](../tests/coverage.csv)). See [Test.md](Test.md) for general test-case mechanics.
 
 ## Packaged TestScene
 
