@@ -9,6 +9,9 @@
 #include "rhi/RHIRayTracing.h"
 #include "rhi/RHIShader.h"
 
+#include <memory>
+#include <vector>
+
 namespace sparkle
 {
 class SkyRenderProxy;
@@ -34,11 +37,22 @@ public:
     ~GPURenderer() override;
 
 private:
+    // one entry per concrete provider, in the order Auto prefers them. a provider is
+    // constructed on first use and never retried once it has failed
+    struct DenoiserSlot
+    {
+        DenoiserProvider provider;
+        std::unique_ptr<Denoiser> denoiser;
+        bool failed = false;
+    };
+
     void Update() override;
 
     void InitSceneRenderResources();
 
     void BindDenoiserInputs();
+
+    [[nodiscard]] DenoiserSlot *FindDenoiserSlot(DenoiserProvider provider);
 
     [[nodiscard]] Denoiser *GetOrCreateDenoiser(DenoiserProvider provider);
 
@@ -63,8 +77,6 @@ private:
     RHIResourceRef<RHIImage> scene_texture_;
     RHIResourceRef<RHIRenderTarget> scene_rt_;
     std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
-    std::unique_ptr<Denoiser> nrd_denoiser_;
-    std::unique_ptr<Denoiser> metalfx_denoiser_;
     std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
 
     RHIResourceRef<RHIImage> tone_mapping_output_;
@@ -78,11 +90,11 @@ private:
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
 
+    std::vector<DenoiserSlot> denoiser_slots_;
+
     Denoiser *frame_denoiser_ = nullptr;
     DenoiserProvider frame_provider_ = DenoiserProvider::Off;
     DenoiserProvider requested_provider_ = DenoiserProvider::Off;
-    bool nrd_failed_ = false;
-    bool metalfx_failed_ = false;
     bool gbuffer_write_this_frame_ = false;
     bool denoiser_reset_this_frame_ = false;
     bool final_frame_this_frame_ = false;
