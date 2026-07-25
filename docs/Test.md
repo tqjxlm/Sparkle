@@ -40,6 +40,12 @@ A case carries:
 
 [tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) generates a test job for each of its columns. A triplet without a column ships untested — currently `macos-macos-release`, `macos-glfw-release`, `macos-ios-release` (the simulator, see [iOS](#ios)), `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` (an emulator, see [Android](#android)) have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
 
+What each triplet is worth, when deciding which columns a new case needs:
+
+* `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` all render on the **same driver** — Mesa lavapipe (`llvmpipe`), the android one inside an x86_64 emulator — so a case whose subject is GPU or driver behaviour learns nothing from the second and third copy. What is unique to them is the host runtime: the MSVC-built binary and Win32 file/path semantics, the Linux binary, and the Android app lifecycle, asset plumbing and surface handling. `ubuntu-glfw-release` is the cheapest of the three per case, so it carries the shared software-rendering and x86 load.
+* `macos-macos-release` (Metal) and `macos-glfw-release` (Vulkan through MoltenVK) are the only triplets on a physical GPU, and with `macos-ios-release` the only ARM ones. Anything arch-sensitive needs one of them plus one x86 column: astcenc, for instance, is built NEON on ARM and SSE4.1 elsewhere ([thirdparty/CMakeLists.txt](../thirdparty/CMakeLists.txt)), so `texture_compression` runs on both sides of that split and nowhere else.
+* Marking a case everywhere is rarely right and never free: a case costs about 24s on the android emulator and 14s on windows before its body runs at all (install, launch, log capture), against ~1s on `macos-macos-release`.
+
 Maintaining the two tables:
 
 * Adding a test case: append a [tests/registry.json](../tests/registry.json) entry (unique `name`, the C++ `test_case` it pins, `app_args`, optional evaluator) and a [tests/coverage.csv](../tests/coverage.csv) row at its execution-order position, marking every triplet that must run it. Development-only cases need no row; every row must name a registry case.
