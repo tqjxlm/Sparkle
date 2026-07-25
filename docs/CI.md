@@ -110,7 +110,7 @@ The iOS cell runs the dedicated unsigned simulator package as spawned headless p
 python3 dev/run_tests.py --framework ios --config Release --width 1565 --height 720
 ```
 
-The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the NRD gate suite (see [Nrd.md](Nrd.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.
+The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the denoiser gate suite (see [Denoiser.md](Denoiser.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.
 
 The paravirtual device also renders MTLHeap-placed resources as solid magenta through MoltenVK without reporting any error, so the test job runs with `MVK_CONFIG_USE_MTLHEAP=0` (dedicated allocations). Real GPUs render identically either way; if a macos-glfw cell ever regresses to uniform magenta screenshots, suspect this class of paravirtual quirk first.
 

@@ -1,6 +1,6 @@
 // Build-host tool: cross-compiles one NRD SPIR-V shader to MSL and prints the reflection metadata
 // the runtime would otherwise need spirv-cross for (see shaders/nrd/cook/cook_nrd_shaders.py, which
-// drives it, and docs/Nrd.md). Compiled at build time with the Vulkan SDK's spirv-cross static libs;
+// drives it, and docs/Denoiser.md). Compiled at build time with the Vulkan SDK's spirv-cross static libs;
 // never part of the app.
 //
 // usage: nrd_msl_cook <in.spv> <out.metal> <macos|ios>

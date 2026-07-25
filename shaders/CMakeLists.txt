@@ -125,7 +125,7 @@ if (ENABLE_METAL)
     add_dependencies(cook-resources compile-metal-shaders)
 
     # NRD's shaders are cooked SPIR-V->MSL at build time into the intermediate shader directory (see
-    # docs/Nrd.md). The cook tool runs on the build HOST even when targeting iOS; its ordering on
+    # docs/Denoiser.md). The cook tool runs on the build HOST even when targeting iOS; its ordering on
     # NRDShaders is declared at root scope because thirdparty is added after this subdirectory.
     if (IOS)
         set(NRD_COOKED_PLATFORM ios)

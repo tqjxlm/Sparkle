@@ -9,7 +9,7 @@
 namespace sparkle
 {
 // Cooked ReBLUR shaders loaded from packed resources (cross-compiled at build time by
-// shaders/nrd/cook; see docs/Nrd.md). Keyed by a canonical form of
+// shaders/nrd/cook; see docs/Denoiser.md). Keyed by a canonical form of
 // nrd::PipelineDesc::shaderIdentifier; the version triple guards against building with a stale
 // shader cook after an NRD submodule update.
 class NrdCookedShaders
