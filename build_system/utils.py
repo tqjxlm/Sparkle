@@ -101,6 +101,21 @@ def extract_archive(archive_path, extract_to):
         raise ValueError(f"Unsupported archive format: {archive_path}")
 
 
+def run_checked(cmd, failure_message, description="Running"):
+    """
+    Run a command, echoing it first, and raise RuntimeError if it fails.
+
+    A string command runs through the shell, which is how the Windows builds wrap
+    cmake in vcvars64.bat.
+    """
+    use_shell = isinstance(cmd, str)
+    print(f"{description}:", cmd if use_shell else " ".join(cmd))
+
+    result = subprocess.run(cmd, shell=use_shell, env=os.environ.copy())
+    if result.returncode != 0:
+        raise RuntimeError(failure_message)
+
+
 def run_command_with_logging(cmd, log_file_path, description):
     """
     Run a command and log output to both console and file.

@@ -3,7 +3,7 @@ import subprocess
 import platform
 
 from build_system.prerequisites import find_llvm_path, find_or_install_ninja, find_visual_studio_path, find_vcpkg, install_glfw
-from build_system.utils import compress_zip, robust_rmtree
+from build_system.utils import compress_zip, robust_rmtree, run_checked
 from build_system.builder_interface import FrameworkBuilder
 
 SCRIPT = os.path.abspath(__file__)
@@ -115,15 +115,9 @@ def configure(args, is_generate_sln):
     ] + generator_args + args["cmake_options"] + compiler_args + framework_args + get_toolchain_args()
 
     if is_windows and not is_generate_sln:
-        shell_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
-        print("Running CMake configure:", shell_cmd)
-        result = subprocess.run(shell_cmd, shell=True)
-    else:
-        print("Running CMake configure:", " ".join(cmake_cmd))
-        result = subprocess.run(cmake_cmd, env=os.environ.copy())
+        cmake_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
 
-    if result.returncode != 0:
-        raise RuntimeError("CMake configure failed.")
+    run_checked(cmake_cmd, "CMake configure failed.", "Running CMake configure")
 
 
 class GlfwBuilder(FrameworkBuilder):
@@ -163,16 +157,9 @@ class GlfwBuilder(FrameworkBuilder):
                      build_threads, "--config", args["config"]]
 
         if is_windows:
-            vs_path = _require_vs_path()
-            shell_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)
-            print("Running build:", shell_cmd)
-            result = subprocess.run(shell_cmd, shell=True)
-        else:
-            print("Running build:", " ".join(cmake_cmd))
-            result = subprocess.run(cmake_cmd, env=os.environ.copy())
+            cmake_cmd = get_cmd_with_vcvars(_require_vs_path(), cmake_cmd)
 
-        if result.returncode != 0:
-            raise RuntimeError("Build failed.")
+        run_checked(cmake_cmd, "Build failed.", "Running build")
 
     def archive(self, args):
         """Archive the built project."""
