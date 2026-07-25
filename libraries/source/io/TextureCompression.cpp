@@ -644,6 +644,11 @@ const char *TextureCompression::GetFamilyName(Family family)
     }
 }
 
+std::string TextureCompression::MakeFamilyType(std::string_view base, Family family)
+{
+    return std::string(base) + "_" + GetFamilyName(family);
+}
+
 PixelFormat TextureCompression::SelectFormat(Profile profile, Family family)
 {
     switch (family)

@@ -17,14 +17,18 @@ public:
     HdrCubeTranscodeJob(const std::string &master_type, TextureCompression::Family family, std::string source_name,
                         std::vector<char> master_payload, uint32_t source_hash);
 
-    // identity-only key for runtime artifact lookups
-    [[nodiscard]] static CookArtifactKey MakeLookupKey(const std::string &master_type,
-                                                       TextureCompression::Family family,
-                                                       const std::string &source_name);
+    // identity-only key: resolves whatever hash the store holds for this logical artifact
+    [[nodiscard]] static CookArtifactKey MakeIdentityKey(const std::string &master_type,
+                                                         TextureCompression::Family family,
+                                                         const std::string &source_name);
 
-    // origin_content_hash must be resolvable by the runtime consumer without cooking any
-    // master AND deterministic across cook platforms: the sky map source hash for sky
-    // transcodes, the family sky cube (encoded bytes) for IBL transcodes
+    // content-addressed key. origin_content_hash must be resolvable by the runtime consumer
+    // without cooking any master AND deterministic across cook platforms: the sky map source
+    // hash for sky transcodes, the family sky cube (encoded bytes) for IBL transcodes
+    [[nodiscard]] static CookArtifactKey MakeKey(const std::string &master_type, TextureCompression::Family family,
+                                                 const std::string &source_name, uint32_t origin_content_hash,
+                                                 uint32_t master_version);
+
     [[nodiscard]] static uint32_t MakeSourceHash(uint32_t origin_content_hash, uint32_t master_version);
 
     [[nodiscard]] const char *GetType() const override

@@ -273,10 +273,7 @@ bool AppFramework::Init()
 
 static std::string JobManifestKey(const CookJob &job)
 {
-    return CookArtifactStore::GetManifestKey({.type = job.GetType(),
-                                              .version = job.GetVersion(),
-                                              .source_name = job.GetSourceName(),
-                                              .source_hash = std::nullopt});
+    return CookArtifactStore::GetManifestKey(MakeCookIdentityKey(job));
 }
 
 using ConsumedSourceMap = std::map<std::string, std::map<TextureCompression::Family, std::set<std::string>>>;

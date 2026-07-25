@@ -15,9 +15,10 @@ namespace sparkle
 class TextureCookJob : public CookJob
 {
 public:
+    static constexpr const char *BaseType = "texture";
     static constexpr uint32_t Version = 2;
 
-    [[nodiscard]] static const char *GetTypeName(TextureCompression::Family family);
+    [[nodiscard]] static std::string GetTypeName(TextureCompression::Family family);
 
     [[nodiscard]] static std::string MakeSourceName(const std::string &identity, TextureCompression::Profile profile);
 
@@ -26,7 +27,7 @@ public:
 
     [[nodiscard]] const char *GetType() const override
     {
-        return GetTypeName(family_);
+        return type_.c_str();
     }
 
     [[nodiscard]] uint32_t GetVersion() const override
@@ -44,6 +45,7 @@ public:
     [[nodiscard]] CookJobResult Execute() override;
 
 private:
+    std::string type_;
     std::shared_ptr<const Image2D> source_;
     std::string identity_;
     TextureCompression::Profile profile_;

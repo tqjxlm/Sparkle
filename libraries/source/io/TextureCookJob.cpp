@@ -47,9 +47,9 @@ bool IsEmbeddedTextureIdentity(const std::string &name)
 }
 } // namespace
 
-const char *TextureCookJob::GetTypeName(TextureCompression::Family family)
+std::string TextureCookJob::GetTypeName(TextureCompression::Family family)
 {
-    return family == TextureCompression::Family::Astc ? "texture_astc" : "texture_bc";
+    return TextureCompression::MakeFamilyType(BaseType, family);
 }
 
 std::string TextureCookJob::MakeSourceName(const std::string &identity, TextureCompression::Profile profile)
@@ -59,7 +59,8 @@ std::string TextureCookJob::MakeSourceName(const std::string &identity, TextureC
 
 TextureCookJob::TextureCookJob(std::shared_ptr<const Image2D> source, std::string identity,
                                TextureCompression::Profile profile, TextureCompression::Family family)
-    : source_(std::move(source)), identity_(std::move(identity)), profile_(profile), family_(family)
+    : type_(GetTypeName(family)), source_(std::move(source)), identity_(std::move(identity)), profile_(profile),
+      family_(family)
 {
     ASSERT(source_ && source_->IsValid());
 }
