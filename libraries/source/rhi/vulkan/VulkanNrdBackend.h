@@ -8,7 +8,7 @@
 
 namespace sparkle
 {
-// Runs NRD's SPIR-V pipelines as packed by the android shader cook (see docs/Nrd.md). Bindings are
+// Runs NRD's SPIR-V pipelines as packed by the android shader cook (see docs/Denoiser.md). Bindings are
 // reflected on device with spirv_reflect; pool textures are raw Vulkan images kept in GENERAL for
 // their whole life, so inter-dispatch hazards reduce to plain compute->compute memory barriers.
 class VulkanNrdBackend final : public RHINrdBackend
