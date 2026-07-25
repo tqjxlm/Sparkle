@@ -72,6 +72,11 @@ GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Gpu);
 
     ASSERT(rhi_->SupportsHardwareRayTracing());
+
+    // preference order: MetalFX runs on the platform's own scaler where it exists, NRD is the
+    // portable fallback. CreateDenoiser returns null for a provider this build cannot serve
+    denoiser_slots_.push_back({.provider = DenoiserProvider::MetalFx, .denoiser = nullptr, .failed = false});
+    denoiser_slots_.push_back({.provider = DenoiserProvider::Nrd, .denoiser = nullptr, .failed = false});
 }
 
 void GPURenderer::InitRenderResources()
@@ -199,13 +204,9 @@ void GPURenderer::Render()
             }
             else
             {
-                if (frame_provider_ == DenoiserProvider::Nrd)
+                if (DenoiserSlot *slot = FindDenoiserSlot(frame_provider_))
                 {
-                    nrd_failed_ = true;
-                }
-                else if (frame_provider_ == DenoiserProvider::MetalFx)
-                {
-                    metalfx_failed_ = true;
+                    slot->failed = true;
                 }
                 Log(Error, "Denoiser {} failed while encoding; the next frame will select a fallback",
                     frame_denoiser_->GetName());
@@ -573,30 +574,22 @@ void GPURenderer::BindDenoiserInputs()
     cs_resources->gSpecAlbedo().BindResource(denoiser_inputs_->GetSpecularAlbedoRoughness()->GetDefaultView(rhi_));
 }
 
+GPURenderer::DenoiserSlot *GPURenderer::FindDenoiserSlot(DenoiserProvider provider)
+{
+    auto slot = std::ranges::find_if(
+        denoiser_slots_, [provider](const DenoiserSlot &candidate) { return candidate.provider == provider; });
+    return slot == denoiser_slots_.end() ? nullptr : &*slot;
+}
+
 Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
 {
-    std::unique_ptr<Denoiser> *slot = nullptr;
-    bool *failed = nullptr;
-    if (provider == DenoiserProvider::Nrd)
-    {
-        slot = &nrd_denoiser_;
-        failed = &nrd_failed_;
-    }
-    else if (provider == DenoiserProvider::MetalFx)
-    {
-        slot = &metalfx_denoiser_;
-        failed = &metalfx_failed_;
-    }
-    else
+    DenoiserSlot *slot = FindDenoiserSlot(provider);
+    if (!slot || slot->failed)
     {
         return nullptr;
     }
 
-    if (*failed)
-    {
-        return nullptr;
-    }
-    if (!*slot)
+    if (!slot->denoiser)
     {
         const DenoiserConfig &config = DenoiserConfig::Get();
         DenoiserDesc desc{
@@ -606,18 +599,17 @@ Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
             .max_frames_in_flight = rhi_->GetMaxFramesInFlight(),
             .synchronous_initialization = config.metalfx_sync_init,
         };
-        *slot = CreateDenoiser(provider, desc, rhi_);
-        if (!*slot || !(*slot)->IsReady())
+        slot->denoiser = CreateDenoiser(provider, desc, rhi_);
+        if (!slot->denoiser || !slot->denoiser->IsReady())
         {
-            *failed = true;
-            Log(Warn, "Denoiser provider {} is unavailable for {}x{} -> {}x{}",
-                provider == DenoiserProvider::MetalFx ? "MetalFX" : "NRD", desc.input_size.x(), desc.input_size.y(),
-                desc.output_size.x(), desc.output_size.y());
-            slot->reset();
+            slot->failed = true;
+            Log(Warn, "Denoiser provider {} is unavailable for {}x{} -> {}x{}", Enum2Str(provider), desc.input_size.x(),
+                desc.input_size.y(), desc.output_size.x(), desc.output_size.y());
+            slot->denoiser.reset();
             return nullptr;
         }
     }
-    return slot->get();
+    return slot->denoiser.get();
 }
 
 Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective)
@@ -628,19 +620,27 @@ Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvid
         return nullptr;
     }
 
-    if (requested == DenoiserProvider::MetalFx || requested == DenoiserProvider::Auto)
+    // Auto starts at the most preferred provider; an explicit request starts at itself and
+    // still falls back down the preference order when it is unavailable
+    size_t begin = 0;
+    if (requested != DenoiserProvider::Auto)
     {
-        if (Denoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::MetalFx))
+        const DenoiserSlot *slot = FindDenoiserSlot(requested);
+        if (!slot)
         {
-            effective = DenoiserProvider::MetalFx;
-            return denoiser;
+            return nullptr;
         }
+        begin = static_cast<size_t>(slot - denoiser_slots_.data());
     }
 
-    if (Denoiser *denoiser = GetOrCreateDenoiser(DenoiserProvider::Nrd))
+    for (size_t index = begin; index < denoiser_slots_.size(); index++)
     {
-        effective = DenoiserProvider::Nrd;
-        return denoiser;
+        const DenoiserProvider provider = denoiser_slots_[index].provider;
+        if (Denoiser *denoiser = GetOrCreateDenoiser(provider))
+        {
+            effective = provider;
+            return denoiser;
+        }
     }
     return nullptr;
 }
