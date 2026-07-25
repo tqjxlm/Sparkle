@@ -68,6 +68,60 @@ endif()
 set(THIRD_PARTY_SOURCES ${THIRD_PARTY_SOURCES} ${IMGUI_SOURCES})
 add_library(sparkle_thirdparty STATIC ${THIRD_PARTY_SOURCES})
 
+# ------------------ ispc_texcomp ------------------
+
+# the BC6H encoder of the cook. build.py provides ispc for the frameworks whose binary can
+# cook (glfw, macos); device frameworks build without it and fall back to CVTT, which they
+# only ever run in the texture_compression test
+if(DEFINED ENV{ISPC})
+    set(ISPC $ENV{ISPC})
+
+    set(ISPC_TEXCOMP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ISPCTextureCompressor/ispc_texcomp)
+    set(ISPC_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/ispc_texcomp)
+
+    # ispc names its outputs after the object we ask for, which the host linker must accept
+    set(ISPC_OBJECT ${ISPC_GENERATED_DIR}/kernel_ispc${CMAKE_C_OUTPUT_EXTENSION})
+
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
+        set(ISPC_ARCH aarch64)
+        set(ISPC_TARGETS neon-i32x4)
+        set(ISPC_TARGET_OBJECTS ${ISPC_OBJECT})
+    else()
+        # one object per ISA plus a dispatch object, so a cook host uses AVX when it has it
+        set(ISPC_ARCH x86-64)
+        set(ISPC_TARGETS sse2,avx)
+        set(ISPC_TARGET_OBJECTS ${ISPC_OBJECT}
+            ${ISPC_GENERATED_DIR}/kernel_ispc_sse2${CMAKE_C_OUTPUT_EXTENSION}
+            ${ISPC_GENERATED_DIR}/kernel_ispc_avx${CMAKE_C_OUTPUT_EXTENSION})
+    endif()
+
+    # position independence is the default on windows and not a flag ispc takes there
+    if(NOT WIN32)
+        set(ISPC_PIC_FLAG --pic)
+    endif()
+
+    file(MAKE_DIRECTORY ${ISPC_GENERATED_DIR})
+
+    add_custom_command(
+        OUTPUT ${ISPC_TARGET_OBJECTS} ${ISPC_GENERATED_DIR}/kernel_ispc.h
+        COMMAND ${ISPC} ${ISPC_TEXCOMP_DIR}/kernel.ispc
+            -o ${ISPC_OBJECT}
+            -h ${ISPC_GENERATED_DIR}/kernel_ispc.h
+            -O2 --arch=${ISPC_ARCH} --target=${ISPC_TARGETS} --opt=fast-math ${ISPC_PIC_FLAG}
+        DEPENDS ${ISPC_TEXCOMP_DIR}/kernel.ispc
+        COMMENT "Compiling ispc_texcomp kernels for ${ISPC_ARCH} (${ISPC_TARGETS})"
+        VERBATIM)
+
+    set_source_files_properties(${ISPC_TARGET_OBJECTS} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+
+    target_sources(sparkle_thirdparty PRIVATE
+        ${ISPC_TEXCOMP_DIR}/ispc_texcomp.cpp ${ISPC_TARGET_OBJECTS})
+    target_include_directories(sparkle_thirdparty SYSTEM PUBLIC ${ISPC_TEXCOMP_DIR} ${ISPC_GENERATED_DIR})
+    target_compile_definitions(sparkle_thirdparty PUBLIC SPARKLE_ISPC_TEXCOMP=1)
+else()
+    target_compile_definitions(sparkle_thirdparty PUBLIC SPARKLE_ISPC_TEXCOMP=0)
+endif()
+
 # ------------------ tinyusdz ------------------
 
 if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")

@@ -70,3 +70,6 @@
 [submodule "thirdparty/ConvectionKernels"]
 	path = thirdparty/ConvectionKernels
 	url = https://github.com/elasota/ConvectionKernels.git
+[submodule "thirdparty/ISPCTextureCompressor"]
+	path = thirdparty/ISPCTextureCompressor
+	url = https://github.com/GameTechDev/ISPCTextureCompressor.git

@@ -46,10 +46,18 @@ class CiPipelineTest(unittest.TestCase):
     def test_cook_needs_the_macos_release_build(self):
         self.assertIn("needs: build-macos-macos-release", JOBS["cook"])
 
-    def test_release_needs_its_own_build_and_cook(self):
+    # the bc node encodes from the masters the astc node cooked, on the linux binary
+    def test_bc_cook_needs_the_astc_cook_and_the_linux_build(self):
+        self.assertIn("needs: [cook, build-ubuntu-glfw-release]", JOBS["cook-bc"])
+        self.assertIn("name: cooked-pool", JOBS["cook"])
+        self.assertIn("name: cooked-pool", JOBS["cook-bc"])
+
+    def test_release_needs_its_own_build_and_its_family_cook(self):
         for product in release_products():
             build_id = ci_matrix.slug("build", product, "Release")
-            self.assertIn(f"needs: [{build_id}, cook]",
+            family = ci_matrix.cook_family(ci_matrix.product_cook_target(product))
+            cook_id = ci_matrix.COOK_JOB_ID[family]
+            self.assertIn(f"needs: [{build_id}, {cook_id}]",
                           JOBS[ci_matrix.slug("release", product)])
 
     def test_every_covered_triplet_tests_after_its_release(self):
@@ -79,8 +87,11 @@ class CiPipelineTest(unittest.TestCase):
 
     def test_cook_publishes_one_image_artifact_per_target(self):
         for target in ci_matrix.cook_targets():
-            self.assertIn(f"name: cooked-image-{target}", JOBS["cook"])
-            self.assertIn(f"path: build_system/macos/output/cooked_image/{target}", JOBS["cook"])
+            family = ci_matrix.cook_family(target)
+            text = JOBS[ci_matrix.COOK_JOB_ID[family]]
+            self.assertIn(f"name: cooked-image-{target}", text)
+            self.assertIn(f"path: {ci_matrix.COOK_IMAGE_DIR[family]}/{target}", text)
+            self.assertIn(f"--cook_targets {'+'.join(ci_matrix.family_cook_targets(family))}", text)
 
     # the generator names the artifacts, the release action consumes them by the same name
     def test_release_downloads_only_its_own_cooked_image(self):
