@@ -339,8 +339,10 @@ jobs:
           name: build-macos-macos-latest-Release
           path: build_system/macos/product
 
-      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
       - name: Extract app
+        shell: bash
         run: |
           mkdir -p build_system/macos/output/build
           ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
@@ -388,8 +390,8 @@ jobs:
           name: cooked-image-android
           path: build_system/macos/output/cooked_image/android
 
-      # the fp16 masters the bc node derives its own family from: cooking them needs a GPU,
-      # encoding from them does not
+      # the fp16 masters the encode-only families derive their own textures from: cooking
+      # them needs a GPU, encoding from them does not
       - name: Upload artifact pool
         uses: actions/upload-artifact@v7
         with:
@@ -411,7 +413,7 @@ jobs:
           framework: glfw
           os: ubuntu-latest
 
-      # the linux binary links libglfw at runtime even with no window
+      # the released linux binary links libglfw at runtime even in headless mode
       - name: Install GLFW runtime
         shell: bash
         run: |
@@ -424,15 +426,16 @@ jobs:
           name: build-glfw-ubuntu-latest-Release
           path: build_system/glfw/product
 
-      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
       - name: Extract app
         shell: bash
         run: |
           mkdir -p build_system/glfw/output
           unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
 
-      # seeding the app's internal storage makes every master a cache hit, so this node runs
-      # no integration and needs no gpu
+      # seeding the app's internal storage makes every master a cache hit, so this node
+      # runs no integration and needs no gpu
       - name: Download artifact pool
         uses: actions/download-artifact@v8
         with:
@@ -518,7 +521,8 @@ jobs:
           name: release-macos-macos-latest-Release
           path: build_system/macos/product
 
-      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
       - name: Extract app
         shell: bash
         run: |
@@ -723,7 +727,8 @@ jobs:
           name: release-glfw-macos-latest-Release
           path: build_system/glfw/product
 
-      # ditto, not python zipfile: extraction must preserve the executable bit of the binary
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
       - name: Extract app
         shell: bash
         run: |
@@ -811,11 +816,13 @@ jobs:
           name: release-glfw-windows-latest-Release
           path: build_system/glfw/product
 
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
       - name: Extract app
         shell: bash
-        run: >-
-          python3 -m zipfile -e build_system/glfw/product/windows-glfw-Release.zip
-          build_system/glfw/output/
+        run: |
+          mkdir -p build_system/glfw/output
+          python3 -m zipfile -e build_system/glfw/product/windows-glfw-Release.zip build_system/glfw/output/
 
       # the step timeout bounds a hung app; the log dump below then still runs
       - name: Run Tests
@@ -889,7 +896,8 @@ jobs:
           name: release-glfw-ubuntu-latest-Release
           path: build_system/glfw/product
 
-      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
       - name: Extract app
         shell: bash
         run: |
