@@ -1,7 +1,6 @@
 #include "application/AppFramework.h"
 
 #include "application/InputManager.h"
-#include "application/NativeKeyboard.h"
 #include "application/NativeView.h"
 #include "application/RenderFramework.h"
 #include "application/SessionManager.h"
@@ -1043,50 +1042,50 @@ void AppFramework::HandleSceneKey(const KeyEvent &event)
     const auto action = event.action;
     const bool shift_on = (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Shift)) != 0;
 
-    int key = event.key;
+    Key key = event.key;
 #if FRAMEWORK_MACOS
-    // support keyboards with no escape key
-    if (static_cast<NativeKeyboard>(key) == NativeKeyboard::KeyDelete)
+    // support keyboards with no escape key: the backspace key stands in for it
+    if (key == Key::Backspace)
     {
-        key = static_cast<int>(NativeKeyboard::KeyEscape);
+        key = Key::Escape;
     }
 #endif
 
-    switch (static_cast<NativeKeyboard>(key))
+    switch (key)
     {
-    case NativeKeyboard::KeyEscape: {
+    case Key::Escape: {
         if (action == KeyAction::Release)
         {
             RequestExit();
         }
         break;
     }
-    case NativeKeyboard::KeySpace: {
+    case Key::Space: {
         render_config_.accumulate_key_held = (action == KeyAction::Press);
         break;
     }
-    case NativeKeyboard::KeyUp: {
+    case Key::Up: {
         if (action == KeyAction::Release)
         {
             camera->SetAperture(camera->GetAttribute().aperture + 1.f);
         }
         break;
     }
-    case NativeKeyboard::KeyDown: {
+    case Key::Down: {
         if (action == KeyAction::Release)
         {
             camera->SetAperture(camera->GetAttribute().aperture - 1.f);
         }
         break;
     }
-    case NativeKeyboard::KeyP: {
+    case Key::P: {
         if (action == KeyAction::Release)
         {
             camera->PrintPosture();
         }
         break;
     }
-    case NativeKeyboard::KeyKpAdd: {
+    case Key::NumpadAdd: {
         if (action == KeyAction::Release)
         {
             Log(Debug, "Add debug sphere");
@@ -1094,7 +1093,7 @@ void AppFramework::HandleSceneKey(const KeyEvent &event)
         }
         break;
     }
-    case NativeKeyboard::KeyEqual: {
+    case Key::Equal: {
         if (shift_on)
         {
             // it is actually '+'
@@ -1106,7 +1105,7 @@ void AppFramework::HandleSceneKey(const KeyEvent &event)
         }
         break;
     }
-    case NativeKeyboard::KeyMinus: {
+    case Key::Minus: {
         if (action == KeyAction::Release)
         {
             Log(Debug, "Remove debug sphere");

@@ -23,38 +23,39 @@ constexpr float PixelsPerWheelStep = 80.f;
 constexpr float PinchZoomScale = 0.1f;
 
 #if FRAMEWORK_MACOS
-// NativeKeyboard on apple platforms is unichar-based. this covers the keys imgui needs
-// for widget interaction and text editing; printable input arrives as CharEvent.
-static ImGuiKey ToImGuiKey(int key)
+// covers the keys imgui needs for widget interaction and text editing; printable input
+// arrives as CharEvent. only the macos framework needs it: every other framework feeds imgui
+// through its own backend (see FeedUiSystem below)
+static ImGuiKey ToImGuiKey(Key key)
 {
-    if (key >= 'a' && key <= 'z')
+    if (key >= Key::A && key <= Key::Z)
     {
-        return static_cast<ImGuiKey>(ImGuiKey_A + (key - 'a'));
+        return static_cast<ImGuiKey>(ImGuiKey_A + (static_cast<int>(key) - static_cast<int>(Key::A)));
     }
-    if (key >= '0' && key <= '9')
+    if (key >= Key::Num0 && key <= Key::Num9)
     {
-        return static_cast<ImGuiKey>(ImGuiKey_0 + (key - '0'));
+        return static_cast<ImGuiKey>(ImGuiKey_0 + (static_cast<int>(key) - static_cast<int>(Key::Num0)));
     }
 
     switch (key)
     {
-    case 0x1B:
+    case Key::Escape:
         return ImGuiKey_Escape;
-    case 0x7F:
+    case Key::Backspace:
         return ImGuiKey_Backspace;
-    case '\r':
+    case Key::Enter:
         return ImGuiKey_Enter;
-    case '\t':
+    case Key::Tab:
         return ImGuiKey_Tab;
-    case ' ':
+    case Key::Space:
         return ImGuiKey_Space;
-    case 0xF700:
+    case Key::Up:
         return ImGuiKey_UpArrow;
-    case 0xF701:
+    case Key::Down:
         return ImGuiKey_DownArrow;
-    case 0xF702:
+    case Key::Left:
         return ImGuiKey_LeftArrow;
-    case 0xF703:
+    case Key::Right:
         return ImGuiKey_RightArrow;
     default:
         return ImGuiKey_None;

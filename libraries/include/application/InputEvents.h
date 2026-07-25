@@ -1,5 +1,6 @@
 #pragma once
 
+#include "application/Key.h"
 #include "core/math/Types.h"
 
 #include <variant>
@@ -59,10 +60,10 @@ struct ScrollEvent
     Vector2 delta = Vector2::Zero();
 };
 
-// key is a platform key code, interpreted through the NativeKeyboard enum
+// platform code translates its native key code into Key before pushing the event
 struct KeyEvent
 {
-    int key = 0;
+    Key key = Key::Unknown;
     KeyAction action = KeyAction::Press;
     uint32_t modifiers = 0;
 };

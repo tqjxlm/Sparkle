@@ -1,6 +1,6 @@
 #include "application/AppFramework.h"
 #include "application/InputManager.h"
-#include "application/NativeKeyboard.h"
+#include "application/Key.h"
 #include "application/TestCase.h"
 #include "core/Event.h"
 #include "core/Logger.h"
@@ -146,7 +146,7 @@ private:
                               [this](AppFramework &app) {
                                   // the default aperture sits at the clamp maximum, so step downwards
                                   aperture_before_ = camera_->GetAttribute().aperture;
-                                  const int key = static_cast<int>(NativeKeyboard::KeyDown);
+                                  const Key key = Key::Down;
                                   app.PushInputEvent(KeyEvent{.key = key, .action = KeyAction::Press});
                                   app.PushInputEvent(KeyEvent{.key = key, .action = KeyAction::Release});
                               },
@@ -155,19 +155,16 @@ private:
                                   return !Differs(camera_->GetAttribute().aperture, aperture_before_ - 1.f);
                               }});
 
-        steps_.push_back({.name = "space holds accumulation",
-                          .inject =
-                              [](AppFramework &app) {
-                                  app.PushInputEvent(KeyEvent{.key = static_cast<int>(NativeKeyboard::KeySpace),
-                                                              .action = KeyAction::Press});
-                              },
-                          .verify = [](AppFramework &app) { return app.GetRenderConfig().accumulate_key_held; }});
+        steps_.push_back(
+            {.name = "space holds accumulation",
+             .inject =
+                 [](AppFramework &app) { app.PushInputEvent(KeyEvent{.key = Key::Space, .action = KeyAction::Press}); },
+             .verify = [](AppFramework &app) { return app.GetRenderConfig().accumulate_key_held; }});
 
         steps_.push_back({.name = "space release stops accumulation",
                           .inject =
                               [](AppFramework &app) {
-                                  app.PushInputEvent(KeyEvent{.key = static_cast<int>(NativeKeyboard::KeySpace),
-                                                              .action = KeyAction::Release});
+                                  app.PushInputEvent(KeyEvent{.key = Key::Space, .action = KeyAction::Release});
                               },
                           .verify = [](AppFramework &app) { return !app.GetRenderConfig().accumulate_key_held; }});
 
