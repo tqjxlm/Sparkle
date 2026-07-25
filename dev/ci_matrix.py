@@ -13,6 +13,7 @@ python3 dev/ci_matrix.py --fix    # rewrite ci.yml in place
 
 import argparse
 import csv
+import json
 import os
 import sys
 
@@ -140,8 +141,10 @@ jobs:
               - '.github/**'
               - '.gitmodules'
               - 'CMakeLists.txt'
+              - 'cmake/**'
               - 'build.py'
               - 'prerequisites.json'
+              - 'cook_targets.json'
 
   # runs unconditionally: it is cheap and also covers files outside the code filter (e.g. docs)
   format:
@@ -523,7 +526,7 @@ def host(product):
     return product["os"].removesuffix("-latest")
 
 
-# must match COOK_TARGETS in build.py (runner labels say ubuntu, targets say linux)
+# runner labels say ubuntu, cook targets say linux
 RUNNER_SYSTEM = {"macos-latest": "macos", "windows-latest": "windows", "ubuntu-latest": "linux"}
 
 
@@ -543,11 +546,14 @@ def cook_targets():
     return targets
 
 
-# must match CookTargetFamilies in AppFramework.cpp, which decides the family a target's
-# packaged content carries. the cook stage splits by family: the astc node holds the gpu
-# work and the masters, the bc node only encodes
-COOK_TARGET_FAMILY = {"macos": "astc", "ios": "astc", "macos-glfw": "astc", "android": "astc",
-                      "windows-glfw": "bc", "linux-glfw": "bc"}
+def load_cook_target_families():
+    """The cook target -> texture family table. cook_targets.json is the one source: CMake
+    compiles it into the engine and build.py validates --cook_targets against it."""
+    with open(os.path.join(REPO_ROOT, "cook_targets.json"), encoding="utf-8") as table_file:
+        return json.load(table_file)
+
+
+COOK_TARGET_FAMILY = load_cook_target_families()
 
 # the node that cooks each family. one family produces the fp16 masters (the expensive
 # gpu work) and every other family consumes them, which is pure cpu encoding: consumers

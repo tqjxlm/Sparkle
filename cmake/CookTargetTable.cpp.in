@@ -1,0 +1,14 @@
+// GENERATED FILE — DO NOT EDIT
+// Generated from cook_targets.json; see the cook target table block in CMakeLists.txt.
+
+#include "io/CookTargets.h"
+
+namespace sparkle
+{
+const std::map<std::string, TextureCompression::Family> &CookTargets::All()
+{
+    static const std::map<std::string, TextureCompression::Family> Targets{
+@COOK_TARGET_ENTRIES@    };
+    return Targets;
+}
+} // namespace sparkle

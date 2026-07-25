@@ -1,0 +1,8 @@
+{
+    "android": "astc",
+    "ios": "astc",
+    "macos": "astc",
+    "macos-glfw": "astc",
+    "windows-glfw": "bc",
+    "linux-glfw": "bc"
+}

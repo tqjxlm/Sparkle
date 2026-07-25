@@ -7,6 +7,7 @@
 #include "core/cook/Cooker.h"
 #include "core/math/Types.h"
 #include "core/task/TaskManager.h"
+#include "io/CookTargets.h"
 #include "io/Image.h"
 #include "io/TextureCompression.h"
 #include "renderer/resource/IblBrdfCookJob.h"
@@ -47,7 +48,7 @@ protected:
             }
 
             const auto &env_map = sky_light->GetCubeMap();
-            const auto transcode_format = TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily);
+            const auto transcode_format = TextureCompression::SelectHdrFormat(CookTargets::PlatformFamily());
             if (env_map->GetFormat() != PixelFormat::RGBAFloat16 && env_map->GetFormat() != transcode_format)
             {
                 Log(Error, "sky cube format is {}, expected the fp16 master or the family transcode",

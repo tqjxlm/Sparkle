@@ -41,8 +41,10 @@ jobs:
               - '.github/**'
               - '.gitmodules'
               - 'CMakeLists.txt'
+              - 'cmake/**'
               - 'build.py'
               - 'prerequisites.json'
+              - 'cook_targets.json'
 
   # runs unconditionally: it is cheap and also covers files outside the code filter (e.g. docs)
   format:

@@ -16,6 +16,7 @@
 #include "core/cook/CookArtifactStore.h"
 #include "core/cook/Cooker.h"
 #include "core/task/TaskManager.h"
+#include "io/CookTargets.h"
 #include "io/HdrCubeTranscodeJob.h"
 #include "io/TextureCookJob.h"
 #include "renderer/denoiser/DenoiserConfig.h"
@@ -271,71 +272,6 @@ bool AppFramework::Init()
     return true;
 }
 
-static const std::map<std::string, TextureCompression::Family> &CookTargetFamilies()
-{
-    static const std::map<std::string, TextureCompression::Family> Families{
-        {"android", TextureCompression::Family::Astc},    {"ios", TextureCompression::Family::Astc},
-        {"macos", TextureCompression::Family::Astc},      {"macos-glfw", TextureCompression::Family::Astc},
-        {"windows-glfw", TextureCompression::Family::Bc}, {"linux-glfw", TextureCompression::Family::Bc},
-    };
-    return Families;
-}
-
-static const char *SelfCookTarget()
-{
-#if FRAMEWORK_GLFW
-#if PLATFORM_MACOS
-    return "macos-glfw";
-#elif PLATFORM_WINDOWS
-    return "windows-glfw";
-#else
-    return "linux-glfw";
-#endif
-#elif PLATFORM_MACOS
-    return "macos";
-#elif PLATFORM_IOS
-    return "ios";
-#else
-    return "android";
-#endif
-}
-
-static std::vector<std::string> ParseCookTargets(const std::string &config)
-{
-    const std::string requested = config.empty() ? SelfCookTarget() : config;
-
-    std::vector<std::string> targets;
-    for (size_t begin = 0; begin <= requested.size();)
-    {
-        const auto end = std::min(requested.find('+', begin), requested.size());
-        auto target = requested.substr(begin, end - begin);
-        begin = end + 1;
-
-        if (target.empty())
-        {
-            continue;
-        }
-        if (!CookTargetFamilies().contains(target))
-        {
-            Log(Error,
-                "unknown cook target '{}'. known targets: android, ios, macos, macos-glfw, windows-glfw, "
-                "linux-glfw",
-                target);
-            return {};
-        }
-        if (std::ranges::find(targets, target) == targets.end())
-        {
-            targets.push_back(std::move(target));
-        }
-    }
-
-    if (targets.empty())
-    {
-        Log(Error, "no cook target requested");
-    }
-    return targets;
-}
-
 static std::string JobManifestKey(const CookJob &job)
 {
     return CookArtifactStore::GetManifestKey({.type = job.GetType(),
@@ -495,7 +431,7 @@ static bool WriteCookProducts(const std::vector<std::string> &targets, const std
     nlohmann::json json = nlohmann::json::object();
     for (const auto &target : targets)
     {
-        const auto family = CookTargetFamilies().at(target);
+        const auto family = CookTargets::FamilyOf(target);
 
         std::set<std::string> artifacts = universal_keys;
         if (const auto family_keys = family_artifacts.find(family); family_keys != family_artifacts.end())
@@ -558,7 +494,7 @@ int AppFramework::RunCookMode()
         };
     }
 
-    const auto cook_targets = ParseCookTargets(app_config_.cook_targets);
+    const auto cook_targets = CookTargets::Parse(app_config_.cook_targets);
     if (cook_targets.empty())
     {
         return 1;
@@ -567,7 +503,7 @@ int AppFramework::RunCookMode()
     std::set<TextureCompression::Family> texture_families;
     for (const auto &target : cook_targets)
     {
-        texture_families.insert(CookTargetFamilies().at(target));
+        texture_families.insert(CookTargets::FamilyOf(target));
         Log(Info, "cook target: {}", target);
     }
 

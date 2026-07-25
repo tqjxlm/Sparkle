@@ -2,6 +2,7 @@
 
 #include "application/AppFramework.h"
 #include "core/Logger.h"
+#include "io/CookTargets.h"
 #include "io/HdrCubeTranscodeJob.h"
 #include "io/Image.h"
 #include "io/TextureCompression.h"
@@ -31,7 +32,7 @@ public:
 
         // a dev pool resolves the fp16 master; a packaged image carries only the transcode
         const auto &cube = sky_light->GetCubeMap();
-        const auto transcode_format = TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily);
+        const auto transcode_format = TextureCompression::SelectHdrFormat(CookTargets::PlatformFamily());
         const bool is_master = cube->GetFormat() == PixelFormat::RGBAFloat16;
         bool success = Expect(is_master || cube->GetFormat() == transcode_format,
                               "sky cube is the fp16 master or the family transcode");
@@ -92,8 +93,8 @@ private:
         const std::array<char, 4> tail{1, 2, 3, 4};
         master.insert(master.end(), tail.begin(), tail.end());
 
-        HdrCubeTranscodeJob job("skylight", TextureCompression::PlatformFamily, "sky_compression_test",
-                                std::move(master), 0);
+        HdrCubeTranscodeJob job("skylight", CookTargets::PlatformFamily(), "sky_compression_test", std::move(master),
+                                0);
         auto result = job.Execute();
         bool success = Expect(result.IsSuccess() && !result.GetPayload().empty(), "transcode job produces a payload");
         if (!success)
@@ -104,7 +105,7 @@ private:
 
         TextureCompression::PayloadHeader header{};
         std::memcpy(&header, payload.data(), sizeof(header));
-        const auto expected_format = TextureCompression::SelectHdrFormat(TextureCompression::PlatformFamily);
+        const auto expected_format = TextureCompression::SelectHdrFormat(CookTargets::PlatformFamily());
         success &= Expect(static_cast<PixelFormat>(header.format) == expected_format,
                           "transcode carries the platform family HDR format");
 
