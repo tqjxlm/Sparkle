@@ -36,6 +36,54 @@
     [self addTrackingArea:tracking_area_];
 }
 
+// AppKit reports keys as characters, so the native code is the lowercased unichar of the
+// key with shift removed; the function keys use the NSxxxFunctionKey private-use range.
+// Keys the application does not bind stay Unknown and are dropped
+static sparkle::Key TranslateKey(unichar keychar)
+{
+    using sparkle::Key;
+
+    if (keychar >= 'a' && keychar <= 'z')
+    {
+        return static_cast<Key>(static_cast<uint16_t>(Key::A) + (keychar - 'a'));
+    }
+    if (keychar >= '0' && keychar <= '9')
+    {
+        return static_cast<Key>(static_cast<uint16_t>(Key::Num0) + (keychar - '0'));
+    }
+
+    switch (keychar)
+    {
+    case 0x1B:
+        return Key::Escape;
+    case '\r':
+        return Key::Enter;
+    case '\t':
+        return Key::Tab;
+    case ' ':
+        return Key::Space;
+    // the backspace key reports DEL, not BS
+    case 0x7F:
+        return Key::Backspace;
+    case NSUpArrowFunctionKey:
+        return Key::Up;
+    case NSDownArrowFunctionKey:
+        return Key::Down;
+    case NSLeftArrowFunctionKey:
+        return Key::Left;
+    case NSRightArrowFunctionKey:
+        return Key::Right;
+    case '-':
+        return Key::Minus;
+    case '=':
+        return Key::Equal;
+    case '+':
+        return Key::NumpadAdd;
+    default:
+        return Key::Unknown;
+    }
+}
+
 static uint32_t GetKeyboardModifiers(NSEvent *event)
 {
     uint32_t modifiers = 0;
@@ -65,7 +113,7 @@ static uint32_t GetKeyboardModifiers(NSEvent *event)
     unichar keychar = (text.length > 0) ? [text.lowercaseString characterAtIndex:0] : 0;
 
     app_->PushInputEvent(
-        sparkle::KeyEvent{.key = keychar, .action = action, .modifiers = GetKeyboardModifiers(theEvent)});
+        sparkle::KeyEvent{.key = TranslateKey(keychar), .action = action, .modifiers = GetKeyboardModifiers(theEvent)});
 }
 
 - (void)keyDown:(NSEvent *)theEvent

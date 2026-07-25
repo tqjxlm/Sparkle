@@ -17,6 +17,51 @@
 
 namespace sparkle
 {
+// glfw key code -> the engine's framework-independent Key. Keys the application does not
+// bind stay Unknown and are dropped; imgui gets the full key table through its own glfw
+// backend, so nothing here limits text navigation
+static Key TranslateKey(int glfw_key)
+{
+    if (glfw_key >= GLFW_KEY_A && glfw_key <= GLFW_KEY_Z)
+    {
+        return static_cast<Key>(static_cast<uint16_t>(Key::A) + (glfw_key - GLFW_KEY_A));
+    }
+    if (glfw_key >= GLFW_KEY_0 && glfw_key <= GLFW_KEY_9)
+    {
+        return static_cast<Key>(static_cast<uint16_t>(Key::Num0) + (glfw_key - GLFW_KEY_0));
+    }
+
+    switch (glfw_key)
+    {
+    case GLFW_KEY_ESCAPE:
+        return Key::Escape;
+    case GLFW_KEY_ENTER:
+        return Key::Enter;
+    case GLFW_KEY_TAB:
+        return Key::Tab;
+    case GLFW_KEY_SPACE:
+        return Key::Space;
+    case GLFW_KEY_BACKSPACE:
+        return Key::Backspace;
+    case GLFW_KEY_UP:
+        return Key::Up;
+    case GLFW_KEY_DOWN:
+        return Key::Down;
+    case GLFW_KEY_LEFT:
+        return Key::Left;
+    case GLFW_KEY_RIGHT:
+        return Key::Right;
+    case GLFW_KEY_MINUS:
+        return Key::Minus;
+    case GLFW_KEY_EQUAL:
+        return Key::Equal;
+    case GLFW_KEY_KP_ADD:
+        return Key::NumpadAdd;
+    default:
+        return Key::Unknown;
+    }
+}
+
 static uint32_t GetKeyboardModifiers(int mods)
 {
     uint32_t modifiers = 0;
@@ -225,7 +270,7 @@ void GLFWNativeView::KeyboardCallback(GLFWwindow *window, int key, int scancode,
     }
 
     auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
-    app->PushInputEvent(KeyEvent{.key = key,
+    app->PushInputEvent(KeyEvent{.key = TranslateKey(key),
                                  .action = action == GLFW_PRESS ? KeyAction::Press : KeyAction::Release,
                                  .modifiers = GetKeyboardModifiers(mods)});
 }
