@@ -426,6 +426,81 @@ def install_slangc(build_cache_dir):
     return slangc_executable
 
 
+def _ispc_paths(build_cache_dir):
+    """(install dir, executable) of the ispc kernel compiler in the build cache."""
+    ispc_dir = os.path.join(build_cache_dir, "ispc")
+    executable = os.path.join(ispc_dir, "bin", "ispc" + (".exe" if is_windows else ""))
+    return ispc_dir, executable
+
+
+def install_ispc(build_cache_dir):
+    """Install ispc, which compiles the texture encoder kernels, to build_cache."""
+    prerequisites = load_prerequisites_versions()
+    ispc_version = prerequisites.get("ispc", "1.27.0")
+
+    ispc_dir, ispc_executable = _ispc_paths(build_cache_dir)
+
+    machine = platform.machine().lower()
+    if machine in ("amd64", "x86_64"):
+        arch = "x86_64"
+    elif machine in ("arm64", "aarch64"):
+        arch = "arm64"
+    else:
+        raise RuntimeError(f"Unsupported architecture '{machine}' for ispc installation.")
+
+    if is_windows:
+        asset = f"ispc-v{ispc_version}-windows.zip"
+    elif is_macos:
+        asset = f"ispc-v{ispc_version}-macOS.{arch}.tar.gz"
+    else:
+        asset = f"ispc-v{ispc_version}-linux.tar.gz"
+
+    download_url = f"https://github.com/ispc/ispc/releases/download/v{ispc_version}/{asset}"
+    download_path = os.path.join(build_cache_dir, asset)
+
+    def provision():
+        print("Extracting ispc...")
+        tmp_dir = os.path.join(build_cache_dir, "ispc_tmp")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        os.makedirs(tmp_dir, exist_ok=True)
+        if asset.endswith(".zip"):
+            extract_zip(download_path, tmp_dir)
+        else:
+            extract_archive(download_path, tmp_dir)
+
+        # the archives carry one versioned top-level directory
+        roots = glob.glob(os.path.join(tmp_dir, "ispc-v*"))
+        if not roots:
+            raise RuntimeError(f"ispc archive {asset} has no ispc-v* directory")
+        shutil.rmtree(ispc_dir, ignore_errors=True)
+        shutil.move(roots[0], ispc_dir)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        if not is_windows:
+            os.chmod(ispc_executable, 0o755)
+        if not os.path.exists(ispc_executable):
+            raise RuntimeError(f"ispc executable not found after installation: {ispc_executable}")
+
+    print(f"Downloading ispc {ispc_version} from: {download_url}")
+    install_with_retry(download_url, download_path, provision,
+                       reset=lambda: shutil.rmtree(ispc_dir, ignore_errors=True))
+    os.remove(download_path)
+
+    print(f"ispc {ispc_version} installed successfully!")
+    return ispc_executable
+
+
+def find_ispc():
+    """Find ispc or install it automatically. Returns the path to the ispc executable."""
+    _, ispc_executable = _ispc_paths(_BUILD_CACHE_DIR)
+    if os.path.exists(ispc_executable):
+        return ispc_executable
+
+    print("ispc not found. Installing to build_cache...")
+    os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
+    return install_ispc(_BUILD_CACHE_DIR)
+
+
 def find_slangc():
     """Find slangc or install it automatically. Returns the path to the slangc executable."""
     slang_dir = os.path.join(_BUILD_CACHE_DIR, "slang")

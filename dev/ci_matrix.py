@@ -270,6 +270,80 @@ COOK_JOB = """
             test -f "build_system/macos/output/cooked_image/$target/cooked/manifest.json"
           done
 
+@upload_steps@
+      # the fp16 masters the bc node derives its own family from: cooking them needs a GPU,
+      # encoding from them does not
+      - name: Upload artifact pool
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-pool
+          path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
+"""
+
+# the bc family is pure cpu work once the masters exist, so it leaves the scarce macos
+# runners and stops gating the release and test nodes of the targets that never read it
+COOK_BC_JOB = """
+  cook-bc:
+    name: cook (ubuntu-latest, glfw, Release)
+    needs: [cook, build-ubuntu-glfw-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Environment
+        id: setup-environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: glfw
+          os: ubuntu-latest
+
+      # the linux binary links libglfw at runtime even with no window
+      - name: Install GLFW runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libglfw3
+
+      - name: Download build product
+        uses: actions/download-artifact@v8
+        with:
+          name: build-glfw-ubuntu-latest-Release
+          path: build_system/glfw/product
+
+      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
+
+      # seeding the app's internal storage makes every master a cache hit, so this node runs
+      # no integration and needs no gpu
+      - name: Download artifact pool
+        uses: actions/download-artifact@v8
+        with:
+          name: cooked-pool
+          path: build_system/glfw/output/build/generated/cooked
+
+      - name: Cook
+        shell: bash
+        run: |
+          # a hung app never fails the step on its own; kill it so the diagnostics below run
+          ( sleep 900 && echo "cook watchdog fired" && pkill -f build_system/glfw/output/build/sparkle ) &
+          WATCHDOG=$!
+          if ! python3 build.py --framework glfw --config Release --stage cook --cook_targets @cook_targets@ ${{ steps.setup-environment.outputs.build-args }}; then
+            kill $WATCHDOG 2>/dev/null || true
+            echo "=== app logs ==="
+            cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+            cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+            exit 1
+          fi
+          kill $WATCHDOG 2>/dev/null || true
+          for target in @cook_target_list@; do
+            test -f "build_system/glfw/output/cooked_image/$target/cooked/manifest.json"
+          done
+
 @upload_steps@"""
 
 # one artifact per target: a release node downloads only the image its own product packages
@@ -277,13 +351,13 @@ COOK_UPLOAD_STEP = """      - name: Upload cooked content image (@target@)
         uses: actions/upload-artifact@v7
         with:
           name: cooked-image-@target@
-          path: build_system/macos/output/cooked_image/@target@
+          path: @image_dir@/@target@
 """
 
 RELEASE_JOB = """
   @id@:
     name: release (@os@, @framework@, Release@name_abi@)
-    needs: [@build_id@, cook]
+    needs: [@build_id@, @cook_id@]
     runs-on: @runs_on@
     steps:
       - name: Checkout code
@@ -538,6 +612,29 @@ def cook_targets():
     return targets
 
 
+# must match CookTargetFamilies in AppFramework.cpp, which decides the family a target's
+# packaged content carries. the cook stage splits by family: the astc node holds the gpu
+# work and the masters, the bc node only encodes
+COOK_TARGET_FAMILY = {"macos": "astc", "ios": "astc", "macos-glfw": "astc", "android": "astc",
+                      "windows-glfw": "bc", "linux-glfw": "bc"}
+
+COOK_JOB_ID = {"astc": "cook", "bc": "cook-bc"}
+
+COOK_IMAGE_DIR = {"astc": "build_system/macos/output/cooked_image",
+                  "bc": "build_system/glfw/output/cooked_image"}
+
+
+def cook_family(target):
+    family = COOK_TARGET_FAMILY.get(target)
+    if family is None:
+        raise LookupError(f"cook target {target} has no family; update COOK_TARGET_FAMILY")
+    return family
+
+
+def family_cook_targets(family):
+    return [target for target in cook_targets() if cook_family(target) == family]
+
+
 def slug(stage, product, config=None):
     parts = [stage, host(product), product["framework"], product.get("abi"),
              config.lower() if config else None]
@@ -576,6 +673,7 @@ def release_job(product):
     return render(RELEASE_JOB, id=slug("release", product), os=product["os"],
                   framework=product["framework"], name_abi=name_abi(product),
                   build_id=slug("build", product, "Release"),
+                  cook_id=COOK_JOB_ID[cook_family(product_cook_target(product))],
                   runs_on="macos-latest" if apple else "ubuntu-latest", extras=extras)
 
 
@@ -642,10 +740,14 @@ def jobs():
         for config in product.get("build_types", ("Debug", "Release")):
             generated.append((slug("build", product, config),
                               build_job(product, config)))
-    upload_steps = "\n".join(render(COOK_UPLOAD_STEP, target=target) for target in cook_targets())
-    generated.append(("cook", render(COOK_JOB, cook_targets="+".join(cook_targets()),
-                                     cook_target_list=" ".join(cook_targets()),
-                                     upload_steps=upload_steps)))
+    for family, template in (("astc", COOK_JOB), ("bc", COOK_BC_JOB)):
+        targets = family_cook_targets(family)
+        upload_steps = "\n".join(render(COOK_UPLOAD_STEP, target=target,
+                                        image_dir=COOK_IMAGE_DIR[family]) for target in targets)
+        generated.append((COOK_JOB_ID[family],
+                          render(template, cook_targets="+".join(targets),
+                                 cook_target_list=" ".join(targets),
+                                 upload_steps=upload_steps)))
     for product in PRODUCTS:
         if "Release" not in product.get("build_types", ("Release",)):
             continue

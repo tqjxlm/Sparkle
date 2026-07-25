@@ -351,7 +351,7 @@ jobs:
           # a hung app never fails the step on its own; kill it so the diagnostics below run
           ( sleep 900 && echo "cook watchdog fired" && pkill -f sparkle.app/Contents/MacOS/sparkle ) &
           WATCHDOG=$!
-          if ! python3 build.py --framework macos --config Release --stage cook --cook_targets macos+ios+macos-glfw+windows-glfw+linux-glfw+android ${{ steps.setup-environment.outputs.build-args }}; then
+          if ! python3 build.py --framework macos --config Release --stage cook --cook_targets macos+ios+macos-glfw+android ${{ steps.setup-environment.outputs.build-args }}; then
             kill $WATCHDOG 2>/dev/null || true
             echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
             echo "=== crash reports ==="
@@ -360,7 +360,7 @@ jobs:
             exit 1
           fi
           kill $WATCHDOG 2>/dev/null || true
-          for target in macos ios macos-glfw windows-glfw linux-glfw android; do
+          for target in macos ios macos-glfw android; do
             test -f "build_system/macos/output/cooked_image/$target/cooked/manifest.json"
           done
 
@@ -382,23 +382,92 @@ jobs:
           name: cooked-image-macos-glfw
           path: build_system/macos/output/cooked_image/macos-glfw
 
-      - name: Upload cooked content image (windows-glfw)
-        uses: actions/upload-artifact@v7
-        with:
-          name: cooked-image-windows-glfw
-          path: build_system/macos/output/cooked_image/windows-glfw
-
-      - name: Upload cooked content image (linux-glfw)
-        uses: actions/upload-artifact@v7
-        with:
-          name: cooked-image-linux-glfw
-          path: build_system/macos/output/cooked_image/linux-glfw
-
       - name: Upload cooked content image (android)
         uses: actions/upload-artifact@v7
         with:
           name: cooked-image-android
           path: build_system/macos/output/cooked_image/android
+
+      # the fp16 masters the bc node derives its own family from: cooking them needs a GPU,
+      # encoding from them does not
+      - name: Upload artifact pool
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-pool
+          path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
+
+  cook-bc:
+    name: cook (ubuntu-latest, glfw, Release)
+    needs: [cook, build-ubuntu-glfw-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Environment
+        id: setup-environment
+        uses: ./.github/actions/setup-environment
+        with:
+          framework: glfw
+          os: ubuntu-latest
+
+      # the linux binary links libglfw at runtime even with no window
+      - name: Install GLFW runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libglfw3
+
+      - name: Download build product
+        uses: actions/download-artifact@v8
+        with:
+          name: build-glfw-ubuntu-latest-Release
+          path: build_system/glfw/product
+
+      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
+
+      # seeding the app's internal storage makes every master a cache hit, so this node runs
+      # no integration and needs no gpu
+      - name: Download artifact pool
+        uses: actions/download-artifact@v8
+        with:
+          name: cooked-pool
+          path: build_system/glfw/output/build/generated/cooked
+
+      - name: Cook
+        shell: bash
+        run: |
+          # a hung app never fails the step on its own; kill it so the diagnostics below run
+          ( sleep 900 && echo "cook watchdog fired" && pkill -f build_system/glfw/output/build/sparkle ) &
+          WATCHDOG=$!
+          if ! python3 build.py --framework glfw --config Release --stage cook --cook_targets windows-glfw+linux-glfw ${{ steps.setup-environment.outputs.build-args }}; then
+            kill $WATCHDOG 2>/dev/null || true
+            echo "=== app logs ==="
+            cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+            cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+            exit 1
+          fi
+          kill $WATCHDOG 2>/dev/null || true
+          for target in windows-glfw linux-glfw; do
+            test -f "build_system/glfw/output/cooked_image/$target/cooked/manifest.json"
+          done
+
+      - name: Upload cooked content image (windows-glfw)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-image-windows-glfw
+          path: build_system/glfw/output/cooked_image/windows-glfw
+
+      - name: Upload cooked content image (linux-glfw)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-image-linux-glfw
+          path: build_system/glfw/output/cooked_image/linux-glfw
 
   release-macos-macos:
     name: release (macos-latest, macos, Release)
@@ -700,7 +769,7 @@ jobs:
 
   release-windows-glfw:
     name: release (windows-latest, glfw, Release)
-    needs: [build-windows-glfw-release, cook]
+    needs: [build-windows-glfw-release, cook-bc]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -771,7 +840,7 @@ jobs:
 
   release-ubuntu-glfw:
     name: release (ubuntu-latest, glfw, Release)
-    needs: [build-ubuntu-glfw-release, cook]
+    needs: [build-ubuntu-glfw-release, cook-bc]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -1004,7 +1073,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
+    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, cook-bc, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

@@ -100,6 +100,9 @@ Otherwise, you need to specify them via environment variables. See the table bel
 | ANDROID_HOME | /Users/username/AndroidSDK                                   | android          | no (Android Studio)             |
 | JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home  | android          | no (Android Studio)             |
 | VS_PATH      | C:/Program Files/Microsoft Visual Studio/[version]/[edition] | all windows      | no (vs-installer)               |
+| ISPC         | /Users/username/ispc/bin/ispc                                | glfw, macos      | yes                             |
+
+ISPC compiles the block encoder kernels of the cook. Only the frameworks whose binary can cook (glfw, macos) build them; android and ios build the portable encoder instead, which they never run outside the `texture_compression` test.
 
 `SPARKLE_BUILD_JOBS` optionally overrides glfw build parallelism (defaults: 64 on windows, 16 elsewhere). CI sets it to 8 because hosted runners only have ~4 vcpus and oversubscribing them can starve the runner agent.
 
