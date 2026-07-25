@@ -18,7 +18,9 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <mutex>
+#include <optional>
 
 namespace sparkle
 {
@@ -41,14 +43,48 @@ unsigned FullMipCount(unsigned width, unsigned height)
     return count;
 }
 
-size_t MipChainByteSize(PixelFormat format, unsigned width, unsigned height, unsigned mip_count)
+using PayloadHeader = TextureCompression::PayloadHeader;
+
+constexpr size_t PayloadHeaderSize = sizeof(PayloadHeader);
+
+constexpr unsigned CubeFaceCount = 6;
+
+// bytes a full mip chain occupies, counting every face of every mip
+size_t MipChainByteSize(PixelFormat format, unsigned width, unsigned height, unsigned mip_count, unsigned faces = 1)
 {
     size_t total = 0;
     for (auto mip = 0u; mip < mip_count; mip++)
     {
-        total += GetImageMipByteSize(format, MipDim(width, mip), MipDim(height, mip));
+        total += faces * static_cast<size_t>(GetImageMipByteSize(format, MipDim(width, mip), MipDim(height, mip)));
     }
     return total;
+}
+
+// a payload is a PayloadHeader followed by tightly packed bytes; these two are the only
+// places that know the container layout
+std::vector<char> MakePayload(PixelFormat format, unsigned width, unsigned height, unsigned mip_count, size_t body_size)
+{
+    std::vector<char> payload(PayloadHeaderSize + body_size);
+    const PayloadHeader header{
+        .format = static_cast<uint32_t>(format), .width = width, .height = height, .mip_count = mip_count};
+    std::memcpy(payload.data(), &header, sizeof(header));
+    return payload;
+}
+
+std::optional<PayloadHeader> ReadPayloadHeader(const std::vector<char> &payload)
+{
+    if (payload.size() < PayloadHeaderSize)
+    {
+        return std::nullopt;
+    }
+    PayloadHeader header;
+    std::memcpy(&header, payload.data(), sizeof(header));
+    if (header.format >= static_cast<uint32_t>(PixelFormat::Count) || header.width == 0 || header.height == 0 ||
+        header.mip_count == 0)
+    {
+        return std::nullopt;
+    }
+    return header;
 }
 
 // filtering must happen in linear space; sRGB content is linearized first
@@ -172,6 +208,54 @@ astcenc_profile GetAstcProfile(PixelFormat format)
     }
     return IsSRGBFormat(format) ? ASTCENC_PRF_LDR_SRGB : ASTCENC_PRF_LDR;
 }
+
+// owns an astcenc context for one format. astcenc contexts are not shareable across threads,
+// so a caller that parallelizes creates one per unit of work
+class AstcContext
+{
+public:
+    AstcContext(PixelFormat format, float quality)
+    {
+        astcenc_config config;
+        const unsigned block_dim = GetBlockDim(format);
+        auto status = astcenc_config_init(GetAstcProfile(format), block_dim, block_dim, 1, quality, 0, &config);
+        if (status == ASTCENC_SUCCESS)
+        {
+            status = astcenc_context_alloc(&config, 1, &context_, nullptr);
+        }
+        if (status != ASTCENC_SUCCESS)
+        {
+            Log(Error, "astc encoder setup failed: {}", astcenc_get_error_string(status));
+            context_ = nullptr;
+        }
+    }
+
+    ~AstcContext()
+    {
+        if (context_ != nullptr)
+        {
+            astcenc_context_free(context_);
+        }
+    }
+
+    AstcContext(const AstcContext &) = delete;
+    AstcContext &operator=(const AstcContext &) = delete;
+    AstcContext(AstcContext &&) = delete;
+    AstcContext &operator=(AstcContext &&) = delete;
+
+    [[nodiscard]] bool IsValid() const
+    {
+        return context_ != nullptr;
+    }
+
+    [[nodiscard]] astcenc_context *Get() const
+    {
+        return context_;
+    }
+
+private:
+    astcenc_context *context_ = nullptr;
+};
 
 // radiance data, not display color: the default luma-derived channel weights would starve
 // red and blue of error budget. a single refine round runs at 2.7x the default speed while
@@ -609,24 +693,13 @@ bool EncodeHdrRows(const uint8_t *fp16, unsigned width, unsigned height, PixelFo
 
     ASSERT(target_format == PixelFormat::ASTC4x4HDR);
 
-    astcenc_config config;
-    const unsigned block_dim = GetBlockDim(target_format);
-    auto status =
-        astcenc_config_init(GetAstcProfile(target_format), block_dim, block_dim, 1, ASTCENC_PRE_MEDIUM, 0, &config);
-    astcenc_context *context = nullptr;
-    if (status == ASTCENC_SUCCESS)
+    const AstcContext context(target_format, ASTCENC_PRE_MEDIUM);
+    if (!context.IsValid())
     {
-        status = astcenc_context_alloc(&config, 1, &context, nullptr);
-    }
-    if (status != ASTCENC_SUCCESS)
-    {
-        Log(Error, "astc hdr encoder setup failed: {}", astcenc_get_error_string(status));
         return false;
     }
 
-    const bool ok = EncodeAstcHdrMip(reinterpret_cast<const Half *>(fp16), width, height, context, out, out_size);
-    astcenc_context_free(context);
-    return ok;
+    return EncodeAstcHdrMip(reinterpret_cast<const Half *>(fp16), width, height, context.Get(), out, out_size);
 }
 } // namespace
 
@@ -731,13 +804,13 @@ std::vector<char> TextureCompression::EncodeHdrCube(const uint8_t *fp16, unsigne
 
     std::vector<BandJob> band_jobs;
     size_t in_offset = 0;
-    size_t out_offset = sizeof(PayloadHeader);
+    size_t out_offset = PayloadHeaderSize;
     for (unsigned mip = 0; mip < mip_count; mip++)
     {
         const unsigned mip_width = MipDim(width, mip);
         const unsigned mip_height = MipDim(height, mip);
         const size_t fp16_row_size = static_cast<size_t>(mip_width) * GetPixelSize(PixelFormat::RGBAFloat16);
-        for (unsigned face = 0; face < 6; face++)
+        for (unsigned face = 0; face < CubeFaceCount; face++)
         {
             for (unsigned row = 0; row < mip_height; row += band_height)
             {
@@ -751,10 +824,7 @@ std::vector<char> TextureCompression::EncodeHdrCube(const uint8_t *fp16, unsigne
         }
     }
 
-    std::vector<char> payload(out_offset);
-    const PayloadHeader header{
-        .format = static_cast<uint32_t>(target_format), .width = width, .height = height, .mip_count = mip_count};
-    std::memcpy(payload.data(), &header, sizeof(header));
+    auto payload = MakePayload(target_format, width, height, mip_count, out_offset - PayloadHeaderSize);
 
     std::atomic<bool> success{true};
     TaskManager::ParallelFor(0u, static_cast<unsigned>(band_jobs.size()), [&](unsigned index) {
@@ -772,75 +842,55 @@ std::vector<char> TextureCompression::EncodeHdrCube(const uint8_t *fp16, unsigne
 std::vector<char> TextureCompression::WrapFp16Payload(const uint8_t *fp16, size_t size, unsigned width, unsigned height,
                                                       unsigned mip_count)
 {
-    std::vector<char> payload(sizeof(PayloadHeader) + size);
-    const PayloadHeader header{.format = static_cast<uint32_t>(PixelFormat::RGBAFloat16),
-                               .width = width,
-                               .height = height,
-                               .mip_count = mip_count};
-    std::memcpy(payload.data(), &header, sizeof(header));
-    std::memcpy(payload.data() + sizeof(header), fp16, size);
+    auto payload = MakePayload(PixelFormat::RGBAFloat16, width, height, mip_count, size);
+    std::memcpy(payload.data() + PayloadHeaderSize, fp16, size);
     return payload;
 }
 
 std::vector<char> TextureCompression::TranscodeHdrCube(const std::vector<char> &master, PixelFormat target_format)
 {
-    if (master.size() < sizeof(PayloadHeader))
-    {
-        return {};
-    }
-    PayloadHeader header;
-    std::memcpy(&header, master.data(), sizeof(header));
-    if (static_cast<PixelFormat>(header.format) != PixelFormat::RGBAFloat16)
+    const auto header = ReadPayloadHeader(master);
+    if (!header || static_cast<PixelFormat>(header->format) != PixelFormat::RGBAFloat16)
     {
         return {};
     }
 
-    size_t fp16_total = 0;
-    for (unsigned mip = 0; mip < header.mip_count; mip++)
-    {
-        fp16_total += 6 * static_cast<size_t>(MipDim(header.width, mip)) * MipDim(header.height, mip) *
-                      GetPixelSize(PixelFormat::RGBAFloat16);
-    }
-    if (master.size() < sizeof(PayloadHeader) + fp16_total)
+    const size_t fp16_total =
+        MipChainByteSize(PixelFormat::RGBAFloat16, header->width, header->height, header->mip_count, CubeFaceCount);
+    if (master.size() < PayloadHeaderSize + fp16_total)
     {
         return {};
     }
 
-    auto payload = EncodeHdrCube(reinterpret_cast<const uint8_t *>(master.data()) + sizeof(PayloadHeader), header.width,
-                                 header.height, header.mip_count, target_format);
+    auto payload = EncodeHdrCube(reinterpret_cast<const uint8_t *>(master.data()) + PayloadHeaderSize, header->width,
+                                 header->height, header->mip_count, target_format);
     if (payload.empty())
     {
         return {};
     }
-    payload.insert(payload.end(), master.begin() + static_cast<std::ptrdiff_t>(sizeof(PayloadHeader) + fp16_total),
+    payload.insert(payload.end(), master.begin() + static_cast<std::ptrdiff_t>(PayloadHeaderSize + fp16_total),
                    master.end());
     return payload;
 }
 
 std::vector<uint8_t> TextureCompression::DecodeHdrCube(const std::vector<char> &payload)
 {
-    if (payload.size() < sizeof(PayloadHeader))
+    const auto header = ReadPayloadHeader(payload);
+    if (!header)
     {
         return {};
     }
-    PayloadHeader header;
-    std::memcpy(&header, payload.data(), sizeof(header));
-    const auto format = static_cast<PixelFormat>(header.format);
-    if (header.format >= static_cast<uint32_t>(PixelFormat::Count) || !IsHDRFormat(format))
+    const auto format = static_cast<PixelFormat>(header->format);
+    if (!IsHDRFormat(format))
     {
         return {};
     }
 
-    size_t fp16_total = 0;
-    size_t compressed_total = 0;
-    for (unsigned mip = 0; mip < header.mip_count; mip++)
-    {
-        const unsigned mip_width = MipDim(header.width, mip);
-        const unsigned mip_height = MipDim(header.height, mip);
-        fp16_total += 6 * static_cast<size_t>(mip_width) * mip_height * GetPixelSize(PixelFormat::RGBAFloat16);
-        compressed_total += 6 * GetImageMipByteSize(format, mip_width, mip_height);
-    }
-    if (payload.size() < sizeof(PayloadHeader) + compressed_total)
+    const size_t fp16_total =
+        MipChainByteSize(PixelFormat::RGBAFloat16, header->width, header->height, header->mip_count, CubeFaceCount);
+    const size_t compressed_total =
+        MipChainByteSize(format, header->width, header->height, header->mip_count, CubeFaceCount);
+    if (payload.size() < PayloadHeaderSize + compressed_total)
     {
         return {};
     }
@@ -848,20 +898,20 @@ std::vector<uint8_t> TextureCompression::DecodeHdrCube(const std::vector<char> &
     std::vector<uint8_t> fp16(fp16_total);
     if (format == PixelFormat::RGBAFloat16)
     {
-        std::memcpy(fp16.data(), payload.data() + sizeof(PayloadHeader), fp16_total);
+        std::memcpy(fp16.data(), payload.data() + PayloadHeaderSize, fp16_total);
         return fp16;
     }
 
-    size_t in_offset = sizeof(PayloadHeader);
+    size_t in_offset = PayloadHeaderSize;
     size_t out_offset = 0;
-    for (unsigned mip = 0; mip < header.mip_count; mip++)
+    for (unsigned mip = 0; mip < header->mip_count; mip++)
     {
-        const unsigned mip_width = MipDim(header.width, mip);
-        const unsigned mip_height = MipDim(header.height, mip);
+        const unsigned mip_width = MipDim(header->width, mip);
+        const unsigned mip_height = MipDim(header->height, mip);
         const size_t fp16_face_size =
             static_cast<size_t>(mip_width) * mip_height * GetPixelSize(PixelFormat::RGBAFloat16);
         const size_t compressed_face_size = GetImageMipByteSize(format, mip_width, mip_height);
-        for (unsigned face = 0; face < 6; face++)
+        for (unsigned face = 0; face < CubeFaceCount; face++)
         {
             std::vector<uint8_t> blocks(payload.begin() + static_cast<std::ptrdiff_t>(in_offset),
                                         payload.begin() +
@@ -900,31 +950,19 @@ std::vector<char> TextureCompression::Encode(const Image2D &source, Profile prof
     const unsigned mip_count = FullMipCount(width, height);
     const bool srgb = profile == Profile::Color;
 
-    std::vector<char> payload(sizeof(PayloadHeader) + MipChainByteSize(target_format, width, height, mip_count));
-    const PayloadHeader header{
-        .format = static_cast<uint32_t>(target_format), .width = width, .height = height, .mip_count = mip_count};
-    memcpy(payload.data(), &header, sizeof(header));
+    auto payload =
+        MakePayload(target_format, width, height, mip_count, MipChainByteSize(target_format, width, height, mip_count));
 
-    astcenc_context *astc_context = nullptr;
-    if (family == Family::Astc)
+    // one context for the whole chain: allocation dominates a small mip's encode
+    const auto astc_context =
+        family == Family::Astc ? std::make_unique<AstcContext>(target_format, ASTCENC_PRE_MEDIUM) : nullptr;
+    if (astc_context && !astc_context->IsValid())
     {
-        astcenc_config config;
-        const unsigned block_dim = GetBlockDim(target_format);
-        auto status =
-            astcenc_config_init(GetAstcProfile(target_format), block_dim, block_dim, 1, ASTCENC_PRE_MEDIUM, 0, &config);
-        if (status == ASTCENC_SUCCESS)
-        {
-            status = astcenc_context_alloc(&config, 1, &astc_context, nullptr);
-        }
-        if (status != ASTCENC_SUCCESS)
-        {
-            Log(Error, "astc encoder setup failed: {}", astcenc_get_error_string(status));
-            return {};
-        }
+        return {};
     }
 
     bool success = true;
-    size_t mip_offset = sizeof(PayloadHeader);
+    size_t mip_offset = PayloadHeaderSize;
     std::vector<float> linear_mip;
     for (auto mip = 0u; mip < mip_count && success; mip++)
     {
@@ -957,9 +995,9 @@ std::vector<char> TextureCompression::Encode(const Image2D &source, Profile prof
 
         const size_t mip_size = GetImageMipByteSize(target_format, mip_width, mip_height);
         auto *out = reinterpret_cast<uint8_t *>(payload.data()) + mip_offset;
-        if (family == Family::Astc)
+        if (astc_context)
         {
-            success = EncodeAstcMip(mip_rgba, mip_width, mip_height, astc_context, out, mip_size);
+            success = EncodeAstcMip(mip_rgba, mip_width, mip_height, astc_context->Get(), out, mip_size);
         }
         else
         {
@@ -968,46 +1006,38 @@ std::vector<char> TextureCompression::Encode(const Image2D &source, Profile prof
         mip_offset += mip_size;
     }
 
-    if (astc_context != nullptr)
-    {
-        astcenc_context_free(astc_context);
-    }
-
     return success ? payload : std::vector<char>{};
 }
 
 std::shared_ptr<Image2D> TextureCompression::CreateImageFromPayload(const std::vector<char> &payload,
                                                                     const std::string &name)
 {
-    if (payload.size() < sizeof(PayloadHeader))
+    const auto header = ReadPayloadHeader(payload);
+    if (!header)
     {
-        Log(Error, "compressed texture payload for {} is too small", name);
+        Log(Error, "compressed texture payload for {} is too small or has a corrupt header", name);
         return nullptr;
     }
 
-    PayloadHeader header;
-    memcpy(&header, payload.data(), sizeof(header));
-
-    const auto format = static_cast<PixelFormat>(header.format);
-    if (header.format >= static_cast<uint32_t>(PixelFormat::Count) || !IsCompressedFormat(format) ||
-        header.width == 0 || header.height == 0 || header.mip_count != FullMipCount(header.width, header.height))
+    const auto format = static_cast<PixelFormat>(header->format);
+    if (!IsCompressedFormat(format) || header->mip_count != FullMipCount(header->width, header->height))
     {
         Log(Error, "compressed texture payload for {} has a corrupt header", name);
         return nullptr;
     }
 
-    const size_t chain_size = MipChainByteSize(format, header.width, header.height, header.mip_count);
-    if (payload.size() != sizeof(PayloadHeader) + chain_size)
+    const size_t chain_size = MipChainByteSize(format, header->width, header->height, header->mip_count);
+    if (payload.size() != PayloadHeaderSize + chain_size)
     {
         Log(Error, "compressed texture payload for {} has size {}, expected {}", name, payload.size(),
-            sizeof(PayloadHeader) + chain_size);
+            PayloadHeaderSize + chain_size);
         return nullptr;
     }
 
     std::vector<uint8_t> chain(chain_size);
-    memcpy(chain.data(), payload.data() + sizeof(PayloadHeader), chain_size);
+    memcpy(chain.data(), payload.data() + PayloadHeaderSize, chain_size);
 
-    return std::make_shared<Image2D>(header.width, header.height, format, header.mip_count, std::move(chain), name);
+    return std::make_shared<Image2D>(header->width, header->height, format, header->mip_count, std::move(chain), name);
 }
 
 Image2D TextureCompression::Decode(const Image2D &compressed, unsigned mip_level)
