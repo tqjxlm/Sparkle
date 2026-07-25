@@ -158,7 +158,8 @@ def package_cooked(package, framework, image_dir, target):
                 zip_out.writestr(name, content)
     shutil.move(temp_path, package)
 
-    print(f"replaced content of {package} under {packed_root} with {len(placed)} image files")
+    print(f"replaced content of {package} under {packed_root} with the {target} content image"
+          f" ({len(placed)} files)")
     return len(placed)
 
 
