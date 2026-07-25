@@ -46,6 +46,21 @@ class CiPipelineTest(unittest.TestCase):
     def test_cook_needs_the_macos_release_build(self):
         self.assertIn("needs: build-macos-macos-release", JOBS["cook"])
 
+    # every family is generated from its COOK_FAMILIES entry alone, and exactly one of them
+    # cooks the masters the others encode from
+    def test_every_cook_family_gets_a_job_from_its_descriptor(self):
+        producers = []
+        for family, spec in ci_matrix.COOK_FAMILIES.items():
+            text = JOBS[spec["id"]]
+            self.assertIn(f"runs-on: {spec['os']}", text)
+            self.assertIn(f"--framework {spec['framework']} ", text)
+            self.assertIn(f"pkill -f {spec['app_binary']} ", text)
+            self.assertIn(f"path: {spec['pool_dir']}", text)
+            self.assertIn(ci_matrix.cook_image_dir(family), text)
+            if spec["role"] == "produce":
+                producers.append(family)
+        self.assertEqual(producers, [ci_matrix.master_producing_family()])
+
     # the bc node encodes from the masters the astc node cooked, on the linux binary
     def test_bc_cook_needs_the_astc_cook_and_the_linux_build(self):
         self.assertIn("needs: [cook, build-ubuntu-glfw-release]", JOBS["cook-bc"])
@@ -56,7 +71,7 @@ class CiPipelineTest(unittest.TestCase):
         for product in release_products():
             build_id = ci_matrix.slug("build", product, "Release")
             family = ci_matrix.cook_family(ci_matrix.product_cook_target(product))
-            cook_id = ci_matrix.COOK_JOB_ID[family]
+            cook_id = ci_matrix.COOK_FAMILIES[family]["id"]
             self.assertIn(f"needs: [{build_id}, {cook_id}]",
                           JOBS[ci_matrix.slug("release", product)])
 
@@ -88,9 +103,9 @@ class CiPipelineTest(unittest.TestCase):
     def test_cook_publishes_one_image_artifact_per_target(self):
         for target in ci_matrix.cook_targets():
             family = ci_matrix.cook_family(target)
-            text = JOBS[ci_matrix.COOK_JOB_ID[family]]
+            text = JOBS[ci_matrix.COOK_FAMILIES[family]["id"]]
             self.assertIn(f"name: cooked-image-{target}", text)
-            self.assertIn(f"path: {ci_matrix.COOK_IMAGE_DIR[family]}/{target}", text)
+            self.assertIn(f"path: {ci_matrix.cook_image_dir(family)}/{target}", text)
             self.assertIn(f"--cook_targets {'+'.join(ci_matrix.family_cook_targets(family))}", text)
 
     # the generator names the artifacts, the release action consumes them by the same name

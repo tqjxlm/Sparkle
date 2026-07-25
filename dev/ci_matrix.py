@@ -224,10 +224,10 @@ BUILD_IOS_SECRETS = """\
 """
 
 COOK_JOB = """
-  cook:
-    name: cook (macos-latest, macos, Release)
-    needs: build-macos-macos-release
-    runs-on: macos-latest
+  @id@:
+    name: cook (@os@, @framework@, Release)
+    needs: @needs@
+    runs-on: @os@
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -236,122 +236,72 @@ COOK_JOB = """
         id: setup-environment
         uses: ./.github/actions/setup-environment
         with:
-          framework: macos
-          os: macos-latest
-
+          framework: @framework@
+          os: @os@
+@pre_steps@
       - name: Download build product
         uses: actions/download-artifact@v8
         with:
-          name: build-macos-macos-latest-Release
-          path: build_system/macos/product
-
-      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
-      - name: Extract app
-        run: |
-          mkdir -p build_system/macos/output/build
-          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
-
+          name: build-@framework@-@os@-Release
+          path: build_system/@framework@/product
+@extract_step@@pool_download@
       - name: Cook
         shell: bash
         run: |
           # a hung app never fails the step on its own; kill it so the diagnostics below run
-          ( sleep 900 && echo "cook watchdog fired" && pkill -f sparkle.app/Contents/MacOS/sparkle ) &
+          ( sleep 900 && echo "cook watchdog fired" && pkill -f @app_binary@ ) &
           WATCHDOG=$!
-          if ! python3 build.py --framework macos --config Release --stage cook --cook_targets @cook_targets@ ${{ steps.setup-environment.outputs.build-args }}; then
+          if ! python3 build.py --framework @framework@ --config Release --stage cook --cook_targets @cook_targets@ ${{ steps.setup-environment.outputs.build-args }}; then
             kill $WATCHDOG 2>/dev/null || true
-            echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
-            echo "=== crash reports ==="
-            sleep 10
-            for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+@diagnostics@\
             exit 1
           fi
           kill $WATCHDOG 2>/dev/null || true
           for target in @cook_target_list@; do
-            test -f "build_system/macos/output/cooked_image/$target/cooked/manifest.json"
+            test -f "@image_dir@/$target/cooked/manifest.json"
           done
-
-@upload_steps@
-      # the fp16 masters the bc node derives its own family from: cooking them needs a GPU,
-      # encoding from them does not
-      - name: Upload artifact pool
-        uses: actions/upload-artifact@v7
-        with:
-          name: cooked-pool
-          path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
-"""
-
-# the bc family is pure cpu work once the masters exist, so it leaves the scarce macos
-# runners and stops gating the release and test nodes of the targets that never read it
-COOK_BC_JOB = """
-  cook-bc:
-    name: cook (ubuntu-latest, glfw, Release)
-    needs: [cook, build-ubuntu-glfw-release]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Setup Environment
-        id: setup-environment
-        uses: ./.github/actions/setup-environment
-        with:
-          framework: glfw
-          os: ubuntu-latest
-
-      # the linux binary links libglfw at runtime even with no window
-      - name: Install GLFW runtime
-        shell: bash
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y libglfw3
-
-      - name: Download build product
-        uses: actions/download-artifact@v8
-        with:
-          name: build-glfw-ubuntu-latest-Release
-          path: build_system/glfw/product
-
-      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
-      - name: Extract app
-        shell: bash
-        run: |
-          mkdir -p build_system/glfw/output
-          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
-
-      # seeding the app's internal storage makes every master a cache hit, so this node runs
-      # no integration and needs no gpu
-      - name: Download artifact pool
-        uses: actions/download-artifact@v8
-        with:
-          name: cooked-pool
-          path: build_system/glfw/output/build/generated/cooked
-
-      - name: Cook
-        shell: bash
-        run: |
-          # a hung app never fails the step on its own; kill it so the diagnostics below run
-          ( sleep 900 && echo "cook watchdog fired" && pkill -f build_system/glfw/output/build/sparkle ) &
-          WATCHDOG=$!
-          if ! python3 build.py --framework glfw --config Release --stage cook --cook_targets @cook_targets@ ${{ steps.setup-environment.outputs.build-args }}; then
-            kill $WATCHDOG 2>/dev/null || true
-            echo "=== app logs ==="
-            cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
-            cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
-            exit 1
-          fi
-          kill $WATCHDOG 2>/dev/null || true
-          for target in @cook_target_list@; do
-            test -f "build_system/glfw/output/cooked_image/$target/cooked/manifest.json"
-          done
-
-@upload_steps@"""
+@upload_steps@@pool_upload@"""
 
 # one artifact per target: a release node downloads only the image its own product packages
-COOK_UPLOAD_STEP = """      - name: Upload cooked content image (@target@)
+COOK_UPLOAD_STEP = """
+      - name: Upload cooked content image (@target@)
         uses: actions/upload-artifact@v7
         with:
           name: cooked-image-@target@
           path: @image_dir@/@target@
+"""
+
+STEP_POOL_UPLOAD = """
+      # the fp16 masters the encode-only families derive their own textures from: cooking
+      # them needs a GPU, encoding from them does not
+      - name: Upload artifact pool
+        uses: actions/upload-artifact@v7
+        with:
+          name: cooked-pool
+          path: @pool_dir@
+"""
+
+STEP_POOL_DOWNLOAD = """
+      # seeding the app's internal storage makes every master a cache hit, so this node
+      # runs no integration and needs no gpu
+      - name: Download artifact pool
+        uses: actions/download-artifact@v8
+        with:
+          name: cooked-pool
+          path: @pool_dir@
+"""
+
+COOK_DIAGNOSTICS_APPLE = """\
+            echo "=== app logs ==="; cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+            echo "=== crash reports ==="
+            sleep 10
+            for f in ~/Library/Logs/DiagnosticReports/sparkle*; do echo "--- $f"; cat "$f"; done 2>/dev/null || true
+"""
+
+COOK_DIAGNOSTICS_LINUX = """\
+            echo "=== app logs ==="
+            cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+            cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
 """
 
 RELEASE_JOB = """
@@ -442,39 +392,20 @@ STEP_DOWNLOAD = """
           path: build_system/@framework@/product
 """
 
-STEP_EXTRACT_WINDOWS = """
-      - name: Extract app
-        shell: bash
-        run: >-
-          python3 -m zipfile -e build_system/glfw/product/windows-glfw-Release.zip
-          build_system/glfw/output/
-"""
+EXTRACT_COMMANDS = {
+    "macos-latest": "ditto -x -k @archive@ @extract_dir@/",
+    "ubuntu-latest": "unzip -q @archive@ -d @extract_dir@/",
+    "windows-latest": "python3 -m zipfile -e @archive@ @extract_dir@/",
+}
 
-STEP_EXTRACT_LINUX = """
-      # unzip, not python zipfile: extraction must preserve the executable bit of the binary
+STEP_EXTRACT = """
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
       - name: Extract app
         shell: bash
         run: |
-          mkdir -p build_system/glfw/output
-          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
-"""
-
-STEP_EXTRACT_GLFW_MACOS = """
-      # ditto, not python zipfile: extraction must preserve the executable bit of the binary
-      - name: Extract app
-        shell: bash
-        run: |
-          mkdir -p build_system/glfw/output
-          ditto -x -k build_system/glfw/product/macos-glfw-Release.zip build_system/glfw/output/
-"""
-
-STEP_EXTRACT_MACOS = """
-      # ditto, not python zipfile: extraction must preserve the executable bit of the app binary
-      - name: Extract app
-        shell: bash
-        run: |
-          mkdir -p build_system/macos/output/build
-          ditto -x -k build_system/macos/product/macos-Release.zip build_system/macos/output/build/
+          mkdir -p @extract_dir@
+          @extract_command@
 """
 
 STEP_RUN_TESTS = """
@@ -618,10 +549,32 @@ def cook_targets():
 COOK_TARGET_FAMILY = {"macos": "astc", "ios": "astc", "macos-glfw": "astc", "android": "astc",
                       "windows-glfw": "bc", "linux-glfw": "bc"}
 
-COOK_JOB_ID = {"astc": "cook", "bc": "cook-bc"}
-
-COOK_IMAGE_DIR = {"astc": "build_system/macos/output/cooked_image",
-                  "bc": "build_system/glfw/output/cooked_image"}
+# the node that cooks each family. one family produces the fp16 masters (the expensive
+# gpu work) and every other family consumes them, which is pure cpu encoding: consumers
+# leave the scarce macos runners and stop gating the products that never read them.
+# app_binary is what the watchdog kills, pool_dir the app's internal storage the masters
+# travel through (COOKED_OUTPUT_DIR in build.py)
+COOK_FAMILIES = {
+    "astc": {
+        "id": "cook",
+        "os": "macos-latest",
+        "framework": "macos",
+        "role": "produce",
+        "app_binary": "sparkle.app/Contents/MacOS/sparkle",
+        "pool_dir": "build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked",
+        "diagnostics": COOK_DIAGNOSTICS_APPLE,
+    },
+    "bc": {
+        "id": "cook-bc",
+        "os": "ubuntu-latest",
+        "framework": "glfw",
+        "role": "consume",
+        "app_binary": "build_system/glfw/output/build/sparkle",
+        "pool_dir": "build_system/glfw/output/build/generated/cooked",
+        "diagnostics": COOK_DIAGNOSTICS_LINUX,
+        "pre_steps": STEP_GLFW_RUNTIME,
+    },
+}
 
 
 def cook_family(target):
@@ -629,6 +582,23 @@ def cook_family(target):
     if family is None:
         raise LookupError(f"cook target {target} has no family; update COOK_TARGET_FAMILY")
     return family
+
+
+def cook_product(family):
+    """The product whose build output cooks this family."""
+    spec = COOK_FAMILIES[family]
+    return {"os": spec["os"], "framework": spec["framework"]}
+
+
+def cook_image_dir(family):
+    return f"build_system/{COOK_FAMILIES[family]['framework']}/output/cooked_image"
+
+
+def master_producing_family():
+    producers = [family for family, spec in COOK_FAMILIES.items() if spec["role"] == "produce"]
+    if len(producers) != 1:
+        raise LookupError(f"exactly one cook family must produce the masters, got {producers}")
+    return producers[0]
 
 
 def family_cook_targets(family):
@@ -652,6 +622,43 @@ def render(template, **tokens):
     return text
 
 
+def extract_step(product):
+    """Unpack a downloaded archive of this product. The macos app bundle lands inside the
+    build directory, a glfw binary at the output root."""
+    framework = product["framework"]
+    directory = f"build_system/{framework}/output"
+    if framework == "macos":
+        directory += "/build"
+    archive = f"build_system/{framework}/product/{product_cook_target(product)}-Release.zip"
+    command = render(EXTRACT_COMMANDS[product["os"]], archive=archive, extract_dir=directory)
+    return render(STEP_EXTRACT, extract_dir=directory, extract_command=command)
+
+
+def cook_job(family):
+    spec = COOK_FAMILIES[family]
+    product = cook_product(family)
+    targets = family_cook_targets(family)
+    image_dir = cook_image_dir(family)
+
+    build_id = slug("build", product, "Release")
+    if spec["role"] == "produce":
+        needs = build_id
+        pool_download, pool_upload = "", render(STEP_POOL_UPLOAD, pool_dir=spec["pool_dir"])
+    else:
+        needs = f"[{COOK_FAMILIES[master_producing_family()]['id']}, {build_id}]"
+        pool_download, pool_upload = render(STEP_POOL_DOWNLOAD, pool_dir=spec["pool_dir"]), ""
+
+    upload_steps = "".join(render(COOK_UPLOAD_STEP, target=target, image_dir=image_dir)
+                           for target in targets)
+
+    return render(COOK_JOB, id=spec["id"], os=spec["os"], framework=spec["framework"],
+                  needs=needs, pre_steps=spec.get("pre_steps", ""),
+                  extract_step=extract_step(product), pool_download=pool_download,
+                  app_binary=spec["app_binary"], diagnostics=spec["diagnostics"],
+                  cook_targets="+".join(targets), cook_target_list=" ".join(targets),
+                  image_dir=image_dir, upload_steps=upload_steps, pool_upload=pool_upload)
+
+
 def build_job(product, config):
     extras = ""
     if "abi" in product:
@@ -673,7 +680,7 @@ def release_job(product):
     return render(RELEASE_JOB, id=slug("release", product), os=product["os"],
                   framework=product["framework"], name_abi=name_abi(product),
                   build_id=slug("build", product, "Release"),
-                  cook_id=COOK_JOB_ID[cook_family(product_cook_target(product))],
+                  cook_id=COOK_FAMILIES[cook_family(product_cook_target(product))]["id"],
                   runs_on="macos-latest" if apple else "ubuntu-latest", extras=extras)
 
 
@@ -693,12 +700,8 @@ def test_job(product, runner):
         text += STEP_KVM
     text += render(STEP_DOWNLOAD, framework=framework, os=os_name,
                    artifact_abi=f"-{product['abi']}" if "abi" in product else "")
-    if framework == "glfw":
-        text += {"windows-latest": STEP_EXTRACT_WINDOWS,
-                 "ubuntu-latest": STEP_EXTRACT_LINUX,
-                 "macos-latest": STEP_EXTRACT_GLFW_MACOS}[os_name]
-    elif framework == "macos":
-        text += STEP_EXTRACT_MACOS
+    if framework in ("glfw", "macos"):
+        text += extract_step(product)
     suite_args = f" {runner['suite_args']}" if runner["suite_args"] else ""
     text += render(STEP_RUN_TESTS, suite_timeout=runner["suite_timeout"],
                    framework=framework, suite_args=suite_args)
@@ -740,14 +743,8 @@ def jobs():
         for config in product.get("build_types", ("Debug", "Release")):
             generated.append((slug("build", product, config),
                               build_job(product, config)))
-    for family, template in (("astc", COOK_JOB), ("bc", COOK_BC_JOB)):
-        targets = family_cook_targets(family)
-        upload_steps = "\n".join(render(COOK_UPLOAD_STEP, target=target,
-                                        image_dir=COOK_IMAGE_DIR[family]) for target in targets)
-        generated.append((COOK_JOB_ID[family],
-                          render(template, cook_targets="+".join(targets),
-                                 cook_target_list=" ".join(targets),
-                                 upload_steps=upload_steps)))
+    for family, spec in COOK_FAMILIES.items():
+        generated.append((spec["id"], cook_job(family)))
     for product in PRODUCTS:
         if "Release" not in product.get("build_types", ("Release",)):
             continue
