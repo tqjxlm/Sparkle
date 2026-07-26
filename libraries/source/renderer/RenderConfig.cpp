@@ -6,6 +6,7 @@
 #include "application/NativeView.h"
 #endif
 #include "application/ConfigCollectionHelper.h"
+#include "application/InputManager.h"
 
 namespace sparkle
 {
@@ -82,6 +83,24 @@ void RenderConfig::Init()
     });
 
     Validate();
+}
+
+std::vector<std::unique_ptr<EventSubscription>> RenderConfig::BindInput()
+{
+    auto *input_manager = InputManager::Instance();
+    if (!input_manager)
+    {
+        return {};
+    }
+
+    std::vector<std::unique_ptr<EventSubscription>> subscriptions;
+
+    subscriptions.push_back(input_manager->BindKey({.key = Key::Space, .action = KeyAction::Press},
+                                                   [this]() { accumulate_key_held = true; }));
+    subscriptions.push_back(input_manager->BindKey({.key = Key::Space, .action = KeyAction::Release},
+                                                   [this]() { accumulate_key_held = false; }));
+
+    return subscriptions;
 }
 
 static RenderConfig::Pipeline GetFallbackRenderMode(RenderConfig::Pipeline mode)

@@ -18,14 +18,15 @@
 #include "rhi/RHI.h"
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
-#include "scene/component/camera/CameraComponent.h"
 #include "scene/material/MaterialManager.h"
 
 #if ENABLE_TEST_CASES
 #include "application/TestCase.h"
 #endif
 
+#include <algorithm>
 #include <cstring>
+#include <iterator>
 
 namespace sparkle
 {
@@ -509,16 +510,6 @@ void AppFramework::Cleanup()
     // no more logging should happen after this point
 }
 
-void AppFramework::DebugNextFrame()
-{
-    auto scale = view_->GetWindowScale();
-    auto pointer = input_manager_->GetPointerPosition();
-    TaskManager::RunInRenderThread([this, scale, pointer]() {
-        render_framework_->SetDebugPoint(pointer.x() * scale.x(),
-                                         static_cast<float>(render_config_.image_height) - pointer.y() * scale.y());
-    });
-}
-
 void AppFramework::PushInputEvent(const InputEvent &event)
 {
     if (input_manager_)
@@ -529,52 +520,6 @@ void AppFramework::PushInputEvent(const InputEvent &event)
 
 void AppFramework::SetupInputHandlers()
 {
-    input_subscriptions_.push_back(input_manager_->OnScenePointer().Subscribe([this](const PointerEvent &event) {
-        switch (event.action)
-        {
-        case PointerAction::Down:
-            if (event.button == ClickButton::SecondaryRight ||
-                (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Control)))
-            {
-                DebugNextFrame();
-            }
-            else if (event.button == ClickButton::PrimaryLeft)
-            {
-                if (auto *camera = GetMainCamera())
-                {
-                    camera->OnPointerDown();
-                }
-            }
-            break;
-        case PointerAction::Up:
-        case PointerAction::Cancel:
-            if (event.button == ClickButton::PrimaryLeft)
-            {
-                if (auto *camera = GetMainCamera())
-                {
-                    camera->OnPointerUp();
-                }
-            }
-            break;
-        default:
-            break;
-        }
-    }));
-
-    input_subscriptions_.push_back(input_manager_->OnSceneDrag().Subscribe([this](Vector2 delta) {
-        if (auto *camera = GetMainCamera())
-        {
-            camera->OnPointerMove(delta.y(), -delta.x());
-        }
-    }));
-
-    input_subscriptions_.push_back(input_manager_->OnSceneZoom().Subscribe([this](float amount) {
-        if (auto *camera = GetMainCamera())
-        {
-            camera->OnScroll(amount);
-        }
-    }));
-
     input_subscriptions_.push_back(input_manager_->OnSceneDoubleTap().Subscribe(
         [this](uint8_t /*finger_count*/) { show_control_panel_ = !show_control_panel_; }));
 
@@ -585,8 +530,12 @@ void AppFramework::SetupInputHandlers()
         }
     }));
 
-    input_subscriptions_.push_back(
-        input_manager_->OnSceneKey().Subscribe([this](const KeyEvent &event) { HandleSceneKey(event); }));
+    input_subscriptions_.push_back(input_manager_->BindKey({.key = Key::Escape}, []() { RequestExit(); }));
+
+    // the app owns the config instance the per-frame snapshot is taken from, so it holds the
+    // subscriptions the renderer binds against it
+    auto render_config_subscriptions = render_config_.BindInput();
+    std::ranges::move(render_config_subscriptions, std::back_inserter(input_subscriptions_));
 }
 
 void AppFramework::ResetInputEvents()
@@ -605,96 +554,6 @@ void AppFramework::FrameBufferResizeCallback(int width, int height) const
             render_framework_->OnFrameBufferResize(width, height);
         }
     });
-}
-
-void AppFramework::HandleSceneKey(const KeyEvent &event)
-{
-    auto *camera = GetMainCamera();
-    if (!camera)
-    {
-        return;
-    }
-
-    Key key = event.key;
-#if FRAMEWORK_MACOS
-    // support keyboards with no escape key: the backspace key stands in for it
-    if (key == Key::Backspace)
-    {
-        key = Key::Escape;
-    }
-#endif
-
-    // Space is the only binding that tracks the key being held, so it reads the action itself;
-    // every other binding fires once on release. Shift is required where the glyph on the key
-    // needs it: Shift+Equal is the '+' a keyboard without a numpad has.
-    struct Binding
-    {
-        Key key;
-        bool needs_shift;
-        KeyAction action;
-        void (*handler)(AppFramework &app);
-    };
-
-    static constexpr Binding Bindings[] = {
-        {Key::Escape, false, KeyAction::Release, [](AppFramework &) { RequestExit(); }},
-        {Key::Space, false, KeyAction::Press, [](AppFramework &app) { app.HoldAccumulation(); }},
-        {Key::Space, false, KeyAction::Release, [](AppFramework &app) { app.ReleaseAccumulation(); }},
-        {Key::Up, false, KeyAction::Release, [](AppFramework &app) { app.WidenAperture(); }},
-        {Key::Down, false, KeyAction::Release, [](AppFramework &app) { app.NarrowAperture(); }},
-        {Key::P, false, KeyAction::Release, [](AppFramework &app) { app.PrintCameraPosture(); }},
-        {Key::NumpadAdd, false, KeyAction::Release, [](AppFramework &app) { app.AddDebugSphere(); }},
-        {Key::Equal, true, KeyAction::Release, [](AppFramework &app) { app.AddDebugSphere(); }},
-        {Key::Minus, false, KeyAction::Release, [](AppFramework &app) { app.RemoveDebugSphere(); }},
-    };
-
-    const bool shift_on = (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Shift)) != 0;
-
-    for (const Binding &binding : Bindings)
-    {
-        if (binding.key == key && binding.action == event.action && (!binding.needs_shift || shift_on))
-        {
-            binding.handler(*this);
-        }
-    }
-}
-
-void AppFramework::HoldAccumulation()
-{
-    render_config_.accumulate_key_held = true;
-}
-
-void AppFramework::ReleaseAccumulation()
-{
-    render_config_.accumulate_key_held = false;
-}
-
-void AppFramework::WidenAperture() const
-{
-    auto *camera = GetMainCamera();
-    camera->SetAperture(camera->GetAttribute().aperture + 1.f);
-}
-
-void AppFramework::NarrowAperture() const
-{
-    auto *camera = GetMainCamera();
-    camera->SetAperture(camera->GetAttribute().aperture - 1.f);
-}
-
-void AppFramework::PrintCameraPosture() const
-{
-    GetMainCamera()->PrintPosture();
-}
-
-void AppFramework::AddDebugSphere()
-{
-    Log(Debug, "Add debug sphere");
-    SceneManager::GenerateRandomSpheres(*main_scene_, 1);
-}
-
-void AppFramework::RemoveDebugSphere()
-{
-    Log(Debug, "Remove debug sphere");
-    SceneManager::RemoveLastDebugSphere(main_scene_.get());
 }
 
 void AppFramework::RequestExit()

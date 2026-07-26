@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <iterator>
 #include <utility>
 
 namespace sparkle
@@ -22,7 +23,16 @@ constexpr float TouchScrollStartDistance = 8.f;
 constexpr float PixelsPerWheelStep = 80.f;
 constexpr float PinchZoomScale = 0.1f;
 
+InputManager *InputManager::instance_ = nullptr;
+
 #if FRAMEWORK_MACOS
+// support keyboards with no escape key: the backspace key stands in for it. only key bindings
+// see the substitution, so text editing in the ui still receives a real backspace.
+static Key NormalizeBindingKey(Key key)
+{
+    return key == Key::Backspace ? Key::Escape : key;
+}
+
 // covers the keys imgui needs for widget interaction and text editing; printable input
 // arrives as CharEvent. only the macos framework needs it: every other framework feeds imgui
 // through its own backend (see FeedUiSystem below)
@@ -66,6 +76,28 @@ static ImGuiKey ToImGuiKey(Key key)
 InputManager::InputManager(const AppConfig &app_config, UiManager *ui_manager)
     : app_config_(app_config), ui_manager_(ui_manager)
 {
+    ASSERT(!instance_);
+
+    instance_ = this;
+}
+
+InputManager::~InputManager()
+{
+    instance_ = nullptr;
+}
+
+std::unique_ptr<EventSubscription> InputManager::BindKey(const KeyBinding &binding, std::function<void()> &&handler)
+{
+    ASSERT(ThreadManager::IsInMainThread());
+
+    auto found = std::ranges::find_if(key_bindings_, [&binding](const auto &slot) { return slot.first == binding; });
+    if (found == key_bindings_.end())
+    {
+        key_bindings_.emplace_back(binding, Event<>{EventPolicy::Exclusive});
+        found = std::prev(key_bindings_.end());
+    }
+
+    return found->second.OnTrigger().Subscribe(std::move(handler));
 }
 
 void InputManager::Push(const InputEvent &event)
@@ -362,6 +394,20 @@ void InputManager::Process(const KeyEvent &event)
     }
 
     scene_key_event_.Trigger(event);
+
+    Key key = event.key;
+#if FRAMEWORK_MACOS
+    key = NormalizeBindingKey(key);
+#endif
+
+    for (auto &[binding, slot] : key_bindings_)
+    {
+        if (binding.key == key && binding.action == event.action &&
+            (event.modifiers & binding.modifiers) == binding.modifiers)
+        {
+            slot.Trigger();
+        }
+    }
 }
 
 void InputManager::Process(const CharEvent &event)

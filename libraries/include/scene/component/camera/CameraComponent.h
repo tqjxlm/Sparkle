@@ -2,8 +2,13 @@
 
 #include "scene/component/RenderableComponent.h"
 
+#include <vector>
+
 namespace sparkle
 {
+class EventSubscription;
+class Scene;
+
 class CameraComponent : public RenderableComponent
 {
 public:
@@ -22,6 +27,11 @@ public:
     explicit CameraComponent(const Attribute &attribute);
 
     ~CameraComponent() override;
+
+    // claims the scene input that drives camera posture and attributes. the scene owns the
+    // returned subscriptions; every handler resolves the scene's current main camera at
+    // dispatch time, so swapping the main camera needs no rebinding.
+    [[nodiscard]] static std::vector<std::unique_ptr<EventSubscription>> BindSceneInput(Scene &scene);
 
     void UpdateRenderData();
 

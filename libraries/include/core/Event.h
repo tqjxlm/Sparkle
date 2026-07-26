@@ -12,6 +12,15 @@ namespace sparkle
 {
 class EventListenerBase;
 
+enum class EventPolicy : uint8_t
+{
+    // any number of listeners may observe the event
+    Broadcast,
+    // at most one listener at a time. use it for slots that represent ownership rather than
+    // observation, so that two owners cannot silently fight over the same signal.
+    Exclusive,
+};
+
 class EventSubscription
 {
 public:
@@ -97,9 +106,16 @@ template <typename... Args> class Event;
 template <typename... Args> class EventListener : public EventListenerBase
 {
 public:
+    explicit EventListener(EventPolicy policy) : policy_(policy)
+    {
+    }
+
     // subscriber is responsible for managing the lifetime of the subscription. do not just get and destroy it.
     [[nodiscard]] std::unique_ptr<EventSubscription> Subscribe(std::function<void(Args...)> &&callback)
     {
+        ASSERT_F(policy_ == EventPolicy::Broadcast || callbacks_.empty(),
+                 "an exclusive event is already claimed. free it before binding again");
+
         auto id = AllocateId();
         callbacks_.emplace(id, std::move(callback));
 
@@ -123,13 +139,16 @@ private:
 
     std::unordered_map<uint32_t, std::function<void(Args...)>> callbacks_;
 
+    EventPolicy policy_;
+
     friend class Event<Args...>;
 };
 
 template <typename... Args> class Event
 {
 public:
-    Event() : listener_(std::make_shared<EventListener<Args...>>())
+    explicit Event(EventPolicy policy = EventPolicy::Broadcast)
+        : listener_(std::make_shared<EventListener<Args...>>(policy))
     {
     }
 

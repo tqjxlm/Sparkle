@@ -127,21 +127,10 @@ public:
 #endif
 
 private:
+    // claims only the inputs the app itself owns. every other module claims its own.
     void SetupInputHandlers();
 
-    // the scene key bindings and the actions they dispatch to
-    void HandleSceneKey(const KeyEvent &event);
-    void HoldAccumulation();
-    void ReleaseAccumulation();
-    void WidenAperture() const;
-    void NarrowAperture() const;
-    void PrintCameraPosture() const;
-    void AddDebugSphere();
-    void RemoveDebugSphere();
-
     void AdvanceFrame(float main_thread_time);
-
-    void DebugNextFrame();
 
     void MeasurePerformance(float delta_time);
 

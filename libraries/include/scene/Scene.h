@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Event.h"
 #include "core/Exception.h"
 
 #include <atomic>
@@ -7,6 +8,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace sparkle
 {
@@ -141,5 +143,9 @@ private:
     SkyLight *sky_light_ = nullptr;
 
     std::shared_ptr<SceneAsyncTask::State> async_state_;
+
+    // scene input is claimed once for the scene's lifetime. the handlers resolve the scene state
+    // they act on at dispatch time, so loading another scene never rebinds them.
+    std::vector<std::unique_ptr<EventSubscription>> input_subscriptions_;
 };
 } // namespace sparkle

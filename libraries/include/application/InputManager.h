@@ -4,6 +4,9 @@
 #include "core/Event.h"
 #include "core/Timer.h"
 
+#include <functional>
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace sparkle
@@ -14,6 +17,10 @@ class UiManager;
 // receives raw input events from platform code (or tests, for injection), feeds the ui
 // system, and maps them to scene events that any module can subscribe to.
 // scene events are suppressed while the ui captures the pointer or keyboard.
+//
+// there are two tiers of interest:
+//   * scene events (On*) are broadcast, for any module that wants to observe an input.
+//   * key bindings (BindKey) are exclusive, because a shortcut belongs to exactly one owner.
 class InputManager
 {
 public:
@@ -58,6 +65,18 @@ public:
 
     InputManager(const AppConfig &app_config, UiManager *ui_manager);
 
+    ~InputManager();
+
+    InputManager(const InputManager &) = delete;
+    InputManager &operator=(const InputManager &) = delete;
+
+    // the app owns the only instance. cook mode runs without one, so modules that bind their
+    // own inputs must tolerate a null instance.
+    static InputManager *Instance()
+    {
+        return instance_;
+    }
+
     // main thread only
     void Push(const InputEvent &event);
 
@@ -65,11 +84,6 @@ public:
     void DispatchPendingEvents();
 
     void Reset();
-
-    [[nodiscard]] Vector2 GetPointerPosition() const
-    {
-        return pointer_position_;
-    }
 
     auto &OnScenePointer()
     {
@@ -105,6 +119,12 @@ public:
         return scene_key_event_.OnTrigger();
     }
 
+    // claims a keyboard shortcut for one owner. the slot is freed when the returned subscription
+    // dies, and claiming a slot that is already taken asserts.
+    // main thread only.
+    [[nodiscard]] std::unique_ptr<EventSubscription> BindKey(const KeyBinding &binding,
+                                                             std::function<void()> &&handler);
+
 private:
     void Process(const PointerEvent &event);
     void Process(const ScrollEvent &event);
@@ -137,6 +157,10 @@ private:
     Event<uint8_t> scene_double_tap_event_;
     Event<uint8_t> scene_tap_event_;
     Event<const KeyEvent &> scene_key_event_;
+
+    // few enough that a linear scan beats hashing. every slot is exclusive, so a shortcut has
+    // at most one owner at a time.
+    std::vector<std::pair<KeyBinding, Event<>>> key_bindings_;
 
     UiCaptureGate gate_;
 
@@ -177,5 +201,7 @@ private:
     };
 
     UiTouchEmulation ui_touch_;
+
+    static InputManager *instance_;
 };
 } // namespace sparkle

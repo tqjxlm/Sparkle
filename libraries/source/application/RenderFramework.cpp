@@ -1,5 +1,6 @@
 #include "application/RenderFramework.h"
 
+#include "application/InputManager.h"
 #include "application/NativeView.h"
 #include "application/UiManager.h"
 #include "core/CoreStates.h"
@@ -76,9 +77,32 @@ RenderFramework::RenderFramework(NativeView *native_view, RHIContext *rhi, UiMan
 {
     task_queue_ = std::make_shared<ThreadTaskQueue>();
     TaskDispatcher::Instance().RegisterTaskQueue(task_queue_, ThreadName::Render);
+
+    if (auto *input_manager = InputManager::Instance())
+    {
+        pointer_subscription_ = input_manager->OnScenePointer().Subscribe([this](const PointerEvent &event) {
+            const bool debug_gesture = event.button == ClickButton::SecondaryRight ||
+                                       (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Control)) != 0;
+            if (event.action == PointerAction::Down && debug_gesture)
+            {
+                RequestDebugPoint(event.position);
+            }
+        });
+    }
 }
 
 RenderFramework::~RenderFramework() = default;
+
+void RenderFramework::RequestDebugPoint(const Vector2 &ui_position)
+{
+    const auto scale = native_view_->GetWindowScale();
+
+    TaskManager::RunInRenderThread([this, ui_position, scale]() {
+        // render_config_ belongs to the render thread, so the y flip reads the resolution here
+        SetDebugPoint(ui_position.x() * scale.x(),
+                      static_cast<float>(render_config_.image_height) - ui_position.y() * scale.y());
+    });
+}
 
 void RenderFramework::RenderThreadMain()
 {

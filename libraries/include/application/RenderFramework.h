@@ -2,6 +2,7 @@
 
 #include "core/Event.h"
 #include "core/Timer.h"
+#include "core/math/Types.h"
 #include "renderer/RenderConfig.h"
 
 #include <atomic>
@@ -62,9 +63,6 @@ public:
     void PushRenderTasks();
 
     // called by main thread, run on render thread
-    void SetDebugPoint(float x, float y);
-
-    // called by main thread, run on render thread
     void OnFrameBufferResize(int width, int height);
 
     // called by main thread, run on render thread
@@ -97,6 +95,13 @@ public:
     [[nodiscard]] bool IsSceneFullyLoaded() const;
 
 private:
+    // called by main thread. converts the ui-space position into render-target space and hands
+    // it to the render thread.
+    void RequestDebugPoint(const Vector2 &ui_position);
+
+    // render thread only
+    void SetDebugPoint(float x, float y);
+
     void ProcessScreenshotRequest();
     void RenderThreadMain();
 
@@ -142,6 +147,8 @@ private:
     float last_second_gpu_time_ = 0.f;
 
     Event<> renderer_created_event_;
+
+    std::unique_ptr<EventSubscription> pointer_subscription_;
 
     TimerCaller frame_rate_monitor_;
 

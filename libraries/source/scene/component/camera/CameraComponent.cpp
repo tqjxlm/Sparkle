@@ -1,5 +1,6 @@
 #include "scene/component/camera/CameraComponent.h"
 
+#include "application/InputManager.h"
 #include "core/Logger.h"
 #include "core/task/TaskManager.h"
 #include "renderer/proxy/CameraRenderProxy.h"
@@ -8,11 +9,85 @@
 
 namespace sparkle
 {
+// one f-stop per key press
+constexpr float ApertureStep = 1.f;
+
 CameraComponent::CameraComponent(const Attribute &attribute) : attribute_(attribute)
 {
 }
 
 CameraComponent::~CameraComponent() = default;
+
+std::vector<std::unique_ptr<EventSubscription>> CameraComponent::BindSceneInput(Scene &scene)
+{
+    auto *input_manager = InputManager::Instance();
+    if (!input_manager)
+    {
+        return {};
+    }
+
+    std::vector<std::unique_ptr<EventSubscription>> subscriptions;
+
+    subscriptions.push_back(input_manager->OnScenePointer().Subscribe([&scene](const PointerEvent &event) {
+        auto *camera = scene.GetMainCamera();
+        if (!camera || event.button != ClickButton::PrimaryLeft)
+        {
+            return;
+        }
+
+        switch (event.action)
+        {
+        case PointerAction::Down:
+            // control + primary is the debug-point gesture, so it must not start a camera drag
+            if ((event.modifiers & static_cast<uint32_t>(KeyboardModifier::Control)) == 0)
+            {
+                camera->OnPointerDown();
+            }
+            break;
+        case PointerAction::Up:
+        case PointerAction::Cancel:
+            camera->OnPointerUp();
+            break;
+        default:
+            break;
+        }
+    }));
+
+    subscriptions.push_back(input_manager->OnSceneDrag().Subscribe([&scene](Vector2 delta) {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->OnPointerMove(delta.y(), -delta.x());
+        }
+    }));
+
+    subscriptions.push_back(input_manager->OnSceneZoom().Subscribe([&scene](float amount) {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->OnScroll(amount);
+        }
+    }));
+
+    auto bind_aperture_step = [input_manager, &scene, &subscriptions](Key key, float step) {
+        subscriptions.push_back(input_manager->BindKey({.key = key}, [&scene, step]() {
+            if (auto *camera = scene.GetMainCamera())
+            {
+                camera->SetAperture(camera->GetAttribute().aperture + step);
+            }
+        }));
+    };
+
+    bind_aperture_step(Key::Up, ApertureStep);
+    bind_aperture_step(Key::Down, -ApertureStep);
+
+    subscriptions.push_back(input_manager->BindKey({.key = Key::P}, [&scene]() {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->PrintPosture();
+        }
+    }));
+
+    return subscriptions;
+}
 
 void CameraComponent::SetExposure(float exposure)
 {

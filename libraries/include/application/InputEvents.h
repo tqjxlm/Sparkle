@@ -73,5 +73,16 @@ struct CharEvent
     uint32_t codepoint = 0;
 };
 
+// a keyboard shortcut a module claims from InputManager. it fires when the key reaches the
+// given action while every required modifier is held; extra modifiers do not block it.
+struct KeyBinding
+{
+    Key key = Key::Unknown;
+    KeyAction action = KeyAction::Release;
+    uint32_t modifiers = 0;
+
+    bool operator==(const KeyBinding &other) const = default;
+};
+
 using InputEvent = std::variant<PointerEvent, ScrollEvent, KeyEvent, CharEvent>;
 } // namespace sparkle

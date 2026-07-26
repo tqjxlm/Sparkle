@@ -5,17 +5,33 @@ All user input flows through a single pipeline owned by `InputManager` ([librari
 ```text
 platform layer                InputManager                       subscribers
 ──────────────                ─────────────────────────────      ─────────────────
-glfw callbacks     ┐          Push(InputEvent)  → queue
-macos NSEvents     ├─ raw ──► DispatchPendingEvents()            AppFramework
-ios raw touches    │          ├─ feed imgui (io.Add*Event)       (camera routing,
-android motions    │          ├─ ui capture gate                  app shortcuts,
-tests (injection)  ┘          └─ map to scene events        ──►   panel toggle, …)
+glfw callbacks     ┐          Push(InputEvent)  → queue           camera, renderer,
+macos NSEvents     ├─ raw ──► DispatchPendingEvents()             scene, app, …
+ios raw touches    │          ├─ feed imgui (io.Add*Event)        (each module claims
+android motions    │          ├─ ui capture gate                   the inputs it
+tests (injection)  ┘          ├─ map to scene events        ──►     implements)
+                              └─ dispatch key bindings      ──►
 ```
 
 * **Raw events** ([InputEvents.h](../libraries/include/application/InputEvents.h)): `PointerEvent` (mouse and touch unified: device, action, pointer id, button, modifiers, position), `ScrollEvent`, `KeyEvent`, `CharEvent`.
-* **Scene events** (subscribe via `Event<Args...>` / RAII `EventSubscription`, [core/Event.h](../libraries/include/core/Event.h)): `OnScenePointer` (gated raw pointers, incl. synthesized `Cancel` when the ui takes over a sequence), `OnSceneDrag` (delta while the primary pointer is pressed), `OnSceneZoom` (wheel and pinch unified), `OnSceneTap(finger_count)`, `OnSceneDoubleTap`, `OnSceneKey`.
+* **Scene events** (subscribe via `Event<Args...>` / RAII `EventSubscription`, [core/Event.h](../libraries/include/core/Event.h)): `OnScenePointer` (gated raw pointers, incl. synthesized `Cancel` when the ui takes over a sequence), `OnSceneDrag` (delta while the primary pointer is pressed), `OnSceneZoom` (wheel and pinch unified), `OnSceneTap(finger_count)`, `OnSceneDoubleTap`, `OnSceneKey`. They are broadcast: any number of modules may observe the same event.
+* **Key bindings** (`InputManager::BindKey`): a `KeyBinding` is a key, a `KeyAction`, and the modifiers that must be held (extra modifiers do not block it). Unlike scene events, a binding is exclusive — the slot has exactly one owner and claiming a taken slot asserts, so two modules cannot silently fight over a shortcut. The slot is freed when the returned subscription dies.
 
 Events are queued by `Push` (main thread only) and delivered once per frame from the main loop, in push order — input handling is deterministic with respect to frames.
+
+## Ownership
+
+Every input is implemented and claimed by the module that owns the state it changes, not by a central dispatcher. `InputManager::Instance()` gives a module access without any wiring from the app layer; it is null in cook mode, so a module must tolerate its absence.
+
+| input | owner |
+| --- | --- |
+| pointer down/up, drag, zoom, `Up`/`Down` (aperture), `P` (print posture) | `CameraComponent::BindSceneInput`, resolving the scene's current main camera |
+| `Space` hold (manual accumulation) | `RenderConfig::BindInput` |
+| secondary or ctrl + primary click (debug point) | `RenderFramework` |
+| `NumpadAdd` / `Shift`+`Equal` / `Minus` (debug spheres) | `SceneManager::BindDebugInput` |
+| `Escape` (exit), double tap (config panel), 4-finger tap (frame capture) | `AppFramework` |
+
+Scene-owned bindings live for the lifetime of the `Scene` and resolve the state they act on at dispatch time, so loading another scene never rebinds them.
 
 ## Coordinate space
 
