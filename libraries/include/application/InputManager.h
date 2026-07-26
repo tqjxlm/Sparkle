@@ -4,6 +4,8 @@
 #include "core/Event.h"
 #include "core/Timer.h"
 
+#include <functional>
+#include <memory>
 #include <vector>
 
 namespace sparkle
@@ -14,9 +16,23 @@ class UiManager;
 // receives raw input events from platform code (or tests, for injection), feeds the ui
 // system, and maps them to scene events that any module can subscribe to.
 // scene events are suppressed while the ui captures the pointer or keyboard.
+//
+// scene events are gestures, not pointers: recognition (which button, which modifier, how many
+// fingers, how long) happens here once, so no subscriber re-derives it and mouse and touch reach
+// a subscriber through the same event.
+//
+// there are two tiers of interest:
+//   * scene events (On*) are broadcast, for any module that wants to observe an input.
+//   * key bindings (BindKey) are arbitrated: one owner per key per InputLayer, and the layers
+//     answer in order until one consumes the key.
 class InputManager
 {
 public:
+    // returns true when the binding consumed the key, which stops lower layers from seeing it.
+    // an owner that is currently irrelevant (a panel that is closed) returns false and lets the
+    // key fall through.
+    using KeyHandler = std::function<bool()>;
+
     // a pointer sequence that starts on the ui stays on the ui until release, even if
     // the pointer leaves it in between. touch consults ShouldConsume only at sequence
     // boundaries (first finger down, last finger up) and reads IsSequenceActive in
@@ -58,6 +74,18 @@ public:
 
     InputManager(const AppConfig &app_config, UiManager *ui_manager);
 
+    ~InputManager();
+
+    InputManager(const InputManager &) = delete;
+    InputManager &operator=(const InputManager &) = delete;
+
+    // the app owns the only instance. cook mode runs without one, so modules that bind their
+    // own inputs must tolerate a null instance.
+    static InputManager *Instance()
+    {
+        return instance_;
+    }
+
     // main thread only
     void Push(const InputEvent &event);
 
@@ -66,26 +94,36 @@ public:
 
     void Reset();
 
-    [[nodiscard]] Vector2 GetPointerPosition() const
+    // a drag is the primary pointer pressed and moving: mouse button or one finger. it always
+    // ends, on release or on the ui taking the sequence over, so an owner that started acting on
+    // Begin can rely on End to stop.
+    auto &OnSceneDragBegin()
     {
-        return pointer_position_;
+        return scene_drag_begin_event_.OnTrigger();
     }
 
-    auto &OnScenePointer()
-    {
-        return scene_pointer_event_.OnTrigger();
-    }
-
-    // drag delta in ui space while the primary pointer is pressed
+    // drag delta in ui space
     auto &OnSceneDrag()
     {
         return scene_drag_event_.OnTrigger();
     }
 
-    // positive amount zooms out, matching OrbitCameraComponent::OnScroll
+    auto &OnSceneDragEnd()
+    {
+        return scene_drag_end_event_.OnTrigger();
+    }
+
+    // positive amount zooms out, matching OrbitCameraComponent::OnZoom
     auto &OnSceneZoom()
     {
         return scene_zoom_event_.OnTrigger();
+    }
+
+    // payload is the click position in ui space. the secondary button and control + primary both
+    // produce it; touch has no secondary gesture yet.
+    auto &OnSceneSecondaryClick()
+    {
+        return scene_secondary_click_event_.OnTrigger();
     }
 
     // payload is the finger count of the tap (1 for mouse double click)
@@ -100,12 +138,41 @@ public:
         return scene_tap_event_.OnTrigger();
     }
 
-    auto &OnSceneKey()
-    {
-        return scene_key_event_.OnTrigger();
-    }
+    // claims a keyboard shortcut in one layer. the slot is freed when the returned subscription
+    // dies, and claiming a slot another owner already holds in the same layer asserts — two
+    // owners in one layer have no defined order, unlike two owners in different layers.
+    // main thread only.
+    [[nodiscard]] std::unique_ptr<EventSubscription> BindKey(InputLayer layer, const KeyBinding &binding,
+                                                             KeyHandler &&handler);
 
 private:
+    // the key slots of every layer. unlike Event, a slot holds a single handler that reports
+    // consumption, which is what lets the layers arbitrate. it reuses EventSubscription so a
+    // binding's lifetime works exactly like an event subscription's.
+    class KeyBindings : public EventListenerBase
+    {
+    public:
+        [[nodiscard]] uint32_t Add(InputLayer layer, const KeyBinding &binding, KeyHandler &&handler);
+
+        // runs the layer's binding for this key, if any. returns true when it consumed the key.
+        bool Dispatch(InputLayer layer, const KeyEvent &event);
+
+    protected:
+        bool RemoveCallback(uint32_t id) override;
+
+    private:
+        struct Slot
+        {
+            InputLayer layer;
+            KeyBinding binding;
+            KeyHandler handler;
+            uint32_t id;
+        };
+
+        // few enough that a linear scan beats hashing
+        std::vector<Slot> slots_;
+    };
+
     void Process(const PointerEvent &event);
     void Process(const ScrollEvent &event);
     void Process(const KeyEvent &event);
@@ -124,19 +191,22 @@ private:
 
     void CancelScenePointer();
     void HandleClick();
-    void BeginTouchDrag(uint8_t id, const Vector2 &position);
+    void BeginTouchDrag();
 
     const AppConfig &app_config_;
     UiManager *ui_manager_ = nullptr;
 
     std::vector<InputEvent> pending_events_;
 
-    Event<const PointerEvent &> scene_pointer_event_;
+    Event<> scene_drag_begin_event_;
     Event<Vector2> scene_drag_event_;
+    Event<> scene_drag_end_event_;
+    Event<Vector2> scene_secondary_click_event_;
     Event<float> scene_zoom_event_;
     Event<uint8_t> scene_double_tap_event_;
     Event<uint8_t> scene_tap_event_;
-    Event<const KeyEvent &> scene_key_event_;
+
+    std::shared_ptr<KeyBindings> key_bindings_ = std::make_shared<KeyBindings>();
 
     UiCaptureGate gate_;
 
@@ -177,5 +247,7 @@ private:
     };
 
     UiTouchEmulation ui_touch_;
+
+    static InputManager *instance_;
 };
 } // namespace sparkle

@@ -22,7 +22,16 @@ constexpr float TouchScrollStartDistance = 8.f;
 constexpr float PixelsPerWheelStep = 80.f;
 constexpr float PinchZoomScale = 0.1f;
 
+InputManager *InputManager::instance_ = nullptr;
+
 #if FRAMEWORK_MACOS
+// support keyboards with no escape key: the backspace key stands in for it. only key bindings
+// see the substitution, so text editing in the ui still receives a real backspace.
+static Key NormalizeBindingKey(Key key)
+{
+    return key == Key::Backspace ? Key::Escape : key;
+}
+
 // covers the keys imgui needs for widget interaction and text editing; printable input
 // arrives as CharEvent. only the macos framework needs it: every other framework feeds imgui
 // through its own backend (see FeedUiSystem below)
@@ -66,6 +75,60 @@ static ImGuiKey ToImGuiKey(Key key)
 InputManager::InputManager(const AppConfig &app_config, UiManager *ui_manager)
     : app_config_(app_config), ui_manager_(ui_manager)
 {
+    ASSERT(!instance_);
+
+    instance_ = this;
+}
+
+InputManager::~InputManager()
+{
+    instance_ = nullptr;
+}
+
+uint32_t InputManager::KeyBindings::Add(InputLayer layer, const KeyBinding &binding, KeyHandler &&handler)
+{
+    const bool claimed = std::ranges::any_of(
+        slots_, [layer, &binding](const Slot &slot) { return slot.layer == layer && slot.binding == binding; });
+    ASSERT_F(!claimed, "the key is already claimed in this layer. free it before binding again");
+
+    const auto id = AllocateId();
+
+    slots_.push_back({.layer = layer, .binding = binding, .handler = std::move(handler), .id = id});
+
+    return id;
+}
+
+bool InputManager::KeyBindings::Dispatch(InputLayer layer, const KeyEvent &event)
+{
+    auto found = std::ranges::find_if(slots_, [layer, &event](const Slot &slot) {
+        return slot.layer == layer && slot.binding.key == event.key && slot.binding.action == event.action &&
+               (event.modifiers & slot.binding.modifiers) == slot.binding.modifiers;
+    });
+    if (found == slots_.end())
+    {
+        return false;
+    }
+
+    // a handler may bind or free a slot, so it runs on a copy: mutating slots_ mid-dispatch
+    // must not invalidate the handler being called
+    KeyHandler handler = found->handler;
+
+    return handler();
+}
+
+bool InputManager::KeyBindings::RemoveCallback(uint32_t id)
+{
+    return std::erase_if(slots_, [id](const Slot &slot) { return slot.id == id; }) > 0;
+}
+
+std::unique_ptr<EventSubscription> InputManager::BindKey(InputLayer layer, const KeyBinding &binding,
+                                                         KeyHandler &&handler)
+{
+    ASSERT(ThreadManager::IsInMainThread());
+
+    const auto id = key_bindings_->Add(layer, binding, std::move(handler));
+
+    return std::make_unique<EventSubscription>(key_bindings_, id);
 }
 
 void InputManager::Push(const InputEvent &event)
@@ -124,7 +187,7 @@ void InputManager::CancelScenePointer()
 
     primary_pressing_ = false;
 
-    scene_pointer_event_.Trigger(PointerEvent{.action = PointerAction::Cancel, .position = pointer_position_});
+    scene_drag_end_event_.Trigger();
 }
 
 void InputManager::HandleClick()
@@ -171,26 +234,28 @@ void InputManager::Process(const PointerEvent &event)
         {
             primary_pressing_ = true;
             click_timer_.Reset();
+            scene_drag_begin_event_.Trigger();
         }
-        scene_pointer_event_.Trigger(event);
+        else
+        {
+            scene_secondary_click_event_.Trigger(event.position);
+        }
         break;
     }
     case PointerAction::Up: {
-        const bool was_pressing = primary_pressing_;
-        if (event.button == ClickButton::PrimaryLeft)
+        if (event.button == ClickButton::PrimaryLeft && primary_pressing_)
         {
             primary_pressing_ = false;
-        }
-        scene_pointer_event_.Trigger(event);
-        if (event.button == ClickButton::PrimaryLeft && was_pressing &&
-            click_timer_.ElapsedMilliSecond() < ClickThresholdMS)
-        {
-            HandleClick();
+            scene_drag_end_event_.Trigger();
+
+            if (click_timer_.ElapsedMilliSecond() < ClickThresholdMS)
+            {
+                HandleClick();
+            }
         }
         break;
     }
     case PointerAction::Move: {
-        scene_pointer_event_.Trigger(event);
         if (primary_pressing_)
         {
             scene_drag_event_.Trigger(event.position - last_position);
@@ -206,13 +271,12 @@ void InputManager::Process(const PointerEvent &event)
     }
 }
 
-void InputManager::BeginTouchDrag(uint8_t id, const Vector2 &position)
+void InputManager::BeginTouchDrag()
 {
     primary_pressing_ = true;
     click_timer_.Reset();
 
-    scene_pointer_event_.Trigger(
-        PointerEvent{.device = PointerDevice::Touch, .action = PointerAction::Down, .id = id, .position = position});
+    scene_drag_begin_event_.Trigger();
 }
 
 void InputManager::ProcessTouch(const PointerEvent &event)
@@ -238,7 +302,7 @@ void InputManager::ProcessTouch(const PointerEvent &event)
             touch_.moved = false;
             if (!consumed)
             {
-                BeginTouchDrag(event.id, event.position);
+                BeginTouchDrag();
             }
         }
         else
@@ -278,7 +342,6 @@ void InputManager::ProcessTouch(const PointerEvent &event)
         }
         else if (primary_pressing_ && pointers.size() == 1)
         {
-            scene_pointer_event_.Trigger(event);
             scene_drag_event_.Trigger(event.position - previous);
         }
         break;
@@ -298,7 +361,7 @@ void InputManager::ProcessTouch(const PointerEvent &event)
             if (primary_pressing_)
             {
                 primary_pressing_ = false;
-                scene_pointer_event_.Trigger(event);
+                scene_drag_end_event_.Trigger();
             }
             if (tapped)
             {
@@ -317,7 +380,7 @@ void InputManager::ProcessTouch(const PointerEvent &event)
             touch_.pinching = false;
             if (!gate_.IsSequenceActive())
             {
-                BeginTouchDrag(pointers[0].id, pointers[0].position);
+                BeginTouchDrag();
             }
         }
         else if (touch_.pinching)
@@ -361,7 +424,18 @@ void InputManager::Process(const KeyEvent &event)
         return;
     }
 
-    scene_key_event_.Trigger(event);
+    KeyEvent binding_event = event;
+#if FRAMEWORK_MACOS
+    binding_event.key = NormalizeBindingKey(binding_event.key);
+#endif
+
+    for (uint8_t layer = 0; layer < static_cast<uint8_t>(InputLayer::Count); layer++)
+    {
+        if (key_bindings_->Dispatch(static_cast<InputLayer>(layer), binding_event))
+        {
+            break;
+        }
+    }
 }
 
 void InputManager::Process(const CharEvent &event)

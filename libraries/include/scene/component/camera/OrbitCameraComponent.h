@@ -54,17 +54,20 @@ public:
         SetupFromTransform();
     }
 
-    void OnPointerDown() override
+protected:
+    void PrintPosture() override;
+
+    void OnDragBegin() override
     {
         is_dragging_ = true;
     }
 
-    void OnPointerUp() override
+    void OnDragEnd() override
     {
         is_dragging_ = false;
     }
 
-    void OnPointerMove(float dx, float dy) override
+    void OnDrag(float dx, float dy) override
     {
         if (is_dragging_)
         {
@@ -75,7 +78,7 @@ public:
         }
     }
 
-    void OnScroll(float dx) override
+    void OnZoom(float dx) override
     {
         auto new_radius = std::clamp((1.f + dx * sensitivity_) * radius_, .001f, 100.f);
         if (std::abs(radius_ - new_radius) < Eps)
@@ -87,8 +90,6 @@ public:
 
         UpdateTransform();
     }
-
-    void PrintPosture() override;
 
 private:
     void UpdateTransform();

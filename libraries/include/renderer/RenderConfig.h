@@ -3,8 +3,12 @@
 #include "application/ConfigCollection.h"
 #include "renderer/RenderResolution.h"
 
+#include <memory>
+#include <vector>
+
 namespace sparkle
 {
+class EventSubscription;
 class RHIContext;
 class NativeView;
 
@@ -58,6 +62,10 @@ struct RenderConfig : public ConfigCollection
     }
 
     void Init();
+
+    // claims the manual-accumulation hold key. the caller owns the returned subscriptions: this
+    // struct is copied into every frame snapshot, so it cannot hold them itself.
+    [[nodiscard]] std::vector<std::unique_ptr<EventSubscription>> BindInput();
 
     [[nodiscard]] RenderResolution GetResolution() const
     {

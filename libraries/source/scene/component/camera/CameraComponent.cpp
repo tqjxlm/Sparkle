@@ -1,5 +1,6 @@
 #include "scene/component/camera/CameraComponent.h"
 
+#include "application/InputManager.h"
 #include "core/Logger.h"
 #include "core/task/TaskManager.h"
 #include "renderer/proxy/CameraRenderProxy.h"
@@ -8,11 +9,83 @@
 
 namespace sparkle
 {
+// one f-stop per key press
+constexpr float ApertureStep = 1.f;
+
 CameraComponent::CameraComponent(const Attribute &attribute) : attribute_(attribute)
 {
 }
 
 CameraComponent::~CameraComponent() = default;
+
+std::vector<std::unique_ptr<EventSubscription>> CameraComponent::BindSceneInput(Scene &scene)
+{
+    auto *input_manager = InputManager::Instance();
+    if (!input_manager)
+    {
+        return {};
+    }
+
+    std::vector<std::unique_ptr<EventSubscription>> subscriptions;
+
+    subscriptions.push_back(input_manager->OnSceneDragBegin().Subscribe([&scene]() {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->OnDragBegin();
+        }
+    }));
+
+    subscriptions.push_back(input_manager->OnSceneDragEnd().Subscribe([&scene]() {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->OnDragEnd();
+        }
+    }));
+
+    // a drag along x orbits around the vertical axis, so the deltas cross over
+    subscriptions.push_back(input_manager->OnSceneDrag().Subscribe([&scene](Vector2 delta) {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->OnDrag(delta.y(), -delta.x());
+        }
+    }));
+
+    subscriptions.push_back(input_manager->OnSceneZoom().Subscribe([&scene](float amount) {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->OnZoom(amount);
+        }
+    }));
+
+    auto bind_aperture_step = [input_manager, &scene, &subscriptions](Key key, float step) {
+        subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = key}, [&scene, step]() {
+            auto *camera = scene.GetMainCamera();
+            if (!camera)
+            {
+                return false;
+            }
+
+            camera->SetAperture(camera->GetAttribute().aperture + step);
+            return true;
+        }));
+    };
+
+    bind_aperture_step(Key::Up, ApertureStep);
+    bind_aperture_step(Key::Down, -ApertureStep);
+
+    subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = Key::P}, [&scene]() {
+        auto *camera = scene.GetMainCamera();
+        if (!camera)
+        {
+            return false;
+        }
+
+        camera->PrintPosture();
+        return true;
+    }));
+
+    return subscriptions;
+}
 
 void CameraComponent::SetExposure(float exposure)
 {

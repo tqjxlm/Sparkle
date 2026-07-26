@@ -5,12 +5,14 @@
 #include "core/task/TaskManager.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
+#include "scene/SceneManager.h"
 #include "scene/SceneNode.h"
 #include "scene/component/camera/CameraComponent.h"
 #include "scene/component/light/SkyLight.h"
 #include "scene/component/primitive/PrimitiveComponent.h"
 #include "scene/material/Material.h"
 
+#include <iterator>
 #include <queue>
 #include <ranges>
 
@@ -57,6 +59,10 @@ Scene::Scene()
     : render_proxy_(CreateRenderProxy()), root_node_(std::make_unique<SceneNode>(this, "SceneRoot")),
       async_state_(std::make_shared<SceneAsyncTask::State>())
 {
+    input_subscriptions_ = CameraComponent::BindSceneInput(*this);
+
+    auto debug_subscriptions = SceneManager::BindDebugInput(*this);
+    std::ranges::move(debug_subscriptions, std::back_inserter(input_subscriptions_));
 }
 
 Scene::~Scene()

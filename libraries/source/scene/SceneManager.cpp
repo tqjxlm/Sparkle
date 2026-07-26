@@ -1,5 +1,6 @@
 #include "scene/SceneManager.h"
 
+#include "application/InputManager.h"
 #include "core/ConfigManager.h"
 #include "core/FileManager.h"
 #include "core/Logger.h"
@@ -183,10 +184,47 @@ std::shared_ptr<TaskFuture<bool>> SceneManager::LoadScene(Scene *scene, const Pa
 
 void SceneManager::RemoveLastDebugSphere(Scene *scene)
 {
+    if (debug_spheres.empty())
+    {
+        return;
+    }
+
     auto *root_node = scene->GetRootNode();
     auto *last_sphere = debug_spheres.back();
     root_node->RemoveChild(last_sphere);
     debug_spheres.pop_back();
+}
+
+std::vector<std::unique_ptr<EventSubscription>> SceneManager::BindDebugInput(Scene &scene)
+{
+    auto *input_manager = InputManager::Instance();
+    if (!input_manager)
+    {
+        return {};
+    }
+
+    auto add_sphere = [&scene]() {
+        Log(Debug, "Add debug sphere");
+        GenerateRandomSpheres(scene, 1);
+        return true;
+    };
+
+    std::vector<std::unique_ptr<EventSubscription>> subscriptions;
+
+    subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = Key::NumpadAdd}, add_sphere));
+
+    // shift + equal is the '+' a keyboard without a numpad has
+    subscriptions.push_back(input_manager->BindKey(
+        InputLayer::Scene, {.key = Key::Equal, .modifiers = static_cast<uint32_t>(KeyboardModifier::Shift)},
+        add_sphere));
+
+    subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = Key::Minus}, [&scene]() {
+        Log(Debug, "Remove debug sphere");
+        RemoveLastDebugSphere(&scene);
+        return true;
+    }));
+
+    return subscriptions;
 }
 
 std::shared_ptr<TaskFuture<void>> SceneManager::AddDefaultSky(Scene *scene)

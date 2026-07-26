@@ -2,8 +2,13 @@
 
 #include "scene/component/RenderableComponent.h"
 
+#include <vector>
+
 namespace sparkle
 {
+class EventSubscription;
+class Scene;
+
 class CameraComponent : public RenderableComponent
 {
 public:
@@ -23,9 +28,12 @@ public:
 
     ~CameraComponent() override;
 
-    void UpdateRenderData();
+    // claims the scene input that drives camera posture and attributes. the scene owns the
+    // returned subscriptions; every handler resolves the scene's current main camera at
+    // dispatch time, so swapping the main camera needs no rebinding.
+    [[nodiscard]] static std::vector<std::unique_ptr<EventSubscription>> BindSceneInput(Scene &scene);
 
-    virtual void PrintPosture() = 0;
+    void UpdateRenderData();
 
 #pragma region Attributes
 
@@ -36,29 +44,7 @@ public:
 
     void SetFocusDistance(float focus_distance);
 
-    void SetAperture(float aperture);
-
     void SetExposure(float exposure);
-
-#pragma endregion
-
-#pragma region Input
-
-    virtual void OnPointerDown()
-    {
-    }
-
-    virtual void OnPointerUp()
-    {
-    }
-
-    virtual void OnPointerMove(float, float)
-    {
-    }
-
-    virtual void OnScroll(float)
-    {
-    }
 
 #pragma endregion
 
@@ -69,6 +55,32 @@ public:
 #pragma endregion
 
 protected:
+#pragma region Input
+
+    // driven by the scene gestures BindSceneInput claims, never called from outside the camera
+
+    virtual void PrintPosture() = 0;
+
+    virtual void OnDragBegin()
+    {
+    }
+
+    virtual void OnDragEnd()
+    {
+    }
+
+    virtual void OnDrag(float, float)
+    {
+    }
+
+    virtual void OnZoom(float)
+    {
+    }
+
+    void SetAperture(float aperture);
+
+#pragma endregion
+
     std::unique_ptr<RenderProxy> CreateRenderProxy() override;
 
 private:
