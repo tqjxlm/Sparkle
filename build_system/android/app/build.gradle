@@ -139,18 +139,11 @@ tasks.register('copyAssets', Copy) {
     outputs.dir "${project.projectDir}/src/main/assets"
 }
 
-// onVariants names the variants, but the AGP tasks wired below are only registered once the
-// project is evaluated, so the lookups wait for afterEvaluate
-def variantNames = []
-androidComponents {
-    onVariants { variant ->
-        variantNames.add(variant.name.capitalize())
-    }
-}
-
-// make sure copyAssets runs before the mergeAssets task and after the externalNativeBuild task
+// with no product flavors declared, a variant is named after its build type. the wiring waits
+// for afterEvaluate because AGP registers the tasks it names while the project is evaluated.
 afterEvaluate {
-    variantNames.each { variantName ->
+    android.buildTypes.each { buildType ->
+        def variantName = buildType.name.capitalize()
         def nativeBuild = tasks.named("externalNativeBuild${variantName}")
         def generateManifests = tasks.named("generateAssetManifests")
         def copyAssets = tasks.named("copyAssets")
