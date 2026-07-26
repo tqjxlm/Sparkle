@@ -7,16 +7,16 @@ Sparkle can load USD scenes (`.usda` / `.usdc` / `.usdz`) and export the active 
 
 ## Scene <-> USD mapping
 
-| Scene object                        | USD prim                                                          |
-| ----------------------------------- | ----------------------------------------------------------------- |
-| `SceneNode`                         | `Xform` with a single `xformOp:transform` matrix                  |
-| `MeshPrimitive` / `SpherePrimitive` | child `GeomMesh` (points, vertex normals, `primvars:st`, `primvars:tangents`) |
-| `Material` (PBR family)             | `Material` + `UsdPreviewSurface` under the root `/_materials` scope |
-| `DieletricMaterial`                 | `UsdPreviewSurface` with `opacity = 0` and `ior = eta`            |
+| Scene object                        | USD prim                                                                                      |
+| ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `SceneNode`                         | `Xform` with a single `xformOp:transform` matrix                                              |
+| `MeshPrimitive` / `SpherePrimitive` | child `GeomMesh` (points, vertex normals, `primvars:st`, `primvars:tangents`)                 |
+| `Material` (PBR family)             | `Material` + `UsdPreviewSurface` under the root `/_materials` scope                           |
+| `DieletricMaterial`                 | `UsdPreviewSurface` with `opacity = 0` and `ior = eta`                                        |
 | material textures                   | `UsdUVTexture` + `UsdPrimvarReader_float2`, image files under `textures/` next to the `.usda` |
-| `DirectionalLight`                  | child `DistantLight` (color carries intensity, direction from the parent `Xform`) |
-| `SkyLight`                          | child `DomeLight` (`inputs:texture:file` for sky maps, color-only otherwise) |
-| `CameraComponent`                   | child `GeomCamera` (`focalLength`/`verticalAperture` in mm, `fStop`, `focusDistance`) |
+| `DirectionalLight`                  | child `DistantLight` (color carries intensity, direction from the parent `Xform`)             |
+| `SkyLight`                          | child `DomeLight` (`inputs:texture:file` for sky maps, color-only otherwise)                  |
+| `CameraComponent`                   | child `GeomCamera` (`focalLength`/`verticalAperture` in mm, `fStop`, `focusDistance`)         |
 
 Notes:
 

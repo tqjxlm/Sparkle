@@ -47,9 +47,9 @@ It is an experimental demo which aims to be simple and modern, rather than being
 | framework | supported platforms   | supported generators           |
 | --------- | --------------------- | ------------------------------ |
 | glfw      | windows, macos, linux | ninja, makefile, Visual Studio |
-| android   | android             | Android Studio                 |
-| macos     | macos               | Xcode                          |
-| ios       | ios                 | Xcode                          |
+| android   | android               | Android Studio                 |
+| macos     | macos                 | Xcode                          |
+| ios       | ios                   | Xcode                          |
 
 ### Graphics API Support
 
