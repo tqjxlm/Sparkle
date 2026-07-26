@@ -344,15 +344,9 @@ float Bc6hTexelToFloat(int16_t bits)
     return static_cast<float>(std::bit_cast<Half>(bits));
 }
 
-// absolute rgb error of one encoded block against its source texels, and the signal it
-// carries, both through the spec-exact decode
-std::pair<double, double> Bc6hBlockError(const cvtt::PixelBlockF16 &source, const uint8_t *encoded)
+// absolute rgb error of one decoded block against its source texels, and the signal it carries
+std::pair<double, double> Bc6hBlockError(const cvtt::PixelBlockF16 &source, const cvtt::PixelBlockF16 &decoded)
 {
-    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> decoded{};
-    std::array<uint8_t, cvtt::NumParallelBlocks * 16> batch{};
-    std::memcpy(batch.data(), encoded, 16);
-    cvtt::Kernels::DecodeBC6HU(decoded.data(), batch.data());
-
     double error = 0.0;
     double signal = 0.0;
     for (unsigned texel = 0; texel < 16; texel++)
@@ -360,7 +354,7 @@ std::pair<double, double> Bc6hBlockError(const cvtt::PixelBlockF16 &source, cons
         for (unsigned channel = 0; channel < 3; channel++)
         {
             const float reference = Bc6hTexelToFloat(source.m_pixels[texel][channel]);
-            const float restored = Bc6hTexelToFloat(decoded[0].m_pixels[texel][channel]);
+            const float restored = Bc6hTexelToFloat(decoded.m_pixels[texel][channel]);
             error += std::abs(restored - reference);
             signal += std::abs(reference);
         }
@@ -416,29 +410,67 @@ void EncodeBc6hMip(const uint8_t *fp16, unsigned width, unsigned height, uint8_t
     const unsigned blocks_x = padded_width / block_dim;
     const unsigned blocks_y = padded_height / block_dim;
     const auto options = Bc6hOptions();
+    const size_t total_blocks = static_cast<size_t>(blocks_x) * blocks_y;
 
-    for (unsigned by = 0; by < blocks_y; by++)
+    // every CVTT kernel call carries NumParallelBlocks blocks whatever it is handed, and on the
+    // scalar path that is that many independent passes over the block. so both halves of this
+    // work in whole batches: the survey below decodes NumParallelBlocks blocks per call, and the
+    // refine collects its candidates and searches them together rather than one block per call
+    // against seven copies of itself. the candidates are a fraction of a percent of the mip but
+    // the exhaustive search is thousands of times the cost of the decode that finds them, so
+    // grouping them is what this pass costs
+    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> sources{};
+    std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> decoded{};
+    std::array<uint8_t, cvtt::NumParallelBlocks * 16> batch{};
+
+    std::vector<cvtt::PixelBlockF16> candidate_sources;
+    std::vector<size_t> candidate_indices;
+    std::vector<double> candidate_errors;
+
+    for (size_t batch_start = 0; batch_start < total_blocks; batch_start += cvtt::NumParallelBlocks)
     {
-        for (unsigned bx = 0; bx < blocks_x; bx++)
+        const size_t batch_size = std::min<size_t>(cvtt::NumParallelBlocks, total_blocks - batch_start);
+        for (size_t lane = 0; lane < batch_size; lane++)
         {
-            cvtt::PixelBlockF16 source{};
-            GatherBc6hBlock(pixels, padded_width, padded_height, bx, by, source);
+            const size_t index = batch_start + lane;
+            GatherBc6hBlock(pixels, padded_width, padded_height, static_cast<unsigned>(index % blocks_x),
+                            static_cast<unsigned>(index / blocks_x), sources[lane]);
+            std::memcpy(batch.data() + lane * 16, out + index * 16, 16);
+        }
+        cvtt::Kernels::DecodeBC6HU(decoded.data(), batch.data());
 
-            uint8_t *block = out + ((static_cast<size_t>(by) * blocks_x) + bx) * 16;
-            const auto [error, signal] = Bc6hBlockError(source, block);
-            if (signal <= 0.0 || error <= signal * RefineErrorThreshold)
+        for (size_t lane = 0; lane < batch_size; lane++)
+        {
+            const auto [error, signal] = Bc6hBlockError(sources[lane], decoded[lane]);
+            if (signal > 0.0 && error > signal * RefineErrorThreshold)
             {
-                continue;
+                candidate_sources.push_back(sources[lane]);
+                candidate_indices.push_back(batch_start + lane);
+                candidate_errors.push_back(error);
             }
+        }
+    }
 
-            std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> blocks{};
-            blocks.fill(source);
-            std::array<uint8_t, cvtt::NumParallelBlocks * 16> encoded;
-            cvtt::Kernels::EncodeBC6HU(encoded.data(), blocks.data(), options);
+    // the trailing lanes of the last batch repeat its final candidate: the kernel encodes all
+    // NumParallelBlocks either way, and only the lanes a candidate claims are read back
+    for (size_t start = 0; start < candidate_sources.size(); start += cvtt::NumParallelBlocks)
+    {
+        const size_t count = std::min<size_t>(cvtt::NumParallelBlocks, candidate_sources.size() - start);
+        std::array<cvtt::PixelBlockF16, cvtt::NumParallelBlocks> blocks{};
+        for (size_t lane = 0; lane < cvtt::NumParallelBlocks; lane++)
+        {
+            blocks[lane] = candidate_sources[start + std::min(lane, count - 1)];
+        }
 
-            if (Bc6hBlockError(source, encoded.data()).first < error)
+        std::array<uint8_t, cvtt::NumParallelBlocks * 16> encoded;
+        cvtt::Kernels::EncodeBC6HU(encoded.data(), blocks.data(), options);
+        cvtt::Kernels::DecodeBC6HU(decoded.data(), encoded.data());
+
+        for (size_t lane = 0; lane < count; lane++)
+        {
+            if (Bc6hBlockError(candidate_sources[start + lane], decoded[lane]).first < candidate_errors[start + lane])
             {
-                std::memcpy(block, encoded.data(), 16);
+                std::memcpy(out + candidate_indices[start + lane] * 16, encoded.data() + lane * 16, 16);
             }
         }
     }
