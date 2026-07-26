@@ -4,13 +4,13 @@
 
 ### Compiler
 
-| framework | windows                 | macos              | linux            | ios                | android               |
-| --------- | ----------------------- | ------------------ | ---------------- | ------------------ | --------------------- |
-| glfw      | clang-cl (vs-installer) | apple-llvm (Xcode) | clang 19+ (apt)  | -                  | -                     |
-| glfw (VS solution via `--generate_only`) | msvc (Visual Studio) | -     | -                | -                  | -                     |
-| macos     | -                       | apple-llvm (Xcode) | -                | -                  | -                     |
-| ios       | -                       | -                  | -                | apple-llvm (Xcode) | -                     |
-| android   | -                       | -                  | -                | -                  | llvm (Android Studio) |
+| framework                                | windows                 | macos              | linux            | ios                | android               |
+| ---------------------------------------- | ----------------------- | ------------------ | ---------------- | ------------------ | --------------------- |
+| glfw                                     | clang-cl (vs-installer) | apple-llvm (Xcode) | clang 19+ (apt)  | -                  | -                     |
+| glfw (VS solution via `--generate_only`) | msvc (Visual Studio)    | -                  | -                | -                  | -                     |
+| macos                                    | -                       | apple-llvm (Xcode) | -                | -                  | -                     |
+| ios                                      | -                       | -                  | -                | apple-llvm (Xcode) | -                     |
+| android                                  | -                       | -                  | -                | -                  | llvm (Android Studio) |
 
 ### External Dependencies
 

@@ -2,20 +2,20 @@
 
 ## Key Entry Points
 
-| Component         | Location                                                                                         | Description                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| `AppFramework`    | [libraries/source/application/](../libraries/source/application/)                                   | Main application base class                 |
-| `RenderFramework` | [libraries/source/application/](../libraries/source/application/)                                   | Rendering pipeline lifecycle                |
-| `NativeView`      | [frameworks/source/](../frameworks/source/)                                                         | Platform windowing/input interface          |
-| `RHI`             | [libraries/include/rhi/](../libraries/include/rhi/)                                                 | Graphics API abstraction singleton          |
-| `TaskManager`     | [libraries/include/core/task/](../libraries/include/core/task/)                                     | Async task scheduling                       |
-| `Scene`           | [libraries/source/scene/](../libraries/source/scene/)                                               | Scene graph root; owns all components       |
-| `Renderer`        | [libraries/include/renderer/](../libraries/include/renderer/)                                       | Abstract base for all pipeline renderers    |
-| `RHIContext`      | [libraries/include/rhi/RHI.h](../libraries/include/rhi/RHI.h)                                       | Per-device render context (Vulkan or Metal) |
-| `ConfigManager`   | [libraries/include/core/ConfigManager.h](../libraries/include/core/ConfigManager.h)                 | Config system registry (cvar registration)  |
-| `MaterialManager` | [libraries/include/scene/material/](../libraries/include/scene/material/)                           | Material lifecycle and lookup               |
-| `SessionManager`  | [libraries/include/application/SessionManager.h](../libraries/include/application/SessionManager.h) | Save/load session state                     |
-| `InputManager`    | [libraries/include/application/InputManager.h](../libraries/include/application/InputManager.h)     | Input event pipeline, see [Input.md](Input.md)  |
+| Component         | Location                                                                                            | Description                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `AppFramework`    | [libraries/source/application/](../libraries/source/application/)                                   | Main application base class                    |
+| `RenderFramework` | [libraries/source/application/](../libraries/source/application/)                                   | Rendering pipeline lifecycle                   |
+| `NativeView`      | [frameworks/source/](../frameworks/source/)                                                         | Platform windowing/input interface             |
+| `RHI`             | [libraries/include/rhi/](../libraries/include/rhi/)                                                 | Graphics API abstraction singleton             |
+| `TaskManager`     | [libraries/include/core/task/](../libraries/include/core/task/)                                     | Async task scheduling                          |
+| `Scene`           | [libraries/source/scene/](../libraries/source/scene/)                                               | Scene graph root; owns all components          |
+| `Renderer`        | [libraries/include/renderer/](../libraries/include/renderer/)                                       | Abstract base for all pipeline renderers       |
+| `RHIContext`      | [libraries/include/rhi/RHI.h](../libraries/include/rhi/RHI.h)                                       | Per-device render context (Vulkan or Metal)    |
+| `ConfigManager`   | [libraries/include/core/ConfigManager.h](../libraries/include/core/ConfigManager.h)                 | Config system registry (cvar registration)     |
+| `MaterialManager` | [libraries/include/scene/material/](../libraries/include/scene/material/)                           | Material lifecycle and lookup                  |
+| `SessionManager`  | [libraries/include/application/SessionManager.h](../libraries/include/application/SessionManager.h) | Save/load session state                        |
+| `InputManager`    | [libraries/include/application/InputManager.h](../libraries/include/application/InputManager.h)     | Input event pipeline, see [Input.md](Input.md) |
 
 ## Build System Architecture
 
