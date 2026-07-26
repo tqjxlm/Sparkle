@@ -167,19 +167,33 @@ def validate_vulkan_sdk(vulkan_sdk_path):
 
 def set_vulkan_layer_path(vulkan_sdk_path):
     """Set VK_LAYER_PATH environment variable for validation layers."""
-    layer_path = os.path.join(vulkan_sdk_path, "share",
-                              "vulkan", "explicit_layer.d")
+    # the sdk lays the layer manifests out per platform: unix keeps them in an explicit_layer.d
+    # directory, windows drops them next to the binaries in Bin
+    candidates = [os.path.join(vulkan_sdk_path, "share",
+                               "vulkan", "explicit_layer.d")]
+    if is_windows:
+        candidates.insert(0, os.path.join(vulkan_sdk_path, "Bin"))
 
-    if os.path.exists(layer_path):
-        existing = os.environ.get("VK_LAYER_PATH")
-        if existing:
-            if layer_path not in existing.split(os.pathsep):
-                os.environ["VK_LAYER_PATH"] = f"{layer_path}{os.pathsep}{existing}"
-        else:
-            os.environ["VK_LAYER_PATH"] = layer_path
-        print(f"VK_LAYER_PATH set to include: {layer_path}")
+    # Bin holds far more than manifests, so a candidate only counts once it actually carries one;
+    # a bare existing directory is still accepted as a fallback
+    layer_path = next((path for path in candidates
+                       if glob.glob(os.path.join(path, "VkLayer_*.json"))), None)
+    if layer_path is None:
+        layer_path = next(
+            (path for path in candidates if os.path.isdir(path)), None)
+
+    if layer_path is None:
+        print("Warning: no validation layer manifests found under "
+              f"{vulkan_sdk_path} (looked in: {', '.join(candidates)})")
+        return
+
+    existing = os.environ.get("VK_LAYER_PATH")
+    if existing:
+        if layer_path not in existing.split(os.pathsep):
+            os.environ["VK_LAYER_PATH"] = f"{layer_path}{os.pathsep}{existing}"
     else:
-        print(f"Warning: Validation layer directory not found at {layer_path}")
+        os.environ["VK_LAYER_PATH"] = layer_path
+    print(f"VK_LAYER_PATH set to include: {layer_path}")
 
 
 def set_vulkan_icd_filenames(vulkan_sdk_path):

@@ -53,7 +53,8 @@ SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
     float cos_m = CosTheta(local_w_m);
     float o_dot_m = SaturateDot(local_w_o, local_w_m);
 
-    float3 fresnel_color;
+    // white unless the metal branch below tints it: a non-metal reflects the light unchanged
+    float3 fresnel_color = float3(1.0, 1.0, 1.0);
     if (cos_o > Eps && cos_i > Eps && cos_m > Eps)
     {
         if (RandomUnit() < mat_param.metallic)
@@ -70,8 +71,6 @@ SampleResult BxdfSpecular(float3 local_w_o, MaterialParameters mat_param)
             // this value is empirical and widely adopted.
             const float F0 = 0.04f;
             float fresnel = FresnelSchlick(o_dot_m, F0);
-
-            fresnel_color = float3(1.0, 1.0, 1.0);
 
             if (RandomUnit() < fresnel)
             {
