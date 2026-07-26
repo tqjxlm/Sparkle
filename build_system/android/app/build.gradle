@@ -28,7 +28,8 @@ android {
     buildTypes {
         release {
             minifyEnabled = true
-            proguardFiles getDefaultProguardFile('proguard-android.txt')
+            // the non-optimize variant carries -dontoptimize and AGP 9 rejects it
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
             ndk {
                 //noinspection ChromeOsAbiSupport
                 abiFilters targetAbi
