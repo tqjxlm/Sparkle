@@ -105,6 +105,12 @@ private:
         app.PushInputEvent(PointerEvent{.action = PointerAction::Up, .position = position});
     }
 
+    static void InjectKey(AppFramework &app, Key key)
+    {
+        app.PushInputEvent(KeyEvent{.key = key, .action = KeyAction::Press});
+        app.PushInputEvent(KeyEvent{.key = key, .action = KeyAction::Release});
+    }
+
     void BuildSteps()
     {
         const Vector2 start{400.f, 300.f};
@@ -146,9 +152,7 @@ private:
                               [this](AppFramework &app) {
                                   // the default aperture sits at the clamp maximum, so step downwards
                                   aperture_before_ = camera_->GetAttribute().aperture;
-                                  const Key key = Key::Down;
-                                  app.PushInputEvent(KeyEvent{.key = key, .action = KeyAction::Press});
-                                  app.PushInputEvent(KeyEvent{.key = key, .action = KeyAction::Release});
+                                  InjectKey(app, Key::Down);
                               },
                           .verify =
                               [this](AppFramework &) {
@@ -167,6 +171,50 @@ private:
                                   app.PushInputEvent(KeyEvent{.key = Key::Space, .action = KeyAction::Release});
                               },
                           .verify = [](AppFramework &app) { return !app.GetRenderConfig().accumulate_key_held; }});
+
+        // two owners of one key, arbitrated by layer. ArbitrationKey is bound by no module, so
+        // these two bindings are the only claims on it.
+        steps_.push_back({.name = "the ui layer answers a key before the scene",
+                          .inject =
+                              [this](AppFramework &app) {
+                                  auto *input_manager = app.GetInputManager();
+                                  ui_consumes_ = true;
+                                  ui_fired_ = false;
+                                  scene_fired_ = false;
+                                  ui_binding_ =
+                                      input_manager->BindKey(InputLayer::Ui, {.key = ArbitrationKey}, [this]() {
+                                          ui_fired_ = true;
+                                          return ui_consumes_;
+                                      });
+                                  scene_binding_ =
+                                      input_manager->BindKey(InputLayer::Scene, {.key = ArbitrationKey}, [this]() {
+                                          scene_fired_ = true;
+                                          return true;
+                                      });
+                                  InjectKey(app, ArbitrationKey);
+                              },
+                          .verify = [this](AppFramework &) { return ui_fired_ && !scene_fired_; }});
+
+        steps_.push_back({.name = "a ui binding that declines lets the scene have the key",
+                          .inject =
+                              [this](AppFramework &app) {
+                                  ui_consumes_ = false;
+                                  ui_fired_ = false;
+                                  scene_fired_ = false;
+                                  InjectKey(app, ArbitrationKey);
+                              },
+                          .verify = [this](AppFramework &) { return ui_fired_ && scene_fired_; }});
+
+        steps_.push_back({.name = "freeing a binding releases its key",
+                          .inject =
+                              [this](AppFramework &app) {
+                                  ui_binding_.reset();
+                                  scene_binding_.reset();
+                                  ui_fired_ = false;
+                                  scene_fired_ = false;
+                                  InjectKey(app, ArbitrationKey);
+                              },
+                          .verify = [this](AppFramework &) { return !ui_fired_ && !scene_fired_; }});
 
         auto touch = [](PointerAction action, uint8_t id, const Vector2 &position) {
             return PointerEvent{.device = PointerDevice::Touch, .action = action, .id = id, .position = position};
@@ -235,6 +283,9 @@ private:
              .verify = [this](AppFramework &app) { return app.IsControlPanelVisible() != panel_before_; }});
     }
 
+    // claimed by no module, so the layer steps own it outright
+    static constexpr Key ArbitrationKey = Key::T;
+
     std::vector<Step> steps_;
     size_t current_step_ = 0;
     bool pending_verify_ = false;
@@ -247,6 +298,12 @@ private:
     bool panel_before_ = false;
     uint8_t last_tap_fingers_ = 0;
     std::unique_ptr<EventSubscription> tap_subscription_;
+
+    bool ui_consumes_ = false;
+    bool ui_fired_ = false;
+    bool scene_fired_ = false;
+    std::unique_ptr<EventSubscription> ui_binding_;
+    std::unique_ptr<EventSubscription> scene_binding_;
 };
 
 static TestCaseRegistrar<InputInjectionTest> input_injection_test_registrar("input_injection");

@@ -95,10 +95,16 @@ std::vector<std::unique_ptr<EventSubscription>> RenderConfig::BindInput()
 
     std::vector<std::unique_ptr<EventSubscription>> subscriptions;
 
-    subscriptions.push_back(input_manager->BindKey({.key = Key::Space, .action = KeyAction::Press},
-                                                   [this]() { accumulate_key_held = true; }));
-    subscriptions.push_back(input_manager->BindKey({.key = Key::Space, .action = KeyAction::Release},
-                                                   [this]() { accumulate_key_held = false; }));
+    subscriptions.push_back(
+        input_manager->BindKey(InputLayer::Scene, {.key = Key::Space, .action = KeyAction::Press}, [this]() {
+            accumulate_key_held = true;
+            return true;
+        }));
+    subscriptions.push_back(
+        input_manager->BindKey(InputLayer::Scene, {.key = Key::Space, .action = KeyAction::Release}, [this]() {
+            accumulate_key_held = false;
+            return true;
+        }));
 
     return subscriptions;
 }

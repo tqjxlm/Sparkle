@@ -206,19 +206,22 @@ std::vector<std::unique_ptr<EventSubscription>> SceneManager::BindDebugInput(Sce
     auto add_sphere = [&scene]() {
         Log(Debug, "Add debug sphere");
         GenerateRandomSpheres(scene, 1);
+        return true;
     };
 
     std::vector<std::unique_ptr<EventSubscription>> subscriptions;
 
-    subscriptions.push_back(input_manager->BindKey({.key = Key::NumpadAdd}, add_sphere));
+    subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = Key::NumpadAdd}, add_sphere));
 
     // shift + equal is the '+' a keyboard without a numpad has
     subscriptions.push_back(input_manager->BindKey(
-        {.key = Key::Equal, .modifiers = static_cast<uint32_t>(KeyboardModifier::Shift)}, add_sphere));
+        InputLayer::Scene, {.key = Key::Equal, .modifiers = static_cast<uint32_t>(KeyboardModifier::Shift)},
+        add_sphere));
 
-    subscriptions.push_back(input_manager->BindKey({.key = Key::Minus}, [&scene]() {
+    subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = Key::Minus}, [&scene]() {
         Log(Debug, "Remove debug sphere");
         RemoveLastDebugSphere(&scene);
+        return true;
     }));
 
     return subscriptions;

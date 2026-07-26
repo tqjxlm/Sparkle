@@ -6,7 +6,6 @@
 
 #include <functional>
 #include <memory>
-#include <utility>
 #include <vector>
 
 namespace sparkle
@@ -20,10 +19,16 @@ class UiManager;
 //
 // there are two tiers of interest:
 //   * scene events (On*) are broadcast, for any module that wants to observe an input.
-//   * key bindings (BindKey) are exclusive, because a shortcut belongs to exactly one owner.
+//   * key bindings (BindKey) are arbitrated: one owner per key per InputLayer, and the layers
+//     answer in order until one consumes the key.
 class InputManager
 {
 public:
+    // returns true when the binding consumed the key, which stops lower layers from seeing it.
+    // an owner that is currently irrelevant (a panel that is closed) returns false and lets the
+    // key fall through.
+    using KeyHandler = std::function<bool()>;
+
     // a pointer sequence that starts on the ui stays on the ui until release, even if
     // the pointer leaves it in between. touch consults ShouldConsume only at sequence
     // boundaries (first finger down, last finger up) and reads IsSequenceActive in
@@ -114,18 +119,41 @@ public:
         return scene_tap_event_.OnTrigger();
     }
 
-    auto &OnSceneKey()
-    {
-        return scene_key_event_.OnTrigger();
-    }
-
-    // claims a keyboard shortcut for one owner. the slot is freed when the returned subscription
-    // dies, and claiming a slot that is already taken asserts.
+    // claims a keyboard shortcut in one layer. the slot is freed when the returned subscription
+    // dies, and claiming a slot another owner already holds in the same layer asserts — two
+    // owners in one layer have no defined order, unlike two owners in different layers.
     // main thread only.
-    [[nodiscard]] std::unique_ptr<EventSubscription> BindKey(const KeyBinding &binding,
-                                                             std::function<void()> &&handler);
+    [[nodiscard]] std::unique_ptr<EventSubscription> BindKey(InputLayer layer, const KeyBinding &binding,
+                                                             KeyHandler &&handler);
 
 private:
+    // the key slots of every layer. unlike Event, a slot holds a single handler that reports
+    // consumption, which is what lets the layers arbitrate. it reuses EventSubscription so a
+    // binding's lifetime works exactly like an event subscription's.
+    class KeyBindings : public EventListenerBase
+    {
+    public:
+        [[nodiscard]] uint32_t Add(InputLayer layer, const KeyBinding &binding, KeyHandler &&handler);
+
+        // runs the layer's binding for this key, if any. returns true when it consumed the key.
+        bool Dispatch(InputLayer layer, const KeyEvent &event);
+
+    protected:
+        bool RemoveCallback(uint32_t id) override;
+
+    private:
+        struct Slot
+        {
+            InputLayer layer;
+            KeyBinding binding;
+            KeyHandler handler;
+            uint32_t id;
+        };
+
+        // few enough that a linear scan beats hashing
+        std::vector<Slot> slots_;
+    };
+
     void Process(const PointerEvent &event);
     void Process(const ScrollEvent &event);
     void Process(const KeyEvent &event);
@@ -156,11 +184,8 @@ private:
     Event<float> scene_zoom_event_;
     Event<uint8_t> scene_double_tap_event_;
     Event<uint8_t> scene_tap_event_;
-    Event<const KeyEvent &> scene_key_event_;
 
-    // few enough that a linear scan beats hashing. every slot is exclusive, so a shortcut has
-    // at most one owner at a time.
-    std::vector<std::pair<KeyBinding, Event<>>> key_bindings_;
+    std::shared_ptr<KeyBindings> key_bindings_ = std::make_shared<KeyBindings>();
 
     UiCaptureGate gate_;
 

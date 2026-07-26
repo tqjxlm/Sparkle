@@ -530,7 +530,22 @@ void AppFramework::SetupInputHandlers()
         }
     }));
 
-    input_subscriptions_.push_back(input_manager_->BindKey({.key = Key::Escape}, []() { RequestExit(); }));
+    // escape has two owners: the panel dismisses itself first, and only a key it leaves alone
+    // reaches the app and exits
+    input_subscriptions_.push_back(input_manager_->BindKey(InputLayer::Ui, {.key = Key::Escape}, [this]() {
+        if (!show_control_panel_)
+        {
+            return false;
+        }
+
+        show_control_panel_ = false;
+        return true;
+    }));
+
+    input_subscriptions_.push_back(input_manager_->BindKey(InputLayer::Scene, {.key = Key::Escape}, []() {
+        RequestExit();
+        return true;
+    }));
 
     // the app owns the config instance the per-frame snapshot is taken from, so it holds the
     // subscriptions the renderer binds against it

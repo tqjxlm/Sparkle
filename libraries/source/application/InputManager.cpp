@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cfloat>
-#include <iterator>
 #include <utility>
 
 namespace sparkle
@@ -86,18 +85,50 @@ InputManager::~InputManager()
     instance_ = nullptr;
 }
 
-std::unique_ptr<EventSubscription> InputManager::BindKey(const KeyBinding &binding, std::function<void()> &&handler)
+uint32_t InputManager::KeyBindings::Add(InputLayer layer, const KeyBinding &binding, KeyHandler &&handler)
+{
+    const bool claimed = std::ranges::any_of(
+        slots_, [layer, &binding](const Slot &slot) { return slot.layer == layer && slot.binding == binding; });
+    ASSERT_F(!claimed, "the key is already claimed in this layer. free it before binding again");
+
+    const auto id = AllocateId();
+
+    slots_.push_back({.layer = layer, .binding = binding, .handler = std::move(handler), .id = id});
+
+    return id;
+}
+
+bool InputManager::KeyBindings::Dispatch(InputLayer layer, const KeyEvent &event)
+{
+    auto found = std::ranges::find_if(slots_, [layer, &event](const Slot &slot) {
+        return slot.layer == layer && slot.binding.key == event.key && slot.binding.action == event.action &&
+               (event.modifiers & slot.binding.modifiers) == slot.binding.modifiers;
+    });
+    if (found == slots_.end())
+    {
+        return false;
+    }
+
+    // a handler may bind or free a slot, so it runs on a copy: mutating slots_ mid-dispatch
+    // must not invalidate the handler being called
+    KeyHandler handler = found->handler;
+
+    return handler();
+}
+
+bool InputManager::KeyBindings::RemoveCallback(uint32_t id)
+{
+    return std::erase_if(slots_, [id](const Slot &slot) { return slot.id == id; }) > 0;
+}
+
+std::unique_ptr<EventSubscription> InputManager::BindKey(InputLayer layer, const KeyBinding &binding,
+                                                         KeyHandler &&handler)
 {
     ASSERT(ThreadManager::IsInMainThread());
 
-    auto found = std::ranges::find_if(key_bindings_, [&binding](const auto &slot) { return slot.first == binding; });
-    if (found == key_bindings_.end())
-    {
-        key_bindings_.emplace_back(binding, Event<>{EventPolicy::Exclusive});
-        found = std::prev(key_bindings_.end());
-    }
+    const auto id = key_bindings_->Add(layer, binding, std::move(handler));
 
-    return found->second.OnTrigger().Subscribe(std::move(handler));
+    return std::make_unique<EventSubscription>(key_bindings_, id);
 }
 
 void InputManager::Push(const InputEvent &event)
@@ -393,19 +424,16 @@ void InputManager::Process(const KeyEvent &event)
         return;
     }
 
-    scene_key_event_.Trigger(event);
-
-    Key key = event.key;
+    KeyEvent binding_event = event;
 #if FRAMEWORK_MACOS
-    key = NormalizeBindingKey(key);
+    binding_event.key = NormalizeBindingKey(binding_event.key);
 #endif
 
-    for (auto &[binding, slot] : key_bindings_)
+    for (uint8_t layer = 0; layer < static_cast<uint8_t>(InputLayer::Count); layer++)
     {
-        if (binding.key == key && binding.action == event.action &&
-            (event.modifiers & binding.modifiers) == binding.modifiers)
+        if (key_bindings_->Dispatch(static_cast<InputLayer>(layer), binding_event))
         {
-            slot.Trigger();
+            break;
         }
     }
 }

@@ -73,6 +73,19 @@ struct CharEvent
     uint32_t codepoint = 0;
 };
 
+// declaration order is dispatch order: a layer only sees a key that no layer above it consumed.
+// several layers may claim the same key — that is how a shortcut can mean one thing in the ui
+// and another in the scene.
+enum class InputLayer : uint8_t
+{
+    // ui panels and widgets. they answer first, so dismissing a panel wins over what the same
+    // key does in the scene.
+    Ui,
+    // camera, scene content, renderer, and app-wide shortcuts
+    Scene,
+    Count
+};
+
 // a keyboard shortcut a module claims from InputManager. it fires when the key reaches the
 // given action while every required modifier is held; extra modifiers do not block it.
 struct KeyBinding

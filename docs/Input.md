@@ -14,22 +14,35 @@ tests (injection)  ┘          ├─ map to scene events        ──►     
 ```
 
 * **Raw events** ([InputEvents.h](../libraries/include/application/InputEvents.h)): `PointerEvent` (mouse and touch unified: device, action, pointer id, button, modifiers, position), `ScrollEvent`, `KeyEvent`, `CharEvent`.
-* **Scene events** (subscribe via `Event<Args...>` / RAII `EventSubscription`, [core/Event.h](../libraries/include/core/Event.h)): `OnScenePointer` (gated raw pointers, incl. synthesized `Cancel` when the ui takes over a sequence), `OnSceneDrag` (delta while the primary pointer is pressed), `OnSceneZoom` (wheel and pinch unified), `OnSceneTap(finger_count)`, `OnSceneDoubleTap`, `OnSceneKey`. They are broadcast: any number of modules may observe the same event.
-* **Key bindings** (`InputManager::BindKey`): a `KeyBinding` is a key, a `KeyAction`, and the modifiers that must be held (extra modifiers do not block it). Unlike scene events, a binding is exclusive — the slot has exactly one owner and claiming a taken slot asserts, so two modules cannot silently fight over a shortcut. The slot is freed when the returned subscription dies.
+* **Scene events** (subscribe via `Event<Args...>` / RAII `EventSubscription`, [core/Event.h](../libraries/include/core/Event.h)): `OnScenePointer` (gated raw pointers, incl. synthesized `Cancel` when the ui takes over a sequence), `OnSceneDrag` (delta while the primary pointer is pressed), `OnSceneZoom` (wheel and pinch unified), `OnSceneTap(finger_count)`, `OnSceneDoubleTap`. They are broadcast: any number of modules may observe the same event.
+* **Key bindings** (`InputManager::BindKey`): a `KeyBinding` is a key, a `KeyAction`, and the modifiers that must be held (extra modifiers do not block it). A binding is claimed in an `InputLayer` and freed when the returned subscription dies.
 
 Events are queued by `Push` (main thread only) and delivered once per frame from the main loop, in push order — input handling is deterministic with respect to frames.
+
+## Key arbitration
+
+A key often means different things to different modules — `Escape` dismisses the config panel, and it also exits the app. `InputLayer` resolves that without either module knowing about the other:
+
+* Layers answer a key in declaration order (`Ui`, then `Scene`), and a handler returns `true` to consume the key, which stops lower layers from seeing it.
+* An owner that is currently irrelevant — a panel that is closed — returns `false`, and the key falls through to the layer below as if the binding did not exist.
+* Within one layer a key has exactly one owner; claiming a key a second time in the same layer asserts. Two owners in one layer have no defined order, whereas two owners in different layers do.
+
+Everything a key can reach is therefore visible from its bindings, and a new consumer of an already-bound key is added by picking a layer rather than by editing the module that already owns it.
+
+While imgui wants the keyboard (`IsHandlingKeyboardEvent`, e.g. a focused text field) no binding runs in any layer — imgui itself is the owner of the keystroke.
 
 ## Ownership
 
 Every input is implemented and claimed by the module that owns the state it changes, not by a central dispatcher. `InputManager::Instance()` gives a module access without any wiring from the app layer; it is null in cook mode, so a module must tolerate its absence.
 
-| input | owner |
-| --- | --- |
-| pointer down/up, drag, zoom, `Up`/`Down` (aperture), `P` (print posture) | `CameraComponent::BindSceneInput`, resolving the scene's current main camera |
-| `Space` hold (manual accumulation) | `RenderConfig::BindInput` |
-| secondary or ctrl + primary click (debug point) | `RenderFramework` |
-| `NumpadAdd` / `Shift`+`Equal` / `Minus` (debug spheres) | `SceneManager::BindDebugInput` |
-| `Escape` (exit), double tap (config panel), 4-finger tap (frame capture) | `AppFramework` |
+| input | layer | owner |
+| --- | --- | --- |
+| pointer down/up, drag, zoom, `Up`/`Down` (aperture), `P` (print posture) | `Scene` | `CameraComponent::BindSceneInput`, resolving the scene's current main camera |
+| `Space` hold (manual accumulation) | `Scene` | `RenderConfig::BindInput` |
+| secondary or ctrl + primary click (debug point) | — | `RenderFramework` |
+| `NumpadAdd` / `Shift`+`Equal` / `Minus` (debug spheres) | `Scene` | `SceneManager::BindDebugInput` |
+| `Escape` (dismiss the config panel) | `Ui` | `AppFramework` |
+| `Escape` (exit), double tap (config panel), 4-finger tap (frame capture) | `Scene` | `AppFramework` |
 
 Scene-owned bindings live for the lifetime of the `Scene` and resolve the state they act on at dispatch time, so loading another scene never rebinds them.
 

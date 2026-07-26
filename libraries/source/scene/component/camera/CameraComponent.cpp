@@ -68,22 +68,30 @@ std::vector<std::unique_ptr<EventSubscription>> CameraComponent::BindSceneInput(
     }));
 
     auto bind_aperture_step = [input_manager, &scene, &subscriptions](Key key, float step) {
-        subscriptions.push_back(input_manager->BindKey({.key = key}, [&scene, step]() {
-            if (auto *camera = scene.GetMainCamera())
+        subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = key}, [&scene, step]() {
+            auto *camera = scene.GetMainCamera();
+            if (!camera)
             {
-                camera->SetAperture(camera->GetAttribute().aperture + step);
+                return false;
             }
+
+            camera->SetAperture(camera->GetAttribute().aperture + step);
+            return true;
         }));
     };
 
     bind_aperture_step(Key::Up, ApertureStep);
     bind_aperture_step(Key::Down, -ApertureStep);
 
-    subscriptions.push_back(input_manager->BindKey({.key = Key::P}, [&scene]() {
-        if (auto *camera = scene.GetMainCamera())
+    subscriptions.push_back(input_manager->BindKey(InputLayer::Scene, {.key = Key::P}, [&scene]() {
+        auto *camera = scene.GetMainCamera();
+        if (!camera)
         {
-            camera->PrintPosture();
+            return false;
         }
+
+        camera->PrintPosture();
+        return true;
     }));
 
     return subscriptions;
