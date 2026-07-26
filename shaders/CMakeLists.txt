@@ -55,10 +55,19 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
         message(FATAL_ERROR "Invalid shader file name, please provide a valid shader type (vs, ps, cs): " ${SLANG})
     endif()
 
+    # ray query is not part of the base profile, so slang upgrades the profile itself and warns.
+    # requesting the capability explicitly emits the same SPIR-V without the warning.
+    cmake_path(GET SLANG PARENT_PATH SLANG_PARENT_PATH)
+    cmake_path(GET SLANG_PARENT_PATH FILENAME SLANG_SUB_PATH_NAME)
+    set(SLANG_CAPABILITIES)
+    if (SLANG_SUB_PATH_NAME STREQUAL "ray_trace")
+        set(SLANG_CAPABILITIES -capability spvRayQueryKHR)
+    endif()
+
     add_custom_command(
         OUTPUT ${SPIRV}
-        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3
-        COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3"
+        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}
+        COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}"
         DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
     )
     list(APPEND ALL_SPIRV_OUTPUTS ${SPIRV})

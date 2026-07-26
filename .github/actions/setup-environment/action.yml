@@ -170,8 +170,12 @@ runs:
         fi
 
         if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"macos"* ]]; then
+          # brew --prefix answers where llvm would live, installed or not, and the runner image
+          # builds against Xcode clang instead. an absent prefix only earns ld search-path warnings
           LLVM_PREFIX=$(brew --prefix llvm)
-          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\""
+          if [ -d "${LLVM_PREFIX}/lib" ]; then
+            EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\""
+          fi
         fi
 
         if [[ "${{ inputs.framework }}" == "macos" || "${{ inputs.framework }}" == "ios" ]]; then
