@@ -4,8 +4,9 @@ buildscript {
        mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.10.1'
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0"
+        // the kotlin gradle plugin arrives as an AGP runtime dependency: AGP 9 compiles the
+        // app's kotlin itself and rejects the standalone org.jetbrains.kotlin.android plugin
+        classpath 'com.android.tools.build:gradle:9.3.0'
     }
 }
 allprojects {

@@ -1,17 +1,16 @@
 apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
 
 // arm64-v8a is the shipping ABI; x86_64 exists for emulators on x86 hosts (CI)
 def targetAbi = project.hasProperty('targetAbi') ? project.targetAbi : 'arm64-v8a'
 
 android {
-    compileSdk 35
-    ndkVersion '28.1.13356709'
+    compileSdk 37
+    ndkVersion '29.0.14206865'
     
     defaultConfig {
         applicationId 'io.tqjxlm.sparkle'
         minSdk 31
-        targetSdk 35
+        targetSdk 37
         externalNativeBuild {
             cmake {
                 def fixedArgs = [
@@ -34,7 +33,7 @@ android {
                 //noinspection ChromeOsAbiSupport
                 abiFilters targetAbi
             }
-            signingConfig signingConfigs.debug
+            signingConfig = signingConfigs.debug
         }
         debug {
             packaging {
@@ -142,31 +141,41 @@ tasks.register('copyAssets', Copy) {
     outputs.dir "${project.projectDir}/src/main/assets"
 }
 
-// make sure copyAssets runs before the mergeAssets task and after the externalNativeBuild task
-android.applicationVariants.configureEach { variant ->
-    def variantName = variant.name.capitalize()
-    def nativeBuild = tasks.named("externalNativeBuild${variantName}")
-    def generateManifests = tasks.named("generateAssetManifests")
-    def copyAssets = tasks.named("copyAssets")
+// onVariants names the variants, but the AGP tasks wired below are only registered once the
+// project is evaluated, so the lookups wait for afterEvaluate
+def variantNames = []
+androidComponents {
+    onVariants { variant ->
+        variantNames.add(variant.name.capitalize())
+    }
+}
 
-    generateManifests.configure {
-        mustRunAfter nativeBuild
-    }
-    copyAssets.configure {
-        mustRunAfter nativeBuild
-    }
-    if (variantName == "Release") {
-        // release lint reads the generated assets copied into the main source set
-        tasks.named("generateReleaseLintVitalReportModel").configure {
-            mustRunAfter copyAssets
+// make sure copyAssets runs before the mergeAssets task and after the externalNativeBuild task
+afterEvaluate {
+    variantNames.each { variantName ->
+        def nativeBuild = tasks.named("externalNativeBuild${variantName}")
+        def generateManifests = tasks.named("generateAssetManifests")
+        def copyAssets = tasks.named("copyAssets")
+
+        generateManifests.configure {
+            mustRunAfter nativeBuild
         }
-        tasks.named("lintVitalAnalyzeRelease").configure {
-            mustRunAfter copyAssets
+        copyAssets.configure {
+            mustRunAfter nativeBuild
         }
-    }
-    tasks.named("merge${variantName}Assets").configure {
-        dependsOn nativeBuild
-        dependsOn copyAssets
+        if (variantName == "Release") {
+            // release lint reads the generated assets copied into the main source set
+            tasks.named("generateReleaseLintVitalReportModel").configure {
+                mustRunAfter copyAssets
+            }
+            tasks.named("lintVitalAnalyzeRelease").configure {
+                mustRunAfter copyAssets
+            }
+        }
+        tasks.named("merge${variantName}Assets").configure {
+            dependsOn nativeBuild
+            dependsOn copyAssets
+        }
     }
 }
 
