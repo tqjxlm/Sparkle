@@ -148,7 +148,7 @@ private:
 
     Event<> renderer_created_event_;
 
-    std::unique_ptr<EventSubscription> pointer_subscription_;
+    std::unique_ptr<EventSubscription> secondary_click_subscription_;
 
     TimerCaller frame_rate_monitor_;
 

@@ -187,7 +187,7 @@ void InputManager::CancelScenePointer()
 
     primary_pressing_ = false;
 
-    scene_pointer_event_.Trigger(PointerEvent{.action = PointerAction::Cancel, .position = pointer_position_});
+    scene_drag_end_event_.Trigger();
 }
 
 void InputManager::HandleClick()
@@ -234,26 +234,28 @@ void InputManager::Process(const PointerEvent &event)
         {
             primary_pressing_ = true;
             click_timer_.Reset();
+            scene_drag_begin_event_.Trigger();
         }
-        scene_pointer_event_.Trigger(event);
+        else
+        {
+            scene_secondary_click_event_.Trigger(event.position);
+        }
         break;
     }
     case PointerAction::Up: {
-        const bool was_pressing = primary_pressing_;
-        if (event.button == ClickButton::PrimaryLeft)
+        if (event.button == ClickButton::PrimaryLeft && primary_pressing_)
         {
             primary_pressing_ = false;
-        }
-        scene_pointer_event_.Trigger(event);
-        if (event.button == ClickButton::PrimaryLeft && was_pressing &&
-            click_timer_.ElapsedMilliSecond() < ClickThresholdMS)
-        {
-            HandleClick();
+            scene_drag_end_event_.Trigger();
+
+            if (click_timer_.ElapsedMilliSecond() < ClickThresholdMS)
+            {
+                HandleClick();
+            }
         }
         break;
     }
     case PointerAction::Move: {
-        scene_pointer_event_.Trigger(event);
         if (primary_pressing_)
         {
             scene_drag_event_.Trigger(event.position - last_position);
@@ -269,13 +271,12 @@ void InputManager::Process(const PointerEvent &event)
     }
 }
 
-void InputManager::BeginTouchDrag(uint8_t id, const Vector2 &position)
+void InputManager::BeginTouchDrag()
 {
     primary_pressing_ = true;
     click_timer_.Reset();
 
-    scene_pointer_event_.Trigger(
-        PointerEvent{.device = PointerDevice::Touch, .action = PointerAction::Down, .id = id, .position = position});
+    scene_drag_begin_event_.Trigger();
 }
 
 void InputManager::ProcessTouch(const PointerEvent &event)
@@ -301,7 +302,7 @@ void InputManager::ProcessTouch(const PointerEvent &event)
             touch_.moved = false;
             if (!consumed)
             {
-                BeginTouchDrag(event.id, event.position);
+                BeginTouchDrag();
             }
         }
         else
@@ -341,7 +342,6 @@ void InputManager::ProcessTouch(const PointerEvent &event)
         }
         else if (primary_pressing_ && pointers.size() == 1)
         {
-            scene_pointer_event_.Trigger(event);
             scene_drag_event_.Trigger(event.position - previous);
         }
         break;
@@ -361,7 +361,7 @@ void InputManager::ProcessTouch(const PointerEvent &event)
             if (primary_pressing_)
             {
                 primary_pressing_ = false;
-                scene_pointer_event_.Trigger(event);
+                scene_drag_end_event_.Trigger();
             }
             if (tapped)
             {
@@ -380,7 +380,7 @@ void InputManager::ProcessTouch(const PointerEvent &event)
             touch_.pinching = false;
             if (!gate_.IsSequenceActive())
             {
-                BeginTouchDrag(pointers[0].id, pointers[0].position);
+                BeginTouchDrag();
             }
         }
         else if (touch_.pinching)

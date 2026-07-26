@@ -28,42 +28,32 @@ std::vector<std::unique_ptr<EventSubscription>> CameraComponent::BindSceneInput(
 
     std::vector<std::unique_ptr<EventSubscription>> subscriptions;
 
-    subscriptions.push_back(input_manager->OnScenePointer().Subscribe([&scene](const PointerEvent &event) {
-        auto *camera = scene.GetMainCamera();
-        if (!camera || event.button != ClickButton::PrimaryLeft)
+    subscriptions.push_back(input_manager->OnSceneDragBegin().Subscribe([&scene]() {
+        if (auto *camera = scene.GetMainCamera())
         {
-            return;
-        }
-
-        switch (event.action)
-        {
-        case PointerAction::Down:
-            // control + primary is the debug-point gesture, so it must not start a camera drag
-            if ((event.modifiers & static_cast<uint32_t>(KeyboardModifier::Control)) == 0)
-            {
-                camera->OnPointerDown();
-            }
-            break;
-        case PointerAction::Up:
-        case PointerAction::Cancel:
-            camera->OnPointerUp();
-            break;
-        default:
-            break;
+            camera->OnDragBegin();
         }
     }));
 
+    subscriptions.push_back(input_manager->OnSceneDragEnd().Subscribe([&scene]() {
+        if (auto *camera = scene.GetMainCamera())
+        {
+            camera->OnDragEnd();
+        }
+    }));
+
+    // a drag along x orbits around the vertical axis, so the deltas cross over
     subscriptions.push_back(input_manager->OnSceneDrag().Subscribe([&scene](Vector2 delta) {
         if (auto *camera = scene.GetMainCamera())
         {
-            camera->OnPointerMove(delta.y(), -delta.x());
+            camera->OnDrag(delta.y(), -delta.x());
         }
     }));
 
     subscriptions.push_back(input_manager->OnSceneZoom().Subscribe([&scene](float amount) {
         if (auto *camera = scene.GetMainCamera())
         {
-            camera->OnScroll(amount);
+            camera->OnZoom(amount);
         }
     }));
 

@@ -13,11 +13,25 @@ tests (injection)  ┘          ├─ map to scene events        ──►     
                               └─ dispatch key bindings      ──►
 ```
 
-* **Raw events** ([InputEvents.h](../libraries/include/application/InputEvents.h)): `PointerEvent` (mouse and touch unified: device, action, pointer id, button, modifiers, position), `ScrollEvent`, `KeyEvent`, `CharEvent`.
-* **Scene events** (subscribe via `Event<Args...>` / RAII `EventSubscription`, [core/Event.h](../libraries/include/core/Event.h)): `OnScenePointer` (gated raw pointers, incl. synthesized `Cancel` when the ui takes over a sequence), `OnSceneDrag` (delta while the primary pointer is pressed), `OnSceneZoom` (wheel and pinch unified), `OnSceneTap(finger_count)`, `OnSceneDoubleTap`. They are broadcast: any number of modules may observe the same event.
+* **Raw events** ([InputEvents.h](../libraries/include/application/InputEvents.h)): `PointerEvent` (mouse and touch unified: device, action, pointer id, button, modifiers, position), `ScrollEvent`, `KeyEvent`, `CharEvent`. They cross only the platform boundary — no module outside `InputManager` handles them.
+* **Scene events** (subscribe via `Event<Args...>` / RAII `EventSubscription`, [core/Event.h](../libraries/include/core/Event.h)) are recognized gestures, not pointers. They are broadcast: any number of modules may observe one.
 * **Key bindings** (`InputManager::BindKey`): a `KeyBinding` is a key, a `KeyAction`, and the modifiers that must be held (extra modifiers do not block it). A binding is claimed in an `InputLayer` and freed when the returned subscription dies.
 
 Events are queued by `Push` (main thread only) and delivered once per frame from the main loop, in push order — input handling is deterministic with respect to frames.
+
+## Scene gestures
+
+Recognition — which button, which modifier, how many fingers, how long — happens once inside `InputManager`, so no subscriber re-derives it and mouse and touch reach a subscriber through the same event:
+
+| scene event | mouse | touch |
+| --- | --- | --- |
+| `OnSceneDragBegin` / `OnSceneDrag(delta)` / `OnSceneDragEnd` | primary button pressed and moving | one finger |
+| `OnSceneZoom(amount)` | wheel | pinch |
+| `OnSceneSecondaryClick(position)` | secondary button, or control + primary | — |
+| `OnSceneTap(finger_count)` | — | quick tap, no slop |
+| `OnSceneDoubleTap(finger_count)` | double click | double tap |
+
+A drag always ends: `OnSceneDragEnd` fires on release and also when the ui takes the sequence over mid-drag, so an owner that started acting on `Begin` can rely on `End` to stop.
 
 ## Key arbitration
 
@@ -37,14 +51,16 @@ Every input is implemented and claimed by the module that owns the state it chan
 
 | input | layer | owner |
 | --- | --- | --- |
-| pointer down/up, drag, zoom, `Up`/`Down` (aperture), `P` (print posture) | `Scene` | `CameraComponent::BindSceneInput`, resolving the scene's current main camera |
+| drag, zoom, `Up`/`Down` (aperture), `P` (print posture) | `Scene` | `CameraComponent::BindSceneInput`, resolving the scene's current main camera |
 | `Space` hold (manual accumulation) | `Scene` | `RenderConfig::BindInput` |
-| secondary or ctrl + primary click (debug point) | — | `RenderFramework` |
+| secondary click (debug point) | — | `RenderFramework` |
 | `NumpadAdd` / `Shift`+`Equal` / `Minus` (debug spheres) | `Scene` | `SceneManager::BindDebugInput` |
 | `Escape` (dismiss the config panel) | `Ui` | `AppFramework` |
 | `Escape` (exit), double tap (config panel), 4-finger tap (frame capture) | `Scene` | `AppFramework` |
 
 Scene-owned bindings live for the lifetime of the `Scene` and resolve the state they act on at dispatch time, so loading another scene never rebinds them.
+
+Because a gesture is recognized once, the handlers a module writes are the whole of what it needs: `CameraComponent`'s `OnDragBegin` / `OnDrag` / `OnDragEnd` / `OnZoom` are protected, driven only by the bindings the camera itself claims.
 
 ## Coordinate space
 
@@ -62,7 +78,7 @@ Gesture recognition is shared engine code, identical on ios and android (platfor
 
 | gesture | scene event |
 | --- | --- |
-| 1-finger drag | `OnScenePointer` Down/Up + `OnSceneDrag` |
+| 1-finger drag | `OnSceneDragBegin` / `OnSceneDrag` / `OnSceneDragEnd` |
 | pinch (2 fingers) | `OnSceneZoom` from the pinch length delta; suppresses drag; lifting back to one finger resumes the drag |
 | quick tap, no slop | `OnSceneTap(finger_count)`; 1-finger taps also drive double-tap detection (4-finger tap triggers a frame capture) |
 | touch → ui | single finger emulates an imgui mouse: short = click, longer drag = wheel scroll, hover reset after each sequence |

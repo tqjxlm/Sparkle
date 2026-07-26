@@ -35,8 +35,6 @@ public:
 
     void UpdateRenderData();
 
-    virtual void PrintPosture() = 0;
-
 #pragma region Attributes
 
     [[nodiscard]] auto GetAttribute() const
@@ -46,29 +44,7 @@ public:
 
     void SetFocusDistance(float focus_distance);
 
-    void SetAperture(float aperture);
-
     void SetExposure(float exposure);
-
-#pragma endregion
-
-#pragma region Input
-
-    virtual void OnPointerDown()
-    {
-    }
-
-    virtual void OnPointerUp()
-    {
-    }
-
-    virtual void OnPointerMove(float, float)
-    {
-    }
-
-    virtual void OnScroll(float)
-    {
-    }
 
 #pragma endregion
 
@@ -79,6 +55,32 @@ public:
 #pragma endregion
 
 protected:
+#pragma region Input
+
+    // driven by the scene gestures BindSceneInput claims, never called from outside the camera
+
+    virtual void PrintPosture() = 0;
+
+    virtual void OnDragBegin()
+    {
+    }
+
+    virtual void OnDragEnd()
+    {
+    }
+
+    virtual void OnDrag(float, float)
+    {
+    }
+
+    virtual void OnZoom(float)
+    {
+    }
+
+    void SetAperture(float aperture);
+
+#pragma endregion
+
     std::unique_ptr<RenderProxy> CreateRenderProxy() override;
 
 private:

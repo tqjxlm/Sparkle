@@ -17,6 +17,10 @@ class UiManager;
 // system, and maps them to scene events that any module can subscribe to.
 // scene events are suppressed while the ui captures the pointer or keyboard.
 //
+// scene events are gestures, not pointers: recognition (which button, which modifier, how many
+// fingers, how long) happens here once, so no subscriber re-derives it and mouse and touch reach
+// a subscriber through the same event.
+//
 // there are two tiers of interest:
 //   * scene events (On*) are broadcast, for any module that wants to observe an input.
 //   * key bindings (BindKey) are arbitrated: one owner per key per InputLayer, and the layers
@@ -90,21 +94,36 @@ public:
 
     void Reset();
 
-    auto &OnScenePointer()
+    // a drag is the primary pointer pressed and moving: mouse button or one finger. it always
+    // ends, on release or on the ui taking the sequence over, so an owner that started acting on
+    // Begin can rely on End to stop.
+    auto &OnSceneDragBegin()
     {
-        return scene_pointer_event_.OnTrigger();
+        return scene_drag_begin_event_.OnTrigger();
     }
 
-    // drag delta in ui space while the primary pointer is pressed
+    // drag delta in ui space
     auto &OnSceneDrag()
     {
         return scene_drag_event_.OnTrigger();
     }
 
-    // positive amount zooms out, matching OrbitCameraComponent::OnScroll
+    auto &OnSceneDragEnd()
+    {
+        return scene_drag_end_event_.OnTrigger();
+    }
+
+    // positive amount zooms out, matching OrbitCameraComponent::OnZoom
     auto &OnSceneZoom()
     {
         return scene_zoom_event_.OnTrigger();
+    }
+
+    // payload is the click position in ui space. the secondary button and control + primary both
+    // produce it; touch has no secondary gesture yet.
+    auto &OnSceneSecondaryClick()
+    {
+        return scene_secondary_click_event_.OnTrigger();
     }
 
     // payload is the finger count of the tap (1 for mouse double click)
@@ -172,15 +191,17 @@ private:
 
     void CancelScenePointer();
     void HandleClick();
-    void BeginTouchDrag(uint8_t id, const Vector2 &position);
+    void BeginTouchDrag();
 
     const AppConfig &app_config_;
     UiManager *ui_manager_ = nullptr;
 
     std::vector<InputEvent> pending_events_;
 
-    Event<const PointerEvent &> scene_pointer_event_;
+    Event<> scene_drag_begin_event_;
     Event<Vector2> scene_drag_event_;
+    Event<> scene_drag_end_event_;
+    Event<Vector2> scene_secondary_click_event_;
     Event<float> scene_zoom_event_;
     Event<uint8_t> scene_double_tap_event_;
     Event<uint8_t> scene_tap_event_;

@@ -80,14 +80,8 @@ RenderFramework::RenderFramework(NativeView *native_view, RHIContext *rhi, UiMan
 
     if (auto *input_manager = InputManager::Instance())
     {
-        pointer_subscription_ = input_manager->OnScenePointer().Subscribe([this](const PointerEvent &event) {
-            const bool debug_gesture = event.button == ClickButton::SecondaryRight ||
-                                       (event.modifiers & static_cast<uint32_t>(KeyboardModifier::Control)) != 0;
-            if (event.action == PointerAction::Down && debug_gesture)
-            {
-                RequestDebugPoint(event.position);
-            }
-        });
+        secondary_click_subscription_ =
+            input_manager->OnSceneSecondaryClick().Subscribe([this](Vector2 position) { RequestDebugPoint(position); });
     }
 }
 
