@@ -881,15 +881,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Setup Mesa Lavapipe
-        uses: ./.github/actions/setup-mesa
-
-      # the released linux binary links libglfw at runtime even in headless mode
-      - name: Install GLFW runtime
+      # the suite runs on a modal GPU container; the hosted runner only drives it
+      - name: Install Modal client
         shell: bash
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y libglfw3
+        run: pip install modal==1.5.3
 
       # the release package already carries the cooked content in its packed resources
       - name: Download app
@@ -906,19 +901,17 @@ jobs:
           mkdir -p build_system/glfw/output
           unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
 
-      # the step timeout bounds a hung app; the log dump below then still runs
+      # the container streams the suite's output into this log live and returns the
+      # screenshots and logs into the work tree, so the steps below stay unchanged.
+      # the step timeout bounds a hung container as it does a hung app
       - name: Run Tests
-        timeout-minutes: 120
+        timeout-minutes: 60
         shell: bash
         env:
-          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
-          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
-          # cells that do not run MoltenVK
-          MVK_CONFIG_USE_MTLHEAP: 0
-          # the suite nests python processes whose block-buffered output would otherwise
-          # reach the live log minutes late and out of order
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           PYTHONUNBUFFERED: 1
-        run: python3 dev/run_tests.py --framework glfw --config Release --software
+        run: modal run dev/modal_gpu_test.py::main
 
       - name: Dump app logs
         if: failure()

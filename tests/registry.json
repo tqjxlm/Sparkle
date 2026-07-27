@@ -50,7 +50,7 @@
     {
         "name": "gpu_render_static",
         "test_case": "screenshot",
-        "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Needs hardware ray tracing, which no hosted runner exposes, so it stays local-only.",
+        "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Needs hardware ray tracing, so it runs only on the ubuntu-glfw cell, whose GPU is rented from modal rather than hosted by the runner.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu"],
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {

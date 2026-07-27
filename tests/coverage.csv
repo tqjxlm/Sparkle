@@ -22,7 +22,7 @@ dynamic_buffer_reuse,x,x,x,x,,x
 vulkan_image_subresources,x,,x,,,x
 pipeline_switch_pool,,x,x,x,,x
 surface_loss_recovery,,,,,x,
-gpu_render_static,,,,,,
+gpu_render_static,,,,,,x
 cpu_render_static,,,,,,
 ibl_parity,,,,,,
 nrd_probe,,,,,,

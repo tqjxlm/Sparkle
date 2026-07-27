@@ -86,6 +86,18 @@ class CoverageTest(unittest.TestCase):
         for triplet in COVERAGE:
             self.assertIn(triplet, ci_matrix.TEST_RUNNERS)
 
+    def test_ray_tracing_cases_only_land_on_a_cell_that_has_a_gpu(self):
+        """A cell without hardware ray tracing does not fail the gpu pipeline, it
+        falls back to forward and passes — the vacuous green this table must not
+        be able to express. Only the rented-GPU cells may pick such a case."""
+        for triplet, picks in COVERAGE.items():
+            if "gpu_render_static" not in picks:
+                continue
+            runner = ci_matrix.TEST_RUNNERS[triplet]
+            self.assertEqual(runner.get("executor"), "modal",
+                             f"triplet {triplet} picks a case that needs hardware"
+                             " ray tracing but runs on a software rasterizer")
+
 
 if __name__ == "__main__":
     unittest.main()

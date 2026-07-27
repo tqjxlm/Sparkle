@@ -91,6 +91,21 @@ class CiPipelineTest(unittest.TestCase):
             tested.add(ci_matrix.tested_triplet(product))
         self.assertEqual(tested, set(ci_matrix.covered_triplets()))
 
+    def test_a_modal_cell_drives_the_container_instead_of_the_runner(self):
+        """Its GPU is rented, so the job installs the client and hands the suite to
+        dev/modal_gpu_test.py; installing lavapipe on the runner would only put a
+        software rasterizer next to a GPU that never sees the app."""
+        for product in release_products():
+            runner = ci_matrix.suite_runner(product)
+            if not runner or runner.get("executor") != "modal":
+                continue
+            text = JOBS[ci_matrix.slug("test", product)]
+            self.assertIn(f"pip install modal=={ci_matrix.MODAL_VERSION}", text)
+            self.assertIn("modal run dev/modal_gpu_test.py::main", text)
+            self.assertIn("MODAL_TOKEN_SECRET", text)
+            self.assertNotIn("setup-mesa", text)
+            self.assertNotIn("run_tests.py", text)
+
     def test_unmatched_coverage_column_fails_loudly(self):
         original = ci_matrix.covered_triplets
         ci_matrix.covered_triplets = lambda: ["windows-macos-release"]

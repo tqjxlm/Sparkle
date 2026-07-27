@@ -42,6 +42,10 @@ PRODUCTS = (
      "build_types": ("Release",)},
 )
 
+# the modal client speaks a versioned protocol to the service and pulls the whole
+# GPU cell down with it when it breaks, so CI pins it like any other toolchain
+MODAL_VERSION = "1.5.3"
+
 # must hold every tests/coverage.csv triplet column: that table decides who runs the suite
 TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
@@ -51,11 +55,16 @@ TEST_RUNNERS = {
         "suite_timeout": 120,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
-    # the linux product, validated under software vulkan like windows (hosted
-    # ubuntu runners have no GPU); same registry cases as macos-macos-release
+    # the linux product on a real NVIDIA GPU rented per second from modal (see
+    # dev/modal_gpu_test.py): the hosted ubuntu runner has no GPU of its own, and
+    # lavapipe traverses acceleration structures on the CPU, which puts the gpu
+    # path-tracing pipeline out of any CI time budget. this is the only cell with
+    # hardware ray tracing, so it carries gpu_render_static; windows-glfw-release
+    # keeps the software-rasterizer coverage the cell used to provide
     "ubuntu-glfw-release": {
-        "suite_args": "--software",
-        "suite_timeout": 120,
+        "executor": "modal",
+        "suite_args": "",
+        "suite_timeout": 60,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
     # physical Metal GPU (the runner class the cook stage relies on). its
@@ -370,6 +379,13 @@ STEP_GLFW_RUNTIME = """
           sudo apt-get install -y libglfw3
 """
 
+STEP_MODAL = """
+      # the suite runs on a modal GPU container; the hosted runner only drives it
+      - name: Install Modal client
+        shell: bash
+        run: pip install modal==@modal_version@
+"""
+
 STEP_KVM = """
       # the emulator needs hardware virtualization; hosted ubuntu runners expose
       # /dev/kvm but leave it root-only
@@ -425,6 +441,20 @@ STEP_RUN_TESTS = """
           # reach the live log minutes late and out of order
           PYTHONUNBUFFERED: 1
         run: python3 dev/run_tests.py --framework @framework@ --config Release@suite_args@
+"""
+
+STEP_RUN_TESTS_MODAL = """
+      # the container streams the suite's output into this log live and returns the
+      # screenshots and logs into the work tree, so the steps below stay unchanged.
+      # the step timeout bounds a hung container as it does a hung app
+      - name: Run Tests
+        timeout-minutes: @suite_timeout@
+        shell: bash
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          PYTHONUNBUFFERED: 1
+        run: modal run dev/modal_gpu_test.py::main@suite_args@
 """
 
 STEP_DUMP_ANDROID = """
@@ -692,25 +722,35 @@ def release_job(product):
 
 def test_job(product, runner):
     framework, os_name = product["framework"], product["os"]
+    # a modal cell rents its GPU: the driver, the runtime libraries and the suite
+    # all live in the container, so the hosted runner needs none of them
+    on_modal = runner.get("executor") == "modal"
     linux_glfw = framework == "glfw" and os_name == "ubuntu-latest"
     text = render(TEST_JOB_HEAD, id=slug("test", product), os=os_name,
                   framework=framework, name_abi=name_abi(product),
                   release_id=slug("release", product))
     if os_name == "macos-latest" or framework == "android":
         text += render(STEP_SETUP_ENV, framework=framework, os=os_name)
-    if os_name == "windows-latest" or linux_glfw:
+    if not on_modal and (os_name == "windows-latest" or linux_glfw):
         text += STEP_MESA
-    if linux_glfw:
+    if linux_glfw and not on_modal:
         text += STEP_GLFW_RUNTIME
     if framework == "android":
         text += STEP_KVM
+    if on_modal:
+        text += render(STEP_MODAL, modal_version=MODAL_VERSION)
     text += render(STEP_DOWNLOAD, framework=framework, os=os_name,
                    artifact_abi=f"-{product['abi']}" if "abi" in product else "")
     if framework in ("glfw", "macos"):
         text += extract_step(product)
     suite_args = f" {runner['suite_args']}" if runner["suite_args"] else ""
-    text += render(STEP_RUN_TESTS, suite_timeout=runner["suite_timeout"],
-                   framework=framework, suite_args=suite_args)
+    if on_modal:
+        text += render(STEP_RUN_TESTS_MODAL, suite_timeout=runner["suite_timeout"],
+                       suite_args=f' --suite-args "{runner["suite_args"]}"'
+                       if runner["suite_args"] else "")
+    else:
+        text += render(STEP_RUN_TESTS, suite_timeout=runner["suite_timeout"],
+                       framework=framework, suite_args=suite_args)
     if framework == "android":
         text += STEP_DUMP_ANDROID
     elif framework == "ios":
