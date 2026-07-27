@@ -36,15 +36,18 @@ PRODUCTS = (
     # because macos-glfw-release is a test cell (the Vulkan backend on a real GPU)
     {"os": "macos-latest", "framework": "glfw", "build_types": ("Release",)},
     {"os": "windows-latest", "framework": "glfw"},
-    {"os": "ubuntu-latest", "framework": "glfw"},
+    # the linux product is arm64: its test cell is a jetson, the only runner in the
+    # matrix with hardware ray tracing, and the shipped binary has to be the one that
+    # cell runs. github's arm64 hosted runners build it at no cost on a public repo
+    {"os": "ubuntu-24.04-arm", "framework": "glfw"},
     {"os": "ubuntu-latest", "framework": "android"},
     {"os": "ubuntu-latest", "framework": "android", "abi": "x86_64",
      "build_types": ("Release",)},
 )
 
-# the modal client speaks a versioned protocol to the service and pulls the whole
-# GPU cell down with it when it breaks, so CI pins it like any other toolchain
-MODAL_VERSION = "1.5.3"
+# the labels the jetson registers itself under. they must match `./config.sh --labels`
+# on the board, or its jobs queue forever instead of failing
+JETSON_LABELS = "[self-hosted, linux, ARM64, jetson]"
 
 # must hold every tests/coverage.csv triplet column: that table decides who runs the suite
 TEST_RUNNERS = {
@@ -55,14 +58,12 @@ TEST_RUNNERS = {
         "suite_timeout": 120,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
-    # the linux product on a real NVIDIA GPU rented per second from modal (see
-    # dev/modal_gpu_test.py): the hosted ubuntu runner has no GPU of its own, and
-    # lavapipe traverses acceleration structures on the CPU, which puts the gpu
-    # path-tracing pipeline out of any CI time budget. this is the only cell with
-    # hardware ray tracing, so it carries gpu_render_static; windows-glfw-release
-    # keeps the software-rasterizer coverage the cell used to provide
+    # the arm64 linux product on a self-hosted jetson, whose Tegra GPU is the only one
+    # in the matrix that exposes VK_KHR_ray_query. that makes it the only cell able to
+    # render the gpu path-tracing pipeline, so it carries gpu_render_static;
+    # windows-glfw-release keeps the software-rasterizer coverage this cell used to give
     "ubuntu-glfw-release": {
-        "executor": "modal",
+        "runs_on": JETSON_LABELS,
         "suite_args": "",
         "suite_timeout": 60,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
@@ -349,10 +350,18 @@ TEST_JOB_HEAD = """
   @id@:
     name: test (@os@, @framework@, Release@name_abi@)
     needs: @release_id@
-    runs-on: @os@
+@condition@    runs-on: @runs_on@
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+"""
+
+# a self-hosted cell executes whatever the workflow tells it to on someone's own
+# hardware, so a fork's pull request must never reach it. the maintainer's own branches
+# still do, which is what keeps this a pre-merge gate rather than a post-merge one
+SELF_HOSTED_CONDITION = """\
+    if: github.event_name == 'push' ||
+        github.event.pull_request.head.repo.full_name == github.repository
 """
 
 STEP_SETUP_ENV = """
@@ -377,13 +386,6 @@ STEP_GLFW_RUNTIME = """
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libglfw3
-"""
-
-STEP_MODAL = """
-      # the suite runs on a modal GPU container; the hosted runner only drives it
-      - name: Install Modal client
-        shell: bash
-        run: pip install modal==@modal_version@
 """
 
 STEP_KVM = """
@@ -414,6 +416,7 @@ STEP_DOWNLOAD = """
 EXTRACT_COMMANDS = {
     "macos-latest": "ditto -x -k @archive@ @extract_dir@/",
     "ubuntu-latest": "unzip -q @archive@ -d @extract_dir@/",
+    "ubuntu-24.04-arm": "unzip -q @archive@ -d @extract_dir@/",
     "windows-latest": "python3 -m zipfile -e @archive@ @extract_dir@/",
 }
 
@@ -441,20 +444,6 @@ STEP_RUN_TESTS = """
           # reach the live log minutes late and out of order
           PYTHONUNBUFFERED: 1
         run: python3 dev/run_tests.py --framework @framework@ --config Release@suite_args@
-"""
-
-STEP_RUN_TESTS_MODAL = """
-      # the container streams the suite's output into this log live and returns the
-      # screenshots and logs into the work tree, so the steps below stay unchanged.
-      # the step timeout bounds a hung container as it does a hung app
-      - name: Run Tests
-        timeout-minutes: @suite_timeout@
-        shell: bash
-        env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          PYTHONUNBUFFERED: 1
-        run: modal run dev/modal_gpu_test.py::main@suite_args@
 """
 
 STEP_DUMP_ANDROID = """
@@ -553,11 +542,18 @@ def covered_triplets():
 
 
 def host(product):
-    return product["os"].removesuffix("-latest")
+    return RUNNER_HOST[product["os"]]
 
 
 # runner labels say ubuntu, cook targets say linux
-RUNNER_SYSTEM = {"macos-latest": "macos", "windows-latest": "windows", "ubuntu-latest": "linux"}
+RUNNER_SYSTEM = {"macos-latest": "macos", "windows-latest": "windows",
+                 "ubuntu-latest": "linux", "ubuntu-24.04-arm": "linux"}
+
+# the triplet name a runner reports itself as. dev/run_tests.py derives the same name
+# from sys.platform on the machine running the suite, so both arm64 and x86 linux answer
+# to "ubuntu" and tests/coverage.csv keeps one linux column
+RUNNER_HOST = {"macos-latest": "macos", "windows-latest": "windows",
+               "ubuntu-latest": "ubuntu", "ubuntu-24.04-arm": "ubuntu"}
 
 
 def product_cook_target(product):
@@ -602,7 +598,9 @@ COOK_FAMILIES = {
     },
     "bc": {
         "id": "cook-bc",
-        "os": "ubuntu-latest",
+        # this node runs the linux product's own binary to encode, so it follows that
+        # product's architecture; the cooked output itself is architecture-independent
+        "os": "ubuntu-24.04-arm",
         "framework": "glfw",
         "role": "consume",
         "app_binary": "build_system/glfw/output/build/sparkle",
@@ -722,35 +720,31 @@ def release_job(product):
 
 def test_job(product, runner):
     framework, os_name = product["framework"], product["os"]
-    # a modal cell rents its GPU: the driver, the runtime libraries and the suite
-    # all live in the container, so the hosted runner needs none of them
-    on_modal = runner.get("executor") == "modal"
-    linux_glfw = framework == "glfw" and os_name == "ubuntu-latest"
+    # a self-hosted cell is a machine someone maintains: its GPU driver and runtime
+    # libraries are installed once, not reinstalled per job, and it needs no
+    # software rasterizer because it has a real GPU
+    self_hosted = "runs_on" in runner
+    linux_glfw = framework == "glfw" and RUNNER_SYSTEM[os_name] == "linux"
     text = render(TEST_JOB_HEAD, id=slug("test", product), os=os_name,
                   framework=framework, name_abi=name_abi(product),
-                  release_id=slug("release", product))
+                  release_id=slug("release", product),
+                  runs_on=runner.get("runs_on", os_name),
+                  condition=SELF_HOSTED_CONDITION if self_hosted else "")
     if os_name == "macos-latest" or framework == "android":
         text += render(STEP_SETUP_ENV, framework=framework, os=os_name)
-    if not on_modal and (os_name == "windows-latest" or linux_glfw):
+    if not self_hosted and (os_name == "windows-latest" or linux_glfw):
         text += STEP_MESA
-    if linux_glfw and not on_modal:
+    if linux_glfw and not self_hosted:
         text += STEP_GLFW_RUNTIME
     if framework == "android":
         text += STEP_KVM
-    if on_modal:
-        text += render(STEP_MODAL, modal_version=MODAL_VERSION)
     text += render(STEP_DOWNLOAD, framework=framework, os=os_name,
                    artifact_abi=f"-{product['abi']}" if "abi" in product else "")
     if framework in ("glfw", "macos"):
         text += extract_step(product)
     suite_args = f" {runner['suite_args']}" if runner["suite_args"] else ""
-    if on_modal:
-        text += render(STEP_RUN_TESTS_MODAL, suite_timeout=runner["suite_timeout"],
-                       suite_args=f' --suite-args "{runner["suite_args"]}"'
-                       if runner["suite_args"] else "")
-    else:
-        text += render(STEP_RUN_TESTS, suite_timeout=runner["suite_timeout"],
-                       framework=framework, suite_args=suite_args)
+    text += render(STEP_RUN_TESTS, suite_timeout=runner["suite_timeout"],
+                   framework=framework, suite_args=suite_args)
     if framework == "android":
         text += STEP_DUMP_ANDROID
     elif framework == "ios":

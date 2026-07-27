@@ -121,6 +121,16 @@ runs:
         sudo apt-get install -y libglfw3-dev
       shell: bash
 
+    # LunarG publishes no linux aarch64 SDK, so the arm64 build takes its vulkan headers,
+    # loader and spirv-cross from the distribution instead; build_system/prerequisites.py
+    # adopts /usr as VULKAN_SDK when it finds them there
+    - name: Install Vulkan from the distribution (Linux arm64)
+      if: inputs.framework == 'glfw' && contains(inputs.os, 'arm')
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y libvulkan-dev spirv-cross
+      shell: bash
+
     - name: Set up JDK 17 (Android)
       if: inputs.framework == 'android'
       uses: actions/setup-java@v5

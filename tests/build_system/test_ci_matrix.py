@@ -91,20 +91,29 @@ class CiPipelineTest(unittest.TestCase):
             tested.add(ci_matrix.tested_triplet(product))
         self.assertEqual(tested, set(ci_matrix.covered_triplets()))
 
-    def test_a_modal_cell_drives_the_container_instead_of_the_runner(self):
-        """Its GPU is rented, so the job installs the client and hands the suite to
-        dev/modal_gpu_test.py; installing lavapipe on the runner would only put a
-        software rasterizer next to a GPU that never sees the app."""
+    def test_a_self_hosted_cell_is_labelled_and_closed_to_forks(self):
+        """It runs on a machine someone owns, so a fork's pull request must not reach
+        it, and it needs no software rasterizer next to its real GPU."""
         for product in release_products():
             runner = ci_matrix.suite_runner(product)
-            if not runner or runner.get("executor") != "modal":
+            if not runner or "runs_on" not in runner:
                 continue
             text = JOBS[ci_matrix.slug("test", product)]
-            self.assertIn(f"pip install modal=={ci_matrix.MODAL_VERSION}", text)
-            self.assertIn("modal run dev/modal_gpu_test.py::main", text)
-            self.assertIn("MODAL_TOKEN_SECRET", text)
+            self.assertIn(f"runs-on: {runner['runs_on']}", text)
+            self.assertIn("head.repo.full_name == github.repository", text)
             self.assertNotIn("setup-mesa", text)
-            self.assertNotIn("run_tests.py", text)
+            self.assertNotIn("--software", text)
+
+    def test_a_cook_node_runs_on_its_own_product_architecture(self):
+        """The consuming node encodes by running that product's binary, so a cook host
+        on a different architecture than the build would only produce exec errors."""
+        for family, spec in ci_matrix.COOK_FAMILIES.items():
+            product = ci_matrix.cook_product(family)
+            build = [candidate for candidate in ci_matrix.PRODUCTS
+                     if candidate["framework"] == product["framework"]
+                     and ci_matrix.host(candidate) == ci_matrix.host(product)]
+            self.assertTrue(build, f"{family}: no product builds what this node runs")
+            self.assertEqual(build[0]["os"], spec["os"], f"{family} cooks on the wrong host")
 
     def test_unmatched_coverage_column_fails_loudly(self):
         original = ci_matrix.covered_triplets
