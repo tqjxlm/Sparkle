@@ -63,7 +63,11 @@ ICD_DIR = pathlib.Path("/usr/share/vulkan/icd.d")
 ICD_ENTRY_POINT = "vk_icdGetInstanceProcAddr"
 
 image = (
-    modal.Image.debian_slim(python_version="3.12")
+    # the same release the package is built on: it links against that runner's
+    # glibc, and debian stable's is older than the binary's floor. the vulkan
+    # loader tracks the distribution too, and a 2023 loader negotiates poorly
+    # with a driver this recent
+    modal.Image.from_registry("ubuntu:24.04", add_python="3.12")
     .apt_install(
         # the vulkan loader, and vulkaninfo for the probe and the device assertion
         "libvulkan1", "vulkan-tools",
@@ -72,6 +76,11 @@ image = (
         "libgl1", "libx11-6", "libxrandr2", "libxinerama1", "libxcursor1", "libxi6",
         "curl", "ca-certificates",
     )
+    # those packages drag mesa in, and a software driver in a GPU container is
+    # only ever a way to pass without a GPU. the driver manifest this runner needs
+    # is written at startup, once the mounted driver has been identified
+    .run_commands("rm -f /usr/share/vulkan/icd.d/*.json"
+                  " /usr/share/vulkan/implicit_layer.d/*.json")
     .env({
         # the container runtime injects the vulkan ICD only for a graphics-capable
         # container; ensure_nvidia_icd below covers the platforms that ignore this
@@ -100,23 +109,32 @@ def _driver_candidates():
     return list(seen.values())
 
 
-def _exports_icd_entry_point(path):
-    """Whether this library is a Vulkan driver, asked of the library itself.
+def _implements_vulkan_driver(path):
+    """Whether this library is a working Vulkan driver, asked the way the loader asks.
 
     Which file carries the ICD entry point is a driver-packaging detail that varies
     by version and by how much of the userspace a container runtime mounted, so
-    naming it by convention guesses at something dlsym can simply answer."""
+    naming it by convention guesses at something the library can answer. Exporting
+    the symbol is not enough, though: a driver that declines to initialize still
+    exports it and then returns nothing, which is exactly how the loader reports
+    finding no drivers. So ask it for vkCreateInstance, as the loader does."""
     try:
-        library = ctypes.CDLL(str(path))
+        entry = getattr(ctypes.CDLL(str(path)), ICD_ENTRY_POINT)
+    except (OSError, AttributeError):
+        return False
+
+    entry.restype = ctypes.c_void_p
+    entry.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    try:
+        return bool(entry(None, b"vkCreateInstance"))
     except OSError:
         return False
-    return hasattr(library, ICD_ENTRY_POINT)
 
 
 def _driver_library():
     """The mounted NVIDIA library that actually implements the Vulkan ICD."""
     for path in _driver_candidates():
-        if _exports_icd_entry_point(path):
+        if _implements_vulkan_driver(path):
             return str(path)
     return None
 
@@ -141,7 +159,7 @@ def ensure_nvidia_icd():
     # that actually answers to the loader; ours did not, the first time around
     manifest = next(
         (path for path in sorted(ICD_DIR.glob("*nvidia*.json"))
-         if _exports_icd_entry_point(
+         if _implements_vulkan_driver(
              json.loads(path.read_text()).get("ICD", {}).get("library_path", ""))),
         None) if ICD_DIR.is_dir() else None
 
@@ -157,9 +175,8 @@ def ensure_nvidia_icd():
         }))
         print(f"wrote vulkan ICD manifest for {library}", flush=True)
 
-    # libglfw3 and libgl1 pull mesa in as a dependency, so a lavapipe ICD sits in
-    # this container next to the driver's. Naming the one we mean keeps the loader
-    # from quietly answering with a CPU device.
+    # the image ships no other manifest, but naming the one we mean costs nothing
+    # and keeps a future dependency from reintroducing a CPU device to fall back to
     os.environ["VK_DRIVER_FILES"] = str(manifest)
     os.environ["VK_ICD_FILENAMES"] = str(manifest)
     return str(manifest)
@@ -191,20 +208,30 @@ def diagnostics():
     rejects. Only the loader's own debug output distinguishes the last two."""
     code, smi = run_text(["nvidia-smi"])
     nodes = sorted(str(path) for path in pathlib.Path("/dev").glob("nvidia*"))
+    # nvidia's vulkan driver reads its per-GPU state from procfs during init, and
+    # a container can hold the device nodes without it. nvidia-smi does not care,
+    # which is why it can answer on a container where vulkan cannot start
+    procfs = pathlib.Path("/proc/driver/nvidia")
+    proc_entries = (sorted(str(path) for path in procfs.rglob("*"))[:20]
+                    if procfs.is_dir() else ["absent"])
+    _, versions = run_text(["dpkg-query", "-W", "-f", "${Package} ${Version}\\n",
+                            "libvulkan1", "libc6"])
     manifests = sorted(ICD_DIR.glob("*.json")) if ICD_DIR.is_dir() else []
     listing = "\n".join(f"  {path}: {path.read_text().strip()}" for path in manifests)
     # which mounted library, if any, the loader would accept as a driver. an empty
     # column here means this platform mounts no vulkan-capable userspace at all,
     # which no amount of manifest writing can work around
     libraries = "\n".join(
-        f"  {'ICD ' if _exports_icd_entry_point(path) else '    '} {path}"
+        f"  {'ICD ' if _implements_vulkan_driver(path) else '    '} {path}"
         for path in _driver_candidates())
     _, loader = run_text(["vulkaninfo", "--summary"],
                          env=dict(os.environ, VK_LOADER_DEBUG="error,warn"))
 
     return "\n".join([
         f"--- nvidia-smi (exit {code})\n{smi}",
+        f"--- loader and libc\n{versions}",
         f"--- device nodes: {nodes or 'none'}",
+        f"--- /proc/driver/nvidia\n  " + "\n  ".join(proc_entries),
         f"--- mounted nvidia libraries ({ICD_ENTRY_POINT} exporters marked ICD)\n"
         f"{libraries or '  none'}",
         f"--- ICD manifests\n{listing or '  none'}",
