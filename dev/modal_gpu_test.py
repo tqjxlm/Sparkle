@@ -24,6 +24,7 @@ default, which leaves the Vulkan ICD out of the container even though the GPU
 itself is present.
 """
 
+import ctypes
 import io
 import json
 import os
@@ -58,6 +59,9 @@ OUTPUT_DIRS = (
 
 ICD_DIR = pathlib.Path("/usr/share/vulkan/icd.d")
 
+# the symbol the vulkan loader looks for to decide a library is a driver
+ICD_ENTRY_POINT = "vk_icdGetInstanceProcAddr"
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install(
@@ -82,20 +86,38 @@ image = (
 app = modal.App("sparkle-gpu-test", image=image)
 
 
-def _driver_library():
-    """Absolute path of the NVIDIA GLX/Vulkan driver library the runtime mounted."""
-    candidates = [
-        "/usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0",
-        "/usr/lib64/libGLX_nvidia.so.0",
-    ]
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            return candidate
+def _driver_candidates():
+    """Every NVIDIA userspace library the runtime mounted, newest path layout first."""
+    roots = ("/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib")
+    seen = {}
+    for root in roots:
+        directory = pathlib.Path(root)
+        if not directory.is_dir():
+            continue
+        for pattern in ("libGLX_nvidia.so*", "libnvidia*.so*"):
+            for path in sorted(directory.glob(pattern)):
+                seen.setdefault(path.resolve(), path)
+    return list(seen.values())
 
-    cache = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True).stdout
-    for line in cache.splitlines():
-        if "libGLX_nvidia.so.0" in line and "=>" in line:
-            return line.split("=>")[-1].strip()
+
+def _exports_icd_entry_point(path):
+    """Whether this library is a Vulkan driver, asked of the library itself.
+
+    Which file carries the ICD entry point is a driver-packaging detail that varies
+    by version and by how much of the userspace a container runtime mounted, so
+    naming it by convention guesses at something dlsym can simply answer."""
+    try:
+        library = ctypes.CDLL(str(path))
+    except OSError:
+        return False
+    return hasattr(library, ICD_ENTRY_POINT)
+
+
+def _driver_library():
+    """The mounted NVIDIA library that actually implements the Vulkan ICD."""
+    for path in _driver_candidates():
+        if _exports_icd_entry_point(path):
+            return str(path)
     return None
 
 
@@ -112,11 +134,16 @@ def ensure_nvidia_icd():
     ICD, fails to resolve its transitive dependencies, and drops it — silently,
     because a loader that cannot use one driver just enumerates the others.
 
-    Returns the manifest path, or None when no NVIDIA driver is present at all."""
+    Returns the manifest path, or None when no mounted library implements the ICD."""
     subprocess.run(["ldconfig"], check=False)
 
-    existing = sorted(ICD_DIR.glob("*nvidia*.json")) if ICD_DIR.is_dir() else []
-    manifest = existing[0] if existing else None
+    # a manifest the platform shipped is only worth keeping if it names a library
+    # that actually answers to the loader; ours did not, the first time around
+    manifest = next(
+        (path for path in sorted(ICD_DIR.glob("*nvidia*.json"))
+         if _exports_icd_entry_point(
+             json.loads(path.read_text()).get("ICD", {}).get("library_path", ""))),
+        None) if ICD_DIR.is_dir() else None
 
     if manifest is None:
         library = _driver_library()
@@ -166,12 +193,20 @@ def diagnostics():
     nodes = sorted(str(path) for path in pathlib.Path("/dev").glob("nvidia*"))
     manifests = sorted(ICD_DIR.glob("*.json")) if ICD_DIR.is_dir() else []
     listing = "\n".join(f"  {path}: {path.read_text().strip()}" for path in manifests)
+    # which mounted library, if any, the loader would accept as a driver. an empty
+    # column here means this platform mounts no vulkan-capable userspace at all,
+    # which no amount of manifest writing can work around
+    libraries = "\n".join(
+        f"  {'ICD ' if _exports_icd_entry_point(path) else '    '} {path}"
+        for path in _driver_candidates())
     _, loader = run_text(["vulkaninfo", "--summary"],
                          env=dict(os.environ, VK_LOADER_DEBUG="error,warn"))
 
     return "\n".join([
         f"--- nvidia-smi (exit {code})\n{smi}",
         f"--- device nodes: {nodes or 'none'}",
+        f"--- mounted nvidia libraries ({ICD_ENTRY_POINT} exporters marked ICD)\n"
+        f"{libraries or '  none'}",
         f"--- ICD manifests\n{listing or '  none'}",
         f"--- loader diagnostics\n{loader}",
     ])
