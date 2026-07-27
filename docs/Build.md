@@ -273,6 +273,8 @@ open build_system/macos/project/sparkle.xcodeproj      # or build_system/ios/pro
 
 ### Android Studio (Only for android framework)
 
+The project builds with Android Gradle Plugin 9.3, which needs a matching Android Studio (Panda 3 or newer) and JDK 17 or newer to sync.
+
 ``` shell
 python3 build.py --framework=android --generate_only
 # open project folder `build_system/android` in Android Studio
