@@ -106,31 +106,75 @@ def ensure_nvidia_icd():
     asks for graphics capabilities, and serverless GPU platforms commonly grant the
     compute-only set regardless of what the image requests. The driver library is
     mounted either way, so the manifest the loader wants can simply be written.
+
+    The driver is mounted after the image was built, so its libraries are absent
+    from the linker cache the image baked. Without a refresh the loader dlopens the
+    ICD, fails to resolve its transitive dependencies, and drops it — silently,
+    because a loader that cannot use one driver just enumerates the others.
+
     Returns the manifest path, or None when no NVIDIA driver is present at all."""
+    subprocess.run(["ldconfig"], check=False)
+
     existing = sorted(ICD_DIR.glob("*nvidia*.json")) if ICD_DIR.is_dir() else []
-    if existing:
-        return str(existing[0])
+    manifest = existing[0] if existing else None
 
-    library = _driver_library()
-    if library is None:
-        return None
+    if manifest is None:
+        library = _driver_library()
+        if library is None:
+            return None
+        ICD_DIR.mkdir(parents=True, exist_ok=True)
+        manifest = ICD_DIR / "nvidia_icd.json"
+        manifest.write_text(json.dumps({
+            "file_format_version": "1.0.0",
+            "ICD": {"library_path": library, "api_version": "1.3.277"},
+        }))
+        print(f"wrote vulkan ICD manifest for {library}", flush=True)
 
-    ICD_DIR.mkdir(parents=True, exist_ok=True)
-    manifest = ICD_DIR / "nvidia_icd.json"
-    manifest.write_text(json.dumps({
-        "file_format_version": "1.0.0",
-        "ICD": {"library_path": library, "api_version": "1.3.277"},
-    }))
-    print(f"wrote vulkan ICD manifest for {library}", flush=True)
+    # libglfw3 and libgl1 pull mesa in as a dependency, so a lavapipe ICD sits in
+    # this container next to the driver's. Naming the one we mean keeps the loader
+    # from quietly answering with a CPU device.
+    os.environ["VK_DRIVER_FILES"] = str(manifest)
+    os.environ["VK_ICD_FILENAMES"] = str(manifest)
     return str(manifest)
+
+
+def run_text(command, **kwargs):
+    """Run a command for its output, reporting rather than raising when it cannot.
+
+    Every caller here is diagnosing a container that may be missing the very tools
+    it is being asked about, so a missing binary is an answer, not an error."""
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, **kwargs)
+    except OSError as error:
+        return 127, f"{command[0]}: {error}"
+    return result.returncode, result.stdout + result.stderr
 
 
 def vulkan_summary():
     """vulkaninfo's device summary, or the failure that stopped it."""
-    result = subprocess.run(["vulkaninfo", "--summary"],
-                            capture_output=True, text=True)
-    return result.stdout if result.returncode == 0 else (
-        f"vulkaninfo failed (exit {result.returncode})\n{result.stderr}")
+    code, output = run_text(["vulkaninfo", "--summary"])
+    return output if code == 0 else f"vulkaninfo failed (exit {code})\n{output}"
+
+
+def diagnostics():
+    """Why the loader chose what it chose — collected before anyone has to ask.
+
+    A rented GPU can fail to reach vulkan at several layers: no GPU attached, no
+    device nodes, a driver whose libraries do not resolve, or a manifest the loader
+    rejects. Only the loader's own debug output distinguishes the last two."""
+    code, smi = run_text(["nvidia-smi"])
+    nodes = sorted(str(path) for path in pathlib.Path("/dev").glob("nvidia*"))
+    manifests = sorted(ICD_DIR.glob("*.json")) if ICD_DIR.is_dir() else []
+    listing = "\n".join(f"  {path}: {path.read_text().strip()}" for path in manifests)
+    _, loader = run_text(["vulkaninfo", "--summary"],
+                         env=dict(os.environ, VK_LOADER_DEBUG="error,warn"))
+
+    return "\n".join([
+        f"--- nvidia-smi (exit {code})\n{smi}",
+        f"--- device nodes: {nodes or 'none'}",
+        f"--- ICD manifests\n{listing or '  none'}",
+        f"--- loader diagnostics\n{loader}",
+    ])
 
 
 def device_report():
@@ -141,12 +185,16 @@ def device_report():
     extensions = subprocess.run(["vulkaninfo"], capture_output=True, text=True).stdout
     names = [line.split("=", 1)[1].strip()
              for line in summary.splitlines() if "deviceName" in line]
+    usable = names and not any("llvmpipe" in name.lower() for name in names)
     return {
         "icd": manifest,
         "summary": summary,
         "devices": names,
         "ray_query": "VK_KHR_ray_query" in extensions,
         "acceleration_structure": "VK_KHR_acceleration_structure" in extensions,
+        # cheap to collect, and the run that needed it is already over by the time
+        # anyone reads the log
+        "diagnostics": "" if usable else diagnostics(),
     }
 
 
@@ -159,13 +207,13 @@ def require_gpu_device(report):
     if not report["devices"]:
         raise RuntimeError(
             "no vulkan device in the container: the NVIDIA ICD is missing and could"
-            f" not be reconstructed.\n{report['summary']}")
+            f" not be reconstructed.\n{report['summary']}\n{report['diagnostics']}")
 
     software = [name for name in report["devices"] if "llvmpipe" in name.lower()]
     if software:
         raise RuntimeError(
             f"vulkan resolved to a software device {software}: the point of this"
-            f" runner is the physical GPU.\n{report['summary']}")
+            f" runner is the physical GPU.\n{report['summary']}\n{report['diagnostics']}")
 
     if not (report["ray_query"] and report["acceleration_structure"]):
         raise RuntimeError(
