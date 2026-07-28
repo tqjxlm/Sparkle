@@ -52,7 +52,7 @@ class CiPipelineTest(unittest.TestCase):
         producers = []
         for family, spec in ci_matrix.COOK_FAMILIES.items():
             text = JOBS[spec["id"]]
-            self.assertIn(f"runs-on: {spec['os']}", text)
+            self.assertIn(f"runs-on: {spec.get('runs_on', spec['os'])}", text)
             self.assertIn(f"--framework {spec['framework']} ", text)
             self.assertIn(f"pkill -f {spec['app_binary']} ", text)
             self.assertIn(f"path: {spec['pool_dir']}", text)
@@ -104,16 +104,23 @@ class CiPipelineTest(unittest.TestCase):
             self.assertNotIn("setup-mesa", text)
             self.assertNotIn("--software", text)
 
-    def test_a_cook_node_runs_on_its_own_product_architecture(self):
-        """The consuming node encodes by running that product's binary, so a cook host
-        on a different architecture than the build would only produce exec errors."""
+    def test_a_cook_node_executes_on_its_products_target_architecture(self):
+        """The consuming node encodes by running that product's binary, so it executes on
+        a host of the product's *target* architecture — which is not its build host when
+        the product is cross-compiled."""
         for family, spec in ci_matrix.COOK_FAMILIES.items():
             product = ci_matrix.cook_product(family)
             build = [candidate for candidate in ci_matrix.PRODUCTS
                      if candidate["framework"] == product["framework"]
                      and ci_matrix.host(candidate) == ci_matrix.host(product)]
             self.assertTrue(build, f"{family}: no product builds what this node runs")
-            self.assertEqual(build[0]["os"], spec["os"], f"{family} cooks on the wrong host")
+
+            runs_on = spec.get("runs_on", spec["os"])
+            if build[0].get("target_arch") == "aarch64":
+                self.assertIn("arm", runs_on,
+                              f"{family} would run a cross-built arm64 binary on {runs_on}")
+            else:
+                self.assertEqual(runs_on, spec["os"], f"{family} cooks on the wrong host")
 
     def test_unmatched_coverage_column_fails_loudly(self):
         original = ci_matrix.covered_triplets

@@ -36,10 +36,11 @@ PRODUCTS = (
     # because macos-glfw-release is a test cell (the Vulkan backend on a real GPU)
     {"os": "macos-latest", "framework": "glfw", "build_types": ("Release",)},
     {"os": "windows-latest", "framework": "glfw"},
-    # the linux product is arm64: its test cell is a jetson, the only runner in the
-    # matrix with hardware ray tracing, and the shipped binary has to be the one that
-    # cell runs. github's arm64 hosted runners build it at no cost on a public repo
-    {"os": "ubuntu-24.04-arm", "framework": "glfw"},
+    # the linux product targets arm64 — its test cell is a jetson, the only runner in
+    # the matrix with hardware ray tracing — but it is cross-compiled on an x86 host,
+    # because nothing that runs during the build ships an aarch64 linux binary (no
+    # LunarG SDK, no DXC). see cmake/aarch64-linux-toolchain.cmake
+    {"os": "ubuntu-latest", "framework": "glfw", "target_arch": "aarch64"},
     {"os": "ubuntu-latest", "framework": "android"},
     {"os": "ubuntu-latest", "framework": "android", "abi": "x86_64",
      "build_types": ("Release",)},
@@ -240,7 +241,7 @@ COOK_JOB = """
   @id@:
     name: cook (@os@, @framework@, Release)
     needs: @needs@
-    runs-on: @os@
+    runs-on: @runs_on@
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -598,9 +599,11 @@ COOK_FAMILIES = {
     },
     "bc": {
         "id": "cook-bc",
-        # this node runs the linux product's own binary to encode, so it follows that
-        # product's architecture; the cooked output itself is architecture-independent
-        "os": "ubuntu-24.04-arm",
+        "os": "ubuntu-latest",
+        # this node encodes by running the linux product's own binary, which is arm64
+        # even though it is built on x86, so it executes on an arm64 host. the cooked
+        # output it produces is architecture-independent
+        "runs_on": "ubuntu-24.04-arm",
         "framework": "glfw",
         "role": "consume",
         "app_binary": "build_system/glfw/output/build/sparkle",
@@ -686,6 +689,7 @@ def cook_job(family):
                            for target in targets)
 
     return render(COOK_JOB, id=spec["id"], os=spec["os"], framework=spec["framework"],
+                  runs_on=spec.get("runs_on", spec["os"]),
                   needs=needs, pre_steps=spec.get("pre_steps", ""),
                   extract_step=extract_step(product), pool_download=pool_download,
                   app_binary=spec["app_binary"], diagnostics=spec["diagnostics"],
@@ -697,6 +701,8 @@ def build_job(product, config):
     extras = ""
     if "abi" in product:
         extras += f"          abi: {product['abi']}\n"
+    if "target_arch" in product:
+        extras += f"          target-arch: {product['target_arch']}\n"
     # the simulator product builds unsigned, so it needs no signing secrets
     if product["framework"] == "ios" and "abi" not in product:
         extras += BUILD_IOS_SECRETS

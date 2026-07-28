@@ -240,10 +240,10 @@ jobs:
           build-type: Release
 
   build-ubuntu-glfw-debug:
-    name: build (ubuntu-24.04-arm, glfw, Debug)
+    name: build (ubuntu-latest, glfw, Debug)
     needs: changes
     if: needs.changes.outputs.code == 'true' && github.ref_type != 'tag'
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -252,14 +252,15 @@ jobs:
         uses: ./.github/actions/build-platform
         with:
           framework: glfw
-          os: ubuntu-24.04-arm
+          os: ubuntu-latest
           build-type: Debug
+          target-arch: aarch64
 
   build-ubuntu-glfw-release:
-    name: build (ubuntu-24.04-arm, glfw, Release)
+    name: build (ubuntu-latest, glfw, Release)
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -268,8 +269,9 @@ jobs:
         uses: ./.github/actions/build-platform
         with:
           framework: glfw
-          os: ubuntu-24.04-arm
+          os: ubuntu-latest
           build-type: Release
+          target-arch: aarch64
 
   build-ubuntu-android-debug:
     name: build (ubuntu-latest, android, Debug)
@@ -401,7 +403,7 @@ jobs:
           path: build_system/macos/output/build/sparkle.app/Contents/SharedSupport/cooked
 
   cook-bc:
-    name: cook (ubuntu-24.04-arm, glfw, Release)
+    name: cook (ubuntu-latest, glfw, Release)
     needs: [cook, build-ubuntu-glfw-release]
     runs-on: ubuntu-24.04-arm
     steps:
@@ -413,7 +415,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           framework: glfw
-          os: ubuntu-24.04-arm
+          os: ubuntu-latest
 
       # the released linux binary links libglfw at runtime even in headless mode
       - name: Install GLFW runtime
@@ -425,7 +427,7 @@ jobs:
       - name: Download build product
         uses: actions/download-artifact@v8
         with:
-          name: build-glfw-ubuntu-24.04-arm-Release
+          name: build-glfw-ubuntu-latest-Release
           path: build_system/glfw/product
 
       # extraction must preserve the executable bit of the binary, which python's zipfile
@@ -848,7 +850,7 @@ jobs:
           path: build_system/glfw/output/build/generated/screenshots/
 
   release-ubuntu-glfw:
-    name: release (ubuntu-24.04-arm, glfw, Release)
+    name: release (ubuntu-latest, glfw, Release)
     needs: [build-ubuntu-glfw-release, cook-bc]
     runs-on: ubuntu-latest
     steps:
@@ -859,7 +861,7 @@ jobs:
         uses: ./.github/actions/release-platform
         with:
           framework: glfw
-          os: ubuntu-24.04-arm
+          os: ubuntu-latest
           build-type: Release
           macos-certificate-p12-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
           macos-certificate-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
@@ -874,7 +876,7 @@ jobs:
           ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
   test-ubuntu-glfw:
-    name: test (ubuntu-24.04-arm, glfw, Release)
+    name: test (ubuntu-latest, glfw, Release)
     needs: release-ubuntu-glfw
     if: github.event_name == 'push' ||
         github.event.pull_request.head.repo.full_name == github.repository
@@ -887,7 +889,7 @@ jobs:
       - name: Download app
         uses: actions/download-artifact@v8
         with:
-          name: release-glfw-ubuntu-24.04-arm-Release
+          name: release-glfw-ubuntu-latest-Release
           path: build_system/glfw/product
 
       # extraction must preserve the executable bit of the binary, which python's zipfile
@@ -924,7 +926,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-screenshots-glfw-ubuntu-24.04-arm
+          name: test-screenshots-glfw-ubuntu-latest
           path: build_system/glfw/output/build/generated/screenshots/
 
   release-ubuntu-android:

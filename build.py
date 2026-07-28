@@ -274,6 +274,9 @@ def parse_args(args=None):
     parser.add_argument("--ios_platform", choices=["device", "simulator"],
                         help="iOS target platform (default device, the shipping target);"
                         " simulator targets the host's iOS Simulator and builds unsigned")
+    parser.add_argument("--target_arch", choices=["aarch64"],
+                        help="cross-compile the desktop product for this architecture instead"
+                        " of the host's; the build tools keep running on the host")
 
     # Unknown args pass through to the app (cook stage runs and run.py launches)
     parsed_args, unknown_args = parser.parse_known_args(args)
@@ -298,6 +301,7 @@ def parse_args(args=None):
         "unknown_args": unknown_args,
         "android_abi": parsed_args.android_abi,
         "ios_platform": parsed_args.ios_platform,
+        "target_arch": parsed_args.target_arch,
         "generate_only": parsed_args.generate_only,
         "configure_only": parsed_args.configure_only,
         "clangd": parsed_args.clangd,

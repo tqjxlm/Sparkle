@@ -13,6 +13,25 @@ framework_args = ["-DUSE_GLFW=ON"]
 is_windows = platform.system() == "Windows"
 
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPTPATH))
+
+
+def get_cross_args(args):
+    """Point CMake at the cross toolchain when the product targets another architecture.
+
+    The compilers stay the host's — clang cross-compiles natively — so only the target
+    triple, the library search and the find rules change. See the toolchain file for why
+    the linux product is built this way rather than natively."""
+    target_arch = args.get("target_arch")
+    if not target_arch:
+        return []
+
+    toolchain = os.path.join(PROJECT_ROOT, "cmake", f"{target_arch}-linux-toolchain.cmake")
+    if not os.path.exists(toolchain):
+        raise RuntimeError(f"No cross toolchain file for {target_arch}: {toolchain}")
+    return [f"-DCMAKE_TOOLCHAIN_FILE={toolchain}"]
+
+
 def get_toolchain_args():
     if not is_windows:
         return []
@@ -112,7 +131,8 @@ def configure(args, is_generate_sln):
     cmake_cmd = [
         args["cmake_executable"],
         "../../..",
-    ] + generator_args + args["cmake_options"] + compiler_args + framework_args + get_toolchain_args()
+    ] + generator_args + args["cmake_options"] + compiler_args + framework_args \
+        + get_toolchain_args() + get_cross_args(args)
 
     if is_windows and not is_generate_sln:
         cmake_cmd = get_cmd_with_vcvars(vs_path, cmake_cmd)

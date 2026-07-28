@@ -96,7 +96,17 @@ No hosted runner has a GPU, and hosted macos reports `supportsRaytracing == fals
 
 The whole linux product moved to arm64 rather than adding a second one: the shipped binary has to be the one the test cell runs, and GitHub's arm64 hosted runners build it at no cost on a public repo. The cook stage follows the same architecture, because the BC node encodes by running that product's own binary — the cooked output it produces is architecture-independent, so the cook graph is otherwise unchanged.
 
-LunarG publishes no linux aarch64 SDK, so on that host [build_system/prerequisites.py](../build_system/prerequisites.py) adopts the distribution's Vulkan (`VULKAN_SDK=/usr`) instead of downloading one. `libvulkan-dev` and `spirv-cross` are the packages it needs; cmake, ninja, ispc and slang all publish aarch64 assets and are selected by `host_arch()`.
+The product is **cross-compiled on an x86 host** rather than built natively, because nothing that runs *during* the build ships an aarch64 linux binary: LunarG publishes no aarch64 Vulkan SDK, and DXC — which NRD needs to compile its HLSL to SPIR-V — has no official aarch64 linux release either. Cross-compiling keeps dxc, slangc, ispc and ShaderMake on the host where those prebuilts exist, and only the linked libraries come from the target ([cmake/aarch64-linux-toolchain.cmake](../cmake/aarch64-linux-toolchain.cmake), selected by `build.py --target_arch aarch64`). Target libraries come from multiarch (`libvulkan-dev:arm64`, `libglfw3-dev:arm64` off ports.ubuntu.com), so the runner needs its existing sources pinned to amd64 first.
+
+Three hosts therefore appear for one product, and the split is deliberate:
+
+| stage | host | why |
+| ----- | ---- | --- |
+| build | `ubuntu-latest` (x86) | the build-time tools only exist for x86 |
+| cook | `ubuntu-24.04-arm` | it encodes by *running* the product's own binary, which is arm64 |
+| test | the jetson | the only runner exposing `VK_KHR_ray_query` |
+
+A job that executes on arm64 still needs a host Vulkan SDK for `build.py`, and there is none to download, so those runners take `libvulkan-dev` and `spirv-cross` from the distribution and [build_system/prerequisites.py](../build_system/prerequisites.py) adopts `/usr` as `VULKAN_SDK`. cmake, ninja, ispc and slang all publish aarch64 assets, selected by `host_arch()`. The prerequisite cache is keyed by runner architecture, since it holds host binaries and the cook node shares an os label with the x86 build.
 
 ### Jetson test runner
 

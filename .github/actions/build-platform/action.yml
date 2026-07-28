@@ -13,6 +13,9 @@ inputs:
   abi:
     description: "Product variant when it differs from the default (keys the artifact name): an android target ABI, or 'simulator' for ios"
     default: ""
+  target-arch:
+    description: "Cross-compile the desktop product for this architecture instead of the runner's (e.g. aarch64)"
+    default: ""
   ios-certificate-p12-base64:
     default: ""
   ios-certificate-password:
@@ -45,6 +48,7 @@ runs:
         os: ${{ inputs.os }}
         build-type: ${{ inputs.build-type }}
         abi: ${{ inputs.abi }}
+        target-arch: ${{ inputs.target-arch }}
 
     # the simulator variant builds unsigned and needs no certificates
     - name: Setup Signing Certificates (iOS)
@@ -71,7 +75,7 @@ runs:
       shell: bash
       run: |
         for attempt in 1 2 3; do
-          python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --configure_only ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }} && exit 0
+          python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --configure_only ${{ inputs.target-arch != '' && format('--target_arch {0}', inputs.target-arch) || '' }} ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }} && exit 0
           echo "configure attempt ${attempt} failed"
           sleep 20
         done
@@ -81,7 +85,7 @@ runs:
       shell: bash
       env:
         SPARKLE_BUILD_JOBS: 8
-      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --stage build ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }}
+      run: python3 build.py --framework ${{ inputs.framework }} --config ${{ inputs.build-type }} --stage build ${{ inputs.target-arch != '' && format('--target_arch {0}', inputs.target-arch) || '' }} ${{ inputs.abi != '' && format(inputs.framework == 'ios' && '--ios_platform {0}' || '--android_abi {0}', inputs.abi) || '' }} ${{ steps.setup-environment.outputs.build-args }}
 
     # the raw build product; the release stage swaps in the cooked content image
     - name: Archive build product
