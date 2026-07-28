@@ -125,15 +125,11 @@ runs:
         sudo apt-get install -y libglfw3-dev
       shell: bash
 
-    # cross-compiling keeps every build-time tool (dxc, slangc, ispc, ShaderMake) on the
-    # host, where prebuilt binaries exist; only the linked libraries come from the target.
-    # arm64 packages live on ports.ubuntu.com, so the existing amd64 sources must be
-    # pinned to their own architecture first or every apt update fails on the other one
-    # keyed on the runner rather than the product: this is for jobs that execute on arm64
-    # (the cook node runs the product's own binary), where build.py still wants a host
-    # Vulkan SDK and LunarG publishes no aarch64 build
-    - name: Install Vulkan from the distribution (arm64 host)
-      if: inputs.framework == 'glfw' && runner.arch == 'ARM64'
+    # for jobs that *execute* on arm64 linux — the cook node runs the product's own
+    # binary — where build.py still wants a host Vulkan SDK and LunarG publishes no
+    # aarch64 build. the os test is not redundant: hosted macos runners are ARM64 too
+    - name: Install Vulkan from the distribution (arm64 linux host)
+      if: inputs.framework == 'glfw' && runner.os == 'Linux' && runner.arch == 'ARM64'
       shell: bash
       run: |
         sudo apt-get update -qq
