@@ -101,6 +101,8 @@ class CiPipelineTest(unittest.TestCase):
             text = JOBS[ci_matrix.slug("test", product)]
             self.assertIn(f"runs-on: {runner['runs_on']}", text)
             self.assertIn("head.repo.full_name == github.repository", text)
+            # an unregistered board must skip the cell, not queue against it
+            self.assertIn(f"vars.{runner['runner_switch']} == 'true'", text)
             self.assertNotIn("setup-mesa", text)
             self.assertNotIn("--software", text)
 

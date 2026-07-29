@@ -47,8 +47,13 @@ PRODUCTS = (
 )
 
 # the labels the jetson registers itself under. they must match `./config.sh --labels`
-# on the board, or its jobs queue forever instead of failing
+# on the board, or its jobs match no runner
 JETSON_LABELS = "[self-hosted, linux, ARM64, jetson]"
+
+# the repository variable that admits the jetson cell. set it to "true" once the board
+# is registered; unset or anything else skips the cell, which is what keeps an offline
+# board from queueing its job for a day and then failing the gate
+JETSON_SWITCH = "JETSON_RUNNER"
 
 # must hold every tests/coverage.csv triplet column: that table decides who runs the suite
 TEST_RUNNERS = {
@@ -65,6 +70,7 @@ TEST_RUNNERS = {
     # windows-glfw-release keeps the software-rasterizer coverage this cell used to give
     "ubuntu-glfw-release": {
         "runs_on": JETSON_LABELS,
+        "runner_switch": JETSON_SWITCH,
         "suite_args": "",
         "suite_timeout": 60,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
@@ -357,12 +363,22 @@ TEST_JOB_HEAD = """
         uses: actions/checkout@v7
 """
 
-# a self-hosted cell executes whatever the workflow tells it to on someone's own
-# hardware, so a fork's pull request must never reach it. the maintainer's own branches
-# still do, which is what keeps this a pre-merge gate rather than a post-merge one
+# A self-hosted cell needs two things to be true.
+#
+# Its board is not always registered, and a job whose labels match no runner does not
+# fail — it queues, for the 24 hours github allows, and only then cancels and takes the
+# gate down with it. The repository variable is the switch that admits the cell, so an
+# absent or offline board skips cleanly and doubles as a kill switch.
+#
+# And it executes whatever the workflow tells it to on hardware someone owns, so a
+# fork's pull request must never reach it, while the maintainer's own branches still do.
+# This condition is defence in depth rather than the real gate: it lives in a file a
+# fork's pull request can rewrite. The gate is the repository's "require approval for
+# all outside collaborators" setting. See docs/CI.md.
 SELF_HOSTED_CONDITION = """\
-    if: github.event_name == 'push' ||
-        github.event.pull_request.head.repo.full_name == github.repository
+    if: vars.@runner_switch@ == 'true' &&
+        (github.event_name == 'push' ||
+         github.event.pull_request.head.repo.full_name == github.repository)
 """
 
 STEP_SETUP_ENV = """
@@ -735,7 +751,9 @@ def test_job(product, runner):
                   framework=framework, name_abi=name_abi(product),
                   release_id=slug("release", product),
                   runs_on=runner.get("runs_on", os_name),
-                  condition=SELF_HOSTED_CONDITION if self_hosted else "")
+                  condition=render(SELF_HOSTED_CONDITION,
+                                   runner_switch=runner["runner_switch"])
+                  if self_hosted else "")
     if os_name == "macos-latest" or framework == "android":
         text += render(STEP_SETUP_ENV, framework=framework, os=os_name)
     if not self_hosted and (os_name == "windows-latest" or linux_glfw):

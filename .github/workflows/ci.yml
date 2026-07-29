@@ -878,8 +878,9 @@ jobs:
   test-ubuntu-glfw:
     name: test (ubuntu-latest, glfw, Release)
     needs: release-ubuntu-glfw
-    if: github.event_name == 'push' ||
-        github.event.pull_request.head.repo.full_name == github.repository
+    if: vars.JETSON_RUNNER == 'true' &&
+        (github.event_name == 'push' ||
+         github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, linux, ARM64, jetson]
     steps:
       - name: Checkout code

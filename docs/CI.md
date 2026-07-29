@@ -110,7 +110,9 @@ A job that executes on arm64 still needs a host Vulkan SDK for `build.py`, and t
 
 ### Jetson test runner
 
-The board is a self-hosted GitHub runner registered against this repository with the labels in `JETSON_LABELS` ([dev/ci_matrix.py](../dev/ci_matrix.py)); they must match `./config.sh --labels` on the board or its jobs queue forever instead of failing.
+The board is a self-hosted GitHub runner registered against this repository with the labels in `JETSON_LABELS` ([dev/ci_matrix.py](../dev/ci_matrix.py)); they must match `./config.sh --labels` on the board.
+
+The cell is admitted by a repository variable, `JETSON_RUNNER`, which must be set to `true` for it to run at all. This is not decoration: a job whose labels match no runner does not fail, it queues for the 24 hours GitHub allows and only then cancels, taking the aggregate gate down a day late. The variable makes an unregistered or offline board skip the cell instead, and doubles as a kill switch when the board is down.
 
 Because a self-hosted runner executes whatever a workflow tells it to, on hardware in someone's home, the cell is closed to forks:
 
@@ -119,7 +121,9 @@ if: github.event_name == 'push' ||
     github.event.pull_request.head.repo.full_name == github.repository
 ```
 
-Pull requests from a fork skip this cell entirely and lose only its linux coverage; the maintainer's own branches still gate on it pre-merge. Pair it with **Settings → Actions → Fork pull request workflows from outside collaborators → Require approval for all outside collaborators**, and never reach this runner from a `pull_request_target` workflow — those run regardless of the approval setting.
+Pull requests from a fork skip this cell entirely and lose only its linux coverage; the maintainer's own branches still gate on it pre-merge.
+
+That condition is defence in depth, not the gate. It lives in a generated file that a fork's pull request can rewrite, since a `pull_request` run executes the workflow as it exists on the PR head. The actual gate is **Settings → Actions → Fork pull request workflows from outside collaborators → Require approval for all outside collaborators** — the default only requires approval for *first-time* contributors, so one merged PR is enough to earn unattended runs on someone's hardware. Register the runner at repository scope rather than account scope, treat the labels as addressing rather than authorization, and never reach this runner from a `pull_request_target` workflow, which runs regardless of the approval setting.
 
 The runner dials out to GitHub over HTTPS and needs no inbound network exposure. The board keeps its own driver and runtime libraries (`libglfw3`, an L4T Vulkan driver), which is why this cell installs neither, and the job carries no secrets at all.
 
