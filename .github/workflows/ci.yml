@@ -875,61 +875,6 @@ jobs:
           ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
           ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
-  test-ubuntu-glfw:
-    name: test (ubuntu-latest, glfw, Release)
-    needs: release-ubuntu-glfw
-    if: vars.JETSON_RUNNER == 'true' &&
-        (github.event_name == 'push' ||
-         github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, linux, ARM64, jetson]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      # the release package already carries the cooked content in its packed resources
-      - name: Download app
-        uses: actions/download-artifact@v8
-        with:
-          name: release-glfw-ubuntu-latest-Release
-          path: build_system/glfw/product
-
-      # extraction must preserve the executable bit of the binary, which python's zipfile
-      # drops; only the windows runner, whose filesystem carries no such bit, may use it
-      - name: Extract app
-        shell: bash
-        run: |
-          mkdir -p build_system/glfw/output
-          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
-
-      # the step timeout bounds a hung app; the log dump below then still runs
-      - name: Run Tests
-        timeout-minutes: 60
-        shell: bash
-        env:
-          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
-          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
-          # cells that do not run MoltenVK
-          MVK_CONFIG_USE_MTLHEAP: 0
-          # the suite nests python processes whose block-buffered output would otherwise
-          # reach the live log minutes late and out of order
-          PYTHONUNBUFFERED: 1
-        run: python3 dev/run_tests.py --framework glfw --config Release
-
-      - name: Dump app logs
-        if: failure()
-        shell: bash
-        run: |
-          echo "=== app logs ==="
-          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
-          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
-
-      - name: Upload Test Screenshot
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-screenshots-glfw-ubuntu-latest
-          path: build_system/glfw/output/build/generated/screenshots/
-
   release-ubuntu-android:
     name: release (ubuntu-latest, android, Release)
     needs: [build-ubuntu-android-release, cook]
@@ -1078,7 +1023,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, cook-bc, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
+    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, cook-bc, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

@@ -14,7 +14,7 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything. Debug cells are compile gates only: they ship no release package and therefore run no release or test node, and a product whose Debug gate is already covered by another cell builds Release only (`build_types` in the `PRODUCTS` table of [dev/ci_matrix.py](../dev/ci_matrix.py)).
 * **cook**: two nodes, split by texture family. The macos-release node cooks every fp16 master on the runner's Metal GPU plus the ASTC targets, and publishes the artifact pool alongside them; the ubuntu node seeds that pool, so every master is a cache hit and the BC targets need no GPU. Each target's content image is its own `cooked-image-<target>` artifact, and a release node waits only on its own family's cook (see [Cooking.md](Cooking.md)).
 * **release**: every released product: replaces each build product's packed content with its own target's image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release under lavapipe, ubuntu-glfw-release (arm64) on a self-hosted Jetson, the only cell with hardware ray tracing, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, macos-ios-release inside the iOS Simulator (a dedicated unsigned simulator package), and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
+* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, macos-ios-release inside the iOS Simulator (a dedicated unsigned simulator package), and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. A column whose `TEST_RUNNERS` entry is `manual` generates no job at all: the linux one is a jetson someone switches on, so its coverage is owed to a dispatched or local run rather than to the pipeline. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
 ci.yml is a fully generated file: GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot express the per-product edges (release → its own build, test → its own release) without runners idling in polling loops. [dev/ci_matrix.py](../dev/ci_matrix.py) owns the product table and the per-triplet suite invocations, and unrolls them into explicit jobs: every edge is a real `needs`, no runner is ever requested before its dependencies are done, and every node renders flat as `stage (os, framework, config[, abi])`. Never edit ci.yml by hand — change the generator, then regenerate with `python3 dev/ci_matrix.py --fix`. Two gates enforce byte-exact freshness: a pre-commit hook (`.githooks/`, wired automatically by any `build.py` run) rejects the commit, and the format job fails the push.
 
@@ -86,7 +86,7 @@ The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000
 python3 dev/run_tests.py --framework glfw --config Release --software
 ```
 
-The Linux + GLFW package is **arm64** and runs on a self-hosted NVIDIA Jetson, whose Tegra GPU is the only one in the matrix that exposes `VK_KHR_ray_query`. That makes it the only cell that can render the gpu path-tracing pipeline, so it carries `gpu_render_static`; the software-rasterizer coverage this cell used to provide now lives entirely on the Windows one:
+The Linux + GLFW package is **arm64** and its suite runs on a self-hosted NVIDIA Jetson, whose Tegra GPU is the only one available that exposes `VK_KHR_ray_query`. That makes it the only place `gpu_render_static` can render, so it owns that case; the software-rasterizer coverage this cell used to provide now lives entirely on the Windows one. The pipeline generates no job for it — see [Running it on demand](#running-it-on-demand):
 
 ```bash
 python3 dev/run_tests.py --framework glfw --config Release
@@ -122,23 +122,6 @@ python3 dev/run_jetson_test.py --case gpu_render_static --watch
 ```
 
 The test node consumes the released package rather than building one, so a manual run takes that artifact from a completed CI run — by default the newest successful one for the current branch, or `--run-id` for a specific one. The launcher resolves it locally so the board needs no gh CLI and no credentials of its own; it only ever receives a run id. That workflow is hand-written rather than generated, and a unit test holds it to the same runner, package and suite invocation as the automatic cell.
-
-Leave `JETSON_RUNNER` unset to rely on this alone.
-
-### Running it automatically
-
-The cell is admitted by a repository variable, `JETSON_RUNNER`, which must be set to `true` for it to run at all. This is not decoration: a job whose labels match no runner does not fail, it queues for the 24 hours GitHub allows and only then cancels, taking the aggregate gate down a day late. The variable makes an unregistered or offline board skip the cell instead, and doubles as a kill switch when the board is down.
-
-Because a self-hosted runner executes whatever a workflow tells it to, on hardware in someone's home, the cell is closed to forks:
-
-```yaml
-if: github.event_name == 'push' ||
-    github.event.pull_request.head.repo.full_name == github.repository
-```
-
-Pull requests from a fork skip this cell entirely and lose only its linux coverage; the maintainer's own branches still gate on it pre-merge.
-
-That condition is defence in depth, not the gate. It lives in a generated file that a fork's pull request can rewrite, since a `pull_request` run executes the workflow as it exists on the PR head. The actual gate is **Settings → Actions → Fork pull request workflows from outside collaborators → Require approval for all outside collaborators** — the default only requires approval for *first-time* contributors, so one merged PR is enough to earn unattended runs on someone's hardware. Register the runner at repository scope rather than account scope, treat the labels as addressing rather than authorization, and never reach this runner from a `pull_request_target` workflow, which runs regardless of the approval setting.
 
 The runner dials out to GitHub over HTTPS and needs no inbound network exposure. The board keeps its own driver and runtime libraries (`libglfw3`, an L4T Vulkan driver), which is why this cell installs neither, and the job carries no secrets at all.
 

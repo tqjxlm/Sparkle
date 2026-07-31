@@ -89,22 +89,22 @@ class CiPipelineTest(unittest.TestCase):
                 self.assertIn(runner["suite_args"], text)
             self.assertIn(runner["screenshots"], text)
             tested.add(ci_matrix.tested_triplet(product))
-        self.assertEqual(tested, set(ci_matrix.covered_triplets()))
+        manual = {triplet for triplet, runner in ci_matrix.TEST_RUNNERS.items()
+                  if runner.get("manual")}
+        self.assertEqual(tested, set(ci_matrix.covered_triplets()) - manual)
 
-    def test_a_self_hosted_cell_is_labelled_and_closed_to_forks(self):
-        """It runs on a machine someone owns, so a fork's pull request must not reach
-        it, and it needs no software rasterizer next to its real GPU."""
-        for product in release_products():
-            runner = ci_matrix.suite_runner(product)
-            if not runner or "runs_on" not in runner:
+    def test_a_manual_triplet_generates_no_pipeline_job(self):
+        """Its runner is a board someone switches on. A generated job would address
+        labels that usually match nothing, and such a job does not fail — it queues for
+        the day github allows and only then takes the gate down with it."""
+        for triplet, runner in ci_matrix.TEST_RUNNERS.items():
+            if not runner.get("manual"):
                 continue
-            text = JOBS[ci_matrix.slug("test", product)]
-            self.assertIn(f"runs-on: {runner['runs_on']}", text)
-            self.assertIn("head.repo.full_name == github.repository", text)
-            # an unregistered board must skip the cell, not queue against it
-            self.assertIn(f"vars.{runner['runner_switch']} == 'true'", text)
-            self.assertNotIn("setup-mesa", text)
-            self.assertNotIn("--software", text)
+            self.assertIn(triplet, ci_matrix.covered_triplets(),
+                          "a manual triplet still owes its coverage to a local run")
+            for product in release_products():
+                if ci_matrix.tested_triplet(product) == triplet:
+                    self.assertNotIn(ci_matrix.slug("test", product), JOBS)
 
     def test_the_manual_jetson_workflow_agrees_with_the_generator(self):
         """That workflow is hand-written, so nothing regenerates it when the cell moves.

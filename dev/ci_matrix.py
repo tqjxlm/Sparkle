@@ -50,11 +50,6 @@ PRODUCTS = (
 # on the board, or its jobs match no runner
 JETSON_LABELS = "[self-hosted, linux, ARM64, jetson]"
 
-# the repository variable that admits the jetson cell. set it to "true" once the board
-# is registered; unset or anything else skips the cell, which is what keeps an offline
-# board from queueing its job for a day and then failing the gate
-JETSON_SWITCH = "JETSON_RUNNER"
-
 # must hold every tests/coverage.csv triplet column: that table decides who runs the suite
 TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
@@ -67,10 +62,16 @@ TEST_RUNNERS = {
     # the arm64 linux product on a self-hosted jetson, whose Tegra GPU is the only one
     # in the matrix that exposes VK_KHR_ray_query. that makes it the only cell able to
     # render the gpu path-tracing pipeline, so it carries gpu_render_static;
-    # windows-glfw-release keeps the software-rasterizer coverage this cell used to give
+    # windows-glfw-release keeps the software-rasterizer coverage this cell used to give.
+    #
+    # manual: the board is a machine someone switches on, so the pipeline generates no
+    # job for it — one whose labels match no runner would queue for a day and then fail
+    # the gate. its coverage column stays, because that is what tells a local or
+    # dispatched run which cases this triplet owes
+    # (.github/workflows/jetson-test.yml, dev/run_jetson_test.py)
     "ubuntu-glfw-release": {
+        "manual": True,
         "runs_on": JETSON_LABELS,
-        "runner_switch": JETSON_SWITCH,
         "suite_args": "",
         "suite_timeout": 60,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
@@ -357,28 +358,10 @@ TEST_JOB_HEAD = """
   @id@:
     name: test (@os@, @framework@, Release@name_abi@)
     needs: @release_id@
-@condition@    runs-on: @runs_on@
+    runs-on: @runs_on@
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-"""
-
-# A self-hosted cell needs two things to be true.
-#
-# Its board is not always registered, and a job whose labels match no runner does not
-# fail — it queues, for the 24 hours github allows, and only then cancels and takes the
-# gate down with it. The repository variable is the switch that admits the cell, so an
-# absent or offline board skips cleanly and doubles as a kill switch.
-#
-# And it executes whatever the workflow tells it to on hardware someone owns, so a
-# fork's pull request must never reach it, while the maintainer's own branches still do.
-# This condition is defence in depth rather than the real gate: it lives in a file a
-# fork's pull request can rewrite. The gate is the repository's "require approval for
-# all outside collaborators" setting. See docs/CI.md.
-SELF_HOSTED_CONDITION = """\
-    if: vars.@runner_switch@ == 'true' &&
-        (github.event_name == 'push' ||
-         github.event.pull_request.head.repo.full_name == github.repository)
 """
 
 STEP_SETUP_ENV = """
@@ -742,23 +725,16 @@ def release_job(product):
 
 def test_job(product, runner):
     framework, os_name = product["framework"], product["os"]
-    # a self-hosted cell is a machine someone maintains: its GPU driver and runtime
-    # libraries are installed once, not reinstalled per job, and it needs no
-    # software rasterizer because it has a real GPU
-    self_hosted = "runs_on" in runner
     linux_glfw = framework == "glfw" and RUNNER_SYSTEM[os_name] == "linux"
     text = render(TEST_JOB_HEAD, id=slug("test", product), os=os_name,
                   framework=framework, name_abi=name_abi(product),
                   release_id=slug("release", product),
-                  runs_on=runner.get("runs_on", os_name),
-                  condition=render(SELF_HOSTED_CONDITION,
-                                   runner_switch=runner["runner_switch"])
-                  if self_hosted else "")
+                  runs_on=os_name)
     if os_name == "macos-latest" or framework == "android":
         text += render(STEP_SETUP_ENV, framework=framework, os=os_name)
-    if not self_hosted and (os_name == "windows-latest" or linux_glfw):
+    if os_name == "windows-latest" or linux_glfw:
         text += STEP_MESA
-    if linux_glfw and not self_hosted:
+    if linux_glfw:
         text += STEP_GLFW_RUNTIME
     if framework == "android":
         text += STEP_KVM
@@ -790,7 +766,7 @@ def suite_runner(product):
     if triplet not in covered_triplets():
         return None
     runner = TEST_RUNNERS[triplet]
-    if runner.get("abi", "") != product.get("abi", ""):
+    if runner.get("manual") or runner.get("abi", "") != product.get("abi", ""):
         return None
     return runner
 
@@ -817,7 +793,8 @@ def jobs():
         if runner:
             generated.append((slug("test", product), test_job(product, runner)))
             tested.add(tested_triplet(product))
-    untested = set(covered_triplets()) - tested
+    manual = {triplet for triplet, runner in TEST_RUNNERS.items() if runner.get("manual")}
+    untested = set(covered_triplets()) - tested - manual
     if untested:
         raise LookupError(f"tests/coverage.csv triplets without a product: {sorted(untested)}")
     release_ids = [job_id for job_id, _ in generated if job_id.startswith("release-")]
