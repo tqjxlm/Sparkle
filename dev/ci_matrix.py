@@ -36,11 +36,19 @@ PRODUCTS = (
     # because macos-glfw-release is a test cell (the Vulkan backend on a real GPU)
     {"os": "macos-latest", "framework": "glfw", "build_types": ("Release",)},
     {"os": "windows-latest", "framework": "glfw"},
-    {"os": "ubuntu-latest", "framework": "glfw"},
+    # the linux product targets arm64 — its test cell is a jetson, the only runner in
+    # the matrix with hardware ray tracing — but it is cross-compiled on an x86 host,
+    # because nothing that runs during the build ships an aarch64 linux binary (no
+    # LunarG SDK, no DXC). see cmake/aarch64-linux-toolchain.cmake
+    {"os": "ubuntu-latest", "framework": "glfw", "target_arch": "aarch64"},
     {"os": "ubuntu-latest", "framework": "android"},
     {"os": "ubuntu-latest", "framework": "android", "abi": "x86_64",
      "build_types": ("Release",)},
 )
+
+# the labels the jetson registers itself under. they must match `./config.sh --labels`
+# on the board, or its jobs match no runner
+JETSON_LABELS = "[self-hosted, linux, ARM64, jetson]"
 
 # must hold every tests/coverage.csv triplet column: that table decides who runs the suite
 TEST_RUNNERS = {
@@ -51,11 +59,21 @@ TEST_RUNNERS = {
         "suite_timeout": 120,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
-    # the linux product, validated under software vulkan like windows (hosted
-    # ubuntu runners have no GPU); same registry cases as macos-macos-release
+    # the arm64 linux product on a self-hosted jetson, whose Tegra GPU is the only one
+    # in the matrix that exposes VK_KHR_ray_query. that makes it the only cell able to
+    # render the gpu path-tracing pipeline, so it carries gpu_render_static;
+    # windows-glfw-release keeps the software-rasterizer coverage this cell used to give.
+    #
+    # manual: the board is a machine someone switches on, so the pipeline generates no
+    # job for it — one whose labels match no runner would queue for a day and then fail
+    # the gate. its coverage column stays, because that is what tells a local or
+    # dispatched run which cases this triplet owes
+    # (.github/workflows/jetson-test.yml, dev/run_jetson_test.py)
     "ubuntu-glfw-release": {
-        "suite_args": "--software",
-        "suite_timeout": 120,
+        "manual": True,
+        "runs_on": JETSON_LABELS,
+        "suite_args": "",
+        "suite_timeout": 60,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
     # physical Metal GPU (the runner class the cook stage relies on). its
@@ -230,7 +248,7 @@ COOK_JOB = """
   @id@:
     name: cook (@os@, @framework@, Release)
     needs: @needs@
-    runs-on: @os@
+    runs-on: @runs_on@
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -340,7 +358,7 @@ TEST_JOB_HEAD = """
   @id@:
     name: test (@os@, @framework@, Release@name_abi@)
     needs: @release_id@
-    runs-on: @os@
+    runs-on: @runs_on@
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -398,6 +416,7 @@ STEP_DOWNLOAD = """
 EXTRACT_COMMANDS = {
     "macos-latest": "ditto -x -k @archive@ @extract_dir@/",
     "ubuntu-latest": "unzip -q @archive@ -d @extract_dir@/",
+    "ubuntu-24.04-arm": "unzip -q @archive@ -d @extract_dir@/",
     "windows-latest": "python3 -m zipfile -e @archive@ @extract_dir@/",
 }
 
@@ -523,11 +542,18 @@ def covered_triplets():
 
 
 def host(product):
-    return product["os"].removesuffix("-latest")
+    return RUNNER_HOST[product["os"]]
 
 
 # runner labels say ubuntu, cook targets say linux
-RUNNER_SYSTEM = {"macos-latest": "macos", "windows-latest": "windows", "ubuntu-latest": "linux"}
+RUNNER_SYSTEM = {"macos-latest": "macos", "windows-latest": "windows",
+                 "ubuntu-latest": "linux", "ubuntu-24.04-arm": "linux"}
+
+# the triplet name a runner reports itself as. dev/run_tests.py derives the same name
+# from sys.platform on the machine running the suite, so both arm64 and x86 linux answer
+# to "ubuntu" and tests/coverage.csv keeps one linux column
+RUNNER_HOST = {"macos-latest": "macos", "windows-latest": "windows",
+               "ubuntu-latest": "ubuntu", "ubuntu-24.04-arm": "ubuntu"}
 
 
 def product_cook_target(product):
@@ -573,6 +599,10 @@ COOK_FAMILIES = {
     "bc": {
         "id": "cook-bc",
         "os": "ubuntu-latest",
+        # this node encodes by running the linux product's own binary, which is arm64
+        # even though it is built on x86, so it executes on an arm64 host. the cooked
+        # output it produces is architecture-independent
+        "runs_on": "ubuntu-24.04-arm",
         "framework": "glfw",
         "role": "consume",
         "app_binary": "build_system/glfw/output/build/sparkle",
@@ -658,6 +688,7 @@ def cook_job(family):
                            for target in targets)
 
     return render(COOK_JOB, id=spec["id"], os=spec["os"], framework=spec["framework"],
+                  runs_on=spec.get("runs_on", spec["os"]),
                   needs=needs, pre_steps=spec.get("pre_steps", ""),
                   extract_step=extract_step(product), pool_download=pool_download,
                   app_binary=spec["app_binary"], diagnostics=spec["diagnostics"],
@@ -669,6 +700,8 @@ def build_job(product, config):
     extras = ""
     if "abi" in product:
         extras += f"          abi: {product['abi']}\n"
+    if "target_arch" in product:
+        extras += f"          target-arch: {product['target_arch']}\n"
     # the simulator product builds unsigned, so it needs no signing secrets
     if product["framework"] == "ios" and "abi" not in product:
         extras += BUILD_IOS_SECRETS
@@ -692,10 +725,11 @@ def release_job(product):
 
 def test_job(product, runner):
     framework, os_name = product["framework"], product["os"]
-    linux_glfw = framework == "glfw" and os_name == "ubuntu-latest"
+    linux_glfw = framework == "glfw" and RUNNER_SYSTEM[os_name] == "linux"
     text = render(TEST_JOB_HEAD, id=slug("test", product), os=os_name,
                   framework=framework, name_abi=name_abi(product),
-                  release_id=slug("release", product))
+                  release_id=slug("release", product),
+                  runs_on=os_name)
     if os_name == "macos-latest" or framework == "android":
         text += render(STEP_SETUP_ENV, framework=framework, os=os_name)
     if os_name == "windows-latest" or linux_glfw:
@@ -732,7 +766,7 @@ def suite_runner(product):
     if triplet not in covered_triplets():
         return None
     runner = TEST_RUNNERS[triplet]
-    if runner.get("abi", "") != product.get("abi", ""):
+    if runner.get("manual") or runner.get("abi", "") != product.get("abi", ""):
         return None
     return runner
 
@@ -759,7 +793,8 @@ def jobs():
         if runner:
             generated.append((slug("test", product), test_job(product, runner)))
             tested.add(tested_triplet(product))
-    untested = set(covered_triplets()) - tested
+    manual = {triplet for triplet, runner in TEST_RUNNERS.items() if runner.get("manual")}
+    untested = set(covered_triplets()) - tested - manual
     if untested:
         raise LookupError(f"tests/coverage.csv triplets without a product: {sorted(untested)}")
     release_ids = [job_id for job_id, _ in generated if job_id.startswith("release-")]

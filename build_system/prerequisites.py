@@ -16,6 +16,17 @@ is_windows = platform.system() == "Windows"
 is_macos = platform.system() == "Darwin"
 
 
+def host_arch():
+    """The architecture tag the toolchain publishers use, normalized across their spellings."""
+    machine = platform.machine().lower()
+    if machine in ("amd64", "x86_64"):
+        return "x86_64"
+    if machine in ("arm64", "aarch64"):
+        return "aarch64"
+    raise RuntimeError(
+        f"Unsupported architecture '{machine}' for automatic toolchain installation.")
+
+
 def install_with_retry(download_url, download_path, provision, reset=None):
     """Provision from a cached archive if present; a corrupt archive only fails at provision
     time, so on failure refresh the cache once and retry."""
@@ -96,7 +107,7 @@ def install_cmake():
 
     elif system == "linux":
         print("Downloading CMake for Linux...")
-        filename = f"cmake-{cmake_version}-linux-x86_64.tar.gz"
+        filename = f"cmake-{cmake_version}-linux-{host_arch()}.tar.gz"
         download_url = f"https://github.com/Kitware/CMake/releases/download/v{cmake_version}/{filename}"
 
     else:
@@ -114,7 +125,7 @@ def install_cmake():
     extract_archive(download_path, tmp_dir)
 
     platform_suffix = {"darwin": "macos-universal",
-                       "windows": "windows-x86_64", "linux": "linux-x86_64"}
+                       "windows": "windows-x86_64", "linux": f"linux-{host_arch()}"}
     extracted_dir = os.path.join(
         tmp_dir, f"cmake-{cmake_version}-{platform_suffix[system]}")
 
@@ -251,6 +262,24 @@ def find_and_set_vulkan_sdk():
     set_vulkan_icd_filenames(vulkan_sdk_path)
 
 
+SYSTEM_VULKAN_PREFIX = "/usr"
+
+
+def use_system_vulkan():
+    """Adopt the distribution's Vulkan instead of a downloaded SDK.
+
+    LunarG publishes no linux aarch64 tarball, so an arm64 linux host takes its headers,
+    loader and layers from the distribution, which lays them out under the same prefix
+    layout the SDK uses. The build only wants headers and the loader through
+    find_package(Vulkan); spirv-cross is already searched for on PATH."""
+    if validate_vulkan_sdk(SYSTEM_VULKAN_PREFIX):
+        return SYSTEM_VULKAN_PREFIX
+    raise RuntimeError(
+        "No Vulkan headers found at " + SYSTEM_VULKAN_PREFIX + " and LunarG ships no"
+        " linux aarch64 SDK. Install the distribution packages instead, e.g.\n"
+        "  sudo apt-get install -y libvulkan-dev spirv-cross vulkan-validationlayers")
+
+
 def install_vulkan_sdk(build_cache_dir):
     """Install Vulkan SDK to build_cache directory and return the path."""
 
@@ -260,6 +289,9 @@ def install_vulkan_sdk(build_cache_dir):
         raise RuntimeError(
             f"Unsupported platform '{system}' for automatic Vulkan SDK installation.")
     platform_name = platform_map[system]
+
+    if platform_name == "linux" and host_arch() == "aarch64":
+        return use_system_vulkan()
 
     tmp_dir = os.path.join(build_cache_dir, "tmp")
     # stale extraction leftovers — including ones restored from an older CI cache entry —
@@ -454,18 +486,14 @@ def install_ispc(build_cache_dir):
 
     ispc_dir, ispc_executable = _ispc_paths(build_cache_dir)
 
-    machine = platform.machine().lower()
-    if machine in ("amd64", "x86_64"):
-        arch = "x86_64"
-    elif machine in ("arm64", "aarch64"):
-        arch = "arm64"
-    else:
-        raise RuntimeError(f"Unsupported architecture '{machine}' for ispc installation.")
-
     if is_windows:
         asset = f"ispc-v{ispc_version}-windows.zip"
     elif is_macos:
-        asset = f"ispc-v{ispc_version}-macOS.{arch}.tar.gz"
+        # the macos assets spell apple silicon arm64, the linux ones aarch64
+        asset = (f"ispc-v{ispc_version}-macOS."
+                 f"{'arm64' if host_arch() == 'aarch64' else 'x86_64'}.tar.gz")
+    elif host_arch() == "aarch64":
+        asset = f"ispc-v{ispc_version}-linux.aarch64.tar.gz"
     else:
         asset = f"ispc-v{ispc_version}-linux.tar.gz"
 
@@ -759,7 +787,8 @@ def find_or_install_ninja():
         return ninja_exe_path
 
     system = platform.system().lower()
-    platform_suffix = {"windows": "win", "darwin": "mac", "linux": "linux"}
+    platform_suffix = {"windows": "win", "darwin": "mac",
+                       "linux": "linux-aarch64" if host_arch() == "aarch64" else "linux"}
     if system not in platform_suffix:
         print(
             "Please install Ninja manually: https://github.com/ninja-build/ninja/releases")

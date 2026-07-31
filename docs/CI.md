@@ -14,7 +14,7 @@
 * **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything. Debug cells are compile gates only: they ship no release package and therefore run no release or test node, and a product whose Debug gate is already covered by another cell builds Release only (`build_types` in the `PRODUCTS` table of [dev/ci_matrix.py](../dev/ci_matrix.py)).
 * **cook**: two nodes, split by texture family. The macos-release node cooks every fp16 master on the runner's Metal GPU plus the ASTC targets, and publishes the artifact pool alongside them; the ubuntu node seeds that pool, so every master is a cache hit and the BC targets need no GPU. Each target's content image is its own `cooked-image-<target>` artifact, and a release node waits only on its own family's cook (see [Cooking.md](Cooking.md)).
 * **release**: every released product: replaces each build product's packed content with its own target's image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release and ubuntu-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, macos-ios-release inside the iOS Simulator (a dedicated unsigned simulator package), and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
+* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, macos-ios-release inside the iOS Simulator (a dedicated unsigned simulator package), and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. A column whose `TEST_RUNNERS` entry is `manual` generates no job at all: the linux one is a jetson someone switches on, so its coverage is owed to a dispatched or local run rather than to the pipeline. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py).
 
 ci.yml is a fully generated file: GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot express the per-product edges (release → its own build, test → its own release) without runners idling in polling loops. [dev/ci_matrix.py](../dev/ci_matrix.py) owns the product table and the per-triplet suite invocations, and unrolls them into explicit jobs: every edge is a real `needs`, no runner is ever requested before its dependencies are done, and every node renders flat as `stage (os, framework, config[, abi])`. Never edit ci.yml by hand — change the generator, then regenerate with `python3 dev/ci_matrix.py --fix`. Two gates enforce byte-exact freshness: a pre-commit hook (`.githooks/`, wired automatically by any `build.py` run) rejects the commit, and the format job fails the push.
 
@@ -86,6 +86,56 @@ The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000
 python3 dev/run_tests.py --framework glfw --config Release --software
 ```
 
+The Linux + GLFW package is **arm64** and its suite runs on a self-hosted NVIDIA Jetson, whose Tegra GPU is the only one available that exposes `VK_KHR_ray_query`. That makes it the only place `gpu_render_static` can render, so it owns that case; the software-rasterizer coverage this cell used to provide now lives entirely on the Windows one. The pipeline generates no job for it — see [Running it on demand](#running-it-on-demand):
+
+```bash
+python3 dev/run_tests.py --framework glfw --config Release
+```
+
+No hosted runner has a GPU, and hosted macos reports `supportsRaytracing == false` through its paravirtual Metal device, so hardware ray tracing in CI needs hardware someone owns. See [Jetson test runner](#jetson-test-runner) for what the board needs and how its access is bounded.
+
+The whole linux product moved to arm64 rather than adding a second one: the shipped binary has to be the one the test cell runs, and GitHub's arm64 hosted runners build it at no cost on a public repo. The cook stage follows the same architecture, because the BC node encodes by running that product's own binary — the cooked output it produces is architecture-independent, so the cook graph is otherwise unchanged.
+
+The product is **cross-compiled on an x86 host** rather than built natively, because nothing that runs *during* the build ships an aarch64 linux binary: LunarG publishes no aarch64 Vulkan SDK, and DXC — which NRD needs to compile its HLSL to SPIR-V — has no official aarch64 linux release either. Cross-compiling keeps dxc, slangc, ispc and ShaderMake on the host where those prebuilts exist, and only the linked libraries come from the target ([cmake/aarch64-linux-toolchain.cmake](../cmake/aarch64-linux-toolchain.cmake), selected by `build.py --target_arch aarch64`). Target libraries come from multiarch (`libvulkan-dev:arm64`, `libglfw3-dev:arm64` off ports.ubuntu.com), so the runner needs its existing sources pinned to amd64 first.
+
+Three hosts therefore appear for one product, and the split is deliberate:
+
+| stage | host | why |
+| ----- | ---- | --- |
+| build | `ubuntu-latest` (x86) | the build-time tools only exist for x86 |
+| cook | `ubuntu-24.04-arm` | it encodes by *running* the product's own binary, which is arm64 |
+| test | the jetson | the only runner exposing `VK_KHR_ray_query` |
+
+A job that executes on arm64 still needs a host Vulkan SDK for `build.py`, and there is none to download, so those runners take `libvulkan-dev` and `spirv-cross` from the distribution and [build_system/prerequisites.py](../build_system/prerequisites.py) adopts `/usr` as `VULKAN_SDK`. cmake, ninja, ispc and slang all publish aarch64 assets, selected by `host_arch()`. The prerequisite cache is keyed by runner architecture, since it holds host binaries and the cook node shares an os label with the x86 build.
+
+### Jetson test runner
+
+The board is a self-hosted GitHub runner registered against this repository with the labels in `JETSON_LABELS` ([dev/ci_matrix.py](../dev/ci_matrix.py)); they must match `./config.sh --labels` on the board.
+
+It is a runner, not a builder. A launch that runs no pipeline stage skips the build toolchain entirely (`check_environment` in [build.py](../build.py)), so the board never needs cmake, slangc, ispc or a Vulkan SDK — it downloads a package and runs it. What it does need:
+
+| | |
+| --- | --- |
+| `python3`, `python3-venv`, `python3-pip` | the suite orchestrator, and the venv its screenshot evaluators install into |
+| `libglfw3` | the released binary links it at runtime even headless |
+| the stock L4T Vulkan driver | already present on a JetPack image; `vulkaninfo` should report `VK_KHR_ray_query` |
+| outbound network | pip, and the published ground-truth captures |
+
+No secrets, no GPU driver installation, no repository checkout beyond what the workflow does itself.
+
+### Running it on demand
+
+The board is a machine someone switches on, so its suite can be launched instead of waiting for a push. [.github/workflows/jetson-test.yml](../.github/workflows/jetson-test.yml) is a `workflow_dispatch` workflow that runs the test node alone, and [dev/run_jetson_test.py](../dev/run_jetson_test.py) dispatches it from a clone:
+
+```bash
+python3 dev/run_jetson_test.py                        # newest successful run's package
+python3 dev/run_jetson_test.py --case gpu_render_static --watch
+```
+
+The test node consumes the released package rather than building one, so a manual run takes that artifact from a completed CI run — by default the newest successful one for the current branch, or `--run-id` for a specific one. The launcher resolves it locally so the board needs no gh CLI and no credentials of its own; it only ever receives a run id. That workflow is hand-written rather than generated, and a unit test holds it to the same runner, package and suite invocation as the automatic cell.
+
+The runner dials out to GitHub over HTTPS and needs no inbound network exposure. The board keeps its own driver and runtime libraries (`libglfw3`, an L4T Vulkan driver), which is why this cell installs neither, and the job carries no secrets at all.
+
 The macOS package runs the forward and deferred pipelines on the runner's physical Metal GPU:
 
 ```bash
@@ -110,7 +160,7 @@ The iOS cell runs the dedicated unsigned simulator package as spawned headless p
 python3 dev/run_tests.py --framework ios --config Release --width 1565 --height 720
 ```
 
-The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the denoiser gate suite (see [Denoiser.md](Denoiser.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.
+The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there. `gpu_render_static` therefore runs on the Jetson linux cell and nowhere else: on any other cell it would render a forward frame, compare it against the path-traced ground truth, and report whatever that comparison happened to yield. The Metal-side denoiser gate suite (see [Denoiser.md](Denoiser.md)) has no such home yet and stays local-only, because its backend is Metal — the Jetson reaches NRD through Vulkan and never touches it.
 
 The paravirtual device also renders MTLHeap-placed resources as solid magenta through MoltenVK without reporting any error, so the test job runs with `MVK_CONFIG_USE_MTLHEAP=0` (dedicated allocations). Real GPUs render identically either way; if a macos-glfw cell ever regresses to uniform magenta screenshots, suspect this class of paravirtual quirk first.
 

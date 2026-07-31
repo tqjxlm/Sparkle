@@ -1,0 +1,76 @@
+# The jetson cell, on demand.
+#
+# The board is a machine someone switches on, so its suite runs when asked rather than
+# on every push. ci.yml still carries the automatic cell, admitted by the JETSON_RUNNER
+# repository variable; leave that unset to rely on this workflow alone.
+#
+# This file is NOT generated, but it must agree with the ubuntu-glfw-release entry of
+# TEST_RUNNERS in dev/ci_matrix.py — tests/build_system/test_ci_matrix.py asserts that.
+#
+# Launch it from a clone with: python3 dev/run_jetson_test.py
+
+name: Jetson Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "CI run whose linux release package to test"
+        required: true
+      case:
+        description: "Registry case to run alone (default: the triplet's whole coverage)"
+        required: false
+        default: ""
+
+# the package comes from another workflow's run, which is the only extra read this needs
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  test:
+    name: test (jetson, glfw, Release)
+    runs-on: [self-hosted, linux, ARM64, jetson]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-glfw-ubuntu-latest-Release
+          path: build_system/glfw/product
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
+
+      - name: Run Tests
+        timeout-minutes: 60
+        shell: bash
+        env:
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: |
+          python3 dev/run_tests.py --framework glfw --config Release \
+            ${{ inputs.case != '' && format('--case {0}', inputs.case) || '' }}
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jetson-test-screenshots
+          path: build_system/glfw/output/build/generated/screenshots/

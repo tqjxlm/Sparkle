@@ -48,10 +48,12 @@ runs:
       id: package
       shell: bash
       run: |
+        # match on the runner family rather than the exact label: the same target system
+        # ships under several of them (ubuntu-latest and ubuntu-24.04-arm are both linux)
         case "${{ inputs.os }}" in
-          macos-latest) target_system=macos ;;
-          windows-latest) target_system=windows ;;
-          ubuntu-latest) target_system=linux ;;
+          macos*) target_system=macos ;;
+          windows*) target_system=windows ;;
+          ubuntu*) target_system=linux ;;
           *) echo "Unsupported target system: ${{ inputs.os }}" >&2; exit 1 ;;
         esac
 

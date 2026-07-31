@@ -52,7 +52,7 @@ class CiPipelineTest(unittest.TestCase):
         producers = []
         for family, spec in ci_matrix.COOK_FAMILIES.items():
             text = JOBS[spec["id"]]
-            self.assertIn(f"runs-on: {spec['os']}", text)
+            self.assertIn(f"runs-on: {spec.get('runs_on', spec['os'])}", text)
             self.assertIn(f"--framework {spec['framework']} ", text)
             self.assertIn(f"pkill -f {spec['app_binary']} ", text)
             self.assertIn(f"path: {spec['pool_dir']}", text)
@@ -89,7 +89,58 @@ class CiPipelineTest(unittest.TestCase):
                 self.assertIn(runner["suite_args"], text)
             self.assertIn(runner["screenshots"], text)
             tested.add(ci_matrix.tested_triplet(product))
-        self.assertEqual(tested, set(ci_matrix.covered_triplets()))
+        manual = {triplet for triplet, runner in ci_matrix.TEST_RUNNERS.items()
+                  if runner.get("manual")}
+        self.assertEqual(tested, set(ci_matrix.covered_triplets()) - manual)
+
+    def test_a_manual_triplet_generates_no_pipeline_job(self):
+        """Its runner is a board someone switches on. A generated job would address
+        labels that usually match nothing, and such a job does not fail — it queues for
+        the day github allows and only then takes the gate down with it."""
+        for triplet, runner in ci_matrix.TEST_RUNNERS.items():
+            if not runner.get("manual"):
+                continue
+            self.assertIn(triplet, ci_matrix.covered_triplets(),
+                          "a manual triplet still owes its coverage to a local run")
+            for product in release_products():
+                if ci_matrix.tested_triplet(product) == triplet:
+                    self.assertNotIn(ci_matrix.slug("test", product), JOBS)
+
+    def test_the_manual_jetson_workflow_agrees_with_the_generator(self):
+        """That workflow is hand-written, so nothing regenerates it when the cell moves.
+        It must still address the same runner and test the same package as the automatic
+        cell, or a manual run would quietly be testing something else."""
+        workflow = os.path.join(PROJECT_ROOT, ".github", "workflows", "jetson-test.yml")
+        with open(workflow, encoding="utf-8") as workflow_file:
+            text = workflow_file.read()
+
+        runner = ci_matrix.TEST_RUNNERS["ubuntu-glfw-release"]
+        self.assertIn(f"runs-on: {runner['runs_on']}", text)
+        self.assertIn(runner["screenshots"], text)
+        self.assertIn("python3 dev/run_tests.py --framework glfw --config Release", text)
+
+        # it consumes the artifact the automatic cell's release stage publishes
+        product = [candidate for candidate in ci_matrix.PRODUCTS
+                   if ci_matrix.tested_triplet(candidate) == "ubuntu-glfw-release"][0]
+        self.assertIn(f"name: release-glfw-{product['os']}-Release", text)
+
+    def test_a_cook_node_executes_on_its_products_target_architecture(self):
+        """The consuming node encodes by running that product's binary, so it executes on
+        a host of the product's *target* architecture — which is not its build host when
+        the product is cross-compiled."""
+        for family, spec in ci_matrix.COOK_FAMILIES.items():
+            product = ci_matrix.cook_product(family)
+            build = [candidate for candidate in ci_matrix.PRODUCTS
+                     if candidate["framework"] == product["framework"]
+                     and ci_matrix.host(candidate) == ci_matrix.host(product)]
+            self.assertTrue(build, f"{family}: no product builds what this node runs")
+
+            runs_on = spec.get("runs_on", spec["os"])
+            if build[0].get("target_arch") == "aarch64":
+                self.assertIn("arm", runs_on,
+                              f"{family} would run a cross-built arm64 binary on {runs_on}")
+            else:
+                self.assertEqual(runs_on, spec["os"], f"{family} cooks on the wrong host")
 
     def test_unmatched_coverage_column_fails_loudly(self):
         original = ci_matrix.covered_triplets

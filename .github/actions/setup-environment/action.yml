@@ -15,6 +15,10 @@ inputs:
     description: "Android target ABI when it differs from the default, used to key the compiler cache"
     required: false
     default: ""
+  target-arch:
+    description: "Cross-compilation target architecture, when the product is not the runner's"
+    required: false
+    default: ""
 outputs:
   build-args:
     description: "Additional build arguments"
@@ -27,10 +31,10 @@ runs:
       with:
         path: |
           ./build_cache
-        key: ${{ inputs.os }}-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
+        key: ${{ inputs.os }}-${{ runner.arch }}-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
         restore-keys: |
-          ${{ inputs.os }}-build_cache-
-          ${{ inputs.os }}-${{ inputs.framework }}-build_cache-
+          ${{ inputs.os }}-${{ runner.arch }}-build_cache-
+          ${{ inputs.os }}-${{ runner.arch }}-${{ inputs.framework }}-build_cache-
 
     # app/build and build are deliberately NOT cached: they are multi-GB intermediates that
     # crowd the repo's 10GB actions-cache quota and evict the compiler caches; ccache covers
@@ -120,6 +124,46 @@ runs:
         sudo apt-get update -qq
         sudo apt-get install -y libglfw3-dev
       shell: bash
+
+    # for jobs that *execute* on arm64 linux — the cook node runs the product's own
+    # binary — where build.py still wants a host Vulkan SDK and LunarG publishes no
+    # aarch64 build. the os test is not redundant: hosted macos runners are ARM64 too
+    - name: Install Vulkan from the distribution (arm64 linux host)
+      if: inputs.framework == 'glfw' && runner.os == 'Linux' && runner.arch == 'ARM64'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y libvulkan-dev spirv-cross
+
+    - name: Install the aarch64 cross toolchain (Linux)
+      if: inputs.target-arch == 'aarch64'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # arm64 packages come from ports.ubuntu.com, so every existing entry must first be
+        # pinned to its own architecture or apt update fails fetching arm64 from the amd64
+        # mirror. the runner image may use either sources layout, so handle both
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+          sudo sed -i '/^Architectures:/d' /etc/apt/sources.list.d/ubuntu.sources
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
+        fi
+        if [ -s /etc/apt/sources.list ]; then
+          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
+        fi
+        sudo tee /etc/apt/sources.list.d/arm64.sources >/dev/null <<'EOF'
+        Types: deb
+        URIs: http://ports.ubuntu.com/ubuntu-ports/
+        Suites: noble noble-updates noble-security
+        Components: main universe
+        Architectures: arm64
+        Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+        EOF
+        sudo dpkg --add-architecture arm64
+        sudo apt-get update -qq
+        sudo apt-get install -y crossbuild-essential-arm64 \
+          libvulkan-dev:arm64 libglfw3-dev:arm64
+        echo "--- target libraries:"
+        ls /usr/lib/aarch64-linux-gnu/libvulkan.so* /usr/lib/aarch64-linux-gnu/libglfw* 2>&1 || true
 
     - name: Set up JDK 17 (Android)
       if: inputs.framework == 'android'
