@@ -311,21 +311,36 @@ def parse_args(args=None):
 
 
 def check_environment(args):
+    # A launch that runs no pipeline stage needs no build toolchain, only the app and
+    # the libraries it links. That is what lets a machine that only runs the suite be a
+    # runner rather than a builder: it downloads a package and launches it, and cmake,
+    # slangc and ispc never come into it (see docs/CI.md).
+    building = bool(args["stages"])
+
     # Check CMake availability (skip for Android as it uses NDK's built-in CMake)
-    if args["framework"] != "android":
+    if building and args["framework"] != "android":
         cmake_executable = find_cmake()
         print(f"Using CMake: {cmake_executable}")
         args["cmake_executable"] = cmake_executable
 
-    find_and_set_vulkan_sdk()
+    # a run takes its loader and driver from the system; the SDK only adds validation
+    # layers, and MoltenVK's ICD for an apple run from a build tree. Both are optional,
+    # so a run adopts an SDK that is already there instead of installing one to proceed
+    try:
+        find_and_set_vulkan_sdk()
+    except (RuntimeError, OSError) as error:
+        if building:
+            raise
+        print(f"No Vulkan SDK for this run ({error}). Using the system loader.")
 
-    slangc_path = find_slangc()
-    os.environ["SLANGC"] = slangc_path
-    print(f"Using slangc: {slangc_path}")
+    if building:
+        slangc_path = find_slangc()
+        os.environ["SLANGC"] = slangc_path
+        print(f"Using slangc: {slangc_path}")
 
     # the ispc block encoders only serve the cook, which runs on desktop hosts; device
     # frameworks would need cross-compiled kernels for an encoder they never run
-    if args["framework"] in COOK_FRAMEWORKS:
+    if building and args["framework"] in COOK_FRAMEWORKS:
         ispc_path = find_ispc()
         os.environ["ISPC"] = ispc_path
         print(f"Using ispc: {ispc_path}")

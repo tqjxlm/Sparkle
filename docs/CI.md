@@ -112,6 +112,17 @@ A job that executes on arm64 still needs a host Vulkan SDK for `build.py`, and t
 
 The board is a self-hosted GitHub runner registered against this repository with the labels in `JETSON_LABELS` ([dev/ci_matrix.py](../dev/ci_matrix.py)); they must match `./config.sh --labels` on the board.
 
+It is a runner, not a builder. A launch that runs no pipeline stage skips the build toolchain entirely (`check_environment` in [build.py](../build.py)), so the board never needs cmake, slangc, ispc or a Vulkan SDK — it downloads a package and runs it. What it does need:
+
+| | |
+| --- | --- |
+| `python3`, `python3-venv`, `python3-pip` | the suite orchestrator, and the venv its screenshot evaluators install into |
+| `libglfw3` | the released binary links it at runtime even headless |
+| the stock L4T Vulkan driver | already present on a JetPack image; `vulkaninfo` should report `VK_KHR_ray_query` |
+| outbound network | pip, and the published ground-truth captures |
+
+No secrets, no GPU driver installation, no repository checkout beyond what the workflow does itself.
+
 ### Running it on demand
 
 The board is a machine someone switches on, so its suite can be launched instead of waiting for a push. [.github/workflows/jetson-test.yml](../.github/workflows/jetson-test.yml) is a `workflow_dispatch` workflow that runs the test node alone, and [dev/run_jetson_test.py](../dev/run_jetson_test.py) dispatches it from a clone:

@@ -44,3 +44,46 @@ class ParseRunArgsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StagelessEnvironmentTest(unittest.TestCase):
+    """A launch that runs no stage must need no build toolchain.
+
+    This is what lets a machine that only runs the suite — the jetson cell — be a
+    runner rather than a builder: it downloads a package and launches it."""
+
+    def setUp(self):
+        import build
+        self.build = build
+        self.reached = []
+        self.original = {name: getattr(build, name) for name in
+                         ("find_cmake", "find_slangc", "find_ispc",
+                          "find_and_set_vulkan_sdk")}
+        for name in self.original:
+            setattr(build, name, self._probe(name))
+
+    def tearDown(self):
+        for name, function in self.original.items():
+            setattr(self.build, name, function)
+
+    def _probe(self, name):
+        def probe(*_args, **_kwargs):
+            self.reached.append(name)
+            if name == "find_and_set_vulkan_sdk":
+                raise RuntimeError("no SDK here")
+            return f"/absent/{name}"
+        return probe
+
+    def test_a_launch_without_stages_reaches_for_no_build_tool(self):
+        args = {"framework": "glfw", "stages": [], "config": "Release"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.build.check_environment(args)
+        self.assertEqual(self.reached, ["find_and_set_vulkan_sdk"])
+        self.assertNotIn("cmake_executable", args)
+
+    def test_a_build_still_requires_its_toolchain(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                self.build.check_environment(
+                    {"framework": "glfw", "stages": ["build"], "config": "Release"})
+        self.assertIn("find_cmake", self.reached)
