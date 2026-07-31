@@ -112,6 +112,21 @@ A job that executes on arm64 still needs a host Vulkan SDK for `build.py`, and t
 
 The board is a self-hosted GitHub runner registered against this repository with the labels in `JETSON_LABELS` ([dev/ci_matrix.py](../dev/ci_matrix.py)); they must match `./config.sh --labels` on the board.
 
+### Running it on demand
+
+The board is a machine someone switches on, so its suite can be launched instead of waiting for a push. [.github/workflows/jetson-test.yml](../.github/workflows/jetson-test.yml) is a `workflow_dispatch` workflow that runs the test node alone, and [dev/run_jetson_test.py](../dev/run_jetson_test.py) dispatches it from a clone:
+
+```bash
+python3 dev/run_jetson_test.py                        # newest successful run's package
+python3 dev/run_jetson_test.py --case gpu_render_static --watch
+```
+
+The test node consumes the released package rather than building one, so a manual run takes that artifact from a completed CI run — by default the newest successful one for the current branch, or `--run-id` for a specific one. The launcher resolves it locally so the board needs no gh CLI and no credentials of its own; it only ever receives a run id. That workflow is hand-written rather than generated, and a unit test holds it to the same runner, package and suite invocation as the automatic cell.
+
+Leave `JETSON_RUNNER` unset to rely on this alone.
+
+### Running it automatically
+
 The cell is admitted by a repository variable, `JETSON_RUNNER`, which must be set to `true` for it to run at all. This is not decoration: a job whose labels match no runner does not fail, it queues for the 24 hours GitHub allows and only then cancels, taking the aggregate gate down a day late. The variable makes an unregistered or offline board skip the cell instead, and doubles as a kill switch when the board is down.
 
 Because a self-hosted runner executes whatever a workflow tells it to, on hardware in someone's home, the cell is closed to forks:

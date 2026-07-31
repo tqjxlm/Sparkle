@@ -106,6 +106,24 @@ class CiPipelineTest(unittest.TestCase):
             self.assertNotIn("setup-mesa", text)
             self.assertNotIn("--software", text)
 
+    def test_the_manual_jetson_workflow_agrees_with_the_generator(self):
+        """That workflow is hand-written, so nothing regenerates it when the cell moves.
+        It must still address the same runner and test the same package as the automatic
+        cell, or a manual run would quietly be testing something else."""
+        workflow = os.path.join(PROJECT_ROOT, ".github", "workflows", "jetson-test.yml")
+        with open(workflow, encoding="utf-8") as workflow_file:
+            text = workflow_file.read()
+
+        runner = ci_matrix.TEST_RUNNERS["ubuntu-glfw-release"]
+        self.assertIn(f"runs-on: {runner['runs_on']}", text)
+        self.assertIn(runner["screenshots"], text)
+        self.assertIn("python3 dev/run_tests.py --framework glfw --config Release", text)
+
+        # it consumes the artifact the automatic cell's release stage publishes
+        product = [candidate for candidate in ci_matrix.PRODUCTS
+                   if ci_matrix.tested_triplet(candidate) == "ubuntu-glfw-release"][0]
+        self.assertIn(f"name: release-glfw-{product['os']}-Release", text)
+
     def test_a_cook_node_executes_on_its_products_target_architecture(self):
         """The consuming node encodes by running that product's binary, so it executes on
         a host of the product's *target* architecture — which is not its build host when
