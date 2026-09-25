@@ -101,7 +101,7 @@ Execute lambdas run after compile, possibly on another thread later (§9). They 
 
 ### 4.4 Frame lifecycle
 
-```
+```text
 Renderer::Tick     host-side data only: proxy updates, UBO writes into dynamic ring, change lists
 Renderer::Render   RenderGraph graph(rhi_, resolution_);
                    BuildGraph(graph);        // renderer composes module functions (§5)

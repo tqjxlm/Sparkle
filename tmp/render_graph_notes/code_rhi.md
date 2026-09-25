@@ -5,12 +5,14 @@ Scope: `libraries/include/rhi/*`, `libraries/source/rhi/{*.cpp,vulkan/*,metal/*}
 ## 1. Object model
 
 **RHIContext** (`inc/RHI.h:29-399`) is the abstract device and frame object. `CreateRHI` picks `VulkanRHI` or `MetalRHI` from the config (`src/RHI.cpp:21-43`). There is no RHIContext singleton: the renderer holds a pointer to it. Each backend does have a global singleton for its native state:
+
 - Vulkan: `inline std::unique_ptr<VulkanContext> context` (`vk/VulkanContext.h:378-380`, marked "TODO avoid singleton").
 - Metal: `inline std::unique_ptr<MetalContext> context` (`mtl/MetalContext.h:108-110`).
 
 Every backend object reaches the device, the current command buffer and the RHIContext through this global.
 
 **RHIResource** (`inc/RHIResource.h:22-87`) holds:
+
 - a name;
 - `IsDynamic` and `IsBindless` flags;
 - a process-unique `GetId()`, taken from an atomic counter (`src/RHIResource.cpp:11-17`). The id is regenerated whenever `id_dirty_` is set, for example when a TLAS gets a new BLAS (`inc/RHIRayTracing.h:61-77`) or a render target is recreated (`vk/VulkanRenderTarget.cpp:43`).
@@ -18,18 +20,21 @@ Every backend object reaches the device, the current command buffer and the RHIC
 The id is what descriptor caching keys on (`src/RHIShader.cpp:46-65`), so it is a ready-made stable handle key.
 
 **Creation and lifetime.** All resources come from backend factory methods (`CreateImage`, `CreateBuffer` and so on, `inc/RHI.h:161-217`). These go through `RHIContext::CreateResource<T>` (`inc/RHI.h:264-284`), which:
+
 - wraps the object in a `std::shared_ptr` with a deleter that calls `DeferResourceDeletion`;
 - in debug builds, also registers a weak ref and the allocation stack for leak checking (`src/RHI.cpp:184-206`).
 
 `RHIResourceRef<T>` is a thin `shared_ptr` wrapper with optional ref-count tracing (`inc/RHIResource.h:99-275`).
 
 Deletion is deferred per frame slot:
+
 - `deferred_deletion_[frame_index_]` is a ring of size max-frames-in-flight (`inc/RHI.h:382-383`), guarded by a mutex so a release from another thread is safe (`src/RHI.cpp:335-388`).
 - The slot is drained in `BeginFrame` only after `BeginFrameInternal` has waited that slot's fence (`src/RHI.cpp:220-235`).
 - `EnqueueEndOfRenderTasks` (`inc/RHI.h:290-293`) is the GPU-completion callback substitute. It is used, for example, to destroy old TLAS handles (`vk/VulkanRayTracing.cpp:219-221`).
 - `FlushDeferredDeletions` requires a prior device idle (`src/RHI.cpp:428-449`).
 
 **Resources are not cached by name.** Only these are cached:
+
 - samplers, by attribute (`src/RHI.cpp:89-101`);
 - dummy textures, by shader-compatibility hash (`src/RHI.cpp:468-492`);
 - image views, per image by view attribute (`src/RHIImage.cpp:59-72`); views are owned by the image (`inc/RHIImageView.h:10-12`), and the Vulkan image destructor kills view handles early (`vk/VulkanImage.cpp:361-373`);
@@ -38,17 +43,20 @@ Deletion is deferred per frame slot:
 `RecreateBuffer` grows a buffer by powers of two (`src/RHI.cpp:281-301`).
 
 **Per-frame memory:**
+
 - `AllocateOneFrameMemory<T>` is a stack allocator reset in `BeginFrame` (`inc/RHI.h:295-300`, `src/RHI.cpp:211`). Vulkan uses it for `VkDescriptor*Info` payloads.
 - Dynamic buffers (`RHIDynamicBuffer`) are persistently mapped rings of capacity × frames-in-flight. The offset is `offset + frame_stride*frame` (`inc/RHIBuffer.h:34-38`, `src/RHIBuffer.cpp:83-140`), and `Upload` memcpys into the current slot (`src/RHIBuffer.cpp:242-249`).
 - Staging buffers come from the dynamic pool when a frame is active (`src/RHI.cpp:303-314`).
 
 **Frames in flight** are fixed on first set, then frozen (`src/RHI.cpp:408-426`):
+
 - Vulkan: the swap-chain image count, `minImageCount+1` (`vk/VulkanSwapChain.cpp:130,197`); 2 in headless mode (`vk/VulkanRHI.cpp:27,302`).
 - Metal: 3 (`frameworks/source/apple/MetalView.mm:125`); 2 in headless mode (`mtl/MetalContext.mm:9,55`).
 
 `frame_index_` advances in `EndFrame` (`src/RHI.cpp:255`).
 
 **RHIRenderTargetPool** (`inc/RHIRenderTargetPool.h`, `src/RHIRenderTargetPool.cpp`):
+
 - It matches requests exactly on `RHIRenderTarget::Attribute` and creates the images itself on a miss (lines 31-76).
 - A target is "free" when `use_count()==1` for the target and all of its images (lines 12-29).
 - A free target becomes reusable ("gpu_safe") `maxFramesInFlight` frames after its last use (lines 78-95), or immediately after a device idle (lines 116-125).
@@ -56,18 +64,21 @@ Deletion is deferred per frame slot:
 - The renderers acquire at init time (`renderer/DeferredRenderer.cpp:50,85`, `GPURenderer.cpp:103,122`, `ForwardRenderer.cpp:96`). It is therefore a cache that survives renderer recreation, not a per-frame transient allocator. It does no aliasing and no memory sharing.
 
 **RHIResourceArray (bindless)** (`inc/RHIResourceArray.h`):
+
 - It is a fixed-capacity vector of `RHIResourceRef<RHIResource>` with dirty indices (`src/RHIResourceArray.cpp:9-21`). It counts as bindless when capacity is 1024 (`inc/RHIShader.h:79`, `inc/RHIResourceArray.h:37-40`).
 - **Vulkan** uses `PARTIALLY_BOUND` + `UPDATE_AFTER_BIND` descriptors, enabled only when ray tracing is supported (`vk/VulkanDescriptorSetManager.cpp:49-63,346-355`; `vk/VulkanContext.cpp:964-969`).
   - Dirty arrays are flushed only in `VulkanRenderPass::Begin` (`vk/VulkanRenderPass.cpp:156`), not in compute-pass begin (`vk/VulkanComputePass.cpp:22-34`).
 - **Metal** uses an argument buffer patched in place at `Bind`, plus `useResources:usage:Read` (`mtl/MetalResourceArray.mm:83-125`).
 
 **RHIMemory** (`inc/RHIMemory.h`) holds five flags: HostVisible, HostCoherent, HostCached, DeviceLocal, AlwaysMap.
+
 - On Vulkan they map to VMA required flags (`vk/VulkanBuffer.cpp:36-63`, `vk/VulkanImage.cpp:35-40`).
 - On Metal, DeviceLocal → Private and everything else → Shared (`mtl/MetalBuffer.h:47-56`, `mtl/MetalBuffer.mm:10-24`).
 
 ## 2. Images and buffers: attributes, state tracking, barriers
 
 **RHIImage::Attribute** (`inc/RHIImage.h:139-166`) holds:
+
 - format, sampler attribute, width, height;
 - usages: TransferDst, TransferSrc, Texture, SRV, UAV, ColorAttachment, DepthStencilAttachment, TransientAttachment (`inc/RHIImage.h:120-131`);
 - memory properties, mips, msaa, `initial_layout`;
@@ -78,11 +89,13 @@ Deletion is deferred per frame slot:
 **RHIBuffer::Attribute** (`inc/RHIBuffer.h:75-82`) holds size, usages, memory properties and `is_dynamic`. Usages are TransferSrc/Dst, Uniform, Vertex, Index, Storage, DeviceAddress, AS build input, AS storage. **Buffers have no state tracking and no barrier API at all.** The only buffer barrier in the RHI is a blanket `TRANSFER→ALL_COMMANDS` after `CopyToBuffer` (`vk/VulkanBuffer.cpp:93-104`). A compute shader writing a storage buffer that is later read as vertex, index or indirect data has no RHI-level synchronization.
 
 **Image layout tracking (the real resource-state tracker):**
+
 - `RHIImage` stores one `RHIImageLayout` per (mip, layer) in `current_layout_` (`inc/RHIImage.h:296-318,330`), initialized from `initial_layout` (`src/RHIImage.cpp:51`).
 - `RHIImageLayout` values are Undefined, General, Read, StorageWrite, ColorOutput, DepthStencilOutput, TransferSrc, TransferDst, PreInitialized, Present (`inc/RHIImage.h:17-29`).
 - `RHIPipelineStage` is a coarse single-value enum: Top, DrawIndirect, VertexInput, VS, PS, EarlyZ, LateZ, ColorOutput, CS, Transfer, Bottom (`inc/RHIImage.h:31-44`). It has no ray-tracing, AS-build or host stage.
 
 **Barriers are explicit and caller-driven.** `RHIImage::Transition(TransitionRequest{target_layout, after_stage, before_stage, mip/layer range})` (`inc/RHIImage.h:168-178,200`) maps on Vulkan to `TransitionLayout` on the current command buffer (`vk/VulkanImage.cpp:54-127,320-323`):
+
 - It groups contiguous mips that share the same old layout into one `VkImageMemoryBarrier` each (lines 98-118).
 - **It skips the barrier entirely when the old and new VkImageLayout are equal** (lines 77-80). So StorageWrite→StorageWrite, and General↔StorageWrite (both `GENERAL`, `vk/VulkanImage.h:265-272`), emit no barrier. Write-after-write or read-after-write on a storage image in a constant layout is left unsynchronized.
 - Access masks are derived from (layout, caller-given stage) only (`vk/VulkanImage.h:9-66`). The tracker records no previous access or stage.
@@ -90,11 +103,13 @@ Deletion is deferred per frame slot:
 - It then writes the new layout (line 126).
 
 The renderer issues these transitions by hand around passes, for example:
+
 - `renderer/GPURenderer.cpp:170-190` (StorageWrite before compute, Read after);
 - `DeferredRenderer.cpp:119-201`;
 - `BlurPass.cpp:56-58,147-152`.
 
 The only transitions that are *not* explicit:
+
 - **Render-pass implicit layouts.** The VkRenderPass uses the attribute's `color_initial_layout` / `final_layout` (`vk/VulkanRenderPass.cpp:24-96`). `End()` then overwrites the tracked layout with `final_layout` (`vk/VulkanRenderPass.cpp:225-241`). `Begin()` never checks the tracked layout against `color_initial_layout`, so the tracker and the pass attribute are two unreconciled sources of truth.
 - The **Present** transition, inserted in `VulkanContext::EndFrame` (`vk/VulkanContext.cpp:538-540`).
 - Upload helpers (`vk/VulkanImage.cpp:144-150,177-183`), `GenerateMips` (lines 217-234) and readback (`src/RHIImage.cpp:20-26`).
@@ -104,6 +119,7 @@ The only transitions that are *not* explicit:
 **`VulkanSynchronization.cpp`** is only `VulkanFence::Wait()` (a spin on `vkGetFenceStatus` plus `vkWaitForFences`, lines 9-17). It is used to block the next frame on a one-shot command buffer (`vk/VulkanCommandBuffer.cpp:61-65`). There is no sync2, no timeline semaphores and no events; the API version is Vulkan 1.1 (`vk/VulkanCommon.h:28`).
 
 **`RHITrackedState.h` is not resource-state tracking.** It is a redundant-*command* filter:
+
 - `Update(value)` bit-casts a trivially-copyable key and returns true only when it differs from the last recorded value (`inc/RHITrackedState.h:14-41`). Comparison is bit-exact by design, so NaN payloads and -0 count as distinct.
 - `VulkanContext::CommandState` holds `RHITrackedState` instances for: graphics and compute pipeline, viewport+scissor, vertex buffers (≤8), index buffer, and descriptor sets (≤8 per bind point, including dynamic offsets) (`vk/VulkanContext.h:307-367`).
 - All binds go through `BindPipeline`, `SetViewportAndScissor`, `BindVertexBuffers`, `BindIndexBuffer` and `BindDescriptorSet` (lines 122-213). The multi-set path `BindDescriptorSets` records unconditionally and invalidates slots (lines 215-227); NRD uses it.
@@ -233,6 +249,7 @@ The only transitions that are *not* explicit:
 ## 7. Other obstructions and helpers
 
 **Obstructions:**
+
 - **Global mutable state:** the backend `context` globals; the static `render_passes` list; the implicit current pass; ids and `id_dirty_`; the debug set `deleted_resources_` (`inc/RHI.h:304-306`).
 - **Commands recorded as side effects of resource operations**, at whatever point the stream is in:
   - `Upload` records a copy plus transitions into the current command buffer (`vk/VulkanImage.cpp:129-151`);
@@ -244,12 +261,14 @@ The only transitions that are *not* explicit:
 - **Mid-frame resource creation is legal and common:** dynamic staging buffers, `RecreateBuffer` growth, and PSO compile in `PartialUpdate`.
 
 **Helpers:**
+
 - **Naming:** every resource has a name. Vulkan applies object names and pass labels only when validation is enabled (`vk/VulkanContext.cpp:1086-1100`, `vk/VulkanRenderPass.cpp:147-154,243-246`); Vulkan compute passes get no label. Metal labels objects and encoders always (`mtl/MetalRHIInternal.h:13-19`).
 - **Stable ids**, **exact-match RT reuse**, **frames-in-flight-delayed deletion**, and the **end-of-render task** hook.
 
 ## Implications for a render graph
 
 **Seams to build on:**
+
 1. **The pass bracket.** `Begin/EndRenderPass` and `Begin/EndComputePass` are already exclusive and unnested (`src/RHI.cpp:271-333`). The graph can own them. It can also inject barriers, labels and timers between passes at a single point: `RHIContext::Begin*PassInternal`.
 2. **The image layout tracker.** Per-subresource `current_layout_` plus `Transition` is a workable "current state" store. The graph can compute (target layout, src stage, dst stage) from declared usage and call `Transition`, replacing the hand-written calls in the renderers.
 3. **Automatic declared-I/O harvesting.**
@@ -260,6 +279,7 @@ The only transitions that are *not* explicit:
 5. **The RT pool** as the seed of a transient allocator. It needs per-frame acquire/release semantics instead of init-time acquire.
 
 **Pain points and required RHI changes:**
+
 1. **The barrier model is incomplete on Vulkan.**
    - Same-VkLayout transitions emit nothing (`vk/VulkanImage.cpp:77-80`). You need an explicit memory/execution barrier path (image *and buffer*) that fires on access-type change, not only on layout change.
    - Track the last access and stage per subresource, not just the layout.
