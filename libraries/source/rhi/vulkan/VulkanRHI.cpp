@@ -176,6 +176,16 @@ bool VulkanRHI::SupportsHardwareRayTracing()
     return context->SupportsHardwareRayTracing();
 }
 
+bool VulkanRHI::SupportsPixelLocalRead()
+{
+    return context->SupportsDynamicRenderingLocalRead();
+}
+
+bool VulkanRHI::SupportsUnifiedImageLayouts()
+{
+    return context->SupportsUnifiedImageLayouts();
+}
+
 bool VulkanRHI::HasPhysicalGpu()
 {
     VkPhysicalDeviceProperties properties;
