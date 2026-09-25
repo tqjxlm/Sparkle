@@ -59,6 +59,8 @@ It is an experimental demo which aims to be simple and modern, rather than being
 | gpu              | vulkan-glfw | vulkan-glfw | metal-macos              | metal-ios | vulkan-android |
 | forward/deferred | vulkan-glfw | vulkan-glfw | metal-macos, vulkan-glfw | metal-ios | vulkan-android |
 
+The Vulkan backend requires a Vulkan 1.3 device.
+
 ### Tested on Devices
 
 | platform | windows          | android          | macos        | ios           |

@@ -25,7 +25,7 @@ inline void CheckVkResult(VkResult err)
     ASSERT_F(false, "[vulkan] Error: VkResult = {}", static_cast<int>(err));
 }
 
-inline const uint32_t ApiVersion = VK_API_VERSION_1_1;
+inline const uint32_t ApiVersion = VK_API_VERSION_1_3;
 
 template <class T> void ChainVkStructurePtr(VkDeviceCreateInfo &info, T &next)
 {

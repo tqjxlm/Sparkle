@@ -14,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <format>
 #include <unordered_set>
 
 namespace sparkle
@@ -104,19 +105,6 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
         {
             device_extensions.push_back("VK_KHR_portability_subset");
         }
-
-        if (strcmp(extension.extensionName, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0)
-        {
-            device_extensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
-        }
-
-        // validation workaround: slang emits StorageImageReadWithoutFormat, which validation accepts via
-        // the equivalent device feature, VK_VERSION_1_3, or this extension. enable it where available so
-        // devices lacking the feature (e.g. Adreno) still pass; devices lacking the extension use the feature.
-        if (strcmp(extension.extensionName, VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) == 0)
-        {
-            device_extensions.push_back(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME);
-        }
     }
 
     std::unordered_set<std::string> required_extensions(device_extensions.begin(), device_extensions.end());
@@ -139,28 +127,27 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     return all_extension_good;
 }
 
-static bool DeviceSupportsAstcHdr(VkPhysicalDevice device)
+[[maybe_unused]] static bool DeviceHasExtension(VkPhysicalDevice device, const char *extension_name)
 {
     uint32_t extension_count = 0;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
     std::vector<VkExtensionProperties> extensions(extension_count);
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, extensions.data());
 
-    const bool has_extension = std::ranges::any_of(extensions, [](const auto &extension) {
-        return strcmp(extension.extensionName, VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME) == 0;
+    return std::ranges::any_of(extensions, [extension_name](const auto &extension) {
+        return strcmp(extension.extensionName, extension_name) == 0;
     });
-    if (!has_extension)
-    {
-        return false;
-    }
+}
 
-    VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT astc_hdr_features{};
-    astc_hdr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES_EXT;
+template <class T> static T QueryDeviceFeatures(VkPhysicalDevice device, VkStructureType type)
+{
+    T features{};
+    features.sType = type;
     VkPhysicalDeviceFeatures2 device_features{};
     device_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    device_features.pNext = &astc_hdr_features;
+    device_features.pNext = &features;
     vkGetPhysicalDeviceFeatures2(device, &device_features);
-    return astc_hdr_features.textureCompressionASTC_HDR == VK_TRUE;
+    return features;
 }
 
 static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
@@ -202,6 +189,8 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     VkPhysicalDeviceFeatures device_features;
     vkGetPhysicalDeviceFeatures(device, &device_features);
 
+    const bool api_version_supported = device_properties.apiVersion >= ApiVersion;
+
     QueueFamilyIndices const indices = FindQueueFamilies(device, surface);
 
     bool const extensions_supported = CheckDeviceExtensionSupport(device, deviceExtensions);
@@ -215,7 +204,13 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
 
     bool is_suitable = false;
     std::string fail_reason;
-    if (!indices.IsComplete())
+    if (!api_version_supported)
+    {
+        fail_reason = std::format("Vulkan {}.{} required, device supports {}.{}", VK_API_VERSION_MAJOR(ApiVersion),
+                                  VK_API_VERSION_MINOR(ApiVersion), VK_API_VERSION_MAJOR(device_properties.apiVersion),
+                                  VK_API_VERSION_MINOR(device_properties.apiVersion));
+    }
+    else if (!indices.IsComplete())
     {
         fail_reason = "Queue family incomplete";
     }
@@ -239,12 +234,6 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     if (is_suitable)
     {
         Log(Info, "Checking device [{}]: OK!", device_properties.deviceName);
-
-        Log(Info, "enabled device extensions:");
-        for (const auto &extension : deviceExtensions)
-        {
-            Log(Info, "\t{}", extension);
-        }
     }
     else
     {
@@ -771,11 +760,6 @@ bool VulkanContext::PickPhysicalDevice()
         {
             physical_device_ = device;
             enable_ray_tracing_ = can_enable_ray_tracing;
-            supports_astc_hdr_ = DeviceSupportsAstcHdr(device);
-            if (supports_astc_hdr_)
-            {
-                device_extensions_.push_back(VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME);
-            }
 
             VkPhysicalDeviceProperties device_properties;
             vkGetPhysicalDeviceProperties(physical_device_, &device_properties);
@@ -785,6 +769,7 @@ bool VulkanContext::PickPhysicalDevice()
                           static_cast<uint32_t>(device_properties.limits.minStorageBufferOffsetAlignment)});
 
             QuerySubgroupQuadSupport();
+            QueryOptionalDeviceFeatures();
 
             auto max_msaa_count = GetMaxUsableSampleCount();
 
@@ -893,6 +878,37 @@ void VulkanContext::QuerySubgroupQuadSupport()
                                   (subgroup_properties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0u;
 }
 
+void VulkanContext::QueryOptionalDeviceFeatures()
+{
+    supports_astc_hdr_ = QueryDeviceFeatures<VkPhysicalDeviceVulkan13Features>(
+                             physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+                             .textureCompressionASTC_HDR == VK_TRUE;
+
+#ifdef VK_KHR_dynamic_rendering_local_read
+    supports_dynamic_rendering_local_read_ =
+        DeviceHasExtension(physical_device_, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) &&
+        QueryDeviceFeatures<VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR>(
+            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR)
+                .dynamicRenderingLocalRead == VK_TRUE;
+    if (supports_dynamic_rendering_local_read_)
+    {
+        device_extensions_.push_back(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
+    }
+#endif
+
+#ifdef VK_KHR_unified_image_layouts
+    supports_unified_image_layouts_ =
+        DeviceHasExtension(physical_device_, VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME) &&
+        QueryDeviceFeatures<VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR>(
+            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR)
+                .unifiedImageLayouts == VK_TRUE;
+    if (supports_unified_image_layouts_)
+    {
+        device_extensions_.push_back(VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
+    }
+#endif
+}
+
 bool VulkanContext::CreateLogicalDevice()
 {
     QueueFamilyIndices const indices = FindQueueFamilies(physical_device_, surface_);
@@ -931,19 +947,45 @@ bool VulkanContext::CreateLogicalDevice()
     create_info.enabledExtensionCount = static_cast<uint32_t>(device_extensions_.size());
     create_info.ppEnabledExtensionNames = device_extensions_.data();
 
+    Log(Info, "enabled device extensions:");
+    for (const auto &extension : device_extensions_)
+    {
+        Log(Info, "\t{}", extension);
+    }
+
     VkPhysicalDeviceBufferDeviceAddressFeatures enabled_buffer_device_addres_features{};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR enabled_acceleration_structure_features{};
     VkPhysicalDeviceRayQueryFeaturesKHR enabled_ray_query_features{};
     VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing_features{};
     VkPhysicalDeviceRobustness2FeaturesEXT enabled_robustness_features{};
-    VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT enabled_astc_hdr_features{};
 
-    if (supports_astc_hdr_)
+    VkPhysicalDeviceVulkan13Features enabled_vulkan13_features{};
+    enabled_vulkan13_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    enabled_vulkan13_features.dynamicRendering = VK_TRUE;
+    enabled_vulkan13_features.synchronization2 = VK_TRUE;
+    enabled_vulkan13_features.textureCompressionASTC_HDR = supports_astc_hdr_ ? VK_TRUE : VK_FALSE;
+    ChainVkStructurePtr(create_info, enabled_vulkan13_features);
+
+#ifdef VK_KHR_dynamic_rendering_local_read
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR enabled_local_read_features{};
+    if (supports_dynamic_rendering_local_read_)
     {
-        enabled_astc_hdr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES_EXT;
-        enabled_astc_hdr_features.textureCompressionASTC_HDR = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_astc_hdr_features);
+        enabled_local_read_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR;
+        enabled_local_read_features.dynamicRenderingLocalRead = VK_TRUE;
+        ChainVkStructurePtr(create_info, enabled_local_read_features);
     }
+#endif
+
+#ifdef VK_KHR_unified_image_layouts
+    VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR enabled_unified_image_layouts_features{};
+    if (supports_unified_image_layouts_)
+    {
+        enabled_unified_image_layouts_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR;
+        enabled_unified_image_layouts_features.unifiedImageLayouts = VK_TRUE;
+        ChainVkStructurePtr(create_info, enabled_unified_image_layouts_features);
+    }
+#endif
 
     if (rhi_->SupportsHardwareRayTracing())
     {
