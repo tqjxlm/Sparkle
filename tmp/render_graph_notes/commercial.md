@@ -31,6 +31,7 @@ GraphBuilder.AddPass(RDG_EVENT_NAME("MyPass"), P, ERDGPassFlags::Compute,
 GraphBuilder.QueueTextureExtraction(Tex, &PooledOut);   // survive past the graph
 GraphBuilder.Execute();
 ```
+
 Snippets are adapted from [UE RDG doc](https://dev.epicgames.com/documentation/en-us/unreal-engine/render-dependency-graph-in-unreal-engine). For raster passes, `RenderTargets[i] = FRenderTargetBinding(Tex, ERenderTargetLoadAction::EClear)` and `RenderTargets.DepthStencil = FDepthStencilBinding(...)` fill the binding slots.
 
 **Declaring dependencies.** The pass parameter struct is the dependency declaration. Its macros produce reflection metadata, and RDG walks that metadata to get every read and write (SRV, UAV, RT, `RDG_*_ACCESS`). "Resource barriers and lifetimes are derived from RDG parameters in the pass parameter struct" ([FRDGBuilder API](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/RenderCore/FRDGBuilder), [timlly RDG analysis](https://www.cnblogs.com/timlly/p/15217090.html)). The same struct also binds shader parameters, so one declaration does both jobs. The cost is that an unused shader parameter still creates a dependency. Epic's answer is `ClearUnusedGraphResources(Shader, Params)`, which nulls out unused bindings so they don't extend lifetimes ([UE RDG doc](https://dev.epicgames.com/documentation/en-us/unreal-engine/render-dependency-graph-in-unreal-engine)).
@@ -117,11 +118,13 @@ using (var builder = renderGraph.AddRasterRenderPass<PassData>("Copy To Debug", 
     builder.SetRenderFunc(static (PassData d, RasterGraphContext ctx) => Execute(d, ctx));
 }
 ```
+
 ([Write a render pass](https://docs.unity3d.com/6000.0/Documentation/Manual/urp/render-graph-write-render-pass.html). Static lambdas are required to avoid allocations.)
 
 Builder surface ([RenderGraphBuilders.cs](https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.core/Runtime/RenderGraph/RenderGraphBuilders.cs)): `UseTexture/UseBuffer(handle, AccessFlags)`, `UseGlobalTexture`, `UseAllGlobalTextures`, `SetGlobalTextureAfterPass`, `SetRenderAttachment`, `SetRenderAttachmentDepth`, `SetInputAttachment`, `SetRandomAccessAttachment`, `SetShadingRateImageAttachment`, `CreateTransientTexture/Buffer`, `EnableAsyncCompute`, `AllowPassCulling`, `AllowGlobalStateModification`, `EnableFoveatedRasterization`, `GenerateDebugData`.
 
 **The three pass types:**
+
 - **Raster**: gets a `RasterCommandBuffer` with no `SetRenderTarget`, so its attachments are fully declared. Only raster passes can be merged.
 - **Compute**: gets a `ComputeCommandBuffer`. It can go async (`EnableAsyncCompute`), and it always ends a native render pass.
 - **Unsafe**: gets an `UnsafeCommandBuffer` with `SetRenderTarget`. "Rendering might be slower because the render graph system can't optimize the render pass." You cannot call `SetRenderAttachment` here. ([Unsafe pass](https://docs.unity3d.com/6000.0/Documentation/Manual/urp/render-graph-unsafe-pass.html))
@@ -131,11 +134,13 @@ Builder surface ([RenderGraphBuilders.cs](https://github.com/Unity-Technologies/
 ### 2.3 The NativePassCompiler (read from source)
 
 `NativePassCompiler.Compile()` runs these stages in order ([NativePassCompiler.cs](https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.core/Runtime/RenderGraph/Compiler/NativePassCompiler.cs)):
-```
+
+```text
 ValidatePasses → SetupContextData → BuildGraph → CullUnusedRenderGraphPasses → TryMergeNativePasses
 → HandleExtendedFeatureFlags → FindResourceUsageRangeAndSynchronization → DetectMemoryLessResources
 → PrepareNativeRenderPasses → (PropagateTextureUVOrigin) → CompactNonCulledPassesForRasterPasses
 ```
+
 - **Culling** runs twice: it removes passes with no side effects, then passes that write only unused resources.
 - **Merging** is a greedy linear scan in submission order (`TryMergeNativePasses`), with no reordering. `CanMerge` returns a **`PassBreakAudit` with a reason** ([PassesData.cs](https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.core/Runtime/RenderGraph/Compiler/PassesData.cs)). The full `PassBreakReason` list is worth copying as a design checklist:
   - `TargetSizeMismatch`: width, height, depth slices or MSAA samples differ.
@@ -221,6 +226,7 @@ Sources: [GDC Vault](https://www.gdcvault.com/play/1024612/FrameGraph-Extensible
 - **Motivation.** The WorldRenderer "organically grew from 4k to 15k SLOC", with "single functions with over 2k SLOC". After the refactor it was about 5K SLOC. BF-era frames "typically see few hundred passes and resources".
 - **Three phases.** *Setup* declares passes and their reads, writes and creates. *Compile* culls unreferenced resources and passes, computes lifetimes, and allocates concrete resources ("acquire right before first use, release after last use"). It also derives bind flags from actual usage. *Execute* calls immediate-mode callbacks.
 - **API.**
+
   ```cpp
   frameGraph.addCallbackPass<PassData>("MyRenderPass",
     [&](RenderPassBuilder& builder, PassData& data) {    // setup
@@ -229,6 +235,7 @@ Sources: [GDC Vault](https://www.gdcvault.com/play/1024612/FrameGraph-Extensible
     },
     [=](const PassData& data, const RenderPassResources& res, IRenderContext* ctx) { /* execute */ });
   ```
+
   Lambdas were chosen to "minimize migration friction". Code flow stays top to bottom.
 - **Culling** uses reference counts (flood fill from outputs). Disconnecting a debug output automatically turns off every pass upstream of it.
 - **Transient resource system.** Resources live "no longer than one frame". PS4 uses virtual-memory aliasing. D3D12 PC uses placed resources in several small heaps, which leads to a "fragmented address space". Xbox One uses physical aliasing with ESRAM. D3D11 uses object pools. Aliasing needs correct metadata state (FMASK/CMASK/DCC), a `DiscardResource` before first use, and aliasing barriers.
@@ -253,6 +260,7 @@ Sources: [GDC Vault](https://www.gdcvault.com/play/1024612/FrameGraph-Extensible
 ### 5.2 EA SEED Halcyon (Graham Wihlidal, 2018)
 
 Source: [Halcyon Architecture "Director's Cut" PDF](https://media.contentapi.ea.com/content/dam/ea/seed/presentations/wihlidal-halcyonarchitecture.pdf), [blog](https://www.wihlidal.com/blog/graphics/2018-11-30-halcyon-architecture/).
+
 - **Render handles**: 64-bit, generational (catches double deletes and use after delete), type-safe, serialisable, with constant-time lookup. One handle can map to a *different* backend object on each device (mGPU, and even DX12 and Vulkan in the same process).
 - **Render commands**: a high-level, **stateless** command list that is "parallel recording" friendly, tracks the queue types it encounters, and checks specs (for example no draws on compute). It is then "compiled" to the low-level API with "Perfect redundant state filtering" and "compile once, submit multiple times".
 - **Render graph** ("inspired by FrameGraph"): automatic transient resources, imports, transitions, render-target batching, DiscardResource, aliasing barriers. "No concept of a 'frame'", and graphs compose at different frequencies. "Fully automatic transitions and split barriers". Construction is "Serial operation (by design)", and evaluation is "Highly parallelized". Data flows between passes through **nested scopes** (`scope.get<T>()` over POD structs, with shadowing).
@@ -261,6 +269,7 @@ Source: [Halcyon Architecture "Director's Cut" PDF](https://media.contentapi.ea.
 ### 5.3 Activision Task Graph Renderer (REAC 2023)
 
 Source: [slides with speaker notes](https://enginearchitecture.realtimerendering.com/downloads/reac2023_task_graph_renderer.pdf), [publication page](https://research.activision.com/publications/2023/06/Task-Graph-Renderer-at-Activision). This is the most useful industrial retrospective in the set.
+
 - **API evolution.** A code-driven class per task was rejected for its duplication. The team moved to a **declarative macro DSL**: `BEGIN_TASK(X) COLOR_TARGET_CREATE(...) TEXTURE_READ(src) CONDITION_FUNC(f) END_TASK()`. One definition generates the access table, a handle struct (`X_Struct`), and a variadic function `cX(builder, handles...)` for the setup DSL. Lua hot reload was prototyped but not shipped.
 - **Two-tier compile.**
   - Heavyweight, at level load (10-100+ ms): run `RendererSetup` with level and platform constants, build dependencies from external resources backwards (which culls implicitly), schedule into GPU order, and create heaps and place resources, including every dynamic-resolution variant.
@@ -286,7 +295,9 @@ Anvil has a Frame Graph giving "full control over lifetime and usage of a big po
 ### 5.5 AMD Render Pipeline Shaders (RPS) SDK
 
 Sources: [GitHub](https://github.com/GPUOpen-LibrariesAndSDKs/RenderPipelineShaders), [RPS 1.0 intro](https://gpuopen.com/learn/rps_1_0/), [tutorial](https://gpuopen.com/learn/rps-tutorial/rps-tutorial-part1/), [rps_runtime.h](https://github.com/GPUOpen-LibrariesAndSDKs/RenderPipelineShaders/blob/main/include/rps/runtime/common/rps_runtime.h).
+
 - **RPSL** is HLSL extended with attributes. Nodes are *declared with access signatures*, and the graph is a function:
+
   ```hlsl
   graphics node Triangle([readwrite(rendertarget)] texture rt : SV_Target0);
   node Upscale([readwrite(rendertarget)] texture dst : SV_Target0, [readonly(ps)] texture src);
@@ -295,6 +306,7 @@ Sources: [GitHub](https://github.com/GPUOpen-LibrariesAndSDKs/RenderPipelineShad
       clear(off, float4(0,0.2,0.4,1)); Triangle(off); Upscale(backbuffer, off);
   }
   ```
+
   C++ binds callbacks: `rpsProgramBindNode(entry, "Triangle", &DrawTriangleCb, this)`. RPS binds render targets from `SV_Target[n]` and sets the default viewport and scissor.
 - **Runtime compiler**: resolve dependencies from node signatures, insert transition nodes, build the DAG, schedule, then the backend creates heaps, resources, descriptors and framebuffers. Scheduler flags include `KEEP_PROGRAM_ORDER`, `PREFER_MEMORY_SAVING` ("minimizing transient resource lifetimes and aggressive aliasing. This may increase the number of barriers"), `RANDOM_ORDER` (for testing), `MINIMIZE_COMPUTE_GFX_SWITCH`, `DISABLE_DEAD_CODE_ELIMINATION`, and `WORKLOAD_TYPE_PIPELINING_*`. `ALLOW_SPLIT_BARRIERS`, `AVOID_RESCHEDULE`, `ALLOW_FRAME_OVERLAP` and `PREFER/DISABLE_RENDERPASS_TRANSITIONS` are marked "Reserved for future use" (not implemented).
 - **Multi-threaded recording**: `rpsRenderGraphGetBatchLayout` returns per-queue `RpsCommandBatch`es with wait and signal fences. `rpsRenderGraphRecordCommands` takes `cmdBeginIndex/numCmds`, so an application can record command ranges on separate threads. Inside a node, `rpsCmdCloneContext` plus `rpsCmdBeginRenderPass/EndRenderPass` support "RenderPass suspend / resume & secondary command buffer behaviors". Diagnostics can dump the DAG and the pre- and post-schedule state, and a visualiser library shows the heap layout.
@@ -305,7 +317,7 @@ Sources: [GitHub](https://github.com/GPUOpen-LibrariesAndSDKs/RenderPipelineShad
 ## 6. Comparison table
 
 | | UE RDG | Unity RenderGraph (NRP) | Godot RD graph | Frostbite FG | O3DE Atom | Activision TG | AMD RPS |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | Level | High-level, per scene render | SRP level, per camera | **Inside the RHI**, per command | High-level, per frame | RHI FrameScheduler + RPI passes | High-level DSL | Separate DSL + runtime |
 | Declaring deps | Reflected param struct (same struct binds shader params) | Builder calls per pass, typed pass kinds | **Inferred** from every RD call | Builder `read/write/create` in a setup lambda | `Use*Attachment` per scope, global IDs | Macro access tables | Node signature attributes |
 | Rebuilt when | Every frame | Every frame, **compile cached by hash** | Every frame (implicit) | Every frame | Every frame | **Level load, plus per-frame cached permutations** | On update, schedule reusable |

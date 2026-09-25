@@ -326,7 +326,7 @@ Sources: [Bevy 0.19 release notes](https://bevy.org/news/bevy-0-19/), [0.18→0.
   - A resource type `T` supplies `Desc`, `create`, `destroy`, optional `preRead`/`preWrite(desc, flags, ctx)`, and `toString`. The per-access `uint32_t flags` is opaque to the graph; the author packs binding set/slot, stage, and attachment index into it, and `preRead`/`preWrite` "build DescriptorSet tables, insert barriers" ([README](https://github.com/skaarj1989/FrameGraph/blob/master/README.md)).
   - `compile()` does refcount culling. `execute()` creates transients at first use and destroys them after the last ([FrameGraph.cpp](https://github.com/skaarj1989/FrameGraph/blob/master/src/FrameGraph.cpp)).
   - A Blackboard carries handles between modules.
-  - Visualization: `std::ofstream{"fg.dot"} << fg;`, custom writers (JSON), and a web viewer at https://skaarj1989.github.io/FrameGraph/.
+  - Visualization: `std::ofstream{"fg.dot"} << fg;`, custom writers (JSON), and a web viewer at <https://skaarj1989.github.io/FrameGraph/>.
   - Why it is elegant: the barrier and binding policy lives entirely in the resource type's hooks, so the graph core stays tiny.
 - **Pavlo Muratov, "Organizing GPU Work with DAGs"** ([2020](https://levelup.gitconnected.com/organizing-gpu-work-with-directed-acyclic-graphs-f3fd5f2c2af3)).
   - DFS topological sort with cycle detection; longest-path **dependency levels**, where passes in a level may run in any order.
@@ -412,7 +412,7 @@ Source: [blog post](https://www.sebastianaaltonen.com/blog/no-graphics-api). The
 ## 12. Comparison table
 
 | System | Dependency declaration | Order | Barrier derivation | Tile / subpass | Transients & aliasing | Temporal | MT recording | Visualization | Size (lines) |
-|---|---|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **Granite** | String names; `add_color_output/attachment_input/texture_input/history_input`; RMW via `input` arg | Bottom-up traversal + greedy reorder (merge-first, max overlap) | Per-pass invalidate/flush lists, runtime state, lookahead batching, sync2 | **Automatic** greedy subpass merge (`should_merge`), BY_REGION deps | Transient = single physical pass → LAZILY_ALLOCATED; same-desc image aliasing | `add_history_input`, image swap per frame | Serial CPU timeline + parallel per-physical-pass command buffers | `log()` | ~4,970 |
 | **Filament FG** | Typed versioned handles; `read/write/sample/declareRenderPass`; Blackboard | Declaration order, refcount cull | **None in graph** (backend tracks layouts) | Derived discardStart/End/clear/readOnly; explicit 2-subpass via `subpassMask` | Texture cache pool by descriptor; no in-frame aliasing | Outside graph (import) | Serial into driver command stream (driver thread) | graphviz + fgviewer web app | ~4,900 |
 | **kajiya** | `pass.read/write(handle, AccessType)`; SimpleRenderPass binds in declaration order | Declaration order | Just-in-time `vk_sync` barrier from last access | None | Transient cache by desc; no aliasing | **`get_or_create_temporal(key)`** import/export with access state | Single CB | debug-pass hook | ~4,000 |

@@ -9,6 +9,7 @@ How this was gathered: the primary sources are cited inline. Driver support come
 ## 1. Vulkan: subpasses, dynamic rendering, dynamic_rendering_local_read, tile extensions
 
 ### 1.1 Subpasses (VkRenderPass)
+
 - Subpasses with `VK_DEPENDENCY_BY_REGION_BIT` dependencies and input attachments are the original Vulkan 1.0 way to keep G-buffer data in tile memory. The driver may merge the subpasses into one hardware pass ([Arm GPU Best Practices 3.4, §7.6](https://documentation-service.arm.com/static/67a62b17091bfc3e0a947695)).
 - Mali merges subpasses only when all of these hold. Merging saves a write-out or read-back. There are fewer than 9 unique color+input attachments across the merged subpasses (depth/stencil does not count). The depth/stencil attachment does not change. All attachments use the same sample count ([Arm BP §7.6](https://documentation-service.arm.com/static/67a62b17091bfc3e0a947695)). Tile color storage is 128 bits per pixel on older Mali, up to 256 bpp from G72, and up to 1024 bpp on recent GPUs. A larger G-buffer "can be used at the expense of requiring smaller tiles", and Arm recommends a 128-bit G-buffer budget (same source).
 - Measured on Mali-G76 ([Vulkan Samples "subpasses"](https://docs.vulkan.org/samples/latest/samples/performance/subpasses/README.html)): merged subpasses cut physical tiles/s from 614.7k to 262.2k (−55%). Fatter G-buffer formats broke merging (409.6k tiles/s). Forgetting TRANSIENT+LAZILY_ALLOCATED roughly doubled fragment jobs (56/s to 113/s).
@@ -17,12 +18,14 @@ How this was gathered: the primary sources are cited inline. Driver support come
 - **MoltenVK does not merge subpasses.** `beginNextSubpass()` ends the Metal render encoder, so every Vulkan subpass becomes its own Metal render pass ([MoltenVK issue #2454, 2025-02](https://github.com/KhronosGroup/MoltenVK/issues/2454); [issue #490 on transient attachments across subpasses](https://github.com/KhronosGroup/MoltenVK/issues/490)). On MoltenVK, subpass-based on-chip merging is lost, and memoryless (lazily allocated) attachments shared across subpasses are broken.
 
 ### 1.2 VK_KHR_dynamic_rendering (core 1.3)
+
 - It replaces VkRenderPass/VkFramebuffer with `vkCmdBeginRendering`. On-chip subpass functionality was left out of scope on purpose and pushed to a separate extension. Vendors judged render-area granularity unimportant for tilers ([proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_dynamic_rendering.html)).
 - Arm: plain dynamic rendering "automatically disables subpass fusion". Driver r50 fixed that with local_read ([Arm BP §7.6](https://documentation-service.arm.com/static/67a62b17091bfc3e0a947695)).
 - **Suspend/resume**: `VK_RENDERING_SUSPENDING_BIT` / `VK_RENDERING_RESUMING_BIT` split one render pass instance across command buffers. The pairs "must be submitted in the same batch". "No action or synchronization commands, or other render pass instances, are allowed between suspending and resuming render pass instances". `pRenderingInfo` must match apart from these flags ([spec, renderpass chapter](https://docs.vulkan.org/spec/latest/chapters/renderpass.html); [proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_dynamic_rendering.html)). This exists explicitly as "an alternative method of recording across multiple command buffers" to secondaries.
 - Secondary command buffers use `VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT` plus `VkCommandBufferInheritanceRenderingInfo` (formats, sample count, view mask). `VK_RENDERING_CONTENTS_INLINE_BIT_KHR` (needs `maintenance7` or `nestedCommandBuffer`) lets one render pass mix inline and secondary contents ([spec](https://docs.vulkan.org/spec/latest/chapters/renderpass.html)).
 
 ### 1.3 VK_KHR_dynamic_rendering_local_read (core in 1.4, partially)
+
 - It lets a fragment shader read attachment and storage values written by earlier fragments at the same pixel inside one dynamic render pass. "Pipeline barriers are now allowed within dynamic rendering if they include `VK_DEPENDENCY_BY_REGION_BIT`, and source and destination stages are all framebuffer-space stages." It adds the layout `VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR`. `vkCmdSetRenderingAttachmentLocationsKHR` remaps fragment output locations to attachments. `vkCmdSetRenderingInputAttachmentIndicesKHR` maps `input_attachment_index` to color/depth/stencil attachments ([proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_dynamic_rendering_local_read.html)).
 - It deliberately **cannot** express: switching depth/stencil mid-pass, layout transitions or queue transfers inside the pass, reads of values not written at the same fragment location, or anything else that would force a vendor to split the pass (same proposal; [Khronos blog "Streamlining Subpasses", 2024-01-25](https://www.khronos.org/blog/streamlining-subpasses)). Shaders keep using `subpassInput`/`subpassLoad`. Shaders written for classic render passes port unmodified ([Vulkan Samples: dynamic_rendering_local_read](https://docs.vulkan.org/samples/latest/samples/extensions/dynamic_rendering_local_read/README.html); [Arm BP §7.6](https://documentation-service.arm.com/static/67a62b17091bfc3e0a947695)).
 - Vulkan 1.4 promotion is partial. 1.4 implementations must support local read for storage resources and single-sampled color attachments. Depth/stencil and multisampled local reads are gated by `dynamicRenderingLocalReadDepthStencilAttachments` and `dynamicRenderingLocalReadMultisampledAttachments` ([VK_VERSION_1_4 proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_VERSION_1_4.html)). Roadmap 2024 requires the extension ([Roadmap appendix](https://docs.vulkan.org/spec/latest/appendices/roadmap.html)).
@@ -35,6 +38,7 @@ How this was gathered: the primary sources are cited inline. Driver support come
 - The Vulkan Guide's TBR best practices call local_read "the solution" for applications migrating to dynamic rendering ([guide](https://docs.vulkan.org/guide/latest/tile_based_rendering_best_practices.html)).
 
 **Driver support (gpuinfo.org device coverage, queried 2026-09-25):**
+
 - **Adreno 830**: supported since the launch driver 512.800.x (API 1.3.284). All Samsung SM-S938B/U/N (S25 Ultra) reports are 512.800.1–512.800.64 on Android 15/16 with `dynamicRenderingLocalRead = true` ([report 45218](https://vulkan.gpuinfo.org/displayreport.php?id=45218)). Newer Adreno 830 drivers (512.842+ with API 1.4.295, and 512.891.x) report the 1.4 depth/stencil and MSAA local-read properties as true ([report 52020](https://vulkan.gpuinfo.org/displayreport.php?id=52020)). OEM driver versions lag a lot: OPPO/vivo/HONOR Adreno 830 reports on Android 17 still show 512.800.80.
 - **Mali**: G710/G715/G720/G925-Immortalis support it with r49–r54 drivers. `VK_EXT_shader_tile_image` goes back to r44–r46 ([coverage query](https://vulkan.gpuinfo.org/listdevicescoverage.php?extension=VK_KHR_dynamic_rendering_local_read&platform=android)).
 - **NVIDIA** (Windows, 55x+ drivers) and **AMD** (Windows AMDVLK/Adrenalin and RADV) support it. RTX 4080 at 620.12 and RX 7900 XTX both report depth/stencil+MSAA local read = true ([report 50636](https://vulkan.gpuinfo.org/displayreport.php?id=50636), [report 49290](https://vulkan.gpuinfo.org/displayreport.php?id=49290)).
@@ -42,16 +46,19 @@ How this was gathered: the primary sources are cited inline. Driver support come
 - Android policy: "Devices that launch with Android 16 and higher must support Vulkan 1.4" (64-bit, non-low-memory devices) ([AOSP](https://source.android.com/docs/core/graphics/implement-vulkan)). So from Android 16 launch devices on, color local read is guaranteed.
 
 ### 1.4 VK_EXT_shader_tile_image
+
 - It gives explicit, current-pixel-only access to tile color data (mandatory feature) and optionally depth and stencil. Reads are coherent by default. A non-coherent mode needs in-pass `vkCmdPipelineBarrier2` with memory barriers only and BY_REGION. It works only within one render pass instance ([proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_EXT_shader_tile_image.html)).
 - Support: Mali and PowerVR only. No Adreno, NVIDIA, AMD or MoltenVK ([coverage](https://vulkan.gpuinfo.org/listdevicescoverage.php?extension=VK_EXT_shader_tile_image&platform=android)). Arm calls it superseded by local_read.
 
 ### 1.5 Qualcomm tile extensions
+
 - `VK_QCOM_tile_properties` queries tile size and grid. It is present on Adreno 6xx/7xx/8xx including S25 Ultra 512.800.64 ([report 45218](https://vulkan.gpuinfo.org/displayreport.php?id=45218)).
 - `VK_QCOM_tile_shading` adds per-tile execution (`vkCmdBeginPerTileExecutionQCOM`), tile-sized compute dispatch inside a render pass (`vkCmdDispatchTileQCOM`), tile-attachment access from compute/fragment, and an optional "apron" for neighbourhood reads. Using it disables FlexRender (Adreno's automatic choice between binning and direct/IMR mode) and forces TBDR. It requires tile_properties. It "builds upon" dynamic_rendering_local_read with "functionality and performance expected to be equivalent" for render pass objects and dynamic rendering. Restrictions: no stores to depth/stencil or input attachments, fragment shaders can't store color through it, and no queries or tess/geom/RT inside per-tile execution ([proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_QCOM_tile_shading.html)). Adreno 830 has it from 512.800.x/512.842+. The S25 Ultra's 512.800.64 does not list it.
 - `VK_QCOM_tile_memory_heap` exposes a tile-memory VkMemoryHeap. Contents persist only within a submission batch. Images must be 2D, single mip/layer and non-MSAA ([proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_QCOM_tile_memory_heap.html)). Adreno 830 from 512.842.x only.
 - The point for the graph: Qualcomm's own statement means that on Adreno, dynamic rendering plus local_read is the intended base for on-chip work. Tile shading is an optional vendor tier on top.
 
 ### 1.6 Roadmap profiles
+
 - **Roadmap 2024** requires dynamic_rendering_local_read, load_store_op_none, maintenance5, push_descriptor, and others. **Roadmap 2026** adds robustness2, fragment_shading_rate, shader_clock, compute_shader_derivatives, cooperative_matrix, maintenance7/8/9, and more. Neither milestone lists unified_image_layouts, rasterization_order_attachment_access or shader_tile_image ([Roadmap appendix](https://docs.vulkan.org/spec/latest/appendices/roadmap.html); [Khronos blog 2026-01-23](https://www.khronos.org/blog/vulkan-introduces-roadmap-2026-and-new-descriptor-heap-extension)). The latest core version is still 1.4 (spec 1.4.36x).
 
 **Recommendation for tilers today:** the vendors agree. Arm, Qualcomm (through tile_shading's dependency) and Khronos all point to dynamic rendering plus dynamic_rendering_local_read. Subpasses remain as a legacy fallback, and on MoltenVK they are actively worse.
@@ -61,6 +68,7 @@ How this was gathered: the primary sources are cited inline. Driver support come
 ## 2. Transient attachments, load/store ops, bandwidth
 
 ### 2.1 Vulkan
+
 - `VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT` means an image "may" be backed by `LAZILY_ALLOCATED` memory. Such images may carry **only** COLOR_ATTACHMENT, DEPTH_STENCIL_ATTACHMENT and INPUT_ATTACHMENT usage (VUID-VkImageCreateInfo-usage-00963) ([spec, resources](https://docs.vulkan.org/spec/latest/chapters/resources.html)). A transient image therefore can never be sampled, used for storage, or be the target of a copy later.
 - Lazily-allocated memory types (gpuinfo reports):
   - Present on Adreno 830 (memory type 7 or 8 on heap 0) ([45218](https://vulkan.gpuinfo.org/displayreport.php?id=45218), [52020](https://vulkan.gpuinfo.org/displayreport.php?id=52020)).
@@ -80,6 +88,7 @@ How this was gathered: the primary sources are cited inline. Driver support come
 - Mali transaction elimination needs single-sample, single-mip COLOR_ATTACHMENT images **without** TRANSIENT usage. Moving an image from a safe layout to an unsafe one (UNDEFINED, GENERAL, RENDERING_LOCAL_READ) invalidates its signature buffer ([Arm BP §7.10](https://documentation-service.arm.com/static/67a62b17091bfc3e0a947695)). Measured: using the last known layout instead of UNDEFINED roughly doubled CRC-killed tiles and cut write bandwidth by about 10% ([Vulkan Samples "layout_transitions"](https://docs.vulkan.org/samples/latest/samples/performance/layout_transitions/README.html)).
 
 ### 2.2 Metal
+
 - `MTLStorageModeMemoryless` is tile memory, textures only (no buffers), and only for the life of one render pass. Its contents "can't [be accessed] with load or store" actions ([MTLStorageMode.memoryless](https://developer.apple.com/documentation/metal/mtlstoragemode/memoryless); [choosing storage modes](https://developer.apple.com/documentation/metal/choosing-a-resource-storage-mode-for-apple-gpus)). Supported on all Apple GPU families (Apple2+) ([Metal Feature Set Tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf)).
 - `MTLStoreActionDontCare` lets the GPU discard contents. "Some GPUs may still store the contents back… you can't rely on that" ([doc](https://developer.apple.com/documentation/metal/mtlstoreaction/dontcare)). Load and store actions run per tile and are the only times render targets touch memory. "Alpha Blending will always happen on Tile Memory" ([WWDC20 "Harness Apple GPUs with Metal"](https://developer.apple.com/videos/play/wwdc2020/10602/)).
 - Savings. **[inference]** A 1080p D32 depth buffer is 1920×1080×4 B ≈ 8.3 MB, and 4x MSAA is 4× that. Digital Legends saved about 60 MB of footprint by marking a G-buffer memoryless ([WWDC19-606 transcript](https://asciiwwdc.com/2019/sessions/606)). MSAA resolve happens from tile memory, so MSAA color can be memoryless as well ([WWDC20-10602](https://developer.apple.com/videos/play/wwdc2020/10602/)).
@@ -90,6 +99,7 @@ How this was gathered: the primary sources are cited inline. Driver support come
 ## 3. Metal: render pass model, tile features, hazards, Metal 4
 
 ### 3.1 Render pass/encoder model and on-chip features
+
 - One `MTLRenderCommandEncoder` is one render pass with fixed attachments and load/store actions. Tile memory persists only within that encoder. Apple GPUs overlap the fragment tail of one pass with the vertex stage of the next ([TBDR guide](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering)).
 - **Programmable blending** (framebuffer fetch, `[[color(n)]]` fragment inputs) is available on all Apple families (Apple2+). It is not available on Intel/AMD Macs ([Feature Set Tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf); [WWDC20-10631](https://developer.apple.com/videos/play/wwdc2020/10631/)). "Programmable Blending allows fragment shaders to access pixel data directly from Tile Memory. This allows you to merge multiple render passes into one" ([WWDC20-10602](https://developer.apple.com/videos/play/wwdc2020/10602/)).
 - Imageblocks, tile shaders and raster order groups are Apple4+ (A11+), so all Metal 4 hardware has them. Imageblocks persist "for the lifetime of a tile, across draws and dispatches". Tile shaders mix compute into a render pass. In a fragment shader "the current fragment has access to only the imageblock data associated with that fragment's position" ([TBDR guide](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering)).
@@ -102,11 +112,13 @@ How this was gathered: the primary sources are cited inline. Driver support come
 - **Slang** lowers `SubpassInput` to Metal framebuffer fetch. `[[vk::input_attachment_index(N)]]` always maps to `[[color(N)]]`. Metal framebuffer fetch "reads from color attachments only, not from [[depth]]/[[stencil]]". SubpassInput must be a global declaration referenced from the fragment entry (not in a ParameterBlock, and helpers need `[ForceInline]`). `SubpassInputMS` per-sample reads are unsupported ([Slang Metal target doc](https://docs.shader-slang.org/en/latest/external/slang/docs/user-guide/a2-02-metal-target-specific.html)). A search summary said this arrived in Slang v2026.9 (May 2026) **[unverified]**, so check the pinned Slang version.
 
 ### 3.2 Hazard tracking, fences, events, heaps (Metal 3 model)
+
 - By default Metal automatically tracks hazards for resources created from `MTLDevice` (tracked). Heap resources default to untracked. Tracking has runtime overhead, and untracked resources need barriers, fences or events ([MTLHazardTrackingMode](https://developer.apple.com/documentation/metal/mtlhazardtrackingmode); [Resource synchronization](https://developer.apple.com/documentation/metal/resource-synchronization)).
 - Scopes, from smallest to largest: intrapass barrier, then `MTLFence` (across passes in a queue), then intraqueue consumer/producer barriers, then `MTLEvent` (across queues), then `MTLSharedEvent` (CPU and other devices). "Select the synchronizing mechanism with smallest scope" ([Resource synchronization](https://developer.apple.com/documentation/metal/resource-synchronization)). Apple GPUs honour fences per stage, so the vertex stage can run while fragment waits. The producer must be committed before the consumer ([MTLFence](https://developer.apple.com/documentation/metal/mtlfence)). Consumer queue barriers also work with Metal 3 encoders ([consumer barriers](https://developer.apple.com/documentation/metal/synchronizing-passes-with-consumer-barriers)).
 - Aliasing: `makeAliasable()` works only on automatic-allocator heaps. Once a resource is aliased it "can't be un-aliased or moved", and reading it afterwards is undefined. Use `MTLEvent`/`MTLFence` so aliases are never accessed concurrently. For fine-grained control use `MTLHeapType.placement` and manage offsets yourself ([makeAliasable](https://developer.apple.com/documentation/metal/mtlresource/makealiasable())).
 
 ### 3.3 Metal 4 (WWDC25; Apple7+ = A14/M1 and later)
+
 - `MTL4CommandBuffer` and `MTL4CommandAllocator` are created from the device and are independent of queues. They can be encoded in parallel and reused indefinitely (`beginCommandBuffer(allocator:)`). An allocator is bound to one command buffer at a time and is `reset()` once the GPU finishes the frame. Command buffers do **not** retain resources ([Understanding the Metal 4 core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api); [WWDC25-205](https://developer.apple.com/videos/play/wwdc2025/205/)).
 - `MTL4CommandQueue.commit:count:` submits an array in order. Work from any thread is sent to the GPU at commit ([core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api)). Events interoperate between MTL4 and legacy queues.
 - **No hazard tracking at all.** "In Metal 4, the framework considers all resources untracked", and `hazardTrackingMode` has no effect on MTL4 queues ([core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api); [Resource synchronization](https://developer.apple.com/documentation/metal/resource-synchronization)). The unified `MTL4ComputeCommandEncoder` (compute+blit+AS) runs its commands **concurrently** unless barriers intervene ([WWDC25-254](https://developer.apple.com/videos/play/wwdc2025/254/)).
@@ -122,10 +134,12 @@ How this was gathered: the primary sources are cited inline. Driver support come
 - What Metal 4 changes for the graph: on Metal 3 the graph can lean on tracked resources, so hazard derivation is optional there. On Metal 4 the graph **must** emit barriers, residency and retention (lifetime) itself, just as on Vulkan, minus image layouts.
 
 ### 3.4 Metal multithreaded encoding (Metal 3)
+
 - `MTLParallelRenderCommandEncoder` splits one render pass across threads. Its sub-encoders execute in creation order ([doc](https://developer.apple.com/documentation/metal/mtlparallelrendercommandencoder)).
 - For cross-pass parallelism, call `enqueue()` on several `MTLCommandBuffer`s in the desired order, encode them on worker threads, and commit in any order ([enqueue()](https://developer.apple.com/documentation/metal/mtlcommandbuffer/enqueue())).
 
 ### 3.5 Vulkan on Apple: MoltenVK vs KosmicKrisp
+
 - MoltenVK 1.4.x is "not a fully conformant Vulkan implementation" and supports Intel and Apple Silicon. KosmicKrisp (LunarG, Mesa) is Vulkan 1.3 conformant, requires Metal 4 and Apple Silicon, and ships in the Vulkan SDK ([LunarG, Jan 2026](https://www.lunarg.com/the-state-of-vulkan-on-apple-jan-2026/)). On gpuinfo, the Apple reports that expose unified_image_layouts and nested_command_buffer are KosmicKrisp (driver 26.x), not MoltenVK ([coverage](https://vulkan.gpuinfo.org/listdevicescoverage.php?extension=VK_KHR_unified_image_layouts&platform=macos)).
 
 ---
@@ -147,11 +161,13 @@ How this was gathered: the primary sources are cited inline. Driver support come
 ## 5. Barriers, layouts, async compute
 
 ### 5.1 synchronization2 and stage masks
+
 - sync2 is core 1.3 and universal on the targets ([coverage](https://vulkan.gpuinfo.org/listdevicescoverage.php?extension=VK_KHR_synchronization2&platform=android)). NVIDIA: "Group barriers in one call to vkCmdPipelineBarrier2", "Minimize the use of barriers. A barrier may cause a GPU pipeline flush", avoid read-to-read barriers, use precise stages, and use UNDEFINED when contents aren't needed ([NVIDIA](https://developer.nvidia.com/blog/vulkan-dos-donts/)). AMD: "produce data early and wait late", and the driver may widen but never narrow your masks ([GPUOpen, Vulkan barriers explained](https://gpuopen.com/learn/vulkan-barriers-explained/)).
 - **Tilers**: Mali has two hardware slots, vertex/compute/transfer-buffer and fragment. Forward dependencies (vertex/compute → fragment) are cheap. **Backward** dependencies (fragment → vertex/compute) create bubbles. Never use BOTTOM→TOP, ALL_GRAPHICS→ALL_GRAPHICS or ALL_COMMANDS→ALL_COMMANDS. For render pass to render pass use `srcStage=ALL_GRAPHICS, dstStage=FRAGMENT_SHADER`. Don't set an event and then wait on it immediately. Don't use semaphores within one queue ([Arm BP §3.9](https://documentation-service.arm.com/static/67a62b17091bfc3e0a947695)). Measured: COLOR_ATTACHMENT_OUTPUT→FRAGMENT_SHADER instead of →VERTEX_SHADER removed bubbles and cut frame time by 13% on Mali ([Vulkan Samples pipeline_barriers](https://docs.vulkan.org/samples/latest/samples/performance/pipeline_barriers/README.html)). The Vulkan Guide warns that broad barriers "might force the GPU to finish all pending fragment work before it can even start the binning pass" ([TBR guide](https://docs.vulkan.org/guide/latest/tile_based_rendering_best_practices.html)).
 - **Split barriers (events)**: NVIDIA recommends `vkCmdSetEvent2`/`vkCmdWaitEvents2` for asynchronous barriers. AMD says they are useful only with enough work between set and wait. Arm says not to wait right after setting ([NVIDIA](https://developer.nvidia.com/blog/vulkan-dos-donts/); [GPUOpen](https://gpuopen.com/learn/vulkan-barriers-explained/); [Arm BP §3.9](https://documentation-service.arm.com/static/67a62b17091bfc3e0a947695)). Metal has no split-barrier equivalent. The closest are fences, updated early and waited late.
 
 ### 5.2 VK_KHR_unified_image_layouts (2025)
+
 - It guarantees that `GENERAL` is as efficient as the specific layouts wherever it is valid. Transitions are still needed from UNDEFINED/PREINITIALIZED (initialization), to and from PRESENT_SRC/SHARED_PRESENT, and for video unless `unifiedImageLayoutsVideo` is set. Attachment feedback loops go through `VkAttachmentFeedbackLoopInfoEXT`. "Image barriers are still required for best performance on some hardware, even if both src and dst layouts are GENERAL." Memory barriers are unaffected ([proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_unified_image_layouts.html); [Khronos blog 2025-06-26](https://www.khronos.org/blog/so-long-image-layouts-simplifying-vulkan-synchronisation)). It is headed for core but is not in Roadmap 2026.
 - Support (gpuinfo 2026-09-25):
   - NVIDIA Windows/Linux: yes (RTX 4080 at 620.12).
@@ -162,6 +178,7 @@ How this was gathered: the primary sources are cited inline. Driver support come
 - **[inference]** It removes most transitions on desktop only. On Mali it is unavailable, and GENERAL is also a TE-"unsafe" layout, so precise layouts still pay off there (§2.1). The graph should still derive layouts and collapse them to GENERAL when `unifiedImageLayouts` is on.
 
 ### 5.3 Async compute
+
 - **Adreno**: an LPAC (Low Priority Async Compute) queue runs concurrently with the graphics pipe at lower priority. It suits latency-tolerant compute "on the scale of multiple milliseconds" and has a slightly larger instruction cache ([Adreno best practices](https://docs.qualcomm.com/bundle/publicresource/topics/80-78185-2/mobile_best_practices.html), via search excerpt). S25 Ultra exposes three queue families (family 0 with 3 queues) ([45218](https://vulkan.gpuinfo.org/displayreport.php?id=45218)).
 - **Mali**: compute shares the vertex/binning slot. A separate queue lets FRAGMENT→COMPUTE post-processing overlap and gave a modest win (21.8 ms vs 22.9 ms). Gains are small because both slots share shader cores. Avoid FRAGMENT→COMPUTE barriers unless there is a plan for the COMPUTE→FRAGMENT return ([Vulkan Samples async_compute](https://docs.vulkan.org/samples/latest/samples/performance/async_compute/README.html)).
 - **Apple**: without barriers, work in a single queue already overlaps (Metal 4 is "concurrency by default"; vertex overlaps compute unless you over-synchronize). Multiple queues need MTLEvent ([WWDC25-254](https://developer.apple.com/videos/play/wwdc2025/254/); [Resource synchronization](https://developer.apple.com/documentation/metal/resource-synchronization)).
@@ -185,7 +202,7 @@ How this was gathered: the primary sources are cited inline. Driver support come
 Legend: ✔ supported/recommended · ~ partial or caveated · ✘ not available. Driver facts come from gpuinfo as of 2026-09-25. "Adreno 830" means the S25 Ultra's Samsung driver 512.800.64 unless noted.
 
 | Feature | Vulkan desktop (NVIDIA / AMD) | MoltenVK 1.4.x (Apple Silicon) | Adreno 830 (Vulkan) | Mali G710+ (Vulkan) | Metal 3 (Apple Silicon) | Metal 4 (A14/M1+) |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | On-chip multi-step pass primitive | IMR: no tile memory. local_read / subpasses become ordinary barriers | local_read in one Metal pass | subpasses or dynamic rendering + local_read | local_read (r49/r50+) > subpasses | one render encoder + programmable blending / imageblocks | same as Metal 3 (MTL4RenderCommandEncoder) |
 | Subpass merging | n/a (no tiles) | ✘ each subpass is a new Metal pass | ✔ (>10% frametime per Qualcomm) | ~ unpredictable; merge rules (≤8 attachments, same depth/MSAA) | n/a | n/a |
 | dynamic_rendering_local_read | ✔ incl. depth/MSAA | ✔ (1.4.0+); depth reads **[inference: emulated]** | ✔ ext on 512.800; 1.4 props true on 512.842+ | ✔ r49+ | n/a → `[[color(n)]]` | n/a → `[[color(n)]]` |
@@ -210,11 +227,14 @@ Legend: ✔ supported/recommended · ~ partial or caveated · ✘ not available.
 
 ## 8. Design constraints for a cross-API render graph
 
-### C1. Make the pixel-local read its own access type, and treat it as the only thing that allows merging.
+### C1. Make the pixel-local read its own access type, and treat it as the only thing that allows merging
+
 A pass declares, per resource, one of: attachment write (color or depth), attachment read-only (depth test), pixel-local read (input attachment / framebuffer fetch), sampled read, storage read/write, or transfer. A pixel-local read is legal only for data written at the same pixel, since both local_read and Metal forbid neighbour reads within a pass ([local_read proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_dynamic_rendering_local_read.html); [Apple intrapass](https://developer.apple.com/documentation/metal/synchronizing-stages-within-a-pass)). Any sampled read of an attachment written in the current merged group forces a split. This gives one rule for all backends.
 
-### C2. The merge ("physical pass") rules are the intersection of vendor rules.
+### C2. The merge ("physical pass") rules are the intersection of vendor rules
+
 Merge consecutive raster passes when all of these hold:
+
 - Same render area and extent.
 - Same sample count (Arm, and MSAA levels can't fuse).
 - The same depth/stencil attachment or none. local_read cannot switch depth, and Arm won't merge if depth changes.
@@ -224,15 +244,18 @@ Merge consecutive raster passes when all of these hold:
 
 Lift the external dependencies of every member to the start of the merged pass (Granite). Keep a debug switch that disables merging, so results can be A/B'd for correctness and profiled per Arm's "profile, don't assume" advice.
 
-### C3. Lower a merged pass once per backend.
+### C3. Lower a merged pass once per backend
+
 - **Vulkan (all targets: Adreno 830 512.800+, Mali r49+, NVIDIA, AMD, MoltenVK 1.4+)**: one `vkCmdBeginRendering` whose attachments are the union of the members. Between members, call `vkCmdSetRenderingAttachmentLocations` / `vkCmdSetRenderingInputAttachmentIndices` and a `vkCmdPipelineBarrier2` with memory barriers only and `BY_REGION` (framebuffer-space stages, COLOR_ATTACHMENT_WRITE → INPUT_ATTACHMENT_READ). Pixel-locally read attachments use `RENDERING_LOCAL_READ` (or GENERAL when unified layouts are on) for the whole pass. There are no in-pass layout transitions.
 - **Fallback if `dynamicRenderingLocalRead` is absent**: split into separate passes with sampled reads, not VkRenderPass subpasses. **[inference]** The fallback population is small (pre-r49 Mali, very old Adreno drivers), subpasses are unpredictable on Mali and harmful on MoltenVK, and a second on-chip lowering path doubles the test matrix. Revisit only if a target device lacks local_read.
 - **Metal (3 and 4)**: one render encoder with all the attachments. A pixel-local read becomes a `[[color(n)]]` fragment input (Slang `SubpassInput`). No barrier is emitted, because per-pixel ordering is implicit. Metal 4 color attachment mapping plays the role of attachment locations.
 - **Binding convention [inference]**: Slang maps `input_attachment_index(N)` to `[[color(N)]]`. Make the graph assign each pixel-local input the **same index as its color attachment slot**, and use the identity mapping in `vkCmdSetRenderingInputAttachmentIndices`. Then one shader source works on both APIs.
 - **Depth as pixel-local input is not portable**: Metal can't framebuffer-fetch depth. Either write linear depth into a color attachment during the G-buffer step, or have depth consumers sample it after a pass split. Validate this in the graph, as a compile error for Metal-bound pipelines.
 
-### C4. Derive transient storage from lifetime, with backend capability fallbacks.
+### C4. Derive transient storage from lifetime, with backend capability fallbacks
+
 A resource is "memoryless-eligible" when:
+
 - its whole lifetime is inside one merged physical pass,
 - its first access is CLEAR or DONT_CARE,
 - nothing reads it after the pass (storeOp DONT_CARE), and
@@ -240,13 +263,15 @@ A resource is "memoryless-eligible" when:
 
 Lower it to TRANSIENT+LAZILY_ALLOCATED where that memory type exists (Adreno, Mali, MoltenVK) and to `MTLStorageModeMemoryless` on Metal. Where no lazy type exists (NVIDIA/AMD desktop), fall back to a normal image in the aliasing pool. Treat MSAA color/depth that is resolved inline as memoryless-eligible, and resolve inside the pass through resolve attachments or `StoreAndMultisampleResolve`. Never use a separate resolve copy.
 
-### C5. Derive load and store ops, never hand-author them.
+### C5. Derive load and store ops, never hand-author them
+
 - loadOp: CLEAR when the pass declares a clear. DONT_CARE (Metal: DontCare) when the previous contents are dead, including the first use after aliasing. LOAD only when a producer exists and the render area doesn't fully overwrite.
 - storeOp: STORE if any later consumer exists, including next frame (history resources are graph-external and imported). DONT_CARE if dead. NONE for read-only depth or other untouched attachments that must persist (Vulkan 1.4). On Metal use DontCare, since Metal has no NONE.
 
 This is the single largest bandwidth lever. The Arm samples measured about 600 MiB/s per attachment at 60 fps.
 
-### C6. Barrier and hazard derivation happens once, at compile time, into a backend-neutral barrier list at pass boundaries.
+### C6. Barrier and hazard derivation happens once, at compile time, into a backend-neutral barrier list at pass boundaries
+
 - Each barrier entry is (src stages, src access, dst stages, dst access, resource or global, Vulkan-only old/new layout, aliasing flag). Emit barriers at physical pass boundaries and batch them per boundary: one `vkCmdPipelineBarrier2` in Vulkan, one consumer queue barrier at the start of the consuming pass in Metal 4, fences in Metal 3 heaps.
 - Keep masks precise. Prefer forward dependencies. Warn in debug builds on fragment→vertex/compute dependencies (Arm §3.9), and on wide masks such as ALL_COMMANDS or BOTTOM→TOP.
 - Use global memory barriers for buffers. Use image barriers only where a layout changes or a queue ownership transfer happens.
@@ -254,23 +279,27 @@ This is the single largest bandwidth lever. The Arm samples measured about 600 M
 - Skip split barriers (events) in v1. Arm and AMD caveat their use, Metal has no equivalent, and a compile-time scheduler that orders independent passes between producer and consumer gets most of the overlap. **[inference]**
 - Metal 3 backend: allocate graph resources from heaps as untracked and emit fences, rather than relying on tracked-resource overhead. This keeps the Metal 3 and Metal 4 code paths structurally identical (fence or barrier at pass boundaries). **[inference]**
 
-### C7. Multithreading model: "record chunks", with ordering decided at compile time.
+### C7. Multithreading model: "record chunks", with ordering decided at compile time
+
 - The graph compiles to an ordered list of physical passes. A pass (or a group of passes) is a record unit, and a large raster pass can be split into N chunks. Workers record chunks in parallel. Barriers are precomputed, so recording threads never derive hazards.
 - Across passes: Vulkan uses one primary per record unit and `vkQueueSubmit2` in graph order. Metal 3 uses `enqueue()` in graph order and parallel encoding. Metal 4 uses one MTL4CommandBuffer per unit and `commit:count:` in order.
 - Within one raster pass, both APIs offer the same rule, so model a **suspend/resume chunk chain**: Vulkan `SUSPENDING/RESUMING` in one submit batch, Metal 4 `Suspending/Resuming` in one commit array, with nothing between chunks. **Consequence**: a merged pass's internal BY_REGION barriers and attachment-location changes must stay inside a single chunk, and chunk boundaries may fall only between draws of the same member step. Vulkan secondaries (`RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT`) are the equivalent fallback and are fine on Adreno ≥650 and Mali ≥G710 in moderate counts. On Metal 3 use `MTLParallelRenderCommandEncoder`. **[unverified]** How tiler drivers perform on suspend/resume vs secondaries has no public vendor data. Measure both on S25 Ultra before choosing a default.
 - Pools and allocators: one Vulkan command pool per (thread, frame in flight), reset per frame. One MTL4CommandAllocator per (thread, frame in flight), `reset()` after that frame's completion. Use ONE_TIME_SUBMIT. Avoid tiny chunks (NVIDIA) and minimize secondary count (Arm).
 - Metal 4 command buffers don't retain resources, and residency sets are mandatory. The graph's resource pool must keep transient and aliased allocations alive until the frame's completion (timeline value or event), and must keep a residency set containing all pool heaps.
 
-### C8. Aliasing pool for resources that cross pass boundaries.
+### C8. Aliasing pool for resources that cross pass boundaries
+
 - Linear-scan the lifetimes in compiled order and place the members into a small number of large allocations: VkDeviceMemory through VMA with merged requirements and offsets, or Metal placement heaps. Placement heaps give the same offset model as Vulkan. makeAliasable is one-way and cannot model the reuse pattern cleanly **[inference]**.
 - Respect `bufferImageGranularity` when mixing buffers and optimal images (1024 on NVIDIA).
 - On first use of each alias, emit UNDEFINED plus CLEAR/DONT_CARE (Vulkan) or a DontCare/Clear load action or explicit clear (Metal). Emit a barrier between the last use of alias A and the first use of alias B: a Vulkan memory dependency, or a Metal 4 barrier with `resourceAlias` visibility.
 - Expected gain is roughly 45% of transient memory (Frostbite: 147 to 80 MB). Tiler attachments that are memoryless already cost 0 MB and stay out of the pool.
 
-### C9. Queues.
+### C9. Queues
+
 Keep `queue` as an optional pass attribute that defaults to graphics. Add async compute later only for measured wins: Adreno LPAC for long, latency-tolerant compute, and Mali for overlapping fragment-bound post-processing. On Apple, keep a single queue and rely on precise stage barriers.
 
-### C10. Capability tiers to query at startup (Vulkan).
+### C10. Capability tiers to query at startup (Vulkan)
+
 - `dynamicRenderingLocalRead`, plus the two 1.4 depth/MSAA properties when the driver reports 1.4.
 - A lazily-allocated memory type.
 - `unifiedImageLayouts`.
@@ -283,6 +312,7 @@ The S25 Ultra on Samsung's 512.800.64 driver has local_read (including depth/MSA
 ---
 
 ## Open questions and uncertainties
+
 - Whether MoltenVK's local read of depth/stencil (reported as supported) stays on-chip. Metal framebuffer fetch is color-only, so this needs measuring.
 - Suspend/resume vs secondaries on Adreno 830 and Mali: there is no vendor guidance. Profile it (Snapdragon Profiler "Rendering Stages" shows pass merges and GMEM loads).
 - Which Slang version is pinned in the project, and whether it has the Metal `SubpassInput` lowering (reported as v2026.9, unverified).
