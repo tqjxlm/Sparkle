@@ -95,6 +95,16 @@ public:
         return supports_astc_hdr_;
     }
 
+    [[nodiscard]] bool SupportsDynamicRenderingLocalRead() const
+    {
+        return supports_dynamic_rendering_local_read_;
+    }
+
+    [[nodiscard]] bool SupportsUnifiedImageLayouts() const
+    {
+        return supports_unified_image_layouts_;
+    }
+
     bool Init();
 
     void BeginCommandBuffer();
@@ -241,6 +251,7 @@ private:
     bool CreateLogicalDevice();
     bool PickPhysicalDevice();
     void QuerySubgroupQuadSupport();
+    void QueryOptionalDeviceFeatures();
     bool CheckValidationLayerSupport();
     static bool CheckInstanceExtensionSupport();
     void GetRequiredInstanceExtensions();
@@ -367,6 +378,8 @@ private:
     CommandState command_state_;
     bool enable_ray_tracing_ = false;
     bool supports_astc_hdr_ = false;
+    bool supports_dynamic_rendering_local_read_ = false;
+    bool supports_unified_image_layouts_ = false;
 
     VulkanRHI *rhi_;
 
