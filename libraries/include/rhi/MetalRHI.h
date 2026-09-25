@@ -20,6 +20,13 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
+    bool SupportsPixelLocalRead() override;
+
+    bool SupportsUnifiedImageLayouts() override
+    {
+        return false;
+    }
+
     bool SupportsSampledFormat(PixelFormat format) override;
 
     bool HasPhysicalGpu() override

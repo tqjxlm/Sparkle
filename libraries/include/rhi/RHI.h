@@ -124,6 +124,12 @@ public:
     virtual void InitRenderResources() = 0;
     virtual bool SupportsHardwareRayTracing() = 0;
 
+    // draws in a render pass can read color attachments written earlier in the same pass at the same pixel
+    virtual bool SupportsPixelLocalRead() = 0;
+
+    // the general image layout performs as well as the specialized ones for every access
+    virtual bool SupportsUnifiedImageLayouts() = 0;
+
     // false on software rasterizers (e.g. lavapipe): GPU-accelerated cooking is only
     // worthwhile on a physical device, otherwise the CPU cook jobs run instead
     virtual bool HasPhysicalGpu() = 0;

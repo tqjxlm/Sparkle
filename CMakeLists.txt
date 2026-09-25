@@ -315,7 +315,7 @@ if(ENABLE_VULKAN)
                 "    \"file_format_version\": \"1.0.0\",\n"
                 "    \"ICD\": {\n"
                 "        \"library_path\": \"../lib/libMoltenVK.dylib\",\n"
-                "        \"api_version\": \"1.2.0\",\n"
+                "        \"api_version\": \"1.3.0\",\n"
                 "        \"is_portability_driver\": true\n"
                 "    }\n"
                 "}\n")
