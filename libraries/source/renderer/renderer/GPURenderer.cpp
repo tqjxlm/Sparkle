@@ -217,6 +217,11 @@ void GPURenderer::Render()
         }
     }
 
+    // a frame without a dispatch leaves the clear pass's storage layout on the scene texture
+    scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::ColorOutput,
+                                .before_stage = RHIPipelineStage::PixelShader});
+
     // screen space passes (post processing)
     {
         tone_mapping_pass_->Render();
