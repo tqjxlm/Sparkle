@@ -21,6 +21,8 @@ render_target_pool,x,x,x,x,,x
 dynamic_buffer_reuse,x,x,x,x,,x
 vulkan_image_subresources,x,,x,,,x
 pass_timestamps,,x,x,,,x
+render_graph_compile,,x,,,,
+render_graph_sync_validation,,,,,,x
 pipeline_switch_pool,,x,x,x,,x
 sync_validation_hazard,,,,,,x
 forward_sync_validation,,,,,,x

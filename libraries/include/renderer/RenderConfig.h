@@ -101,6 +101,7 @@ struct RenderConfig : public ConfigCollection
     bool enable_nee;
     bool clear_screenshots;
     bool manual_accumulation;
+    bool render_graph_cull;
     float target_framerate;
     float gpu_time_budget_ratio;
     float render_scale;

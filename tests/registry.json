@@ -200,6 +200,17 @@
         "description": "Opt-in render-pass GPU timestamps report a time once their frame slot returns, and nothing without device support."
     },
     {
+        "name": "render_graph_compile",
+        "test_case": "render_graph_compile",
+        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, barriers seeded from tracked state, load/store inference and the dump, then executed and read back."
+    },
+    {
+        "name": "render_graph_sync_validation",
+        "test_case": "render_graph_compile",
+        "description": "render_graph_compile under Vulkan synchronization validation, so every planned barrier batch must order the accesses it separates.",
+        "app_args": ["--validation", "true", "--validate_sync", "true"]
+    },
+    {
         "name": "pipeline_switch_pool",
         "test_case": "pipeline_switch_pool",
         "description": "Runtime pipeline switch and pooled render-target reuse."
