@@ -137,6 +137,16 @@ Use `--test_timeout <frames>` to set a frame budget for the test. If the test do
 | `1`  | `TestCase::Result::Fail` — test failed            |
 | `1`  | Named test case was not registered (init failure) |
 
+### Validation Layer
+
+Once scene loading completes, every validation-type error the Vulkan validation layer has reported fails the running test case; warnings are only logged. The layer is active when `validation` is on (the packaged config enables it) and the loader finds `VK_LAYER_KHRONOS_validation`; otherwise validation stays off silently, except that a run with `validate_sync true` fails unless synchronization validation is actually active, so the synchronization gate can never pass vacuously. Errors reported after the verdict (e.g. objects leaked at device destruction) do not change it. A test that provokes errors on purpose accepts that many through `TestCase::AcceptValidationErrors`.
+
+`validate_sync` adds synchronization validation, which reports hazards between GPU accesses that no barrier orders (read-after-write, write-after-read, write-after-write), including across submits. It is slow, so only dedicated registry cases turn it on: `forward_sync_validation`, `deferred_sync_validation` and `gpu_sync_validation` render a still frame of each pipeline with it (gpu with `--max_spp 4`; a device without ray query support falls back to forward), and `sync_validation_hazard` records an unsynchronized write-after-write and expects it to be reported, proving the gate can fail. CI runs them on `ubuntu-glfw-release` (see [CI.md](CI.md#aggregate-test-suite)); locally they need the layer on the loader's search path:
+
+```bash
+python3 dev/run_tests.py --framework glfw --config Release --case sync_validation_hazard --case forward_sync_validation --case deferred_sync_validation --case gpu_sync_validation
+```
+
 ## Writing a Test Case
 
 1. Create a `.cpp` file anywhere under `tests/`.

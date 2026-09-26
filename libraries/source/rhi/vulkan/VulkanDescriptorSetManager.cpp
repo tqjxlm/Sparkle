@@ -250,21 +250,30 @@ VkDescriptorSet VulkanDescriptorSetManager::RequestDescriptorSet(uint32_t resour
 
 void VulkanDescriptorSetManager::ReleaseDescriptorSet(uint32_t resource_hash, uint32_t layout_hash)
 {
-    context->GetRHI()->EnqueueEndOfFrameTasks([this, resource_hash, layout_hash]() {
-        auto &cache = cache_[layout_hash];
-
-        ASSERT(cache.allocated_sets.contains(resource_hash));
-
-        auto index = cache.allocated_sets[resource_hash];
-        cache.all_sets[index].ref_count--;
-
-        // mark it as free
-        if (cache.all_sets[index].ref_count == 0)
-        {
-            cache.allocated_sets.erase(resource_hash);
-            cache.free_sets.push_back(index);
-        }
+    // the set is reused only after the GPU finishes every frame that may have bound it: the end-of-render task queued
+    // at the end of this frame runs once its frame slot's fence has signaled, max_frames_in_flight frames later
+    auto *rhi = context->GetRHI();
+    rhi->EnqueueEndOfFrameTasks([this, rhi, resource_hash, layout_hash]() {
+        rhi->EnqueueEndOfRenderTasks(
+            [this, resource_hash, layout_hash]() { ReturnDescriptorSet(resource_hash, layout_hash); });
     });
+}
+
+void VulkanDescriptorSetManager::ReturnDescriptorSet(uint32_t resource_hash, uint32_t layout_hash)
+{
+    auto &cache = cache_[layout_hash];
+
+    ASSERT(cache.allocated_sets.contains(resource_hash));
+
+    auto index = cache.allocated_sets[resource_hash];
+    cache.all_sets[index].ref_count--;
+
+    // mark it as free
+    if (cache.all_sets[index].ref_count == 0)
+    {
+        cache.allocated_sets.erase(resource_hash);
+        cache.free_sets.push_back(index);
+    }
 }
 
 VulkanDescriptorSetManager::~VulkanDescriptorSetManager()
