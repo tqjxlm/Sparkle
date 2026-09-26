@@ -4,7 +4,6 @@
 
 #include "VulkanBuffer.h"
 #include "VulkanCommon.h"
-#include "VulkanComputePass.h"
 #include "VulkanContext.h"
 #include "VulkanImage.h"
 #include "VulkanNrdBackend.h"
@@ -51,7 +50,7 @@ bool VulkanRHI::BeginFrameInternal()
         return false;
     }
 
-    if (GetConfig().measure_gpu_time)
+    if (GetConfig().measure_gpu_time && !frame_timers_.empty())
     {
         auto frame_index = GetFrameIndex();
         if (frame_timers_[frame_index]->GetStatus() != RHITimer::Status::Inactive)
@@ -59,7 +58,7 @@ bool VulkanRHI::BeginFrameInternal()
             frame_stats_[frame_index].elapsed_time_ms = frame_timers_[frame_index]->GetTime();
         }
 
-        frame_timers_[frame_index]->Begin();
+        frame_timers_[frame_index]->Begin(*context->GetCommandContext());
     }
 
     return true;
@@ -67,9 +66,9 @@ bool VulkanRHI::BeginFrameInternal()
 
 void VulkanRHI::EndFrameInternal()
 {
-    if (GetConfig().measure_gpu_time)
+    if (GetConfig().measure_gpu_time && !frame_timers_.empty())
     {
-        frame_timers_[GetFrameIndex()]->End();
+        frame_timers_[GetFrameIndex()]->End(*context->GetCommandContext());
     }
 
     auto result = context->EndFrame();
@@ -149,9 +148,12 @@ void VulkanRHI::InitRenderResources()
 
     context->InitRenderResources();
 
-    for (unsigned i = 0; i < GetMaxFramesInFlight(); i++)
+    if (SupportsPassTimestamps())
     {
-        frame_timers_.emplace_back(CreateTimer("FrameTimer"));
+        for (unsigned i = 0; i < GetMaxFramesInFlight(); i++)
+        {
+            frame_timers_.emplace_back(CreateTimer("FrameTimer"));
+        }
     }
 }
 
@@ -182,6 +184,11 @@ bool VulkanRHI::SupportsPixelLocalRead()
 bool VulkanRHI::SupportsUnifiedImageLayouts()
 {
     return context->SupportsUnifiedImageLayouts();
+}
+
+bool VulkanRHI::SupportsPassTimestamps()
+{
+    return context->GetTimestampValidBits() > 0;
 }
 
 bool VulkanRHI::HasPhysicalGpu()
@@ -394,7 +401,7 @@ RHIResourceRef<RHIRenderPass> VulkanRHI::CreateRenderPass(const RHIRenderPass::A
                                                           const RHIResourceRef<RHIRenderTarget> &rt,
                                                           const std::string &name)
 {
-    return CreateResource<VulkanRenderPass>(attribute, rt, name);
+    return CreateResource<VulkanRenderPass>(this, attribute, rt, name);
 }
 
 RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info)
@@ -429,7 +436,7 @@ RHIResourceRef<RHITimer> VulkanRHI::CreateTimer(const std::string &name)
 
 RHIResourceRef<RHIComputePass> VulkanRHI::CreateComputePass(const std::string &name, bool need_timestamp)
 {
-    return CreateResource<VulkanComputePass>(this, need_timestamp, name);
+    return CreateResource<RHIComputePass>(this, need_timestamp, name);
 }
 } // namespace sparkle
 

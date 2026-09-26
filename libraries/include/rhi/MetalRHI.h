@@ -27,6 +27,8 @@ public:
         return false;
     }
 
+    bool SupportsPassTimestamps() override;
+
     bool SupportsSampledFormat(PixelFormat format) override;
 
     bool HasPhysicalGpu() override
