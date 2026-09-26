@@ -54,17 +54,6 @@ public:
     // describes this pass over the render target's current images
     [[nodiscard]] RHIRenderingInfo GetRenderingInfo() const;
 
-    // the rendering info taken when the pass began, valid until it ends
-    [[nodiscard]] const RHIRenderingInfo &GetActiveRenderingInfo() const
-    {
-        return active_rendering_info_;
-    }
-
-    [[nodiscard]] const RHIAttachmentSignature &GetActiveAttachmentSignature() const
-    {
-        return active_attachment_signature_;
-    }
-
 protected:
     Attribute attribute_;
     RHIResourceWeakRef<RHIRenderTarget> render_target_;
@@ -72,14 +61,13 @@ protected:
 private:
     friend class RHICommandContext;
 
-    void CaptureRenderingInfo()
-    {
-        active_rendering_info_ = GetRenderingInfo();
-        active_attachment_signature_ = active_rendering_info_.GetSignature();
-    }
+    // tracks the attachments into their attachment layouts, discarding the contents the pass does not load, and returns
+    // the barriers
+    [[nodiscard]] static std::vector<RHIImageBarrier> TrackBeginTransitions(const RHIRenderingInfo &info);
+
+    // tracks the attachments into the pass's final layouts and returns the barriers
+    [[nodiscard]] std::vector<RHIImageBarrier> TrackEndTransitions(const RHIRenderingInfo &info) const;
 
     bool targets_back_buffer_;
-    RHIRenderingInfo active_rendering_info_;
-    RHIAttachmentSignature active_attachment_signature_;
 };
 } // namespace sparkle

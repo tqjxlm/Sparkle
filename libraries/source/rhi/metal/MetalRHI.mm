@@ -9,7 +9,6 @@
 #include "MetalNrdBackend.h"
 #include "MetalPipelineState.h"
 #include "MetalRayTracing.h"
-#include "MetalRenderPass.h"
 #include "MetalRenderTarget.h"
 #include "MetalResourceArray.h"
 #include "MetalShader.h"
@@ -198,13 +197,6 @@ RHIResourceRef<RHIRenderTarget> MetalRHI::CreateRenderTarget(const RHIRenderTarg
                                                              const std::string &name)
 {
     return CreateResource<MetalRenderTarget>(attribute, color_images, depth_image, name);
-}
-
-RHIResourceRef<RHIRenderPass> MetalRHI::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                         const RHIResourceRef<RHIRenderTarget> &rt,
-                                                         const std::string &name)
-{
-    return CreateResource<MetalRenderPass>(this, attribute, rt, name);
 }
 
 RHIResourceRef<RHIShader> MetalRHI::CreateShader(const RHIShaderInfo *shader_info)
