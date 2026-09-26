@@ -6,7 +6,6 @@
 #include "screen.h.slang"
 #include "shadow.h.slang"
 #include "sky_light.h.slang"
-#include "ssao.h.slang"
 #include "standard.h.slang"
 #include "view.h.slang"
 
@@ -21,7 +20,6 @@
     DirectionalLight dir_light;
     float3 camera_pos;
     RenderConfig config;
-    SSAOConfig ssao_config;
 }
 
 [[vk::binding(1, 1)]] Texture2D shadow_map;
