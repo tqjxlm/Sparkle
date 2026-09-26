@@ -524,9 +524,9 @@ VkResult VulkanContext::EndFrame()
     auto image_index = swap_chain_->GetCurrentImageIndex();
     auto back_buffer_color = swap_chain_->GetImage(image_index);
 
-    back_buffer_color->TransitionLayout(current_command_buffer_, {.target_layout = RHIImageLayout::Present,
-                                                                  .after_stage = RHIPipelineStage::ColorOutput,
-                                                                  .before_stage = RHIPipelineStage::Bottom});
+    back_buffer_color->Transition({.target_layout = RHIImageLayout::Present,
+                                   .after_stage = RHIPipelineStage::ColorOutput,
+                                   .before_stage = RHIPipelineStage::Bottom});
 
     CHECK_VK_ERROR(vkEndCommandBuffer(current_command_buffer_));
 
@@ -880,6 +880,13 @@ void VulkanContext::QuerySubgroupQuadSupport()
 
 void VulkanContext::QueryOptionalDeviceFeatures()
 {
+    // the android emulator (gfxstream over llvmpipe) emulates compressed formats by decoding them when it
+    // intercepts vkCmdPipelineBarrier; its vkCmdPipelineBarrier2 skips the decode (fixed in gfxstream 9068c3aa)
+    VkPhysicalDeviceProperties device_properties;
+    vkGetPhysicalDeviceProperties(physical_device_, &device_properties);
+    compressed_image_barriers_need_sync1_ =
+        FRAMEWORK_ANDROID && std::string_view(device_properties.deviceName).find("llvmpipe") != std::string_view::npos;
+
     supports_astc_hdr_ = QueryDeviceFeatures<VkPhysicalDeviceVulkan13Features>(
                              physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
                              .textureCompressionASTC_HDR == VK_TRUE;
