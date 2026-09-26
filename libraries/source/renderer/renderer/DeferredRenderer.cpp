@@ -346,7 +346,6 @@ void DeferredRenderer::HandleSceneChanges()
         {
             sky_box_pass_ =
                 PipelinePass::Create<SkyBoxPass>(render_config_, rhi_, sky_proxy, scene_color_, scene_depth_);
-            sky_box_pass_->InitRenderResources(render_config_);
         }
     }
     else

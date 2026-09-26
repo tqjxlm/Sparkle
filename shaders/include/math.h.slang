@@ -64,11 +64,6 @@ float3 ClampToLength(float3 v, float max_length)
     return (length_v > max_length) ? v * (max_length / length_v) : v;
 }
 
-float ToLinearDepth(float depth, float near, float far)
-{
-    return near * far / (far - depth * (far - near));
-}
-
 float3 GetPossibleMajorAxis(float3 normal)
 {
     if (abs(normal.x) < InvSqrt3)

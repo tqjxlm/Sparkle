@@ -18,7 +18,6 @@ struct MaterialParameters
 struct RenderConfig
 {
     uint mode;
-    uint use_ssao;
     uint has_diffuse_ibl;
     uint has_specular_ibl;
 };
