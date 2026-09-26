@@ -4,6 +4,7 @@
 
 #include "core/Hash.h"
 #include "io/ImageTypes.h"
+#include "rhi/RHIBarrier.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIImageView.h"
 #include "rhi/RHIMemory.h"
@@ -14,20 +15,6 @@
 
 namespace sparkle
 {
-enum class RHIImageLayout : uint8_t
-{
-    Undefined,
-    General,
-    Read,
-    StorageWrite,
-    ColorOutput,
-    DepthStencilOutput,
-    TransferSrc,
-    TransferDst,
-    PreInitialized,
-    Present,
-};
-
 enum class RHIPipelineStage : uint8_t
 {
     Top,
@@ -165,10 +152,13 @@ public:
         }
     };
 
+    // a read already covered by the tracked reads in the same layout emits nothing; otherwise the barrier waits for the
+    // tracked last access of each subresource plus the write after_stage implies.
     struct TransitionRequest
     {
         RHIImageLayout target_layout;
         RHIPipelineStage after_stage;
+        // the shader stage that samples or stores the image next; Top and Bottom stand for every shader stage
         RHIPipelineStage before_stage;
         // A zero count transitions every remaining subresource in that dimension.
         unsigned base_mip = 0;
@@ -295,15 +285,12 @@ public:
 
     [[nodiscard]] RHIImageLayout GetCurrentLayout(unsigned mip_level, unsigned array_layer) const
     {
-        ASSERT(mip_level < attributes_.mip_levels);
-        ASSERT(array_layer < GetArrayLayerCount());
-
-        return current_layout_[mip_level * GetArrayLayerCount() + array_layer];
+        return GetSubresourceState(mip_level, array_layer).layout;
     }
 
     // CAUTION: normally this should not be used. use RHIImage::Transition instead unless you know what you are doing.
-    void SetCurrentLayout(RHIImageLayout layout, unsigned base_mip, unsigned mip_count, unsigned base_array_layer,
-                          unsigned array_layer_count)
+    void SetCurrentState(RHIImageLayout layout, RHIResourceAccess access, unsigned base_mip, unsigned mip_count,
+                         unsigned base_array_layer, unsigned array_layer_count)
     {
         ASSERT(mip_count > 0 && base_mip + mip_count <= attributes_.mip_levels);
         ASSERT(array_layer_count > 0 && base_array_layer + array_layer_count <= GetArrayLayerCount());
@@ -312,7 +299,7 @@ public:
         {
             for (auto layer = base_array_layer; layer < base_array_layer + array_layer_count; layer++)
             {
-                current_layout_[mip * GetArrayLayerCount() + layer] = layout;
+                subresource_states_[mip * GetArrayLayerCount() + layer] = {.layout = layout, .access = access};
             }
         }
     }
@@ -320,6 +307,9 @@ public:
 #pragma endregion
 
 protected:
+    // records the transition in the tracked state and returns the barriers it needs
+    [[nodiscard]] std::vector<RHIImageBarrier> TrackTransition(const TransitionRequest &request);
+
     Attribute attributes_;
 
     RHIResourceRef<RHISampler> sampler_;
@@ -327,7 +317,24 @@ protected:
     std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
 
 private:
-    std::vector<RHIImageLayout> current_layout_;
+    struct SubresourceState
+    {
+        RHIImageLayout layout;
+        // the accesses the next barrier must wait for
+        RHIResourceAccess access;
+
+        bool operator==(const SubresourceState &) const = default;
+    };
+
+    [[nodiscard]] const SubresourceState &GetSubresourceState(unsigned mip_level, unsigned array_layer) const
+    {
+        ASSERT(mip_level < attributes_.mip_levels);
+        ASSERT(array_layer < GetArrayLayerCount());
+
+        return subresource_states_[mip_level * GetArrayLayerCount() + array_layer];
+    }
+
+    std::vector<SubresourceState> subresource_states_;
     uint32_t bindless_id_ = UINT32_MAX;
 };
 
