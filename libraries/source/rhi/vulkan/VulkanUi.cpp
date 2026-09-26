@@ -45,7 +45,11 @@ void VulkanUiHandler::Init()
 
     QueueFamilyIndices const indices = FindQueueFamilies(context->GetPhysicalDevice(), context->GetSurface());
 
+    const auto signature = render_pass_->GetRenderingInfo().GetSignature();
+    std::array<VkFormat, MaxNumColorAttachments> color_formats;
+
     ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.ApiVersion = ApiVersion;
     init_info.Instance = context->GetInstance();
     init_info.PhysicalDevice = context->GetPhysicalDevice();
     init_info.Device = context->GetDevice();
@@ -53,9 +57,9 @@ void VulkanUiHandler::Init()
     init_info.Queue = context->GetGraphicsQueue();
     init_info.PipelineCache = VK_NULL_HANDLE;
     init_info.DescriptorPool = descriptor_pool_;
-    init_info.PipelineInfoMain.RenderPass = RHICast<VulkanRenderPass>(render_pass_)->GetRenderPass();
-    init_info.PipelineInfoMain.Subpass = 0;
-    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(context->GetRHI()->GetConfig().msaa_samples);
+    init_info.UseDynamicRendering = true;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo = GetVkPipelineRenderingCreateInfo(signature, color_formats);
+    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(signature.samples);
     init_info.MinImageCount = 2;
     init_info.ImageCount = context->GetRHI()->GetMaxFramesInFlight();
     init_info.Allocator = VK_NULL_HANDLE;
@@ -91,6 +95,9 @@ void VulkanUiHandler::Render()
     }
 
     ImGui_ImplVulkan_RenderDrawData(draw_data, context->GetCurrentCommandBuffer());
+
+    // imgui records its pipeline, buffers, descriptor sets and viewport directly
+    context->ResetCommandState();
 }
 
 VulkanUiHandler::~VulkanUiHandler()

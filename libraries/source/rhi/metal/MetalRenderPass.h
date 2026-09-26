@@ -23,6 +23,9 @@ public:
     [[nodiscard]] MTLRenderPassDescriptor *GetDescriptor() const;
 
 private:
+    // lowers an RHIRenderingInfo into descriptor_
+    void FillDescriptor(const RHIRenderingInfo &info) const;
+
     id<MTLRenderCommandEncoder> render_encoder_;
     MTLRenderPassDescriptor *descriptor_;
 };

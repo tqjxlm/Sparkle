@@ -121,7 +121,7 @@ std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &
                                     .array_layer_count = 1,
                                     .from = state.access | legacy_source,
                                     .to = target,
-                                    .from_layout = state.layout,
+                                    .from_layout = request.discard ? RHIImageLayout::Undefined : state.layout,
                                     .to_layout = request.target_layout});
 
                 // later writes must also wait for the reads this barrier did not order
