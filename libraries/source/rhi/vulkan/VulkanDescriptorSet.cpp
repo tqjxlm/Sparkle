@@ -8,8 +8,8 @@
 
 namespace sparkle
 {
-void VulkanDescriptorSet::Bind(VkPipelineBindPoint bind_point, VkPipelineLayout pipeline_layout,
-                               const RHIShaderResourceSet &resource_set, unsigned id)
+void VulkanDescriptorSet::Bind(VulkanCommandContext &command_context, VkPipelineBindPoint bind_point,
+                               VkPipelineLayout pipeline_layout, const RHIShaderResourceSet &resource_set, unsigned id)
 {
     ASSERT(layout_hash_ == resource_set.GetLayoutHash());
 
@@ -17,9 +17,9 @@ void VulkanDescriptorSet::Bind(VkPipelineBindPoint bind_point, VkPipelineLayout 
 
     auto frame_index = context->GetRHI()->GetFrameIndex();
 
-    context->BindDescriptorSet(bind_point, pipeline_layout, id, descriptor_set_,
-                               dynamic_descriptor_offsets_[frame_index].data(),
-                               static_cast<uint32_t>(dynamic_descriptor_offsets_[frame_index].size()));
+    command_context.BindDescriptorSet(bind_point, pipeline_layout, id, descriptor_set_,
+                                      dynamic_descriptor_offsets_[frame_index].data(),
+                                      static_cast<uint32_t>(dynamic_descriptor_offsets_[frame_index].size()));
 }
 
 VulkanDescriptorSet::~VulkanDescriptorSet()

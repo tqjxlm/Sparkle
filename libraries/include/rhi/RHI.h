@@ -5,6 +5,7 @@
 #include "core/math/Types.h"
 #include "rhi/RHIBarrier.h"
 #include "rhi/RHIBuffer.h"
+#include "rhi/RHICommandContext.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIConfig.h"
 #include "rhi/RHIImage.h"
@@ -19,8 +20,6 @@
 #include "rhi/RHIShader.h"
 #include "rhi/RHITimer.h"
 #include "rhi/RHIUiHandler.h"
-
-#include <span>
 
 namespace sparkle
 {
@@ -109,14 +108,6 @@ public:
 
     void EndFrame();
 
-    void BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass);
-
-    void EndRenderPass();
-
-    void BeginComputePass(const RHIResourceRef<RHIComputePass> &pass);
-
-    void EndComputePass(const RHIResourceRef<RHIComputePass> &pass);
-
     void Cleanup();
 
     template <class T> RHIResourceRef<RHIShader> CreateShader()
@@ -146,8 +137,13 @@ public:
         return 64;
     }
 
+    // records outside a frame: BeginCommandBuffer opens a one-shot command buffer, SubmitCommandBuffer submits it
     virtual void BeginCommandBuffer() = 0;
     virtual void SubmitCommandBuffer() = 0;
+
+    // the context recording the open command buffer (the frame's, or the one BeginCommandBuffer opened); null when
+    // none is open. a backend may reuse one context object across command buffers.
+    virtual RHICommandContext *GetCommandContext() = 0;
 
     virtual void WaitForDeviceIdle() = 0;
 
@@ -162,14 +158,6 @@ public:
     virtual void ReleaseRenderResources();
 
     virtual void NextSubpass() = 0;
-
-    // records one batch of barriers outside any render pass. Metal tracks hazards itself and records nothing.
-    virtual void Barrier(std::span<const RHIImageBarrier> image_barriers,
-                         std::span<const RHIMemoryBarrier> memory_barriers) = 0;
-
-    virtual void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) = 0;
-    virtual void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                                 Vector3UInt thread_per_group) = 0;
 
     virtual RHIResourceRef<RHIResourceArray> CreateResourceArray(RHIShaderResourceReflection::ResourceType type,
                                                                  unsigned capacity, const std::string &name) = 0;
@@ -227,16 +215,6 @@ public:
     virtual std::unique_ptr<RHINrdBackend> CreateNrdBackend()
     {
         return nullptr;
-    }
-
-    [[nodiscard]] RHIResourceRef<RHIRenderPass> GetCurrentRenderPass() const
-    {
-        return current_render_pass_;
-    }
-
-    [[nodiscard]] RHIResourceRef<RHIComputePass> GetCurrentComputePass() const
-    {
-        return current_compute_pass_;
     }
 
     [[nodiscard]] const auto &GetFrameStats(unsigned frame_index) const
@@ -319,10 +297,6 @@ public:
 #endif
 
 protected:
-    virtual void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) = 0;
-    virtual void EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) = 0;
-    virtual void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
-    virtual void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
     [[nodiscard]] virtual bool BeginFrameInternal() = 0;
     virtual void EndFrameInternal() = 0;
     virtual void CleanupInternal() = 0;
@@ -341,8 +315,6 @@ protected:
 #endif
 
     RHIResourceRef<RHIRenderTarget> back_buffer_rt_;
-    RHIResourceRef<RHIRenderPass> current_render_pass_;
-    RHIResourceRef<RHIComputePass> current_compute_pass_;
 
     std::unordered_map<RHISampler::SamplerAttribute, RHIResourceRef<RHISampler>> samplers_;
 

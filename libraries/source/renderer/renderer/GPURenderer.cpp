@@ -176,11 +176,14 @@ void GPURenderer::Render()
             denoiser_inputs_->BeginWrite();
         }
 
-        rhi_->BeginComputePass(compute_pass_);
+        auto *command_context = rhi_->GetCommandContext();
 
-        rhi_->DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u}, {16u, 16u, 1u});
+        command_context->BeginComputePass(compute_pass_);
 
-        rhi_->EndComputePass(compute_pass_);
+        command_context->DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u},
+                                         {16u, 16u, 1u});
+
+        command_context->EndComputePass(compute_pass_);
 
         const auto scene_consumer_stage =
             gbuffer_write_this_frame_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;

@@ -66,7 +66,7 @@ protected:
     RHIResourceWeakRef<RHIRenderTarget> render_target_;
 
 private:
-    friend class RHIContext;
+    friend class RHICommandContext;
 
     void CaptureRenderingInfo()
     {

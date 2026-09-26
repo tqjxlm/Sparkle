@@ -82,7 +82,7 @@ void VulkanUiHandler::BeginFrame()
     ImGui_ImplVulkan_NewFrame();
 }
 
-void VulkanUiHandler::Render()
+void VulkanUiHandler::Render(RHICommandContext *command_context)
 {
     auto &io = ImGui::GetIO();
 
@@ -94,10 +94,11 @@ void VulkanUiHandler::Render()
         return;
     }
 
-    ImGui_ImplVulkan_RenderDrawData(draw_data, context->GetCurrentCommandBuffer());
+    auto *vulkan_context = static_cast<VulkanCommandContext *>(command_context);
+    ImGui_ImplVulkan_RenderDrawData(draw_data, vulkan_context->GetCommandBuffer());
 
     // imgui records its pipeline, buffers, descriptor sets and viewport directly
-    context->ResetCommandState();
+    vulkan_context->ResetCommandState();
 }
 
 VulkanUiHandler::~VulkanUiHandler()

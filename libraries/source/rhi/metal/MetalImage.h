@@ -38,13 +38,9 @@ public:
 
     void UploadFaces(std::array<const uint8_t *, 6> data) override;
 
-    void CopyToImage(const RHIImage *image) const override;
+    void CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const;
 
-    void GenerateMips() override;
-
-    void CopyToBuffer(const RHIBuffer *buffer) const override;
-
-    void BlitToImage(const RHIImage *image, RHISampler::FilteringMethod filter) const override;
+    void BlitToImage(id<MTLCommandBuffer> command_buffer, const RHIImage *image) const;
 
     [[nodiscard]] id<MTLTexture> GetResource() const
     {
