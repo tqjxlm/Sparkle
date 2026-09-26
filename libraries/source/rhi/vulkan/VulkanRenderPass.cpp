@@ -228,8 +228,8 @@ void VulkanRenderPass::End()
         if (color_image)
         {
             // set layout manually to keep record
-            color_image->SetCurrentLayout(attribute_.color_final_layout, rt_attribute.mip_level, 1,
-                                          rt_attribute.array_layer, 1);
+            color_image->SetCurrentState(attribute_.color_final_layout, {.access = RHIAccess::ColorWrite},
+                                         rt_attribute.mip_level, 1, rt_attribute.array_layer, 1);
         }
     }
 
@@ -237,7 +237,8 @@ void VulkanRenderPass::End()
     if (auto image = rhi_rt->GetDepthImage())
     {
         // set layout manually to keep record
-        image->SetCurrentLayout(attribute_.depth_final_layout, rt_attribute.mip_level, 1, rt_attribute.array_layer, 1);
+        image->SetCurrentState(attribute_.depth_final_layout, {.access = RHIAccess::DepthWrite}, rt_attribute.mip_level,
+                               1, rt_attribute.array_layer, 1);
     }
 
     if (context->IsValidationEnabled())

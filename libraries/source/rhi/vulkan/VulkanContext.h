@@ -105,6 +105,11 @@ public:
         return supports_unified_image_layouts_;
     }
 
+    [[nodiscard]] bool CompressedImageBarriersNeedSync1() const
+    {
+        return compressed_image_barriers_need_sync1_;
+    }
+
     bool Init();
 
     void BeginCommandBuffer();
@@ -380,6 +385,7 @@ private:
     bool supports_astc_hdr_ = false;
     bool supports_dynamic_rendering_local_read_ = false;
     bool supports_unified_image_layouts_ = false;
+    bool compressed_image_barriers_need_sync1_ = false;
 
     VulkanRHI *rhi_;
 

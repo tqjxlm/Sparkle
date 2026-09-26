@@ -6,65 +6,6 @@
 
 namespace sparkle
 {
-inline VkAccessFlags GetImageAccessFlags(const RHIImage *image, RHIImageLayout layout, RHIPipelineStage stage)
-{
-    auto usages = image->GetAttributes().usages;
-
-    if (stage == RHIPipelineStage::Top || stage == RHIPipelineStage::Bottom)
-    {
-        return 0;
-    }
-
-    if (layout == RHIImageLayout::Undefined || layout == RHIImageLayout::Present)
-    {
-        return 0;
-    }
-
-    if (layout == RHIImageLayout::TransferDst)
-    {
-        return VK_ACCESS_TRANSFER_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::TransferSrc)
-    {
-        return VK_ACCESS_TRANSFER_READ_BIT;
-    }
-
-    if (stage == RHIPipelineStage::DrawIndirect)
-    {
-        return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-    }
-
-    if (layout == RHIImageLayout::StorageWrite)
-    {
-        return VK_ACCESS_SHADER_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::ColorOutput)
-    {
-        ASSERT(usages & RHIImage::ImageUsage::ColorAttachment);
-        return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::DepthStencilOutput)
-    {
-        ASSERT(usages & RHIImage::ImageUsage::DepthStencilAttachment);
-        return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::Read)
-    {
-        return VK_ACCESS_SHADER_READ_BIT;
-    }
-
-    // if it makes it here, some unexpected behaviour happens.
-    // Check whether api usage is correct or whether this function should be extended
-    ASSERT_F(false, "unexpected transition status. layout {}. stage {}", static_cast<int>(layout),
-             static_cast<int>(stage));
-
-    return 0;
-};
-
 inline VkFilter GetVulkanFilteringMethod(RHISampler::FilteringMethod filtering_method)
 {
     switch (filtering_method)
@@ -114,39 +55,6 @@ inline VkSamplerMipmapMode GetVulkanMipmapMethod(RHISampler::FilteringMethod fil
         return VK_SAMPLER_MIPMAP_MODE_MAX_ENUM;
     }
 }
-
-inline VkPipelineStageFlags GetVulkanPipelineStage(RHIPipelineStage stage)
-{
-    switch (stage)
-    {
-    case RHIPipelineStage::Top:
-        return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    case RHIPipelineStage::DrawIndirect:
-        return VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
-    case RHIPipelineStage::VertexInput:
-        return VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
-    case RHIPipelineStage::VertexShader:
-        return VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
-    case RHIPipelineStage::PixelShader:
-        return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    case RHIPipelineStage::EarlyZ:
-        return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    case RHIPipelineStage::LateZ:
-        return VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    case RHIPipelineStage::ColorOutput:
-        return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    case RHIPipelineStage::ComputeShader:
-        return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-    case RHIPipelineStage::Transfer:
-        return VK_PIPELINE_STAGE_TRANSFER_BIT;
-    case RHIPipelineStage::Bottom:
-        return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    default:
-        UnImplemented(stage);
-        break;
-    }
-    return VK_PIPELINE_STAGE_NONE_KHR;
-};
 
 inline VkSampleCountFlagBits GetVkMsaaSampleBit(uint32_t sample_count)
 {
@@ -468,8 +376,6 @@ public:
 
     void BlitToImage(const RHIImage *image, uint8_t from_mip, uint8_t to_mip,
                      RHISampler::FilteringMethod filtering) const;
-
-    void TransitionLayout(VkCommandBuffer command_buffer, const TransitionRequest &request);
 
     [[nodiscard]] VkImage GetImage() const
     {

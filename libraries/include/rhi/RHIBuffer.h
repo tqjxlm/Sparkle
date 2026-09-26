@@ -3,6 +3,7 @@
 #include "rhi/RHIResource.h"
 
 #include "core/Exception.h"
+#include "rhi/RHIBarrier.h"
 #include "rhi/RHIMemory.h"
 
 #include <map>
@@ -101,6 +102,8 @@ public:
     {
         return attribute_.usages;
     }
+
+    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
 
     [[nodiscard]] size_t GetOffset(unsigned frame_index) const
     {
