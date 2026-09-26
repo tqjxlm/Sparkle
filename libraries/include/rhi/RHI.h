@@ -124,6 +124,9 @@ public:
     // the general image layout performs as well as the specialized ones for every access
     virtual bool SupportsUnifiedImageLayouts() = 0;
 
+    // GPU timestamps can measure render and compute passes (see RHIPass)
+    virtual bool SupportsPassTimestamps() = 0;
+
     // false on software rasterizers (e.g. lavapipe): GPU-accelerated cooking is only
     // worthwhile on a physical device, otherwise the CPU cook jobs run instead
     virtual bool HasPhysicalGpu() = 0;

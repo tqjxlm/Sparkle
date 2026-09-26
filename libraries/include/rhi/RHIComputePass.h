@@ -1,26 +1,12 @@
 #pragma once
 
-#include "rhi/RHIResource.h"
-
-#include <vector>
+#include "rhi/RHIPass.h"
 
 namespace sparkle
 {
-class RHIComputePass : public RHIResource
+class RHIComputePass : public RHIPass
 {
 public:
-    RHIComputePass(RHIContext *rhi, bool need_timestamp, const std::string &name);
-
-    ~RHIComputePass() override = default;
-
-    [[nodiscard]] auto GetExecutionTime(unsigned frame_index) const
-    {
-        return execution_time_ms_[frame_index];
-    }
-
-protected:
-    bool need_timestamp_ = false;
-
-    std::vector<float> execution_time_ms_;
+    using RHIPass::RHIPass;
 };
 } // namespace sparkle

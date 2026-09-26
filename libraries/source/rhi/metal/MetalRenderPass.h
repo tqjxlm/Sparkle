@@ -9,7 +9,8 @@ namespace sparkle
 class MetalRenderPass : public RHIRenderPass
 {
 public:
-    MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name);
+    MetalRenderPass(RHIContext *rhi, const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
+                    const std::string &name);
 
     // opens the pass's render encoder on the command buffer
     [[nodiscard]] id<MTLRenderCommandEncoder> Begin(id<MTLCommandBuffer> command_buffer) const;
