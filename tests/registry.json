@@ -169,6 +169,11 @@
         "app_args": ["--validation", "true"]
     },
     {
+        "name": "pass_timestamps",
+        "test_case": "pass_timestamps",
+        "description": "Opt-in render-pass GPU timestamps report a time once their frame slot returns, and nothing without device support."
+    },
+    {
         "name": "pipeline_switch_pool",
         "test_case": "pipeline_switch_pool",
         "description": "Runtime pipeline switch and pooled render-target reuse."

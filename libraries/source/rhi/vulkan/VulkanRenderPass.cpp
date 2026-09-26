@@ -34,17 +34,6 @@ static void TrackAttachmentTransition(std::vector<RHIImageBarrier> &barriers, RH
 
 void VulkanRenderPass::Begin(VulkanCommandContext &command_context)
 {
-    auto *command_buffer = command_context.GetCommandBuffer();
-
-    if (context->IsValidationEnabled())
-    {
-        VkDebugUtilsLabelEXT debug_label{};
-        debug_label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-        debug_label.pLabelName = GetName().c_str();
-
-        vkCmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
-    }
-
     context->GetDescriptorSetManager().UpdateDirtyResourceArrays();
 
     const auto &info = GetActiveRenderingInfo();
@@ -122,7 +111,7 @@ void VulkanRenderPass::Begin(VulkanCommandContext &command_context)
     rendering_info.pColorAttachments = color_infos.data();
     rendering_info.pDepthAttachment = depth_attachment.image ? &depth_info : nullptr;
 
-    vkCmdBeginRendering(command_buffer, &rendering_info);
+    vkCmdBeginRendering(command_context.GetCommandBuffer(), &rendering_info);
 
     const VkViewport viewport{.x = 0.0f,
                               .y = 0.0f,
@@ -135,9 +124,7 @@ void VulkanRenderPass::Begin(VulkanCommandContext &command_context)
 
 void VulkanRenderPass::End(VulkanCommandContext &command_context)
 {
-    auto *command_buffer = command_context.GetCommandBuffer();
-
-    vkCmdEndRendering(command_buffer);
+    vkCmdEndRendering(command_context.GetCommandBuffer());
 
     const auto &info = GetActiveRenderingInfo();
 
@@ -161,11 +148,6 @@ void VulkanRenderPass::End(VulkanCommandContext &command_context)
     }
 
     command_context.Barrier(barriers, {});
-
-    if (context->IsValidationEnabled())
-    {
-        vkCmdEndDebugUtilsLabelEXT(command_buffer);
-    }
 }
 } // namespace sparkle
 

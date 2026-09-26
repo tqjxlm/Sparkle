@@ -17,6 +17,8 @@ void RHICommandContext::BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pas
 
     pass->CaptureRenderingInfo();
 
+    pass->BeginTimer(*this);
+
     // the internal begin records the attachment barriers before the pass opens
     BeginRenderPassInternal(pass);
 
@@ -32,12 +34,16 @@ void RHICommandContext::EndRenderPass()
     current_render_pass_ = nullptr;
 
     EndRenderPassInternal(pass);
+
+    pass->EndTimer(*this);
 }
 
 void RHICommandContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass)
 {
     ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
     ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
+
+    pass->BeginTimer(*this);
 
     current_compute_pass_ = pass;
 
@@ -51,6 +57,8 @@ void RHICommandContext::EndComputePass(const RHIResourceRef<RHIComputePass> &pas
     current_compute_pass_ = nullptr;
 
     EndComputePassInternal(pass);
+
+    pass->EndTimer(*this);
 }
 
 void RHICommandContext::Barrier(std::span<const RHIImageBarrier> image_barriers,

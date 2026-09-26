@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rhi/RHIResource.h"
+#include "rhi/RHIPass.h"
 
 #include "rhi/RHIImage.h"
 #include "rhi/RHIRenderTarget.h"
@@ -8,7 +8,7 @@
 
 namespace sparkle
 {
-class RHIRenderPass : public RHIResource
+class RHIRenderPass : public RHIPass
 {
 public:
     using LoadOp = RHILoadOp;
@@ -24,10 +24,14 @@ public:
         LoadOp depth_load_op = RHIRenderPass::LoadOp::None;
         StoreOp depth_store_op = RHIRenderPass::StoreOp::None;
         RHIImageLayout depth_final_layout = RHIImageLayout::DepthStencilOutput;
+
+        // measures the pass's GPU time, see RHIPass
+        bool need_timestamp = false;
     };
 
-    RHIRenderPass(Attribute attribute, const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name)
-        : RHIResource(name), attribute_(std::move(attribute)), render_target_(rt),
+    RHIRenderPass(RHIContext *rhi, Attribute attribute, const RHIResourceRef<RHIRenderTarget> &rt,
+                  const std::string &name)
+        : RHIPass(rhi, attribute.need_timestamp, name), attribute_(std::move(attribute)), render_target_(rt),
           targets_back_buffer_(rt->IsBackBufferTarget())
     {
     }
