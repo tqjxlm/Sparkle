@@ -20,21 +20,6 @@
 
 namespace sparkle
 {
-static MTLPrimitiveType GetMetalPrimitiveType(RHIPipelineState::PolygonMode mode)
-{
-    switch (mode)
-    {
-    case RHIPipelineState::PolygonMode::Fill:
-        return MTLPrimitiveTypeTriangle;
-    case RHIPipelineState::PolygonMode::Line:
-        return MTLPrimitiveTypeLine;
-    case RHIPipelineState::PolygonMode::Point:
-        return MTLPrimitiveTypePoint;
-    default:
-        UnImplemented(mode);
-    }
-}
-
 bool MetalRHI::InitRHI(NativeView *inWindow, std::string &error)
 {
     @autoreleasepool
@@ -156,7 +141,7 @@ void MetalRHI::EndFrameInternal()
     if (GetConfig().measure_gpu_time)
     {
         auto frame_index = GetFrameIndex();
-        [context->GetCurrentCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
+        [context->GetCommandContext()->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
           frame_stats_[frame_index].elapsed_time_ms = (command_buffer.GPUEndTime - command_buffer.GPUStartTime) * 1e3f;
         }];
     }
@@ -174,6 +159,11 @@ void MetalRHI::BeginCommandBuffer()
     context->BeginCommandBuffer();
 }
 
+RHICommandContext *MetalRHI::GetCommandContext()
+{
+    return context->GetCommandContext();
+}
+
 bool MetalRHI::RecreateSurface()
 {
     UnImplemented();
@@ -188,44 +178,6 @@ void MetalRHI::RecreateSwapChain()
 void MetalRHI::NextSubpass()
 {
     UnImplemented();
-}
-
-void MetalRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
-{
-    auto *pso = RHICast<MetalGraphicsPipeline>(pipeline_state);
-    auto *pass = RHICast<MetalRenderPass>(current_render_pass_);
-    auto encoder = pass->GetRenderEncoder();
-
-    auto index_buffer = RHICast<MetalBuffer>(pso->GetIndexBuffer())->GetResource();
-
-    pso->Bind(encoder, pass->GetActiveAttachmentSignature());
-
-    [encoder drawIndexedPrimitives:GetMetalPrimitiveType(pipeline_state->GetRasterizationState().polygon_mode)
-                        indexCount:draw_args.index_count
-                         indexType:MTLIndexTypeUInt32
-                       indexBuffer:index_buffer
-                 indexBufferOffset:draw_args.first_index
-                     instanceCount:draw_args.instance_count
-                        baseVertex:draw_args.first_vertex
-                      baseInstance:draw_args.first_instance];
-}
-
-void MetalRHI::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                               Vector3UInt thread_per_group)
-{
-    auto *pass = RHICast<MetalComputePass>(current_compute_pass_);
-    ASSERT(pass);
-
-    auto *pso = RHICast<MetalComputePipeline>(pipeline);
-
-    auto encoder = pass->GetEncoder();
-
-    pso->Bind(encoder);
-
-    MTLSize grid_size = MTLSizeMake(total_threads.x(), total_threads.y(), total_threads.z());
-    MTLSize threadgroup_size = MTLSizeMake(thread_per_group.x(), thread_per_group.y(), thread_per_group.z());
-
-    [encoder dispatchThreads:grid_size threadsPerThreadgroup:threadgroup_size];
 }
 
 RHIResourceRef<RHIRenderTarget> MetalRHI::CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
@@ -305,16 +257,6 @@ std::unique_ptr<RHINrdBackend> MetalRHI::CreateNrdBackend()
     return std::make_unique<MetalNrdBackend>(context->GetDevice());
 }
 
-void MetalRHI::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
-{
-    RHICast<MetalRenderPass>(pass)->Begin();
-}
-
-void MetalRHI::EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
-{
-    RHICast<MetalRenderPass>(pass)->End();
-}
-
 RHIResourceRef<RHIUiHandler> MetalRHI::CreateUiHandler()
 {
     return CreateResource<MetalUiHandler>();
@@ -339,16 +281,6 @@ RHIResourceRef<RHITimer> MetalRHI::CreateTimer(const std::string &name)
 RHIResourceRef<RHIComputePass> MetalRHI::CreateComputePass(const std::string &name, bool need_timestamp)
 {
     return CreateResource<MetalComputePass>(this, need_timestamp, name);
-}
-
-void MetalRHI::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    RHICast<MetalComputePass>(pass)->Begin();
-}
-
-void MetalRHI::EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    RHICast<MetalComputePass>(pass)->End();
 }
 } // namespace sparkle
 

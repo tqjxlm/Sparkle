@@ -11,14 +11,8 @@ class MetalRenderPass : public RHIRenderPass
 public:
     MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name);
 
-    void Begin();
-
-    void End();
-
-    id<MTLRenderCommandEncoder> GetRenderEncoder()
-    {
-        return render_encoder_;
-    }
+    // opens the pass's render encoder on the command buffer
+    [[nodiscard]] id<MTLRenderCommandEncoder> Begin(id<MTLCommandBuffer> command_buffer) const;
 
     [[nodiscard]] MTLRenderPassDescriptor *GetDescriptor() const;
 
@@ -26,7 +20,6 @@ private:
     // lowers an RHIRenderingInfo into descriptor_
     void FillDescriptor(const RHIRenderingInfo &info) const;
 
-    id<MTLRenderCommandEncoder> render_encoder_;
     MTLRenderPassDescriptor *descriptor_;
 };
 } // namespace sparkle

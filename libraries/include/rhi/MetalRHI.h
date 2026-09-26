@@ -37,18 +37,11 @@ public:
     void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 
+    RHICommandContext *GetCommandContext() override;
+
     bool RecreateSurface() override;
     void RecreateSwapChain() override;
     void NextSubpass() override;
-
-    void Barrier(std::span<const RHIImageBarrier> /*image_barriers*/,
-                 std::span<const RHIMemoryBarrier> /*memory_barriers*/) override
-    {
-    }
-
-    void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
-    void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                         Vector3UInt thread_per_group) override;
 
     RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
                                                                  const RHIResourceRef<RHIImage> &depth_image,
@@ -90,12 +83,6 @@ public:
 protected:
     [[nodiscard]] bool BeginFrameInternal() override;
     void EndFrameInternal() override;
-
-    void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
-    void EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
-
-    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
 
     void CleanupInternal() override;
 

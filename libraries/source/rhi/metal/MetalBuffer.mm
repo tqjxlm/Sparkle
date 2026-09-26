@@ -23,12 +23,9 @@ static MTLResourceOptions GetMetalResourceOptions(RHIMemoryProperty memory_prope
     return option;
 }
 
-void MetalBuffer::CopyToImage(const RHIImage *image) const
+void MetalBuffer::CopyToImage(id<MTLBlitCommandEncoder> encoder, const RHIImage *image) const
 {
     auto mtl_image = RHICast<MetalImage>(image)->GetResource();
-
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
 
     uint32_t copied_bytes = 0;
     auto src_offset = GetOffset(context->GetRHI()->GetFrameIndex());
@@ -39,21 +36,19 @@ void MetalBuffer::CopyToImage(const RHIImage *image) const
     {
         for (auto mip_level = 0u; mip_level < image->GetAttributes().mip_levels; mip_level++)
         {
-            [command_encoder copyFromBuffer:GetResource()
-                               sourceOffset:(src_offset + copied_bytes)
-                          sourceBytesPerRow:image->GetBytesPerRow(mip_level)
-                        sourceBytesPerImage:0
-                                 sourceSize:{image->GetWidth(mip_level), image->GetHeight(mip_level), 1}
-                                  toTexture:mtl_image
-                           destinationSlice:0
-                           destinationLevel:mip_level
-                          destinationOrigin:{0, 0, 0}];
+            [encoder copyFromBuffer:GetResource()
+                       sourceOffset:(src_offset + copied_bytes)
+                  sourceBytesPerRow:image->GetBytesPerRow(mip_level)
+                sourceBytesPerImage:0
+                         sourceSize:{image->GetWidth(mip_level), image->GetHeight(mip_level), 1}
+                          toTexture:mtl_image
+                   destinationSlice:0
+                   destinationLevel:mip_level
+                  destinationOrigin:{0, 0, 0}];
 
             copied_bytes += image->GetStorageSize(mip_level);
         }
     }
-
-    [command_encoder endEncoding];
 }
 
 MetalBuffer::MetalBuffer(const RHIBuffer::Attribute &attribute, const std::string &name) : RHIBuffer(attribute, name)
@@ -79,24 +74,20 @@ MetalBuffer::MetalBuffer(const RHIBuffer::Attribute &attribute, const std::strin
     }
 }
 
-void MetalBuffer::CopyToBuffer(const RHIBuffer *buffer) const
+void MetalBuffer::CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const
 {
     // copy to dynamic buffer is not supported for now
     ASSERT(!buffer->IsDynamic());
 
     const auto *dst_buffer = RHICast<MetalBuffer>(buffer);
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
 
     auto src_offset = GetOffset(context->GetRHI()->GetFrameIndex());
 
-    [command_encoder copyFromBuffer:GetResource()
-                       sourceOffset:src_offset
-                           toBuffer:dst_buffer->GetResource()
-                  destinationOffset:dst_buffer->GetOffset(UINT_MAX)
-                               size:GetSize()];
-
-    [command_encoder endEncoding];
+    [encoder copyFromBuffer:GetResource()
+               sourceOffset:src_offset
+                   toBuffer:dst_buffer->GetResource()
+          destinationOffset:dst_buffer->GetOffset(UINT_MAX)
+                       size:GetSize()];
 }
 
 id<MTLBuffer> MetalBuffer::GetResource() const

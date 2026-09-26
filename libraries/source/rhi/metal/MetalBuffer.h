@@ -11,9 +11,9 @@ class MetalBuffer : public RHIBuffer
 public:
     MetalBuffer(const RHIBuffer::Attribute &attribute, const std::string &name);
 
-    void CopyToBuffer(const RHIBuffer *buffer) const override;
+    void CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const;
 
-    void CopyToImage(const RHIImage *image) const override;
+    void CopyToImage(id<MTLBlitCommandEncoder> encoder, const RHIImage *image) const;
 
     void *Lock() override
     {

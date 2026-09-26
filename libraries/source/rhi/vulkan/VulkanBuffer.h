@@ -6,6 +6,7 @@
 
 namespace sparkle
 {
+class VulkanCommandContext;
 class VulkanImage;
 
 inline VkBufferUsageFlags GetBufferUsageFlags(RHIBuffer::BufferUsage usage)
@@ -100,9 +101,9 @@ public:
 
     void UnLock() override;
 
-    void CopyToBuffer(const RHIBuffer *buffer) const override;
+    void CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const;
 
-    void CopyToImage(const RHIImage *image) const override;
+    void CopyToImage(VulkanCommandContext &command_context, const RHIImage *image) const;
 
     void WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
                          std::vector<VkWriteDescriptorSet> &out_set_write) const;

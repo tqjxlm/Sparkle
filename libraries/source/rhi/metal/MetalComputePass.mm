@@ -23,7 +23,7 @@ MetalComputePass::MetalComputePass(RHIContext *rhi, bool need_timestamp, const s
     }
 }
 
-void MetalComputePass::Begin()
+id<MTLComputeCommandEncoder> MetalComputePass::Begin(id<MTLCommandBuffer> command_buffer)
 {
     if (need_timestamp_)
     {
@@ -38,16 +38,16 @@ void MetalComputePass::Begin()
         timer->Begin();
     }
 
-    compute_encoder_ = [context->GetCurrentCommandBuffer() computeCommandEncoderWithDescriptor:descriptor_];
-    ASSERT(compute_encoder_);
+    id<MTLComputeCommandEncoder> compute_encoder = [command_buffer computeCommandEncoderWithDescriptor:descriptor_];
+    ASSERT(compute_encoder);
 
-    SetDebugInfo(compute_encoder_, GetName());
+    SetDebugInfo(compute_encoder, GetName());
+
+    return compute_encoder;
 }
 
 void MetalComputePass::End()
 {
-    [compute_encoder_ endEncoding];
-
     if (need_timestamp_)
     {
         timers_[context->GetRHI()->GetFrameIndex()]->End();

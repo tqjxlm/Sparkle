@@ -23,8 +23,10 @@ void ClearTexturePass::InitRenderResources(const RenderConfig &)
 
 void ClearTexturePass::Render()
 {
-    rhi_->BeginRenderPass(pass_);
-    rhi_->EndRenderPass();
+    auto *command_context = rhi_->GetCommandContext();
+
+    command_context->BeginRenderPass(pass_);
+    command_context->EndRenderPass();
 }
 
 } // namespace sparkle

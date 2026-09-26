@@ -19,18 +19,13 @@ public:
 
     ~MetalComputePass() override = default;
 
-    void Begin();
+    // opens the pass's compute encoder on the command buffer
+    [[nodiscard]] id<MTLComputeCommandEncoder> Begin(id<MTLCommandBuffer> command_buffer);
 
+    // runs after the encoder has ended
     void End();
 
-    [[nodiscard]] id<MTLComputeCommandEncoder> GetEncoder() const
-    {
-        return compute_encoder_;
-    }
-
 private:
-    id<MTLComputeCommandEncoder> compute_encoder_;
-
     std::vector<RHIResourceRef<RHITimer>> timers_;
 
     MTLComputePassDescriptor *descriptor_;

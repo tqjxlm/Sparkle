@@ -59,7 +59,7 @@ void MetalTimer::End()
     id<MTLCounterSampleBuffer> buffer = counter_sample_buffer_;
     std::atomic<float> *time_slot = &resolved_time_ms_;
     std::atomic<bool> *resolved = &resolved_;
-    [context->GetCurrentCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer>) {
+    [context->GetCommandContext()->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer>) {
       NSData *data = [buffer resolveCounterRange:NSMakeRange(0, 2)];
       if (!data)
       {

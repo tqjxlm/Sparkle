@@ -8,17 +8,9 @@
 
 namespace sparkle
 {
-OneShotCommandBufferScope::OneShotCommandBufferScope(bool use_external_if_possible, bool should_block_next_frame)
-    : should_block_next_frame_(should_block_next_frame)
+OneShotCommandBufferScope::OneShotCommandBufferScope(bool should_block_next_frame)
+    : command_context_(context->GetRHI()), should_block_next_frame_(should_block_next_frame)
 {
-    // if there is an active command buffer, just use it
-    if (use_external_if_possible && context->GetCurrentCommandBuffer())
-    {
-        resources_.command_buffer = context->GetCurrentCommandBuffer();
-        use_external_command_buffer_ = true;
-        return;
-    }
-
     VkCommandBufferAllocateInfo alloc_info{};
 
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -33,16 +25,13 @@ OneShotCommandBufferScope::OneShotCommandBufferScope(bool use_external_if_possib
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
     CHECK_VK_ERROR(vkBeginCommandBuffer(resources_.command_buffer, &begin_info));
+
+    command_context_.Begin(resources_.command_buffer);
 }
 
 OneShotCommandBufferScope::~OneShotCommandBufferScope()
 {
-    // the command buffer is not managed by this class
-    if (use_external_command_buffer_)
-    {
-        ASSERT(context->GetCurrentCommandBuffer() == resources_.command_buffer);
-        return;
-    }
+    command_context_.End();
 
     CHECK_VK_ERROR(vkEndCommandBuffer(resources_.command_buffer));
 

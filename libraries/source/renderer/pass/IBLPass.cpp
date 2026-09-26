@@ -33,7 +33,8 @@ void IBLPass::Finalize()
                             .after_stage = RHIPipelineStage::Top,
                             .before_stage = RHIPipelineStage::Transfer});
 
-    cooked_ibl_image->BlitToImage(fp16_image, RHISampler::FilteringMethod::Nearest);
+    rhi_->GetCommandContext()->BlitImage(cooked_ibl_image.get(), fp16_image.get(),
+                                         RHISampler::FilteringMethod::Nearest);
 
     rhi_->SubmitCommandBuffer();
 

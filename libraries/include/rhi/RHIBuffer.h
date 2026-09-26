@@ -12,7 +12,6 @@ namespace sparkle
 {
 class RHIDynamicBuffer;
 class RHIBuffer;
-class RHIImage;
 
 class RHIBufferSubAllocation
 {
@@ -140,10 +139,6 @@ public:
     // it does not block resources and avoids writing to resources in use
     // the cost is higher memory footprint
     void Upload(RHIContext *rhi, const void *data);
-
-    virtual void CopyToBuffer(const RHIBuffer *buffer) const = 0;
-
-    virtual void CopyToImage(const RHIImage *image) const = 0;
 
     virtual void *Lock() = 0;
 

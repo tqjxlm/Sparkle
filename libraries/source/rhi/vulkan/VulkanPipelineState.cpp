@@ -347,7 +347,7 @@ void VulkanForwardPipelineState::SetupPipelineLayoutInfo()
         vkCreatePipelineLayout(context->GetDevice(), &pipeline_layout_create_info, nullptr, &pipeline_layout_));
 }
 
-void VulkanForwardPipelineState::BindBuffers()
+void VulkanForwardPipelineState::BindBuffers(VulkanCommandContext &command_context)
 {
     if (!vertex_buffers_.empty())
     {
@@ -365,7 +365,7 @@ void VulkanForwardPipelineState::BindBuffers()
             offsets.push_back(0);
         }
 
-        context->BindVertexBuffers(buffers.data(), offsets.data(), static_cast<uint32_t>(buffers.size()));
+        command_context.BindVertexBuffers(buffers.data(), offsets.data(), static_cast<uint32_t>(buffers.size()));
     }
 
     if (index_buffer_)
@@ -373,7 +373,7 @@ void VulkanForwardPipelineState::BindBuffers()
         const VkDeviceSize offset = 0;
         auto *rhi_buffer = RHICast<VulkanBuffer>(index_buffer_);
         const auto &buffer = rhi_buffer->GetResourceThisFrame();
-        context->BindIndexBuffer(buffer, offset, VK_INDEX_TYPE_UINT32);
+        command_context.BindIndexBuffer(buffer, offset, VK_INDEX_TYPE_UINT32);
     }
 }
 
@@ -417,20 +417,20 @@ VulkanComputePipelineState::~VulkanComputePipelineState()
     }
 }
 
-void VulkanComputePipelineState::BindDescriptorSets()
+void VulkanComputePipelineState::BindDescriptorSets(VulkanCommandContext &command_context)
 {
     for (auto set_id = 0u; set_id < descriptor_sets_.size(); set_id++)
     {
-        descriptor_sets_[set_id].Bind(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout_, combined_resource_sets_[set_id],
-                                      set_id);
+        descriptor_sets_[set_id].Bind(command_context, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout_,
+                                      combined_resource_sets_[set_id], set_id);
     }
 }
 
-void VulkanForwardPipelineState::BindDescriptorSets()
+void VulkanForwardPipelineState::BindDescriptorSets(VulkanCommandContext &command_context)
 {
     for (auto set_id = 0u; set_id < descriptor_sets_.size(); set_id++)
     {
-        descriptor_sets_[set_id].Bind(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
+        descriptor_sets_[set_id].Bind(command_context, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
                                       combined_resource_sets_[set_id], set_id);
     }
 }
