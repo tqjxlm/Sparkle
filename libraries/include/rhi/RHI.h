@@ -202,9 +202,8 @@ public:
         return CreateRenderTarget(attribute, RHIRenderTarget::ColorImageArray{color_image}, depth_image, name);
     }
 
-    virtual RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                           const RHIResourceRef<RHIRenderTarget> &rt,
-                                                           const std::string &name) = 0;
+    RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
+                                                   const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name);
 
     virtual RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                                  const std::string &name) = 0;

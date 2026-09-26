@@ -88,10 +88,6 @@ public:
                                                        const RHIResourceRef<RHIImage> &depth_image,
                                                        const std::string &name) override;
 
-    RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                   const RHIResourceRef<RHIRenderTarget> &rt,
-                                                   const std::string &name) override;
-
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
 

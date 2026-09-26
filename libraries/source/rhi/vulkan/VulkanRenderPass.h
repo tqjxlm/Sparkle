@@ -93,16 +93,8 @@ inline VkPipelineRenderingCreateInfo GetVkPipelineRenderingCreateInfo(
 
 class VulkanCommandContext;
 
-// lowers the pass's RHIRenderingInfo to dynamic rendering
-class VulkanRenderPass : public RHIRenderPass
-{
-public:
-    using RHIRenderPass::RHIRenderPass;
-
-    void Begin(VulkanCommandContext &command_context);
-
-    void End(VulkanCommandContext &command_context);
-};
+// lowers an RHIRenderingInfo to vkCmdBeginRendering and sets the viewport and scissor to its extent
+void BeginVulkanRendering(VulkanCommandContext &command_context, const RHIRenderingInfo &info);
 } // namespace sparkle
 
 #endif

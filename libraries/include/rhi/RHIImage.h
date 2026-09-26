@@ -275,37 +275,24 @@ public:
 
 #pragma endregion
 
-#pragma region Layout
+#pragma region State
 
     [[nodiscard]] RHIImageLayout GetCurrentLayout(unsigned mip_level, unsigned array_layer) const
     {
-        return GetSubresourceState(mip_level, array_layer).layout;
+        return GetState(mip_level, array_layer).layout;
     }
 
-#pragma endregion
-
-protected:
-    // records the transition in the tracked state and returns the barriers it needs
-    [[nodiscard]] std::vector<RHIImageBarrier> TrackTransition(const TransitionRequest &request);
-
-    Attribute attributes_;
-
-    RHIResourceRef<RHISampler> sampler_;
-
-    std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
-
-private:
-    struct SubresourceState
+    [[nodiscard]] RHIImageState GetState(unsigned mip_level, unsigned array_layer) const
     {
-        RHIImageLayout layout;
-        // the accesses the next barrier must wait for
-        RHIResourceAccess access;
+        ASSERT(mip_level < attributes_.mip_levels);
+        ASSERT(array_layer < GetArrayLayerCount());
 
-        bool operator==(const SubresourceState &) const = default;
-    };
+        return subresource_states_[mip_level * GetArrayLayerCount() + array_layer];
+    }
 
-    void SetCurrentState(RHIImageLayout layout, RHIResourceAccess access, unsigned base_mip, unsigned mip_count,
-                         unsigned base_array_layer, unsigned array_layer_count)
+    // sets the tracked state of a subresource range without recording anything
+    void SetState(const RHIImageState &state, unsigned base_mip, unsigned mip_count, unsigned base_array_layer,
+                  unsigned array_layer_count)
     {
         ASSERT(mip_count > 0 && base_mip + mip_count <= attributes_.mip_levels);
         ASSERT(array_layer_count > 0 && base_array_layer + array_layer_count <= GetArrayLayerCount());
@@ -314,20 +301,25 @@ private:
         {
             for (auto layer = base_array_layer; layer < base_array_layer + array_layer_count; layer++)
             {
-                subresource_states_[mip * GetArrayLayerCount() + layer] = {.layout = layout, .access = access};
+                subresource_states_[mip * GetArrayLayerCount() + layer] = state;
             }
         }
     }
 
-    [[nodiscard]] const SubresourceState &GetSubresourceState(unsigned mip_level, unsigned array_layer) const
-    {
-        ASSERT(mip_level < attributes_.mip_levels);
-        ASSERT(array_layer < GetArrayLayerCount());
+    // records the transition in the tracked state and returns the barriers it needs
+    [[nodiscard]] std::vector<RHIImageBarrier> TrackTransition(const TransitionRequest &request);
 
-        return subresource_states_[mip_level * GetArrayLayerCount() + array_layer];
-    }
+#pragma endregion
 
-    std::vector<SubresourceState> subresource_states_;
+protected:
+    Attribute attributes_;
+
+    RHIResourceRef<RHISampler> sampler_;
+
+    std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
+
+private:
+    std::vector<RHIImageState> subresource_states_;
     uint32_t bindless_id_ = UINT32_MAX;
 };
 

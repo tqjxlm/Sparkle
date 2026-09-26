@@ -19,11 +19,11 @@ RHIPass::RHIPass(RHIContext *rhi, bool need_timestamp, const std::string &name)
     }
 }
 
-void RHIPass::BeginTimer(RHICommandContext &command_context)
+RHITimer *RHIPass::SelectTimer()
 {
     if (timers_.empty())
     {
-        return;
+        return nullptr;
     }
 
     const auto frame_index = rhi_->GetFrameIndex();
@@ -36,8 +36,16 @@ void RHIPass::BeginTimer(RHICommandContext &command_context)
         execution_time_ms_[frame_index] = timer->GetStatus() == RHITimer::Status::Ready ? timer->GetTime() : -1.f;
     }
 
-    timer->Begin(command_context);
-    active_timer_ = timer.get();
+    return timer.get();
+}
+
+void RHIPass::BeginTimer(RHICommandContext &command_context)
+{
+    active_timer_ = SelectTimer();
+    if (active_timer_)
+    {
+        active_timer_->Begin(command_context);
+    }
 }
 
 void RHIPass::EndTimer(RHICommandContext &command_context)

@@ -50,8 +50,6 @@ struct RHIColorAttachment
     RHILoadOp load_op = RHILoadOp::None;
     RHIStoreOp store_op = RHIStoreOp::Store;
     Vector4 clear_color{0, 0, 0, 1};
-    // the layout the (resolved) image is left in after the pass
-    RHIImageLayout final_layout = RHIImageLayout::ColorOutput;
 };
 
 struct RHIDepthAttachment
@@ -62,11 +60,9 @@ struct RHIDepthAttachment
     RHILoadOp load_op = RHILoadOp::None;
     RHIStoreOp store_op = RHIStoreOp::None;
     float clear_depth = 1.f;
-    RHIImageLayout final_layout = RHIImageLayout::DepthStencilOutput;
 };
 
-// one render pass instance. attachments are transitioned from their tracked state into the attachment layouts when the
-// pass begins, and into their final layouts when it ends.
+// one render pass instance, rendering into attachments in the color and depth attachment layouts
 struct RHIRenderingInfo
 {
     std::array<RHIColorAttachment, MaxNumColorAttachments> color_attachments;
