@@ -111,6 +111,18 @@ public:
         return compressed_image_barriers_need_sync1_;
     }
 
+    // of the universal queue; 0 when it cannot write timestamps
+    [[nodiscard]] uint32_t GetTimestampValidBits() const
+    {
+        return timestamp_valid_bits_;
+    }
+
+    // VK_EXT_debug_utils is enabled: command buffer labels and object names are recorded
+    [[nodiscard]] bool SupportsDebugUtils() const
+    {
+        return supports_debug_utils_;
+    }
+
     bool Init();
 
     void BeginCommandBuffer();
@@ -130,11 +142,6 @@ public:
 
     void SetDebugInfo(uint64_t objectHandle, VkObjectType objectType, const char *name);
 
-    [[nodiscard]] bool IsValidationEnabled() const
-    {
-        return enable_validation_;
-    }
-
     void EnqueueCommandBufferResource(OneShotCommandBufferScope::CommandBufferResources &&resources)
     {
         pending_command_buffer_resources_.push(std::move(resources));
@@ -145,6 +152,7 @@ private:
     bool CreateLogicalDevice();
     bool PickPhysicalDevice();
     void QuerySubgroupQuadSupport();
+    void QueryTimestampSupport();
     void QueryOptionalDeviceFeatures();
     bool CheckValidationLayerSupport();
     static bool CheckInstanceExtensionSupport();
@@ -209,12 +217,14 @@ private:
     VkDebugUtilsMessengerEXT debug_messenger_;
 
     bool enable_validation_ = false;
+    bool supports_debug_utils_ = false;
 
     bool enable_ray_tracing_ = false;
     bool supports_astc_hdr_ = false;
     bool supports_dynamic_rendering_local_read_ = false;
     bool supports_unified_image_layouts_ = false;
     bool compressed_image_barriers_need_sync1_ = false;
+    uint32_t timestamp_valid_bits_ = 0;
 
     VulkanRHI *rhi_;
 

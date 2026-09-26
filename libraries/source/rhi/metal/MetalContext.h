@@ -7,6 +7,8 @@
 #include "MetalRHIInternal.h"
 #import "apple/MetalView.h"
 
+#include <optional>
+
 namespace sparkle
 {
 class MetalContext
@@ -19,6 +21,9 @@ public:
     {
         return device_;
     }
+
+    // see MetalTimer::IsSupported, queried once
+    [[nodiscard]] bool SupportsPassTimestamps();
 
     // see RHIContext::GetCommandContext
     [[nodiscard]] MetalCommandContext *GetCommandContext()
@@ -88,6 +93,7 @@ public:
 
 private:
     id<MTLDevice> device_;
+    std::optional<bool> supports_pass_timestamps_;
     id<MTLCommandQueue> command_queue_;
     MetalView *view_;
     MetalRHI *rhi_;

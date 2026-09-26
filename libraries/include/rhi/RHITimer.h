@@ -4,6 +4,8 @@
 
 namespace sparkle
 {
+class RHICommandContext;
+
 class RHITimer : public RHIResource
 {
 public:
@@ -17,9 +19,9 @@ public:
 
     using RHIResource::RHIResource;
 
-    virtual void Begin() = 0;
+    virtual void Begin(RHICommandContext &command_context) = 0;
 
-    virtual void End() = 0;
+    virtual void End(RHICommandContext &command_context) = 0;
 
     virtual void TryGetResult() = 0;
 

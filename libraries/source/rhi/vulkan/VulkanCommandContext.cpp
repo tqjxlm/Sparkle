@@ -3,7 +3,6 @@
 #include "VulkanCommandContext.h"
 
 #include "VulkanBuffer.h"
-#include "VulkanComputePass.h"
 #include "VulkanContext.h"
 #include "VulkanImage.h"
 #include "VulkanPipelineState.h"
@@ -271,22 +270,44 @@ void VulkanCommandContext::BlitImageInternal(const RHIImage *src, const RHIImage
 
 void VulkanCommandContext::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
 {
+    BeginDebugLabel(pass->GetName());
     RHICast<VulkanRenderPass>(pass)->Begin(*this);
 }
 
 void VulkanCommandContext::EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
 {
     RHICast<VulkanRenderPass>(pass)->End(*this);
+    EndDebugLabel();
 }
 
 void VulkanCommandContext::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
 {
-    RHICast<VulkanComputePass>(pass)->Begin();
+    BeginDebugLabel(pass->GetName());
 }
 
-void VulkanCommandContext::EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
+void VulkanCommandContext::EndComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/)
 {
-    RHICast<VulkanComputePass>(pass)->End();
+    EndDebugLabel();
+}
+
+void VulkanCommandContext::BeginDebugLabel(const std::string &name) const
+{
+    if (context->SupportsDebugUtils())
+    {
+        VkDebugUtilsLabelEXT label{};
+        label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+        label.pLabelName = name.c_str();
+
+        vkCmdBeginDebugUtilsLabelEXT(command_buffer_, &label);
+    }
+}
+
+void VulkanCommandContext::EndDebugLabel() const
+{
+    if (context->SupportsDebugUtils())
+    {
+        vkCmdEndDebugUtilsLabelEXT(command_buffer_);
+    }
 }
 } // namespace sparkle
 
