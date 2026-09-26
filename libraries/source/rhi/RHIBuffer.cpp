@@ -95,15 +95,17 @@ void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::v
 
     auto compute_pass = rhi->CreateComputePass("BufferUpdateComputePass", false);
 
-    rhi->BeginComputePass(compute_pass);
+    auto *command_context = rhi->GetCommandContext();
 
-    rhi->DispatchCompute(pipeline_state, {element_count, 1u, 1u}, {64u, 1u, 1u});
+    command_context->BeginComputePass(compute_pass);
 
-    rhi->EndComputePass(compute_pass);
+    command_context->DispatchCompute(pipeline_state, {element_count, 1u, 1u}, {64u, 1u, 1u});
+
+    command_context->EndComputePass(compute_pass);
 
     const RHIMemoryBarrier barrier{.from = {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute},
                                    .to = GetUsageAccess()};
-    rhi->Barrier({}, std::span(&barrier, 1));
+    command_context->Barrier({}, std::span(&barrier, 1));
 }
 
 void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribute)
@@ -285,7 +287,7 @@ void RHIBuffer::Upload(RHIContext *rhi, const void *data)
             staging_buffer->UploadImmediate(data);
         }
 
-        staging_buffer->CopyToBuffer(this);
+        rhi->GetCommandContext()->CopyBuffer(staging_buffer.get(), this);
     }
 }
 } // namespace sparkle

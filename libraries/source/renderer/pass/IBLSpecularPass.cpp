@@ -180,13 +180,15 @@ void IBLSpecularPass::StartCacheLevel(uint8_t level)
 
 void IBLSpecularPass::Render()
 {
-    rhi_->BeginComputePass(compute_pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    rhi_->DispatchCompute(
+    command_context->BeginComputePass(compute_pass_);
+
+    command_context->DispatchCompute(
         pipeline_state_,
         {ibl_image_->GetWidth(current_caching_level_), ibl_image_->GetHeight(current_caching_level_), 6u},
         {16u, 16u, 1u});
 
-    rhi_->EndComputePass(compute_pass_);
+    command_context->EndComputePass(compute_pass_);
 }
 } // namespace sparkle

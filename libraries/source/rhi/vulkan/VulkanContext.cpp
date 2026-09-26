@@ -243,7 +243,7 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     return is_suitable;
 }
 
-VulkanContext::VulkanContext(VulkanRHI *in_rhi) : rhi_(in_rhi)
+VulkanContext::VulkanContext(VulkanRHI *in_rhi) : frame_command_context_(in_rhi), rhi_(in_rhi)
 {
     if (!rhi_->IsHeadless())
     {
@@ -328,6 +328,13 @@ void VulkanContext::Cleanup()
 
 void VulkanContext::ReleaseRenderResources()
 {
+    // surface loss releases the resources instead of ending a recorded frame
+    if (command_context_ == &frame_command_context_)
+    {
+        frame_command_context_.End();
+        command_context_ = nullptr;
+    }
+
     if (!command_buffers_.empty())
     {
         vkFreeCommandBuffers(device_, command_pool_, static_cast<uint32_t>(command_buffers_.size()),
@@ -422,9 +429,9 @@ bool VulkanContext::BeginFrame()
         begin_info.pInheritanceInfo = nullptr;
 
         CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
-        ResetCommandState();
 
-        current_command_buffer_ = command_buffers_[frame_index];
+        frame_command_context_.Begin(command_buffers_[frame_index]);
+        command_context_ = &frame_command_context_;
         return true;
     }
 
@@ -490,9 +497,9 @@ bool VulkanContext::BeginFrame()
     begin_info.pInheritanceInfo = nullptr;
 
     CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
-    ResetCommandState();
 
-    current_command_buffer_ = command_buffers_[frame_index];
+    frame_command_context_.Begin(command_buffers_[frame_index]);
+    command_context_ = &frame_command_context_;
     return true;
 }
 
@@ -502,16 +509,17 @@ VkResult VulkanContext::EndFrame()
 
     if (rhi_->IsHeadless())
     {
-        CHECK_VK_ERROR(vkEndCommandBuffer(current_command_buffer_));
+        VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
+        frame_command_context_.End();
+        command_context_ = nullptr;
+        CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
 
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers = &current_command_buffer_;
+        submit_info.pCommandBuffers = &command_buffer;
 
         CHECK_VK_ERROR(vkQueueSubmit(graphics_queue_, 1, &submit_info, queue_finish_fences_[frame_index]));
-
-        current_command_buffer_ = nullptr;
 
         while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
         {
@@ -528,7 +536,10 @@ VkResult VulkanContext::EndFrame()
                                    .after_stage = RHIPipelineStage::ColorOutput,
                                    .before_stage = RHIPipelineStage::Bottom});
 
-    CHECK_VK_ERROR(vkEndCommandBuffer(current_command_buffer_));
+    VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
+    frame_command_context_.End();
+    command_context_ = nullptr;
+    CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -542,7 +553,7 @@ VkResult VulkanContext::EndFrame()
     submit_info.pWaitDstStageMask = wait_stages;
 
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &current_command_buffer_;
+    submit_info.pCommandBuffers = &command_buffer;
 
     // Use per-image semaphore for signaling to avoid conflicts with vsync
     VkSemaphore signal_semaphores[] = {commands_finish_semaphores_per_image_[image_index]};
@@ -566,8 +577,6 @@ VkResult VulkanContext::EndFrame()
     present_info.pResults = nullptr;
 
     const VkResult result = vkQueuePresentKHR(present_queue_, &present_info);
-
-    current_command_buffer_ = nullptr;
 
     while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
     {
@@ -683,7 +692,7 @@ bool VulkanContext::CheckInstanceExtensionSupport()
 
 void VulkanContext::BeginCommandBuffer()
 {
-    if (current_command_buffer_ != nullptr)
+    if (command_context_ != nullptr)
     {
         return;
     }
@@ -694,20 +703,20 @@ void VulkanContext::BeginCommandBuffer()
     // resources released in this scope land in the current frame slot's deferred-deletion
     // bucket, which empties at the next BeginFrame regardless of this scope's own fence;
     // block that frame on the fence so the deletions stay safe
-    temporary_command_buffer_ = new OneShotCommandBufferScope(false, true);
-    current_command_buffer_ = temporary_command_buffer_->GetCommandBuffer();
+    temporary_command_buffer_ = new OneShotCommandBufferScope(true);
+    command_context_ = &temporary_command_buffer_->GetCommandContext();
 }
 
 void VulkanContext::SubmitCommandBuffer()
 {
-    if (current_command_buffer_ == nullptr)
+    if (command_context_ == nullptr)
     {
         return;
     }
 
     ASSERT_F(temporary_command_buffer_ != nullptr, "No active command buffer to submit");
 
-    current_command_buffer_ = nullptr;
+    command_context_ = nullptr;
     delete temporary_command_buffer_;
     temporary_command_buffer_ = nullptr;
 }

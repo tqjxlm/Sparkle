@@ -152,7 +152,7 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
     Transition({.target_layout = RHIImageLayout::TransferSrc,
                 .after_stage = RHIPipelineStage::Bottom,
                 .before_stage = RHIPipelineStage::Transfer});
-    CopyToBuffer(staging_buffer.get());
+    rhi->GetCommandContext()->CopyImageToBuffer(this, staging_buffer.get());
     Transition({.target_layout = RHIImageLayout::Read,
                 .after_stage = RHIPipelineStage::Transfer,
                 .before_stage = RHIPipelineStage::PixelShader});

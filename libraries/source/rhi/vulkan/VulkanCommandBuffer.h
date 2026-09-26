@@ -2,7 +2,7 @@
 
 #if ENABLE_VULKAN
 
-#include "rhi/VulkanRHI.h"
+#include "VulkanCommandContext.h"
 
 namespace sparkle
 {
@@ -29,18 +29,18 @@ public:
         [[nodiscard]] bool Finished() const;
     };
 
-    explicit OneShotCommandBufferScope(bool use_external_if_possible = false, bool should_block_next_frame = false);
+    explicit OneShotCommandBufferScope(bool should_block_next_frame = false);
 
     ~OneShotCommandBufferScope();
 
-    [[nodiscard]] VkCommandBuffer GetCommandBuffer() const
+    [[nodiscard]] VulkanCommandContext &GetCommandContext()
     {
-        return resources_.command_buffer;
+        return command_context_;
     }
 
 private:
     CommandBufferResources resources_;
-    bool use_external_command_buffer_ = false;
+    VulkanCommandContext command_context_;
     bool should_block_next_frame_ = false;
 };
 } // namespace sparkle

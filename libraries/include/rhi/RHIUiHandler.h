@@ -6,6 +6,7 @@
 
 namespace sparkle
 {
+class RHICommandContext;
 
 class RHIUiHandler : public RHIResource
 {
@@ -25,7 +26,7 @@ public:
 
     virtual void BeginFrame() = 0;
 
-    virtual void Render() = 0;
+    virtual void Render(RHICommandContext *command_context) = 0;
 
     virtual void Init() = 0;
 

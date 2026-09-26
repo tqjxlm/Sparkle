@@ -37,8 +37,8 @@ void MetalContext::CreateBackBuffer()
 
 MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
                            uint32_t headless_height)
-    : view_(mtk_view), rhi_(context), headless_(is_headless), headless_width_(headless_width),
-      headless_height_(headless_height)
+    : view_(mtk_view), rhi_(context), command_context_(context), headless_(is_headless),
+      headless_width_(headless_width), headless_height_(headless_height)
 {
     if (headless_)
     {
@@ -87,18 +87,19 @@ void MetalContext::BeginFrame()
 
 void MetalContext::EndFrame()
 {
+    id<MTLCommandBuffer> command_buffer = command_context_.GetCommandBuffer();
     if (headless_)
     {
         dispatch_semaphore_t throttle = frame_throttle_semaphore_;
-        [current_command_buffer_ addCompletedHandler:^(id<MTLCommandBuffer>) {
+        [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
           dispatch_semaphore_signal(throttle);
         }];
     }
     else
     {
-        [current_command_buffer_ presentDrawable:current_drawable_];
+        [command_buffer presentDrawable:current_drawable_];
 
-        [current_command_buffer_ addCompletedHandler:^(id<MTLCommandBuffer>) {
+        [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
           dispatch_semaphore_signal([view_ getInFlightSemaphore]);
         }];
     }
@@ -176,15 +177,15 @@ void MetalContext::EndFrameCapture()
 
 void MetalContext::SubmitCommandBuffer()
 {
-    [current_command_buffer_ commit];
-    last_command_buffer_ = current_command_buffer_;
-    current_command_buffer_ = nullptr;
+    last_command_buffer_ = command_context_.GetCommandBuffer();
+    command_context_.End();
+    [last_command_buffer_ commit];
 }
 
 void MetalContext::BeginCommandBuffer()
 {
     ASSERT_F(!IsInCommandBuffer(), "already in a command buffer");
-    current_command_buffer_ = [command_queue_ commandBuffer];
+    command_context_.Begin([command_queue_ commandBuffer]);
 }
 
 void MetalContext::CaptureNextFrames(int count)

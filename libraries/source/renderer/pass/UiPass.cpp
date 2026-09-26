@@ -7,13 +7,15 @@ namespace sparkle
 {
 void UiPass::Render()
 {
-    rhi_->BeginRenderPass(render_pass_);
+    auto *command_context = rhi_->GetCommandContext();
+
+    command_context->BeginRenderPass(render_pass_);
 
     ui_handler_->BeginFrame();
 
-    ui_handler_->Render();
+    ui_handler_->Render(command_context);
 
-    rhi_->EndRenderPass();
+    command_context->EndRenderPass();
 }
 
 void UiPass::InitRenderResources(const RenderConfig &)

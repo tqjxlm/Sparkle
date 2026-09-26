@@ -157,7 +157,7 @@ void CPURenderer::Render()
                                      .after_stage = RHIPipelineStage::Top,
                                      .before_stage = RHIPipelineStage::Transfer});
 
-        image_buffer_->CopyToImage(screen_texture_.get());
+        rhi_->GetCommandContext()->CopyBufferToImage(image_buffer_.get(), screen_texture_.get());
     }
 
     // the stage that last wrote composite_texture_, driving downstream transitions
