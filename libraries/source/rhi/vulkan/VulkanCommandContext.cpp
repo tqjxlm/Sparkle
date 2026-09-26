@@ -219,10 +219,8 @@ void VulkanCommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipe
     }
 
     const auto &rhi_pipeline = RHICast<VulkanForwardPipelineState>(pipeline_state);
-    const auto *render_pass = RHICast<VulkanRenderPass>(GetCurrentRenderPass());
 
-    BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS,
-                 rhi_pipeline->GetPipeline(render_pass->GetActiveAttachmentSignature()));
+    BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, rhi_pipeline->GetPipeline(GetAttachmentSignature()));
 
     rhi_pipeline->BindBuffers(*this);
     rhi_pipeline->BindDescriptorSets(*this);
@@ -268,16 +266,15 @@ void VulkanCommandContext::BlitImageInternal(const RHIImage *src, const RHIImage
     RHICast<VulkanImage>(src)->BlitToImage(*this, dst, filter);
 }
 
-void VulkanCommandContext::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
+void VulkanCommandContext::BeginRenderingInternal(const RHIRenderingInfo &info, const std::string & /*name*/,
+                                                  RHITimer * /*timer*/)
 {
-    BeginDebugLabel(pass->GetName());
-    RHICast<VulkanRenderPass>(pass)->Begin(*this);
+    BeginVulkanRendering(*this, info);
 }
 
-void VulkanCommandContext::EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
+void VulkanCommandContext::EndRenderingInternal()
 {
-    RHICast<VulkanRenderPass>(pass)->End(*this);
-    EndDebugLabel();
+    vkCmdEndRendering(command_buffer_);
 }
 
 void VulkanCommandContext::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)

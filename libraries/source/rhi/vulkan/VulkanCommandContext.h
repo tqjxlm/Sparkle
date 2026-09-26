@@ -146,16 +146,14 @@ protected:
     void CopyBufferToImageInternal(const RHIBuffer *src, const RHIImage *dst) override;
     void CopyImageToBufferInternal(const RHIImage *src, const RHIBuffer *dst) override;
     void BlitImageInternal(const RHIImage *src, const RHIImage *dst, RHISampler::FilteringMethod filter) override;
-    void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
-    void EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
+    void BeginDebugLabel(const std::string &name) const override;
+    void EndDebugLabel() const override;
+    void BeginRenderingInternal(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer) override;
+    void EndRenderingInternal() override;
     void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
     void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
 
 private:
-    // the labels group a pass's commands in captures and validation messages
-    void BeginDebugLabel(const std::string &name) const;
-    void EndDebugLabel() const;
-
     struct CommandState
     {
         static constexpr uint32_t MaxTrackedVertexBuffers = 8;

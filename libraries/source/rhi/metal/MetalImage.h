@@ -30,8 +30,10 @@ public:
 
     MetalImage(const Attribute &attributes, id<MTLTexture> texture, const std::string &name);
 
-    void Transition(const TransitionRequest &) override
+    // Metal tracks hazards itself, so nothing is recorded; the state is still tracked to evolve as on Vulkan
+    void Transition(const TransitionRequest &request) override
     {
+        static_cast<void>(TrackTransition(request));
     }
 
     void Upload(const uint8_t *data) override;
