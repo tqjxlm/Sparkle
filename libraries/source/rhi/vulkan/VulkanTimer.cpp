@@ -32,9 +32,11 @@ void VulkanTimer::Begin()
 {
     ASSERT(status_ != Status::Measuring);
 
-    vkCmdResetQueryPool(context->GetCurrentCommandBuffer(), query_pool_, 0, 2);
+    auto *command_buffer = context->GetCommandContext()->GetCommandBuffer();
 
-    vkCmdWriteTimestamp(context->GetCurrentCommandBuffer(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool_, 0);
+    vkCmdResetQueryPool(command_buffer, query_pool_, 0, 2);
+
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool_, 0);
 
     status_ = Status::Measuring;
 }
@@ -43,7 +45,8 @@ void VulkanTimer::End()
 {
     ASSERT_EQUAL(status_, Status::Measuring);
 
-    vkCmdWriteTimestamp(context->GetCurrentCommandBuffer(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool_, 1);
+    vkCmdWriteTimestamp(context->GetCommandContext()->GetCommandBuffer(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                        query_pool_, 1);
 
     status_ = Status::WaitingForResult;
 }

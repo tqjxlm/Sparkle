@@ -91,15 +91,17 @@ inline VkPipelineRenderingCreateInfo GetVkPipelineRenderingCreateInfo(
     return create_info;
 }
 
+class VulkanCommandContext;
+
 // lowers the pass's RHIRenderingInfo to dynamic rendering
 class VulkanRenderPass : public RHIRenderPass
 {
 public:
     using RHIRenderPass::RHIRenderPass;
 
-    void Begin();
+    void Begin(VulkanCommandContext &command_context);
 
-    void End();
+    void End(VulkanCommandContext &command_context);
 };
 } // namespace sparkle
 

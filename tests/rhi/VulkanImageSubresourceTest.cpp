@@ -41,8 +41,9 @@ public:
             auto pass = rhi->CreateRenderPass(pass_attribute, target, "VulkanImageSubresourceTestPass");
 
             rhi->BeginCommandBuffer();
-            rhi->BeginRenderPass(pass);
-            rhi->EndRenderPass();
+            auto *command_context = rhi->GetCommandContext();
+            command_context->BeginRenderPass(pass);
+            command_context->EndRenderPass();
 
             VerifyRenderPassLayout(image.get());
 
