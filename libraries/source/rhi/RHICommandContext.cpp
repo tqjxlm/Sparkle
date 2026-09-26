@@ -6,21 +6,14 @@ namespace sparkle
 {
 void RHICommandContext::BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
 {
-    ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
-    ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
-
     // swap chain recreation replaces the back buffer render target
     if (pass->TargetsBackBuffer())
     {
         pass->SetRenderTarget(rhi_->GetBackBufferRenderTarget());
     }
 
-    pass->CaptureRenderingInfo();
-
-    pass->BeginTimer(*this);
-
-    // the internal begin records the attachment barriers before the pass opens
-    BeginRenderPassInternal(pass);
+    const auto info = pass->GetRenderingInfo();
+    BeginRendering(info, pass->GetName(), pass->SelectTimer(), RHIRenderPass::TrackBeginTransitions(info));
 
     current_render_pass_ = pass;
 }
@@ -29,19 +22,59 @@ void RHICommandContext::EndRenderPass()
 {
     ASSERT_F(current_render_pass_ != nullptr, "No active render pass!");
 
-    // the internal end records barriers after the rendering ends, so the pass is no longer current
     const auto pass = current_render_pass_;
     current_render_pass_ = nullptr;
 
-    EndRenderPassInternal(pass);
+    EndRendering(pass->TrackEndTransitions(rendering_info_));
+}
 
-    pass->EndTimer(*this);
+void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer,
+                                       std::span<const RHIImageBarrier> barriers)
+{
+    ASSERT_F(!rendering_, "Previous render pass not ended {}", rendering_name_);
+    ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
+
+    if (timer)
+    {
+        timer->Begin(*this);
+    }
+    BeginDebugLabel(name);
+
+    Barrier(barriers, {});
+
+    rendering_info_ = info;
+    attachment_signature_ = info.GetSignature();
+    rendering_name_ = name;
+    rendering_timer_ = timer;
+
+    BeginRenderingInternal(info, name, timer);
+
+    rendering_ = true;
+}
+
+void RHICommandContext::EndRendering(std::span<const RHIImageBarrier> barriers)
+{
+    ASSERT_F(rendering_, "No active render pass!");
+    ASSERT_F(current_render_pass_ == nullptr, "Render pass {} must end with EndRenderPass", rendering_name_);
+
+    rendering_ = false;
+
+    EndRenderingInternal();
+
+    Barrier(barriers, {});
+
+    EndDebugLabel();
+    if (rendering_timer_)
+    {
+        rendering_timer_->End(*this);
+        rendering_timer_ = nullptr;
+    }
 }
 
 void RHICommandContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass)
 {
     ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
-    ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
+    ASSERT_F(!rendering_, "Previous render pass not ended {}", rendering_name_);
 
     pass->BeginTimer(*this);
 
@@ -69,7 +102,7 @@ void RHICommandContext::Barrier(std::span<const RHIImageBarrier> image_barriers,
         return;
     }
 
-    ASSERT_F(current_render_pass_ == nullptr, "Barrier inside render pass {}", current_render_pass_->GetName());
+    ASSERT_F(!rendering_, "Barrier inside render pass {}", rendering_name_);
 
     BarrierInternal(image_barriers, memory_barriers);
 }
@@ -100,7 +133,7 @@ void RHICommandContext::BlitImage(const RHIImage *src, const RHIImage *dst, RHIS
 
 void RHICommandContext::AssertOutsidePass([[maybe_unused]] std::string_view command) const
 {
-    ASSERT_F(current_render_pass_ == nullptr, "{} inside render pass {}", command, current_render_pass_->GetName());
+    ASSERT_F(!rendering_, "{} inside render pass {}", command, rendering_name_);
     ASSERT_F(current_compute_pass_ == nullptr, "{} inside compute pass {}", command, current_compute_pass_->GetName());
 }
 } // namespace sparkle

@@ -7,6 +7,7 @@
 #include "MetalImage.h"
 #include "MetalPipelineState.h"
 #include "MetalRenderPass.h"
+#include "MetalTimer.h"
 
 namespace sparkle
 {
@@ -44,11 +45,10 @@ void MetalCommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipel
     ASSERT(render_encoder_);
 
     auto *pso = RHICast<MetalGraphicsPipeline>(pipeline_state);
-    const auto *pass = RHICast<MetalRenderPass>(GetCurrentRenderPass());
 
     auto index_buffer = RHICast<MetalBuffer>(pso->GetIndexBuffer())->GetResource();
 
-    pso->Bind(render_encoder_, pass->GetActiveAttachmentSignature());
+    pso->Bind(render_encoder_, GetAttachmentSignature());
 
     [render_encoder_ drawIndexedPrimitives:GetMetalPrimitiveType(pipeline_state->GetRasterizationState().polygon_mode)
                                 indexCount:draw_args.index_count
@@ -103,12 +103,31 @@ void MetalCommandContext::BlitImageInternal(const RHIImage *src, const RHIImage 
     RHICast<MetalImage>(src)->BlitToImage(command_buffer_, dst);
 }
 
-void MetalCommandContext::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
+void MetalCommandContext::BeginRenderingInternal(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer)
 {
-    render_encoder_ = RHICast<MetalRenderPass>(pass)->Begin(command_buffer_);
+    MTLRenderPassDescriptor *descriptor = CreateMetalRenderPassDescriptor(info);
+
+    if (timer)
+    {
+        RHICast<MetalTimer>(timer)->AttachTo(descriptor);
+    }
+
+    render_encoder_ = [command_buffer_ renderCommandEncoderWithDescriptor:descriptor];
+
+    SetDebugInfo(render_encoder_, name);
+
+    ASSERT_F(render_encoder_, "Failed to create render encoder for pass {}", name);
+
+    // flip the viewport to map vulkan-convention NDC (y down) to metal (y up).
+    // shaders are compiled from vulkan-style slang without a baked-in y-flip.
+    auto width = (double)info.width;
+    auto height = (double)info.height;
+    MTLViewport viewport = {0.0, height, width, -height, 0.0, 1.0};
+
+    [render_encoder_ setViewport:viewport];
 }
 
-void MetalCommandContext::EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> & /*pass*/)
+void MetalCommandContext::EndRenderingInternal()
 {
     [render_encoder_ endEncoding];
     render_encoder_ = nil;

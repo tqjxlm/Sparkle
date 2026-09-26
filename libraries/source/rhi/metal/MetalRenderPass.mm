@@ -3,7 +3,6 @@
 #include "MetalRenderPass.h"
 
 #include "MetalImage.h"
-#include "MetalTimer.h"
 
 namespace sparkle
 {
@@ -37,61 +36,20 @@ static MTLStoreAction GetMetalStoreAction(RHIStoreOp op)
     return MTLStoreActionDontCare;
 }
 
-MetalRenderPass::MetalRenderPass(RHIContext *rhi, const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
-                                 const std::string &name)
-    : RHIRenderPass(rhi, attribute, rt, name), descriptor_([MTLRenderPassDescriptor renderPassDescriptor])
+MTLRenderPassDescriptor *CreateMetalRenderPassDescriptor(const RHIRenderingInfo &info)
 {
-}
+    MTLRenderPassDescriptor *descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
 
-id<MTLRenderCommandEncoder> MetalRenderPass::Begin(id<MTLCommandBuffer> command_buffer) const
-{
-    const auto &info = GetActiveRenderingInfo();
-
-    FillDescriptor(info);
-
-    if (auto *timer = GetActiveTimer())
-    {
-        RHICast<MetalTimer>(timer)->AttachTo(descriptor_);
-    }
-
-    id<MTLRenderCommandEncoder> render_encoder = [command_buffer renderCommandEncoderWithDescriptor:descriptor_];
-
-    SetDebugInfo(render_encoder, GetName());
-
-    ASSERT_F(render_encoder, "Failed to create render encoder for pass {}", GetName());
-
-    // flip the viewport to map vulkan-convention NDC (y down) to metal (y up).
-    // shaders are compiled from vulkan-style slang without a baked-in y-flip.
-    auto width = (double)info.width;
-    auto height = (double)info.height;
-    MTLViewport viewport = {0.0, height, width, -height, 0.0, 1.0};
-
-    [render_encoder setViewport:viewport];
-
-    return render_encoder;
-}
-
-MTLRenderPassDescriptor *MetalRenderPass::GetDescriptor() const
-{
-    FillDescriptor(GetRenderingInfo());
-    return descriptor_;
-}
-
-void MetalRenderPass::FillDescriptor(const RHIRenderingInfo &info) const
-{
     for (auto i = 0u; i < MaxNumColorAttachments; ++i)
     {
         const auto &attachment = info.color_attachments[i];
-        auto color_attachment = descriptor_.colorAttachments[i];
         if (!attachment.image)
         {
-            color_attachment.texture = nil;
-            color_attachment.level = 0;
-            color_attachment.slice = 0;
             continue;
         }
 
         const auto &clear_color = attachment.clear_color;
+        auto color_attachment = descriptor.colorAttachments[i];
         color_attachment.texture = RHICast<MetalImage>(attachment.image)->GetResource();
         color_attachment.level = attachment.mip_level;
         color_attachment.slice = attachment.array_layer;
@@ -104,19 +62,15 @@ void MetalRenderPass::FillDescriptor(const RHIRenderingInfo &info) const
     const auto &depth_attachment = info.depth_attachment;
     if (depth_attachment.image)
     {
-        descriptor_.depthAttachment.texture = RHICast<MetalImage>(depth_attachment.image)->GetResource();
-        descriptor_.depthAttachment.level = depth_attachment.mip_level;
-        descriptor_.depthAttachment.slice = depth_attachment.array_layer;
-        descriptor_.depthAttachment.loadAction = GetMetalLoadAction(depth_attachment.load_op);
-        descriptor_.depthAttachment.clearDepth = depth_attachment.clear_depth;
-        descriptor_.depthAttachment.storeAction = GetMetalStoreAction(depth_attachment.store_op);
+        descriptor.depthAttachment.texture = RHICast<MetalImage>(depth_attachment.image)->GetResource();
+        descriptor.depthAttachment.level = depth_attachment.mip_level;
+        descriptor.depthAttachment.slice = depth_attachment.array_layer;
+        descriptor.depthAttachment.loadAction = GetMetalLoadAction(depth_attachment.load_op);
+        descriptor.depthAttachment.clearDepth = depth_attachment.clear_depth;
+        descriptor.depthAttachment.storeAction = GetMetalStoreAction(depth_attachment.store_op);
     }
-    else
-    {
-        descriptor_.depthAttachment.texture = nil;
-        descriptor_.depthAttachment.level = 0;
-        descriptor_.depthAttachment.slice = 0;
-    }
+
+    return descriptor;
 }
 } // namespace sparkle
 

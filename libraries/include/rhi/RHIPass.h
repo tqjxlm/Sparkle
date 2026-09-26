@@ -27,7 +27,7 @@ public:
     }
 
 protected:
-    // the timer measuring the open pass, null when the pass is not timed
+    // the timer measuring the open compute pass, null when the pass is not timed
     [[nodiscard]] RHITimer *GetActiveTimer() const
     {
         return active_timer_;
@@ -35,6 +35,9 @@ protected:
 
 private:
     friend class RHICommandContext;
+
+    // this frame's timer, after reading the time it measured last; null when the pass is not timed
+    [[nodiscard]] RHITimer *SelectTimer();
 
     void BeginTimer(RHICommandContext &command_context);
 

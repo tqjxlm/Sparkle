@@ -100,6 +100,13 @@ RHIResourceRef<RHISampler> RHIContext::GetSampler(RHISampler::SamplerAttribute a
     return sampler;
 }
 
+RHIResourceRef<RHIRenderPass> RHIContext::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
+                                                           const RHIResourceRef<RHIRenderTarget> &rt,
+                                                           const std::string &name)
+{
+    return CreateResource<RHIRenderPass>(this, attribute, rt, name);
+}
+
 RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const std::string &name)
 {
     if (!image)

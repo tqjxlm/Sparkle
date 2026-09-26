@@ -103,16 +103,14 @@ std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &
         auto range_start = request.base_mip;
         while (range_start < mip_end)
         {
-            const auto state = GetSubresourceState(range_start, array_layer);
+            const auto state = GetState(range_start, array_layer);
             auto range_end = range_start + 1;
-            while (range_end < mip_end && GetSubresourceState(range_end, array_layer) == state)
+            while (range_end < mip_end && GetState(range_end, array_layer) == state)
             {
                 range_end++;
             }
 
-            const bool read_after_read =
-                state.layout == request.target_layout && !state.access.HasWrite() && !target.HasWrite();
-            if (!read_after_read || !state.access.Contains(target))
+            if (const auto next = TransitionImageState(state, {.layout = request.target_layout, .access = target}))
             {
                 barriers.push_back({.image = this,
                                     .base_mip = range_start,
@@ -124,9 +122,7 @@ std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &
                                     .from_layout = request.discard ? RHIImageLayout::Undefined : state.layout,
                                     .to_layout = request.target_layout});
 
-                // later writes must also wait for the reads this barrier did not order
-                const auto access = read_after_read ? state.access | target : target;
-                SetCurrentState(request.target_layout, access, range_start, range_end - range_start, array_layer, 1);
+                SetState(*next, range_start, range_end - range_start, array_layer, 1);
             }
 
             range_start = range_end;

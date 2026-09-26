@@ -3,6 +3,7 @@
 #include "core/Enum.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace sparkle
 {
@@ -83,6 +84,32 @@ struct RHIResourceAccess
                          RHIAccess::AccelerationStructureBuild);
     }
 };
+
+// the tracked state of one image subresource
+struct RHIImageState
+{
+    RHIImageLayout layout;
+    // the accesses the next barrier must wait for
+    RHIResourceAccess access;
+
+    bool operator==(const RHIImageState &) const = default;
+};
+
+// the transition rule for one subresource: `target` is the next access and the layout it needs. returns nullopt when it
+// is a read already covered by the tracked reads in the same layout; otherwise it needs a barrier from `state`, and the
+// result is the state after it. a read in the same layout widens the tracked reads, so later writes also wait for them.
+[[nodiscard]] inline std::optional<RHIImageState> TransitionImageState(const RHIImageState &state,
+                                                                       const RHIImageState &target)
+{
+    const bool read_after_read = state.layout == target.layout && !state.access.HasWrite() && !target.access.HasWrite();
+    if (read_after_read && state.access.Contains(target.access))
+    {
+        return std::nullopt;
+    }
+
+    return RHIImageState{.layout = target.layout,
+                         .access = read_after_read ? state.access | target.access : target.access};
+}
 
 // an Undefined from_layout discards the contents
 struct RHIImageBarrier

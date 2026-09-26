@@ -407,13 +407,6 @@ RHIResourceRef<RHIRenderTarget> VulkanRHI::CreateRenderTarget(const RHIRenderTar
     return CreateResource<VulkanRenderTarget>(attribute, color_images, depth_image, name);
 }
 
-RHIResourceRef<RHIRenderPass> VulkanRHI::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                          const RHIResourceRef<RHIRenderTarget> &rt,
-                                                          const std::string &name)
-{
-    return CreateResource<VulkanRenderPass>(this, attribute, rt, name);
-}
-
 RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info)
 {
     return CreateResource<VulkanShader>(shader_info);

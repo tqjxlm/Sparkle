@@ -362,9 +362,6 @@ public:
 
     ~VulkanImage() override;
 
-    // lets callers batch the barriers of several images into one call
-    using RHIImage::TrackTransition;
-
     void Transition(const TransitionRequest &request) override;
 
     void Upload(const uint8_t *data) override;
