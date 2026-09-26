@@ -495,9 +495,11 @@ bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
                             .before_stage = RHIPipelineStage::ComputeShader});
     }
 
-    impl_->rhi->BeginComputePass(impl_->prepare_pass);
-    impl_->rhi->DispatchCompute(impl_->prepare_pipeline, {size.x(), size.y(), 1u}, {16u, 16u, 1u});
-    impl_->rhi->EndComputePass(impl_->prepare_pass);
+    auto *command_context = context->GetCommandContext();
+
+    command_context->BeginComputePass(impl_->prepare_pass);
+    command_context->DispatchCompute(impl_->prepare_pipeline, {size.x(), size.y(), 1u}, {16u, 16u, 1u});
+    command_context->EndComputePass(impl_->prepare_pass);
 
     for (const auto &prepared : {impl_->color, impl_->depth, impl_->motion, impl_->diffuse_albedo,
                                  impl_->specular_albedo, impl_->normal, impl_->roughness})
@@ -552,7 +554,9 @@ bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
         const bool run_resolve = weight > 0.f;
         impl_->timings.Sample({true, run_resolve});
 
-        id<MTLCommandBuffer> command_buffer = context->GetCurrentCommandBuffer();
+        // MetalFX encodes on the command buffer, which needs no encoder open
+        command_context->AssertOutsidePass("MetalFX denoise");
+        id<MTLCommandBuffer> command_buffer = command_context->GetCommandBuffer();
         [command_buffer pushDebugGroup:@"MetalFX temporal denoised scaler"];
         [scaler encodeToCommandBuffer:command_buffer];
         [command_buffer popDebugGroup];
@@ -576,10 +580,10 @@ bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
                                                 .after_stage = RHIPipelineStage::Top,
                                                 .before_stage = RHIPipelineStage::ComputeShader});
 
-            impl_->rhi->BeginComputePass(impl_->resolve_pass);
-            impl_->rhi->DispatchCompute(impl_->resolve_pipeline, {output_size.x(), output_size.y(), 1u},
-                                        {16u, 16u, 1u});
-            impl_->rhi->EndComputePass(impl_->resolve_pass);
+            command_context->BeginComputePass(impl_->resolve_pass);
+            command_context->DispatchCompute(impl_->resolve_pipeline, {output_size.x(), output_size.y(), 1u},
+                                             {16u, 16u, 1u});
+            command_context->EndComputePass(impl_->resolve_pass);
 
             impl_->resolved_output->Transition({.target_layout = RHIImageLayout::Read,
                                                 .after_stage = RHIPipelineStage::ComputeShader,

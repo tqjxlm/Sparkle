@@ -45,7 +45,11 @@ void VulkanUiHandler::Init()
 
     QueueFamilyIndices const indices = FindQueueFamilies(context->GetPhysicalDevice(), context->GetSurface());
 
+    const auto signature = render_pass_->GetRenderingInfo().GetSignature();
+    std::array<VkFormat, MaxNumColorAttachments> color_formats;
+
     ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.ApiVersion = ApiVersion;
     init_info.Instance = context->GetInstance();
     init_info.PhysicalDevice = context->GetPhysicalDevice();
     init_info.Device = context->GetDevice();
@@ -53,9 +57,9 @@ void VulkanUiHandler::Init()
     init_info.Queue = context->GetGraphicsQueue();
     init_info.PipelineCache = VK_NULL_HANDLE;
     init_info.DescriptorPool = descriptor_pool_;
-    init_info.PipelineInfoMain.RenderPass = RHICast<VulkanRenderPass>(render_pass_)->GetRenderPass();
-    init_info.PipelineInfoMain.Subpass = 0;
-    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(context->GetRHI()->GetConfig().msaa_samples);
+    init_info.UseDynamicRendering = true;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo = GetVkPipelineRenderingCreateInfo(signature, color_formats);
+    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(signature.samples);
     init_info.MinImageCount = 2;
     init_info.ImageCount = context->GetRHI()->GetMaxFramesInFlight();
     init_info.Allocator = VK_NULL_HANDLE;
@@ -78,7 +82,7 @@ void VulkanUiHandler::BeginFrame()
     ImGui_ImplVulkan_NewFrame();
 }
 
-void VulkanUiHandler::Render()
+void VulkanUiHandler::Render(RHICommandContext *command_context)
 {
     auto &io = ImGui::GetIO();
 
@@ -90,7 +94,11 @@ void VulkanUiHandler::Render()
         return;
     }
 
-    ImGui_ImplVulkan_RenderDrawData(draw_data, context->GetCurrentCommandBuffer());
+    auto *vulkan_context = static_cast<VulkanCommandContext *>(command_context);
+    ImGui_ImplVulkan_RenderDrawData(draw_data, vulkan_context->GetCommandBuffer());
+
+    // imgui records its pipeline, buffers, descriptor sets and viewport directly
+    vulkan_context->ResetCommandState();
 }
 
 VulkanUiHandler::~VulkanUiHandler()

@@ -4,7 +4,6 @@
 
 #include "VulkanBuffer.h"
 #include "VulkanCommon.h"
-#include "VulkanComputePass.h"
 #include "VulkanContext.h"
 #include "VulkanImage.h"
 #include "VulkanNrdBackend.h"
@@ -25,8 +24,6 @@
 namespace sparkle
 {
 constexpr unsigned HeadlessFramesInFlight = 2;
-
-static std::vector<RHIResourceWeakRef<VulkanRenderPass>> render_passes;
 
 void VulkanRHI::WaitForDeviceIdle()
 {
@@ -53,7 +50,7 @@ bool VulkanRHI::BeginFrameInternal()
         return false;
     }
 
-    if (GetConfig().measure_gpu_time)
+    if (GetConfig().measure_gpu_time && !frame_timers_.empty())
     {
         auto frame_index = GetFrameIndex();
         if (frame_timers_[frame_index]->GetStatus() != RHITimer::Status::Inactive)
@@ -61,7 +58,7 @@ bool VulkanRHI::BeginFrameInternal()
             frame_stats_[frame_index].elapsed_time_ms = frame_timers_[frame_index]->GetTime();
         }
 
-        frame_timers_[frame_index]->Begin();
+        frame_timers_[frame_index]->Begin(*context->GetCommandContext());
     }
 
     return true;
@@ -69,9 +66,9 @@ bool VulkanRHI::BeginFrameInternal()
 
 void VulkanRHI::EndFrameInternal()
 {
-    if (GetConfig().measure_gpu_time)
+    if (GetConfig().measure_gpu_time && !frame_timers_.empty())
     {
-        frame_timers_[GetFrameIndex()]->End();
+        frame_timers_[GetFrameIndex()]->End(*context->GetCommandContext());
     }
 
     auto result = context->EndFrame();
@@ -151,9 +148,12 @@ void VulkanRHI::InitRenderResources()
 
     context->InitRenderResources();
 
-    for (unsigned i = 0; i < GetMaxFramesInFlight(); i++)
+    if (SupportsPassTimestamps())
     {
-        frame_timers_.emplace_back(CreateTimer("FrameTimer"));
+        for (unsigned i = 0; i < GetMaxFramesInFlight(); i++)
+        {
+            frame_timers_.emplace_back(CreateTimer("FrameTimer"));
+        }
     }
 }
 
@@ -174,6 +174,31 @@ void VulkanRHI::ReleaseRenderResources()
 bool VulkanRHI::SupportsHardwareRayTracing()
 {
     return context->SupportsHardwareRayTracing();
+}
+
+bool VulkanRHI::SupportsPixelLocalRead()
+{
+    return context->SupportsDynamicRenderingLocalRead();
+}
+
+bool VulkanRHI::SupportsUnifiedImageLayouts()
+{
+    return context->SupportsUnifiedImageLayouts();
+}
+
+bool VulkanRHI::SupportsPassTimestamps()
+{
+    return context->GetTimestampValidBits() > 0;
+}
+
+std::optional<unsigned> VulkanRHI::GetValidationErrorCount() const
+{
+    return context->GetValidationErrorCount();
+}
+
+bool VulkanRHI::IsSyncValidationActive() const
+{
+    return context->IsSyncValidationActive();
 }
 
 bool VulkanRHI::HasPhysicalGpu()
@@ -246,22 +271,6 @@ void VulkanRHI::RecreateSwapChain()
     CreateBackBufferRenderTarget();
 
     InitRenderResources();
-
-    for (const auto &render_pass_ptr : render_passes)
-    {
-        if (render_pass_ptr.expired())
-        {
-            continue;
-        }
-
-        auto render_pass = render_pass_ptr.lock();
-
-        if (render_pass->RequireBackBuffer())
-        {
-            render_pass->Cleanup();
-            render_pass->Init(back_buffer_rt_);
-        }
-    }
 }
 
 bool VulkanRHI::RecreateSurface()
@@ -345,6 +354,11 @@ void VulkanRHI::SubmitCommandBuffer()
     context->SubmitCommandBuffer();
 }
 
+RHICommandContext *VulkanRHI::GetCommandContext()
+{
+    return context->GetCommandContext();
+}
+
 RHIResourceRef<RHIImage> VulkanRHI::CreateImage(const RHIImage::Attribute &attributes, const std::string &name)
 {
     return CreateResource<VulkanImage>(attributes, VK_FORMAT_UNDEFINED, name);
@@ -393,15 +407,6 @@ RHIResourceRef<RHIRenderTarget> VulkanRHI::CreateRenderTarget(const RHIRenderTar
     return CreateResource<VulkanRenderTarget>(attribute, color_images, depth_image, name);
 }
 
-RHIResourceRef<RHIRenderPass> VulkanRHI::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                          const RHIResourceRef<RHIRenderTarget> &rt,
-                                                          const std::string &name)
-{
-    auto render_pass = CreateResource<VulkanRenderPass>(attribute, rt, name);
-    render_passes.emplace_back(render_pass);
-    return render_pass;
-}
-
 RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info)
 {
     return CreateResource<VulkanShader>(shader_info);
@@ -421,58 +426,6 @@ RHIResourceRef<RHIPipelineState> VulkanRHI::CreatePipelineState(RHIPipelineState
     }
 }
 
-void VulkanRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
-{
-    if (!pipeline_state)
-    {
-        return;
-    }
-
-    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
-
-    const auto &rhi_pipeline = RHICast<VulkanForwardPipelineState>(pipeline_state);
-    VkPipeline pipeline = rhi_pipeline->GetPipeline();
-
-    context->BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-
-    rhi_pipeline->SetViewportAndScissor();
-    rhi_pipeline->BindBuffers();
-    rhi_pipeline->BindDescriptorSets();
-
-    vkCmdDrawIndexed(command_buffer, draw_args.index_count, draw_args.instance_count, draw_args.first_index,
-                     static_cast<int>(draw_args.first_vertex), draw_args.first_instance);
-}
-
-void VulkanRHI::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                                Vector3UInt thread_per_group)
-{
-    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
-
-    auto *compute_pipeline = RHICast<VulkanComputePipelineState>(pipeline);
-
-    context->BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline->GetPipeline());
-
-    compute_pipeline->BindDescriptorSets();
-
-    unsigned group_count_x = utilities::DivideAndRoundUp(total_threads.x(), thread_per_group.x());
-    unsigned group_count_y = utilities::DivideAndRoundUp(total_threads.y(), thread_per_group.y());
-    unsigned group_count_z = utilities::DivideAndRoundUp(total_threads.z(), thread_per_group.z());
-
-    vkCmdDispatch(command_buffer, group_count_x, group_count_y, group_count_z);
-}
-
-void VulkanRHI::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
-{
-    auto *rhi_render_pass = RHICast<VulkanRenderPass>(pass);
-    rhi_render_pass->Begin();
-}
-
-void VulkanRHI::EndRenderPassInternal()
-{
-    auto *rhi_render_pass = RHICast<VulkanRenderPass>(current_render_pass_);
-    rhi_render_pass->End();
-}
-
 RHIResourceRef<RHIResourceArray> VulkanRHI::CreateResourceArray(RHIShaderResourceReflection::ResourceType type,
                                                                 unsigned int capacity, const std::string &name)
 {
@@ -486,19 +439,7 @@ RHIResourceRef<RHITimer> VulkanRHI::CreateTimer(const std::string &name)
 
 RHIResourceRef<RHIComputePass> VulkanRHI::CreateComputePass(const std::string &name, bool need_timestamp)
 {
-    return CreateResource<VulkanComputePass>(this, need_timestamp, name);
-}
-
-void VulkanRHI::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    auto *rhi_compute_pass = RHICast<VulkanComputePass>(pass);
-    rhi_compute_pass->Begin();
-}
-
-void VulkanRHI::EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    auto *rhi_compute_pass = RHICast<VulkanComputePass>(pass);
-    rhi_compute_pass->End();
+    return CreateResource<RHIComputePass>(this, need_timestamp, name);
 }
 } // namespace sparkle
 

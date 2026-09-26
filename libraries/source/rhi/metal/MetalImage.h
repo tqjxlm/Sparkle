@@ -30,21 +30,19 @@ public:
 
     MetalImage(const Attribute &attributes, id<MTLTexture> texture, const std::string &name);
 
-    void Transition(const TransitionRequest &) override
+    // Metal tracks hazards itself, so nothing is recorded; the state is still tracked to evolve as on Vulkan
+    void Transition(const TransitionRequest &request) override
     {
+        static_cast<void>(TrackTransition(request));
     }
 
     void Upload(const uint8_t *data) override;
 
     void UploadFaces(std::array<const uint8_t *, 6> data) override;
 
-    void CopyToImage(const RHIImage *image) const override;
+    void CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const;
 
-    void GenerateMips() override;
-
-    void CopyToBuffer(const RHIBuffer *buffer) const override;
-
-    void BlitToImage(const RHIImage *image, RHISampler::FilteringMethod filter) const override;
+    void BlitToImage(id<MTLCommandBuffer> command_buffer, const RHIImage *image) const;
 
     [[nodiscard]] id<MTLTexture> GetResource() const
     {

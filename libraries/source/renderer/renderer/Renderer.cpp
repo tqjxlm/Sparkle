@@ -143,7 +143,7 @@ bool Renderer::ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, boo
                              .after_stage = after_stage,
                              .before_stage = RHIPipelineStage::Transfer});
 
-    color_image->CopyToBuffer(staging_buffer);
+    rhi_->GetCommandContext()->CopyImageToBuffer(color_image.get(), staging_buffer.get());
 
     // we do not transition the image back. only the caller knows what to do with the image.
 

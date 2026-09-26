@@ -100,6 +100,13 @@ RHIResourceRef<RHISampler> RHIContext::GetSampler(RHISampler::SamplerAttribute a
     return sampler;
 }
 
+RHIResourceRef<RHIRenderPass> RHIContext::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
+                                                           const RHIResourceRef<RHIRenderTarget> &rt,
+                                                           const std::string &name)
+{
+    return CreateResource<RHIRenderPass>(this, attribute, rt, name);
+}
+
 RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const std::string &name)
 {
     if (!image)
@@ -259,25 +266,6 @@ void RHIContext::EndFrame()
     render_target_pool_.Tick(total_frame_);
 }
 
-void RHIContext::EndRenderPass()
-{
-    ASSERT_F(current_render_pass_ != nullptr, "No active render pass!");
-
-    EndRenderPassInternal();
-
-    current_render_pass_ = nullptr;
-}
-
-void RHIContext::BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
-{
-    ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
-    ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
-
-    current_render_pass_ = pass;
-
-    BeginRenderPassInternal(pass);
-}
-
 void RHIContext::RecreateBuffer(RHIBuffer::Attribute attribute, const std::string &name,
                                 RHIResourceRef<RHIBuffer> &in_out_existing_buffer)
 {
@@ -311,25 +299,6 @@ RHIResourceRef<RHIBuffer> RHIContext::CreateUploadStagingBuffer(size_t size)
                                    .dynamic_buffer_capacity = UploadStagingBufferCapacity};
     attribute.is_dynamic = frame_active_ && buffer_manager_->CanSubAllocateDynamicBuffer(attribute);
     return CreateBuffer(attribute, "UploadStagingBuffer");
-}
-
-void RHIContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass)
-{
-    ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
-    ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
-
-    current_compute_pass_ = pass;
-
-    BeginComputePassInternal(pass);
-}
-
-void RHIContext::EndComputePass(const RHIResourceRef<RHIComputePass> &pass)
-{
-    ASSERT(current_compute_pass_ == pass);
-
-    current_compute_pass_ = nullptr;
-
-    EndComputePassInternal(pass);
 }
 
 void RHIContext::DeferResourceDeletion(RHIResource *resource)
@@ -455,7 +424,6 @@ void RHIContext::ReleaseRenderResources()
     WaitForDeviceIdle();
 
     back_buffer_rt_ = nullptr;
-    current_render_pass_ = nullptr;
     ui_handler_instance_ = nullptr;
 
     render_target_pool_.Clear();

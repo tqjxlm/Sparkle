@@ -176,14 +176,17 @@ void GPURenderer::Render()
             denoiser_inputs_->BeginWrite();
         }
 
-        rhi_->BeginComputePass(compute_pass_);
+        auto *command_context = rhi_->GetCommandContext();
 
-        rhi_->DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u}, {16u, 16u, 1u});
+        command_context->BeginComputePass(compute_pass_);
 
-        rhi_->EndComputePass(compute_pass_);
+        command_context->DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u},
+                                         {16u, 16u, 1u});
+
+        command_context->EndComputePass(compute_pass_);
 
         const auto scene_consumer_stage =
-            frame_denoiser_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
+            gbuffer_write_this_frame_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
 
         scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::ComputeShader,
@@ -213,6 +216,11 @@ void GPURenderer::Render()
             }
         }
     }
+
+    // a frame without a dispatch leaves the clear pass's storage layout on the scene texture
+    scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
+                                .after_stage = RHIPipelineStage::ColorOutput,
+                                .before_stage = RHIPipelineStage::PixelShader});
 
     // screen space passes (post processing)
     {

@@ -72,6 +72,32 @@
         }
     },
     {
+        "name": "forward_sync_validation",
+        "test_case": "screenshot",
+        "description": "Forward still frame under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case.",
+        "app_args": ["--pipeline", "forward", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "deferred_sync_validation",
+        "test_case": "screenshot",
+        "description": "Deferred still frame under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case.",
+        "app_args": ["--pipeline", "deferred", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "gpu_sync_validation",
+        "test_case": "screenshot",
+        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward.",
+        "app_args": ["--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "sync_validation_hazard",
+        "test_case": "sync_validation_hazard",
+        "description": "Records two copies into one buffer with no barrier between them and expects synchronization validation to report the write-after-write, proving the sync validation cases can fail."
+    },
+    {
         "name": "camera_nudge_return",
         "test_case": "camera_nudge_return",
         "description": "Camera drag-out-and-return round trip; the evaluator FLIP-compares the before and after screenshots.",
@@ -167,6 +193,11 @@
         "test_case": "vulkan_image_subresources",
         "description": "Vulkan image layout tracking and readback for a selected cube face and mip.",
         "app_args": ["--validation", "true"]
+    },
+    {
+        "name": "pass_timestamps",
+        "test_case": "pass_timestamps",
+        "description": "Opt-in render-pass GPU timestamps report a time once their frame slot returns, and nothing without device support."
     },
     {
         "name": "pipeline_switch_pool",

@@ -86,6 +86,8 @@ The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000
 python3 dev/run_tests.py --framework glfw --config Release --software
 ```
 
+The Linux + GLFW job restores the Vulkan SDK that the build jobs keep in `build_cache` and registers its validation layer through `VK_ADD_LAYER_PATH`, with a copy of the layer manifest that names the library by absolute path (the SDK's own manifest names it without a path, which would need `LD_LIBRARY_PATH` and would also swap in the SDK's loader). Every case on that cell therefore runs under core validation, and its synchronization validation cases gate GPU hazards on the forward, deferred and gpu pipelines (see [Test.md](Test.md#validation-layer)); a cache miss fails the job before the suite runs. The macOS + GLFW job also runs under core validation, because `run.py` puts the SDK's layer on the path, and so does the Android job, whose package ships the layer. The Windows job has no validation layer.
+
 The macOS package runs the forward and deferred pipelines on the runner's physical Metal GPU:
 
 ```bash

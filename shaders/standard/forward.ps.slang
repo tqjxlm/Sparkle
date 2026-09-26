@@ -5,7 +5,6 @@
 #include "pbr.h.slang"
 #include "shadow.h.slang"
 #include "sky_light.h.slang"
-#include "ssao.h.slang"
 #include "standard.h.slang"
 #include "view.h.slang"
 
@@ -26,21 +25,17 @@
     DirectionalLight dir_light;
     float3 camera_pos;
     RenderConfig config;
-    SSAOConfig ssao_config;
 }
 
 [[vk::binding(1, 2)]] Texture2D shadow_map;
 [[vk::binding(2, 2)]] SamplerState shadow_map_sampler;
 
-[[vk::binding(3, 2)]] Texture2D prepass_depth_map;
-[[vk::binding(4, 2)]] SamplerState prepass_depth_map_sampler;
-
-[[vk::binding(5, 2)]] Texture2D ibl_brdf;
-[[vk::binding(6, 2)]] SamplerState ibl_brdf_sampler;
-[[vk::binding(7, 2)]] TextureCube ibl_diffuse;
-[[vk::binding(8, 2)]] SamplerState ibl_diffuse_sampler;
-[[vk::binding(9, 2)]] TextureCube ibl_specular;
-[[vk::binding(10, 2)]] SamplerState ibl_specular_sampler;
+[[vk::binding(3, 2)]] Texture2D ibl_brdf;
+[[vk::binding(4, 2)]] SamplerState ibl_brdf_sampler;
+[[vk::binding(5, 2)]] TextureCube ibl_diffuse;
+[[vk::binding(6, 2)]] SamplerState ibl_diffuse_sampler;
+[[vk::binding(7, 2)]] TextureCube ibl_specular;
+[[vk::binding(8, 2)]] SamplerState ibl_specular_sampler;
 
 // set 3 for material info that changes per mesh but may be shared if ordered
 [[vk::binding(0, 3)]] cbuffer material
@@ -111,11 +106,6 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
     ibl.brdf = ibl_brdf;
     ibl.brdf_sampler = ibl_brdf_sampler;
     float3 ambient = CalculateAmbientLighting(config, V, sky_light, surface, ibl);
-    if (config.use_ssao != 0)
-    {
-        ambient *= CalculateSSAO(vs_in.world_pos, view.ViewProjectionMatrix, (float3x3)ModelMatrixInvTranspose,
-                                 ssao_config, prepass_depth_map, prepass_depth_map_sampler, view.near, view.far);
-    }
 
     bool in_directional_shadow =
         CalculateDirectionalLightShadow(surface, dir_light, vs_in.world_pos, shadow_map, shadow_map_sampler);

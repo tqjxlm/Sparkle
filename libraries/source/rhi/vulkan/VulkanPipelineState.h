@@ -117,11 +117,6 @@ public:
     {
     }
 
-    [[nodiscard]] VkPipeline GetPipeline() const
-    {
-        return pipeline_;
-    }
-
     ~VulkanPipelineState() override;
 
 protected:
@@ -143,8 +138,6 @@ protected:
     std::vector<RHIShaderResourceSet> combined_resource_sets_;
 
     VkPipelineLayout pipeline_layout_;
-
-    VkPipeline pipeline_;
 };
 
 class VulkanForwardPipelineState : public VulkanPipelineState
@@ -155,13 +148,16 @@ public:
     {
     }
 
+    ~VulkanForwardPipelineState() override;
+
     void CompileInternal() override;
 
-    void SetViewportAndScissor();
+    // compiled on first use for each attachment signature
+    VkPipeline GetPipeline(const RHIAttachmentSignature &signature);
 
-    void BindBuffers();
+    void BindBuffers(VulkanCommandContext &command_context);
 
-    void BindDescriptorSets();
+    void BindDescriptorSets(VulkanCommandContext &command_context);
 
 private:
     struct VulkanVertexInputDescription
@@ -181,9 +177,7 @@ private:
 
     void InitPipelineInfo();
 
-    void CreatePipeline();
-
-    void SetupViewport();
+    [[nodiscard]] VkPipeline CreatePipeline(const RHIAttachmentSignature &signature) const;
 
     void SetupVertexInputInfo();
 
@@ -201,14 +195,14 @@ private:
 
     VkPipelineVertexInputStateCreateInfo vertex_input_info_;
     VkPipelineInputAssemblyStateCreateInfo input_assembly_;
-    VkViewport viewport_;
-    VkRect2D scissor_;
     VkPipelineRasterizationStateCreateInfo rasterizer_;
     VkPipelineMultisampleStateCreateInfo multisampling_;
 
-    std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments_;
-    VkPipelineColorBlendStateCreateInfo color_blending_;
+    // shared by every color slot
+    VkPipelineColorBlendAttachmentState color_blend_attachment_;
     VkPipelineDepthStencilStateCreateInfo depth_stencil_;
+
+    std::vector<std::pair<RHIAttachmentSignature, VkPipeline>> pipelines_;
 };
 
 class VulkanComputePipelineState : public VulkanPipelineState
@@ -219,9 +213,19 @@ public:
     {
     }
 
+    ~VulkanComputePipelineState() override;
+
     void CompileInternal() override;
 
-    void BindDescriptorSets();
+    [[nodiscard]] VkPipeline GetPipeline() const
+    {
+        return pipeline_;
+    }
+
+    void BindDescriptorSets(VulkanCommandContext &command_context);
+
+private:
+    VkPipeline pipeline_;
 };
 } // namespace sparkle
 

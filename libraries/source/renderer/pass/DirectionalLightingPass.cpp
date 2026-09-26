@@ -7,7 +7,6 @@
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/ImageBasedLighting.h"
 #include "renderer/resource/PbrResource.h"
-#include "renderer/resource/SSAOResource.h"
 #include "rhi/RHI.h"
 
 namespace sparkle
@@ -47,7 +46,6 @@ class DirectionalLightingPassPixelShader : public RHIShaderInfo
         DirectionalLightRenderProxy::UniformBufferData dir_light;
         alignas(16) Vector3 view_pos;
         alignas(16) PbrConfig render_config;
-        alignas(16) SSAOConfig ssao_config;
     };
 };
 
@@ -61,7 +59,6 @@ void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneR
 {
     ScreenQuadPass::UpdateFrameData(config, scene);
 
-    bool use_ssao = config.use_ssao;
     bool use_diffuse_ibl = (resources_.ibl != nullptr) && config.use_diffuse_ibl;
     bool use_specular_ibl = (resources_.ibl != nullptr) && config.use_specular_ibl;
 
@@ -83,7 +80,6 @@ void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneR
     }
 
     const PbrConfig pbr_config{.mode = static_cast<uint32_t>(config.debug_mode),
-                               .use_ssao = static_cast<uint32_t>(use_ssao ? 1 : 0),
                                .use_ibl_diffuse = static_cast<uint32_t>(use_diffuse_ibl ? 1 : 0),
                                .use_ibl_specular = static_cast<uint32_t>(use_specular_ibl ? 1 : 0)};
 
@@ -91,8 +87,7 @@ void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneR
         .sky_light = sky_light ? sky_light->GetRenderData() : SkyRenderProxy::UniformBufferData{},
         .dir_light = dir_light ? dir_light->GetRenderData() : DirectionalLightRenderProxy::UniformBufferData{},
         .view_pos = camera->GetPosture().position,
-        .render_config = pbr_config,
-        .ssao_config = {}};
+        .render_config = pbr_config};
 
     ps_ub_->Upload(rhi_, &ubo);
 }
@@ -211,11 +206,13 @@ void DirectionalLightingPass::SetSkyLight(SkyRenderProxy *sky_light)
 
 void DirectionalLightingPass::Render()
 {
-    rhi_->BeginRenderPass(pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    rhi_->DrawMesh(pipeline_state_, draw_args_);
+    command_context->BeginRenderPass(pass_);
 
-    rhi_->EndRenderPass();
+    command_context->DrawMesh(pipeline_state_, draw_args_);
+
+    command_context->EndRenderPass();
 }
 
 void DirectionalLightingPass::SetupRenderPass()

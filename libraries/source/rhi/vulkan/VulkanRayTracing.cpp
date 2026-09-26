@@ -79,9 +79,15 @@ void VulkanBLAS::Build()
 
     {
         // TODO(tqjxlm): use a shared command buffer
-        const OneShotCommandBufferScope command_buffer_scope;
-        VkCommandBuffer command_buffer = command_buffer_scope.GetCommandBuffer();
-        vkCmdBuildAccelerationStructuresKHR(command_buffer, 1, &build_info, ranges);
+        OneShotCommandBufferScope command_buffer_scope;
+        auto &command_context = command_buffer_scope.GetCommandContext();
+
+        // a rebuild reuses the scratch buffer an earlier build submit wrote (a barrier's first scope spans submits)
+        const RHIResourceAccess build{.access = RHIAccess::AccelerationStructureBuild};
+        const RHIMemoryBarrier before_build{.from = build, .to = build};
+        command_context.Barrier({}, std::span(&before_build, 1));
+
+        vkCmdBuildAccelerationStructuresKHR(command_context.GetCommandBuffer(), 1, &build_info, ranges);
     }
 
     // after build finishes, retrieve its address on device
@@ -254,7 +260,22 @@ void VulkanTLAS::BuildInternal(bool rebuild)
 
     const VkAccelerationStructureBuildRangeInfoKHR *ranges[1] = {&range};
 
-    vkCmdBuildAccelerationStructuresKHR(context->GetCurrentCommandBuffer(), 1, &build_info, ranges);
+    // the build reads BLAS from earlier one-shot submits on the same queue (a barrier's first scope spans submits) and
+    // rewrites scratch and acceleration structure memory that earlier builds and ray queries used
+    const RHIResourceAccess ray_query{.access = RHIAccess::AccelerationStructureRead,
+                                      .stages = RHIShaderStageMask::Pixel | RHIShaderStageMask::Compute};
+    const RHIResourceAccess build{.access = RHIAccess::AccelerationStructureBuild};
+
+    auto *command_context = context->GetCommandContext();
+    command_context->AssertOutsidePass("TLAS build");
+
+    const RHIMemoryBarrier before_build{.from = build | ray_query, .to = build};
+    command_context->Barrier({}, std::span(&before_build, 1));
+
+    vkCmdBuildAccelerationStructuresKHR(command_context->GetCommandBuffer(), 1, &build_info, ranges);
+
+    const RHIMemoryBarrier after_build{.from = build, .to = ray_query};
+    command_context->Barrier({}, std::span(&after_build, 1));
 }
 } // namespace sparkle
 

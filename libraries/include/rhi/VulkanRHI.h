@@ -53,24 +53,31 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
+    bool SupportsPixelLocalRead() override;
+
+    bool SupportsUnifiedImageLayouts() override;
+
+    bool SupportsPassTimestamps() override;
+
     bool HasPhysicalGpu() override;
 
     bool SupportsSampledFormat(PixelFormat format) override;
+
+    [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const override;
+
+    [[nodiscard]] bool IsSyncValidationActive() const override;
 
     [[nodiscard]] uint32_t GetMinBufferOffsetAlignment() const override;
 
     void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 
+    RHICommandContext *GetCommandContext() override;
+
     void NextSubpass() override
     {
         UnImplemented();
     }
-
-    void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
-
-    void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                         Vector3UInt thread_per_group) override;
 
     RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
                                                                  const RHIResourceRef<RHIImage> &depth_image,
@@ -80,10 +87,6 @@ public:
                                                        const RHIRenderTarget::ColorImageArray &color_images,
                                                        const RHIResourceRef<RHIImage> &depth_image,
                                                        const std::string &name) override;
-
-    RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                   const RHIResourceRef<RHIRenderTarget> &rt,
-                                                   const std::string &name) override;
 
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
@@ -116,13 +119,6 @@ public:
 protected:
     [[nodiscard]] bool BeginFrameInternal() override;
     void EndFrameInternal() override;
-
-    void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
-    void EndRenderPassInternal() override;
-
-    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-
-    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
 
     void CleanupInternal() override;
 

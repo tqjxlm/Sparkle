@@ -7,6 +7,7 @@
 namespace sparkle
 {
 class RHIImage;
+class RHICommandContext;
 
 // Keeps NRD's backend detail out of the renderer: the renderer owns the nrd::Instance and hands
 // cooked shaders + inputs across this seam. Obtain one via RHIContext::CreateNrdBackend().
@@ -78,8 +79,8 @@ public:
     };
 
     // Record the frame's NRD dispatch sequence into the caller's active compute pass (bracket with
-    // RHIContext::Begin/EndComputePass): the pass's serial encoder implicitly barriers between
+    // RHICommandContext::Begin/EndComputePass): the pass's serial encoder implicitly barriers between
     // dispatches, and pass-level GPU timing covers the whole block.
-    virtual void RunDispatches(const Dispatch *dispatches, uint32_t count) = 0;
+    virtual void RunDispatches(RHICommandContext *command_context, const Dispatch *dispatches, uint32_t count) = 0;
 };
 } // namespace sparkle

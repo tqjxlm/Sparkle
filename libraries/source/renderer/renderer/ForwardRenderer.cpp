@@ -9,12 +9,10 @@
 #include "renderer/pass/UiPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
-#include "renderer/proxy/MeshRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/ImageBasedLighting.h"
 #include "rhi/RHI.h"
-#include "rhi/RHIRayTracing.h"
 
 namespace sparkle
 {
@@ -23,22 +21,11 @@ ForwardRenderer::ForwardRenderer(const RenderConfig &render_config, RHIContext *
     : Renderer(render_config, rhi_context, scene_render_proxy)
 {
     ASSERT_EQUAL(render_config_.pipeline, RenderConfig::Pipeline::Forward);
-
-    use_ray_tracing_ = render_config.IsRayTracingMode();
-    use_prepass_ = render_config_.use_prepass;
-    use_ssao_ = render_config_.use_ssao;
-    resolve_prepass_depth_ = use_ssao_;
 }
 
 void ForwardRenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
-
-    if (use_prepass_)
-    {
-        pre_pass_ = PipelinePass::Create<DepthPass>(render_config_, rhi_, scene_render_proxy_, resolution_.scene.x(),
-                                                    resolution_.scene.y());
-    }
 
     scene_color_ = rhi_->CreateImage(
         RHIImage::Attribute{
@@ -54,27 +41,20 @@ void ForwardRenderer::InitRenderResources()
         },
         "BasePassSceneColor");
 
-    if (use_prepass_)
-    {
-        scene_depth_ = pre_pass_->GetOutput()->GetDepthImage();
-    }
-    else
-    {
-        scene_depth_ = rhi_->CreateImage(
-            RHIImage::Attribute{
-                .format = PixelFormat::D32,
+    scene_depth_ = rhi_->CreateImage(
+        RHIImage::Attribute{
+            .format = PixelFormat::D32,
 
-                .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-                .width = resolution_.scene.x(),
-                .height = resolution_.scene.y(),
-                .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::DepthStencilAttachment,
-                .msaa_samples = 1,
-            },
-            "BasePassSceneDepth");
-    }
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
+            .width = resolution_.scene.x(),
+            .height = resolution_.scene.y(),
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::DepthStencilAttachment,
+            .msaa_samples = 1,
+        },
+        "BasePassSceneDepth");
 
     RHIRenderTarget::Attribute screen_color_rt_attribute;
     screen_color_rt_attribute.SetColorAttribute(
@@ -104,24 +84,7 @@ void ForwardRenderer::InitRenderResources()
     pbr_resources.scene_color = scene_color_;
     pbr_resources.scene_depth = scene_depth_;
 
-    if (use_ray_tracing_)
-    {
-        tlas_ = rhi_->CreateTLAS("TLAS");
-
-        pbr_resources.tlas = tlas_;
-        scene_color_pass_ =
-            PipelinePass::Create<ForwardMeshPass>(render_config_, rhi_, scene_render_proxy_, pbr_resources);
-    }
-    else
-    {
-        if (resolve_prepass_depth_)
-        {
-            pbr_resources.prepass_depth_map = pre_pass_->GetOutput()->GetDepthImage();
-        }
-
-        scene_color_pass_ =
-            PipelinePass::Create<ForwardMeshPass>(render_config_, rhi_, scene_render_proxy_, pbr_resources);
-    }
+    scene_color_pass_ = PipelinePass::Create<ForwardMeshPass>(render_config_, rhi_, scene_render_proxy_, pbr_resources);
 
     if (!rhi_->IsHeadless())
     {
@@ -140,11 +103,6 @@ void ForwardRenderer::Render()
         directional_shadow_pass_->GetOutput()->GetDepthImage()->Transition({.target_layout = RHIImageLayout::Read,
                                                                             .after_stage = RHIPipelineStage::LateZ,
                                                                             .before_stage = RHIPipelineStage::Bottom});
-    }
-
-    if (use_prepass_)
-    {
-        pre_pass_->Render();
     }
 
     if (ibl_cook_pending_)
@@ -267,7 +225,6 @@ void ForwardRenderer::Update()
 
     HandleSceneChanges();
 
-    auto *camera = scene_render_proxy_->GetCamera();
     auto *directional_light = scene_render_proxy_->GetDirectionalLight();
 
     auto output_mode_changed = UpdateOutputMode(render_config_.output_image);
@@ -282,11 +239,6 @@ void ForwardRenderer::Update()
     {
         directional_shadow_pass_->SetProjectionMatrix(directional_light->GetRenderData().shadow_matrix);
         directional_shadow_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-    }
-
-    if (use_prepass_)
-    {
-        pre_pass_->SetProjectionMatrix(camera->GetViewProjectionMatrix());
     }
 
     if (sky_box_pass_)
@@ -306,47 +258,6 @@ void ForwardRenderer::Update()
 
 void ForwardRenderer::HandleSceneChanges()
 {
-    if (use_ray_tracing_)
-    {
-        bool need_rebuild_tlas = false;
-        std::unordered_set<uint32_t> primitives_to_update;
-        for (const auto &[type, primitive, from, to] : scene_render_proxy_->GetPrimitiveChangeList())
-        {
-            switch (type)
-            {
-            case SceneRenderProxy::PrimitiveChangeType::New:
-                RegisterBLAS(primitive);
-                need_rebuild_tlas = true;
-                break;
-            case SceneRenderProxy::PrimitiveChangeType::Remove:
-                // for removed primitives, we don't need to re-register. their slots will be reused
-                need_rebuild_tlas = true;
-                break;
-            case SceneRenderProxy::PrimitiveChangeType::Move:
-                RegisterBLAS(primitive);
-                need_rebuild_tlas = true;
-                break;
-            case SceneRenderProxy::PrimitiveChangeType::Update:
-                primitives_to_update.insert(to);
-                break;
-            default:
-                UnImplemented(type);
-                break;
-            }
-        }
-
-        if (need_rebuild_tlas)
-        {
-            // structural change, rebuild TLAS
-            tlas_->Build();
-        }
-        else if (!primitives_to_update.empty())
-        {
-            // non-structural change, update TLAS
-            tlas_->Update(primitives_to_update);
-        }
-    }
-
     auto *directional_light = scene_render_proxy_->GetDirectionalLight();
 
     if (directional_light)
@@ -401,24 +312,8 @@ void ForwardRenderer::HandleSceneChanges()
         {
             sky_box_pass_ =
                 PipelinePass::Create<SkyBoxPass>(render_config_, rhi_, sky_proxy, scene_color_, scene_depth_);
-            sky_box_pass_->InitRenderResources(render_config_);
         }
     }
-}
-
-void ForwardRenderer::RegisterBLAS(PrimitiveRenderProxy *primitive)
-{
-    if (!primitive->IsMesh())
-    {
-        return;
-    }
-
-    ASSERT(primitive->GetPrimitiveIndex() != UINT_MAX);
-
-    const auto *mesh = primitive->As<MeshRenderProxy>();
-
-    const auto &blas = mesh->GetAccelerationStructure();
-    tlas_->SetBLAS(blas.get(), primitive->GetPrimitiveIndex());
 }
 
 ForwardRenderer::~ForwardRenderer() = default;

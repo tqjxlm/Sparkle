@@ -3,6 +3,7 @@
 #include "rhi/RHIResource.h"
 
 #include "core/Exception.h"
+#include "rhi/RHIBarrier.h"
 #include "rhi/RHIMemory.h"
 
 #include <map>
@@ -11,7 +12,6 @@ namespace sparkle
 {
 class RHIDynamicBuffer;
 class RHIBuffer;
-class RHIImage;
 
 class RHIBufferSubAllocation
 {
@@ -102,6 +102,8 @@ public:
         return attribute_.usages;
     }
 
+    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
+
     [[nodiscard]] size_t GetOffset(unsigned frame_index) const
     {
         if (IsDynamic())
@@ -137,10 +139,6 @@ public:
     // it does not block resources and avoids writing to resources in use
     // the cost is higher memory footprint
     void Upload(RHIContext *rhi, const void *data);
-
-    virtual void CopyToBuffer(const RHIBuffer *buffer) const = 0;
-
-    virtual void CopyToImage(const RHIImage *image) const = 0;
 
     virtual void *Lock() = 0;
 

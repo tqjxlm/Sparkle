@@ -72,11 +72,13 @@ void SkyBoxPass::OverrideSkyMap(const RHIResourceRef<RHIImage> &sky_map)
 
 void SkyBoxPass::Render()
 {
-    rhi_->BeginRenderPass(render_pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    rhi_->DrawMesh(pipeline_state_, draw_args_);
+    command_context->BeginRenderPass(render_pass_);
 
-    rhi_->EndRenderPass();
+    command_context->DrawMesh(pipeline_state_, draw_args_);
+
+    command_context->EndRenderPass();
 }
 
 void SkyBoxPass::UpdateFrameData(const RenderConfig & /*config*/, SceneRenderProxy *scene)
@@ -108,11 +110,9 @@ void SkyBoxPass::InitRenderResources(const RenderConfig & /*config*/)
     // TODO(tqjxlm): avoid the additional pass here.
     RHIRenderPass::Attribute pass_attribute;
     pass_attribute.color_load_op = RHIRenderPass::LoadOp::Load;
-    pass_attribute.color_initial_layout = RHIImageLayout::ColorOutput;
 
     pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Load;
     pass_attribute.depth_store_op = RHIRenderPass::StoreOp::None;
-    pass_attribute.depth_initial_layout = RHIImageLayout::DepthStencilOutput;
 
     render_pass_ = rhi_->CreateRenderPass(pass_attribute, render_target_, "SkyBoxPass");
 

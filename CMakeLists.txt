@@ -201,7 +201,20 @@ else()
         -Wno-unsafe-buffer-usage        # fires on nearly all pointer arithmetic, not practical for a renderer
         -Wno-global-constructors        # self-registering globals (e.g. ConfigValue) are used by design
         -Wno-exit-time-destructors      # same reason as -Wno-global-constructors
+        -Wno-padded                     # struct padding is expected; layouts that matter for gpu data are explicit
         )
+
+    # warnings that older clang (e.g. android ndk) does not know, so they are opted out only where they exist:
+    #   nrvo: reports every return that skips copy elision, not a defect
+    #   unique-object-duplication: concerns shared libraries, and sparkle is not one
+    include(CheckCXXCompilerFlag)
+    foreach(warning nrvo unique-object-duplication)
+        string(MAKE_C_IDENTIFIER "HAS_W_${warning}" has_warning)
+        check_cxx_compiler_flag(-W${warning} ${has_warning})
+        if (${has_warning})
+            target_compile_options(sparkle PRIVATE -Wno-${warning})
+        endif()
+    endforeach()
 endif()
 
 # LTO is opt-in: it adds minutes of Release link time, and nothing depends on it
@@ -315,7 +328,7 @@ if(ENABLE_VULKAN)
                 "    \"file_format_version\": \"1.0.0\",\n"
                 "    \"ICD\": {\n"
                 "        \"library_path\": \"../lib/libMoltenVK.dylib\",\n"
-                "        \"api_version\": \"1.2.0\",\n"
+                "        \"api_version\": \"1.3.0\",\n"
                 "        \"is_portability_driver\": true\n"
                 "    }\n"
                 "}\n")

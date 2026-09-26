@@ -4,30 +4,32 @@
 
 #include "rhi/VulkanRHI.h"
 
+#include "VulkanImage.h"
+
 namespace sparkle
 {
-inline VkAttachmentLoadOp GetAttachmentLoadOp(RHIRenderPass::LoadOp op)
+inline VkAttachmentLoadOp GetAttachmentLoadOp(RHILoadOp op)
 {
     switch (op)
     {
-    case RHIRenderPass::LoadOp::None:
+    case RHILoadOp::None:
         return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    case RHIRenderPass::LoadOp::Load:
+    case RHILoadOp::Load:
         return VK_ATTACHMENT_LOAD_OP_LOAD;
-    case RHIRenderPass::LoadOp::Clear:
+    case RHILoadOp::Clear:
         return VK_ATTACHMENT_LOAD_OP_CLEAR;
     default:
         UnImplemented(op);
     }
 }
 
-inline VkAttachmentStoreOp GetAttachmentStoreOp(RHIRenderPass::StoreOp op)
+inline VkAttachmentStoreOp GetAttachmentStoreOp(RHIStoreOp op)
 {
     switch (op)
     {
-    case RHIRenderPass::StoreOp::None:
+    case RHIStoreOp::None:
         return VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    case RHIRenderPass::StoreOp::Store:
+    case RHIStoreOp::Store:
         return VK_ATTACHMENT_STORE_OP_STORE;
     default:
         UnImplemented(op);
@@ -62,44 +64,37 @@ inline VkFormat FindDepthFormat(VkPhysicalDevice physicalDevice)
                                VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT, physicalDevice);
 }
 
-class VulkanRenderPass : public RHIRenderPass
+// color_formats backs the returned struct and must outlive it
+inline VkPipelineRenderingCreateInfo GetVkPipelineRenderingCreateInfo(
+    const RHIAttachmentSignature &signature, std::array<VkFormat, MaxNumColorAttachments> &color_formats)
 {
-public:
-    VulkanRenderPass(const RHIRenderPass::Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
-                     const std::string &name);
+    // PixelFormat::Count marks an unused attachment
+    auto get_format = [](PixelFormat format) {
+        return format == PixelFormat::Count ? VK_FORMAT_UNDEFINED : GetVkPixelFormat(format);
+    };
 
-    ~VulkanRenderPass() override
+    uint32_t color_attachment_count = 0;
+    for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
     {
-        Cleanup();
+        color_formats[slot] = get_format(signature.color_formats[slot]);
+        if (color_formats[slot] != VK_FORMAT_UNDEFINED)
+        {
+            color_attachment_count = slot + 1;
+        }
     }
 
-    [[nodiscard]] VkRenderPass GetRenderPass() const
-    {
-        return render_pass_;
-    }
+    VkPipelineRenderingCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    create_info.colorAttachmentCount = color_attachment_count;
+    create_info.pColorAttachmentFormats = color_formats.data();
+    create_info.depthAttachmentFormat = get_format(signature.depth_format);
+    return create_info;
+}
 
-    void Init(const RHIResourceRef<RHIRenderTarget> &rt);
+class VulkanCommandContext;
 
-    void Cleanup();
-
-    void Begin();
-
-    [[nodiscard]] bool RequireBackBuffer() const
-    {
-        return require_back_buffer_;
-    }
-
-    void End();
-
-private:
-    void CreateRenderPass();
-
-    void CreateFramebuffers();
-
-    VkRenderPass render_pass_;
-    std::vector<VkFramebuffer> frame_buffers_;
-    bool require_back_buffer_;
-};
+// lowers an RHIRenderingInfo to vkCmdBeginRendering and sets the viewport and scissor to its extent
+void BeginVulkanRendering(VulkanCommandContext &command_context, const RHIRenderingInfo &info);
 } // namespace sparkle
 
 #endif

@@ -149,11 +149,14 @@ void IBLDiffusePass::CookOnTheFly(const RenderConfig &config, unsigned samples_p
 
 void IBLDiffusePass::Render()
 {
-    rhi_->BeginComputePass(compute_pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    rhi_->DispatchCompute(pipeline_state_, {ibl_image_->GetWidth(), ibl_image_->GetHeight(), 6u}, {16u, 16u, 1u});
+    command_context->BeginComputePass(compute_pass_);
 
-    rhi_->EndComputePass(compute_pass_);
+    command_context->DispatchCompute(pipeline_state_, {ibl_image_->GetWidth(), ibl_image_->GetHeight(), 6u},
+                                     {16u, 16u, 1u});
+
+    command_context->EndComputePass(compute_pass_);
 }
 
 } // namespace sparkle

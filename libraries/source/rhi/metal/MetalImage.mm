@@ -294,40 +294,13 @@ void MetalImage::UploadFaces(std::array<const uint8_t *, 6> data)
     }
 }
 
-void MetalImage::CopyToImage(const RHIImage *image) const
-{
-    const auto *dst_image = RHICast<MetalImage>(image);
-
-    auto dst_texture = dst_image->GetResource();
-
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
-
-    [command_encoder copyFromTexture:texture_ toTexture:dst_texture];
-
-    [command_encoder endEncoding];
-}
-
-void MetalImage::GenerateMips()
-{
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
-
-    [command_encoder generateMipmapsForTexture:texture_];
-
-    [command_encoder endEncoding];
-}
-
-void MetalImage::CopyToBuffer(const RHIBuffer *buffer) const
+void MetalImage::CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const
 {
     // copy to dynamic buffer is not supported for now
     ASSERT(!buffer->IsDynamic());
 
     const auto *dst_buffer = RHICast<MetalBuffer>(buffer);
     auto dst_offset = dst_buffer->GetOffset(UINT_MAX);
-
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
 
     uint32_t copied_bytes = 0;
 
@@ -338,30 +311,26 @@ void MetalImage::CopyToBuffer(const RHIBuffer *buffer) const
     {
         for (auto layer = 0u; layer < num_layers; layer++)
         {
-            [command_encoder copyFromTexture:texture_
-                                 sourceSlice:layer
-                                 sourceLevel:mip_level
-                                sourceOrigin:{0, 0, 0}
-                                  sourceSize:{GetWidth(mip_level), GetHeight(mip_level), 1}
-                                    toBuffer:dst_buffer->GetResource()
-                           destinationOffset:(dst_offset + copied_bytes)
-                      destinationBytesPerRow:GetBytesPerRow(mip_level)
-                    destinationBytesPerImage:0];
+            [encoder copyFromTexture:texture_
+                             sourceSlice:layer
+                             sourceLevel:mip_level
+                            sourceOrigin:{0, 0, 0}
+                              sourceSize:{GetWidth(mip_level), GetHeight(mip_level), 1}
+                                toBuffer:dst_buffer->GetResource()
+                       destinationOffset:(dst_offset + copied_bytes)
+                  destinationBytesPerRow:GetBytesPerRow(mip_level)
+                destinationBytesPerImage:0];
 
             copied_bytes += GetStorageSize(mip_level);
         }
     }
-
-    [command_encoder endEncoding];
 }
 
-void MetalImage::BlitToImage(const RHIImage *image, RHISampler::FilteringMethod) const
+void MetalImage::BlitToImage(id<MTLCommandBuffer> command_buffer, const RHIImage *image) const
 {
     const auto *dst_image = RHICast<MetalImage>(image);
 
     auto dst_texture = dst_image->GetResource();
-
-    auto command_buffer = context->GetCurrentCommandBuffer();
 
     unsigned num_layers = attributes_.type == RHIImage::ImageType::Image2DCube ? 6 : 1;
 

@@ -26,6 +26,28 @@ public:
     };
 };
 
+RHIResourceAccess RHIBuffer::GetUsageAccess() const
+{
+    RHIResourceAccess result{.stages = RHIShaderStageMask::All};
+    auto add = [this, &result](BufferUsage usage, RHIAccess access) {
+        if (attribute_.usages & usage)
+        {
+            result.access |= access;
+        }
+    };
+
+    add(BufferUsage::TransferSrc, RHIAccess::CopySrc);
+    add(BufferUsage::TransferDst, RHIAccess::CopyDst);
+    add(BufferUsage::UniformBuffer, RHIAccess::Uniform);
+    add(BufferUsage::VertexBuffer, RHIAccess::VertexInput);
+    add(BufferUsage::IndexBuffer, RHIAccess::IndexInput);
+    add(BufferUsage::StorageBuffer, RHIAccess::StorageRead | RHIAccess::StorageWrite);
+    add(BufferUsage::DeviceAddress, RHIAccess::StorageRead);
+    add(BufferUsage::AccelerationStructureBuildInput, RHIAccess::AccelerationStructureBuild);
+
+    return result;
+}
+
 void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::vector<uint32_t> &indices,
                               uint32_t element_count, uint32_t element_size)
 {
@@ -73,11 +95,21 @@ void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::v
 
     auto compute_pass = rhi->CreateComputePass("BufferUpdateComputePass", false);
 
-    rhi->BeginComputePass(compute_pass);
+    auto *command_context = rhi->GetCommandContext();
 
-    rhi->DispatchCompute(pipeline_state, {element_count, 1u, 1u}, {64u, 1u, 1u});
+    // the dispatch rewrites a buffer that earlier work may still access, and its later consumers are unknown here
+    const RHIResourceAccess update{.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute};
+    const RHIMemoryBarrier before_update{.from = GetUsageAccess(), .to = update};
+    command_context->Barrier({}, std::span(&before_update, 1));
 
-    rhi->EndComputePass(compute_pass);
+    command_context->BeginComputePass(compute_pass);
+
+    command_context->DispatchCompute(pipeline_state, {element_count, 1u, 1u}, {64u, 1u, 1u});
+
+    command_context->EndComputePass(compute_pass);
+
+    const RHIMemoryBarrier after_update{.from = update, .to = GetUsageAccess()};
+    command_context->Barrier({}, std::span(&after_update, 1));
 }
 
 void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribute)
@@ -259,7 +291,7 @@ void RHIBuffer::Upload(RHIContext *rhi, const void *data)
             staging_buffer->UploadImmediate(data);
         }
 
-        staging_buffer->CopyToBuffer(this);
+        rhi->GetCommandContext()->CopyBuffer(staging_buffer.get(), this);
     }
 }
 } // namespace sparkle

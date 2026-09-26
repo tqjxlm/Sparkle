@@ -138,10 +138,12 @@ void GBufferPass::HandleUpdatedPrimitive([[maybe_unused]] uint32_t primitive_id)
 
 void GBufferPass::Render()
 {
-    rhi_->BeginRenderPass(pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    MeshPass::Render();
+    command_context->BeginRenderPass(pass_);
 
-    rhi_->EndRenderPass();
+    DrawPrimitives(command_context);
+
+    command_context->EndRenderPass();
 }
 } // namespace sparkle

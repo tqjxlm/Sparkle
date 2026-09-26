@@ -144,11 +144,13 @@ void ScreenQuadPass::BindPixelShaderResources()
 
 void ScreenQuadPass::Render()
 {
-    rhi_->BeginRenderPass(pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    rhi_->DrawMesh(pipeline_state_, draw_args_);
+    command_context->BeginRenderPass(pass_);
 
-    rhi_->EndRenderPass();
+    command_context->DrawMesh(pipeline_state_, draw_args_);
+
+    command_context->EndRenderPass();
 }
 
 void ScreenQuadPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)

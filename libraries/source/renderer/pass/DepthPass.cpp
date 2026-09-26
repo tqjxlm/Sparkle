@@ -99,10 +99,12 @@ void DepthPass::SetProjectionMatrix(const Mat4 &matrix)
 
 void DepthPass::Render()
 {
-    rhi_->BeginRenderPass(pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    MeshPass::Render();
+    command_context->BeginRenderPass(pass_);
 
-    rhi_->EndRenderPass();
+    DrawPrimitives(command_context);
+
+    command_context->EndRenderPass();
 }
 } // namespace sparkle

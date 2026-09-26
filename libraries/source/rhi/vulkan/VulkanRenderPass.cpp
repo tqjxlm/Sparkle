@@ -2,275 +2,85 @@
 
 #include "VulkanRenderPass.h"
 
-#include "VulkanCommon.h"
 #include "VulkanContext.h"
-#include "VulkanDescriptorSetManager.h"
 #include "VulkanImage.h"
-#include "VulkanRenderTarget.h"
-#include "VulkanSwapChain.h"
-#include "core/Exception.h"
 
 namespace sparkle
 {
-void VulkanRenderPass::CreateRenderPass()
+static VkImageView GetAttachmentView(RHIImage *image, unsigned mip_level, unsigned array_layer)
 {
-    auto *rhi_rt = RHICast<VulkanRenderTarget>(GetRenderTarget());
-    const auto &rt_attrib = rhi_rt->GetAttribute();
+    const auto view = image->GetView(context->GetRHI(), {.base_mip_level = mip_level, .base_array_layer = array_layer});
+    return RHICast<VulkanImageView>(view)->GetView();
+}
 
-    ASSERT_F(rhi_rt->GetExtent().width > 0 && rhi_rt->GetExtent().height > 0, "render target size invalid {}",
-             rhi_rt->GetName());
-
-    auto msaa_samples = rt_attrib.msaa_samples;
-    const VkImageLayout final_layout = GetVulkanImageLayout(attribute_.color_final_layout);
-
-    std::vector<VkAttachmentDescription> attachments;
-    std::vector<VkAttachmentReference> color_attachment_refs;
-    std::vector<VkAttachmentReference> resolve_attachment_refs;
-
-    // we treat all color attachments with the same attribute
-    for (auto i = 0u; i < RHIRenderTarget::MaxNumColorImage; i++)
+void BeginVulkanRendering(VulkanCommandContext &command_context, const RHIRenderingInfo &info)
+{
+    std::array<VkRenderingAttachmentInfo, MaxNumColorAttachments> color_infos{};
+    uint32_t color_attachment_count = 0;
+    for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
     {
-        if (!rhi_rt->GetColorImage(i))
+        const auto &attachment = info.color_attachments[slot];
+        auto &color_info = color_infos[slot];
+        color_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        if (!attachment.image)
         {
             continue;
         }
 
-        auto &color_attachment_ref = color_attachment_refs.emplace_back(VkAttachmentReference{});
-        color_attachment_ref.attachment = static_cast<uint32_t>(attachments.size());
-        color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_attachment_count = slot + 1;
 
-        auto &color_attachment = attachments.emplace_back(VkAttachmentDescription{});
-
-        color_attachment.format = rhi_rt->GetFormat(i);
-        color_attachment.samples = GetVkMsaaSampleBit(msaa_samples);
-        color_attachment.loadOp = GetAttachmentLoadOp(attribute_.color_load_op);
-        color_attachment.storeOp = GetAttachmentStoreOp(attribute_.color_store_op);
-        color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        color_attachment.initialLayout = GetVulkanImageLayout(attribute_.color_initial_layout);
-
-        if (msaa_samples > 1)
+        if (attachment.resolve_image)
         {
-            color_attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            color_info.imageView = GetAttachmentView(attachment.image, 0, 0);
+            color_info.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+            color_info.resolveImageView =
+                GetAttachmentView(attachment.resolve_image, attachment.mip_level, attachment.array_layer);
+            color_info.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
         else
         {
-            color_attachment.finalLayout = final_layout;
+            color_info.imageView = GetAttachmentView(attachment.image, attachment.mip_level, attachment.array_layer);
         }
 
-        // for msaa resolve
-        if (msaa_samples > 1)
-        {
-            auto &resolve_attachment_ref = resolve_attachment_refs.emplace_back(VkAttachmentReference{});
-            resolve_attachment_ref.attachment = static_cast<uint32_t>(attachments.size());
-            resolve_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-            auto &resolve_attachment = attachments.emplace_back(VkAttachmentDescription{});
-
-            resolve_attachment.format = rhi_rt->GetFormat(i);
-            resolve_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-            resolve_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            resolve_attachment.storeOp = GetAttachmentStoreOp(attribute_.color_store_op);
-            resolve_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            resolve_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            resolve_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            resolve_attachment.finalLayout = final_layout;
-        }
+        color_info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_info.loadOp = GetAttachmentLoadOp(attachment.load_op);
+        color_info.storeOp = GetAttachmentStoreOp(attachment.store_op);
+        color_info.clearValue.color = {{attachment.clear_color.x(), attachment.clear_color.y(),
+                                        attachment.clear_color.z(), attachment.clear_color.w()}};
     }
 
-    VkAttachmentReference depth_attachment_ref{};
-    if (rhi_rt->GetDepthImage())
+    const auto &depth_attachment = info.depth_attachment;
+    VkRenderingAttachmentInfo depth_info{};
+    depth_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    if (depth_attachment.image)
     {
-        depth_attachment_ref.attachment = static_cast<uint32_t>(attachments.size());
-        depth_attachment_ref.layout = GetVulkanImageLayout(attribute_.depth_final_layout);
-
-        auto &depth_attachment = attachments.emplace_back(VkAttachmentDescription{});
-
-        depth_attachment.format = FindDepthFormat(context->GetPhysicalDevice());
-        depth_attachment.samples = GetVkMsaaSampleBit(msaa_samples);
-        depth_attachment.loadOp = GetAttachmentLoadOp(attribute_.depth_load_op);
-        depth_attachment.storeOp = GetAttachmentStoreOp(attribute_.depth_store_op);
-        depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depth_attachment.initialLayout = GetVulkanImageLayout(attribute_.depth_initial_layout);
-        depth_attachment.finalLayout = GetVulkanImageLayout(attribute_.depth_final_layout);
+        depth_info.imageView =
+            GetAttachmentView(depth_attachment.image, depth_attachment.mip_level, depth_attachment.array_layer);
+        depth_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth_info.loadOp = GetAttachmentLoadOp(depth_attachment.load_op);
+        depth_info.storeOp = GetAttachmentStoreOp(depth_attachment.store_op);
+        depth_info.clearValue.depthStencil = {.depth = depth_attachment.clear_depth, .stencil = 0};
     }
 
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    const VkRect2D render_area{.offset = {.x = 0, .y = 0}, .extent = {.width = info.width, .height = info.height}};
 
-    if (!color_attachment_refs.empty())
-    {
-        subpass.colorAttachmentCount = static_cast<uint32_t>(color_attachment_refs.size());
-        subpass.pColorAttachments = color_attachment_refs.data();
-        if (!resolve_attachment_refs.empty())
-        {
-            subpass.pResolveAttachments = resolve_attachment_refs.data();
-        }
-    }
+    VkRenderingInfo rendering_info{};
+    rendering_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering_info.renderArea = render_area;
+    rendering_info.layerCount = 1;
+    rendering_info.colorAttachmentCount = color_attachment_count;
+    rendering_info.pColorAttachments = color_infos.data();
+    rendering_info.pDepthAttachment = depth_attachment.image ? &depth_info : nullptr;
 
-    if (rhi_rt->GetDepthImage())
-    {
-        subpass.pDepthStencilAttachment = &depth_attachment_ref;
-    }
+    vkCmdBeginRendering(command_context.GetCommandBuffer(), &rendering_info);
 
-    VkRenderPassCreateInfo render_pass_info{};
-    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    render_pass_info.attachmentCount = static_cast<uint32_t>(attachments.size());
-    render_pass_info.pAttachments = attachments.data();
-    render_pass_info.subpassCount = 1;
-    render_pass_info.pSubpasses = &subpass;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    render_pass_info.dependencyCount = 1;
-    render_pass_info.pDependencies = &dependency;
-
-    CHECK_VK_ERROR(vkCreateRenderPass(context->GetDevice(), &render_pass_info, nullptr, &render_pass_));
-
-    context->SetDebugInfo(reinterpret_cast<uint64_t>(render_pass_), VK_OBJECT_TYPE_RENDER_PASS, GetName().c_str());
-}
-
-void VulkanRenderPass::Begin()
-{
-    ASSERT(GetRenderTarget());
-
-    auto *command_buffer = context->GetCurrentCommandBuffer();
-
-    if (context->IsValidationEnabled())
-    {
-        VkDebugUtilsLabelEXT debug_label{};
-        debug_label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-        debug_label.pLabelName = GetName().c_str();
-
-        vkCmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
-    }
-
-    context->GetDescriptorSetManager().UpdateDirtyResourceArrays();
-
-    auto *rhi_rt = RHICast<VulkanRenderTarget>(GetRenderTarget());
-
-    auto image_index = RequireBackBuffer() ? context->GetSwapChain()->GetCurrentImageIndex() : 0;
-
-    VkRenderPassBeginInfo render_pass_info{};
-    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render_pass_info.renderPass = render_pass_;
-    render_pass_info.framebuffer = frame_buffers_[image_index];
-    render_pass_info.renderArea.offset = {.x = 0, .y = 0};
-    render_pass_info.renderArea.extent = rhi_rt->GetExtent();
-
-    std::vector<VkClearValue> clear_values;
-    for (const auto &color_image : rhi_rt->GetColorImages())
-    {
-        if (color_image)
-        {
-            clear_values.push_back({.color = {{attribute_.clear_color.x(), attribute_.clear_color.y(),
-                                               attribute_.clear_color.z(), attribute_.clear_color.w()}}});
-        }
-    }
-
-    if (rhi_rt->GetDepthImage())
-    {
-        clear_values.push_back({.depthStencil = {1.0f, 0}});
-    }
-
-    render_pass_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
-    render_pass_info.pClearValues = clear_values.data();
-
-    vkCmdBeginRenderPass(context->GetCurrentCommandBuffer(), &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
-}
-
-void VulkanRenderPass::CreateFramebuffers()
-{
-    auto *rhi_rt = RHICast<VulkanRenderTarget>(GetRenderTarget());
-
-    // indexed by swap chain image index in Begin(), which is decoupled from frames in flight
-    auto frame_buffer_num = RequireBackBuffer() ? context->GetSwapChain()->GetSwapChainImageCount() : 1u;
-
-    frame_buffers_.resize(frame_buffer_num);
-
-    for (auto i = 0u; i < frame_buffer_num; i++)
-    {
-        auto attachments = rhi_rt->GetAttachments(i);
-
-        VkFramebufferCreateInfo framebuffer_info{};
-        framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebuffer_info.renderPass = render_pass_;
-        framebuffer_info.attachmentCount = static_cast<uint32_t>(attachments.size());
-        framebuffer_info.pAttachments = attachments.data();
-        framebuffer_info.width = rhi_rt->GetExtent().width;
-        framebuffer_info.height = rhi_rt->GetExtent().height;
-        framebuffer_info.layers = 1;
-
-        CHECK_VK_ERROR(vkCreateFramebuffer(context->GetDevice(), &framebuffer_info, nullptr, &frame_buffers_[i]));
-    }
-}
-
-void VulkanRenderPass::End()
-{
-    auto *command_buffer = context->GetCurrentCommandBuffer();
-
-    vkCmdEndRenderPass(command_buffer);
-
-    auto *rhi_rt = RHICast<VulkanRenderTarget>(GetRenderTarget());
-    const auto &rt_attribute = rhi_rt->GetAttribute();
-
-    // layout is managed by explicit transition most of the time, except implicit transition by render passes
-    for (const auto &color_image : rhi_rt->GetColorImages())
-    {
-        if (color_image)
-        {
-            // set layout manually to keep record
-            color_image->SetCurrentLayout(attribute_.color_final_layout, rt_attribute.mip_level, 1,
-                                          rt_attribute.array_layer, 1);
-        }
-    }
-
-    // layout is managed by explicit transition most of the time, except implicit transition by render passes
-    if (auto image = rhi_rt->GetDepthImage())
-    {
-        // set layout manually to keep record
-        image->SetCurrentLayout(attribute_.depth_final_layout, rt_attribute.mip_level, 1, rt_attribute.array_layer, 1);
-    }
-
-    if (context->IsValidationEnabled())
-    {
-        vkCmdEndDebugUtilsLabelEXT(command_buffer);
-    }
-}
-
-void VulkanRenderPass::Cleanup()
-{
-    for (auto &swap_chain_frame_buffer : frame_buffers_)
-    {
-        vkDestroyFramebuffer(context->GetDevice(), swap_chain_frame_buffer, nullptr);
-    }
-    vkDestroyRenderPass(context->GetDevice(), render_pass_, nullptr);
-}
-
-void VulkanRenderPass::Init(const RHIResourceRef<RHIRenderTarget> &rt)
-{
-    render_target_ = rt;
-
-    ASSERT(GetRenderTarget());
-
-    CreateRenderPass();
-
-    CreateFramebuffers();
-}
-
-VulkanRenderPass::VulkanRenderPass(const RHIRenderPass::Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
-                                   const std::string &name)
-    : RHIRenderPass(attribute, rt, name), require_back_buffer_(RHICast<VulkanRenderTarget>(rt)->IsBackBufferTarget())
-{
-    Init(rt);
+    const VkViewport viewport{.x = 0.0f,
+                              .y = 0.0f,
+                              .width = static_cast<float>(info.width),
+                              .height = static_cast<float>(info.height),
+                              .minDepth = 0.0f,
+                              .maxDepth = 1.0f};
+    command_context.SetViewportAndScissor(viewport, render_area);
 }
 } // namespace sparkle
 

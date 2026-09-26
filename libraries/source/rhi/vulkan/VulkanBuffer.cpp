@@ -71,7 +71,7 @@ void VulkanBuffer::Create()
     }
 }
 
-void VulkanBuffer::CopyToBuffer(const RHIBuffer *buffer) const
+void VulkanBuffer::CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const
 {
     const auto *dst_buffer = RHICast<VulkanBuffer>(buffer);
 
@@ -87,24 +87,20 @@ void VulkanBuffer::CopyToBuffer(const RHIBuffer *buffer) const
 
     ASSERT_EQUAL(GetSize(), buffer->GetSize());
 
-    vkCmdCopyBuffer(context->GetCurrentCommandBuffer(), GetResourceThisFrame(), dst_buffer->GetResourceThisFrame(), 1,
+    // neither the earlier accesses to the destination nor its later consumers are known here, so the copy waits for
+    // and is waited on by every access the usages allow
+    const RHIResourceAccess copy_dst{.access = RHIAccess::CopyDst};
+    const RHIMemoryBarrier before_copy{.from = dst_buffer->GetUsageAccess(), .to = copy_dst};
+    command_context.Barrier({}, std::span(&before_copy, 1));
+
+    vkCmdCopyBuffer(command_context.GetCommandBuffer(), GetResourceThisFrame(), dst_buffer->GetResourceThisFrame(), 1,
                     &copy_region);
 
-    VkBufferMemoryBarrier memory_barrier{};
-    memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    memory_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-    memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    memory_barrier.buffer = dst_buffer->GetResourceThisFrame();
-    memory_barrier.offset = copy_region.dstOffset;
-    memory_barrier.size = copy_region.size;
-
-    vkCmdPipelineBarrier(context->GetCurrentCommandBuffer(), VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, &memory_barrier, 0, nullptr);
+    const RHIMemoryBarrier after_copy{.from = copy_dst, .to = dst_buffer->GetUsageAccess()};
+    command_context.Barrier({}, std::span(&after_copy, 1));
 }
 
-void VulkanBuffer::CopyToImage(const RHIImage *image) const
+void VulkanBuffer::CopyToImage(VulkanCommandContext &command_context, const RHIImage *image) const
 {
     auto frame_index = context->GetRHI()->GetFrameIndex();
 
@@ -140,7 +136,7 @@ void VulkanBuffer::CopyToImage(const RHIImage *image) const
         copied_bytes += image->GetStorageSize(mip_level) * num_layers;
     }
 
-    vkCmdCopyBufferToImage(context->GetCurrentCommandBuffer(), buffer_resource, image_resource,
+    vkCmdCopyBufferToImage(command_context.GetCommandBuffer(), buffer_resource, image_resource,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copy_regions.size()),
                            copy_regions.data());
 }

@@ -22,28 +22,25 @@ MetalUiHandler::~MetalUiHandler()
     is_valid_ = false;
 }
 
-void MetalUiHandler::Render()
+void MetalUiHandler::Render(RHICommandContext *command_context)
 {
-    auto *pass = RHICast<MetalRenderPass>(render_pass_);
-    auto encoder = pass->GetRenderEncoder();
+    auto *metal_context = static_cast<MetalCommandContext *>(command_context);
 
     // it has been set in UiManager::Render()
     auto *draw_data = reinterpret_cast<ImDrawData *>(ImGui::GetIO().UserData);
 
-    ImGui_ImplMetal_RenderDrawData(draw_data, context->GetCurrentCommandBuffer(), encoder);
+    ImGui_ImplMetal_RenderDrawData(draw_data, metal_context->GetCommandBuffer(), metal_context->GetRenderEncoder());
 }
 
 void MetalUiHandler::BeginFrame()
 {
-    auto *pass = RHICast<MetalRenderPass>(render_pass_);
-
     ImGuiIO &io = ImGui::GetIO();
 
     // it may be override by platform specific callbacks, so we need to set it every frame
     io.DisplaySize = ImVec2(static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().width),
                             static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().height));
 
-    ImGui_ImplMetal_NewFrame(pass->GetDescriptor());
+    ImGui_ImplMetal_NewFrame(CreateMetalRenderPassDescriptor(render_pass_->GetRenderingInfo()));
 }
 
 void MetalUiHandler::Init()

@@ -24,6 +24,7 @@
 * [ ] msaa
 * [ ] render graph
 * [ ] subpass
+* [ ] `PickPhysicalDevice` appends the ray tracing extension list to `device_extensions_` once per candidate device, and `CheckDeviceExtensionSupport` mutates that static list (portability subset), so duplicate extension names are possible on multi-GPU hosts and on MoltenVK
 
 ## IO
 

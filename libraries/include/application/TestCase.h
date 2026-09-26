@@ -53,6 +53,12 @@ protected:
     void EnforceConfig(const std::string &config_name, float value) const;
     void EnforceConfig(const std::string &config_name, const std::string &value) const;
 
+    /// Lets `count` more validation errors pass; for tests that provoke them on purpose.
+    void AcceptValidationErrors(unsigned count)
+    {
+        accepted_validation_errors_ += count;
+    }
+
     uint32_t frame_ = 0;
 
 private:
@@ -64,6 +70,7 @@ private:
     }
 
     std::string name_;
+    unsigned accepted_validation_errors_ = 0;
 };
 
 class TestCaseRegistry

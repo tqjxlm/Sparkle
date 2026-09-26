@@ -43,16 +43,21 @@ public:
 
     void CompileInternal() override;
 
-    void Bind(id<MTLRenderCommandEncoder> encoder);
+    void Bind(id<MTLRenderCommandEncoder> encoder, const RHIAttachmentSignature &signature);
 
 private:
     void CreatePipelineState();
+
+    // compiled on first use for each attachment signature
+    id<MTLRenderPipelineState> GetPipelineState(const RHIAttachmentSignature &signature);
+
+    MTLRenderPipelineDescriptor *CreatePipelineDescriptor(const RHIAttachmentSignature &signature);
 
     MTLVertexDescriptor *CreateVertexDescriptor(uint64_t buffer_index_offset);
 
     void CreateDepthStencilState();
 
-    id<MTLRenderPipelineState> pipeline_state_;
+    std::vector<std::pair<RHIAttachmentSignature, id<MTLRenderPipelineState>>> pipeline_states_;
     id<MTLDepthStencilState> depth_stencil_state_;
 
     // two facts:
