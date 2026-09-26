@@ -63,6 +63,10 @@ public:
 
     bool SupportsSampledFormat(PixelFormat format) override;
 
+    [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const override;
+
+    [[nodiscard]] bool IsSyncValidationActive() const override;
+
     [[nodiscard]] uint32_t GetMinBufferOffsetAlignment() const override;
 
     void BeginCommandBuffer() override;

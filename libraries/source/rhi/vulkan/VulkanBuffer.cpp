@@ -87,12 +87,17 @@ void VulkanBuffer::CopyToBuffer(VulkanCommandContext &command_context, const RHI
 
     ASSERT_EQUAL(GetSize(), buffer->GetSize());
 
+    // neither the earlier accesses to the destination nor its later consumers are known here, so the copy waits for
+    // and is waited on by every access the usages allow
+    const RHIResourceAccess copy_dst{.access = RHIAccess::CopyDst};
+    const RHIMemoryBarrier before_copy{.from = dst_buffer->GetUsageAccess(), .to = copy_dst};
+    command_context.Barrier({}, std::span(&before_copy, 1));
+
     vkCmdCopyBuffer(command_context.GetCommandBuffer(), GetResourceThisFrame(), dst_buffer->GetResourceThisFrame(), 1,
                     &copy_region);
 
-    // the consumer of the copy is unknown here, so wait for the copy before every access the usages allow
-    const RHIMemoryBarrier barrier{.from = {.access = RHIAccess::CopyDst}, .to = dst_buffer->GetUsageAccess()};
-    command_context.Barrier({}, std::span(&barrier, 1));
+    const RHIMemoryBarrier after_copy{.from = copy_dst, .to = dst_buffer->GetUsageAccess()};
+    command_context.Barrier({}, std::span(&after_copy, 1));
 }
 
 void VulkanBuffer::CopyToImage(VulkanCommandContext &command_context, const RHIImage *image) const

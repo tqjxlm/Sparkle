@@ -891,6 +891,34 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y libglfw3
 
+      - name: Restore Vulkan SDK
+        uses: actions/cache/restore@v6
+        with:
+          path: ./build_cache
+          key: ubuntu-latest-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
+          restore-keys: |
+            ubuntu-latest-build_cache-
+
+      - name: Register Vulkan validation layer
+        shell: bash
+        run: |
+          sdk="$PWD/build_cache/VulkanSDK/$(python3 -c "import json; print(json.load(open('prerequisites.json'))['VulkanSDK'])")"
+          layer_dir="$RUNNER_TEMP/vulkan_layers"
+          mkdir -p "$layer_dir"
+          python3 - "$sdk" "$layer_dir" <<'PY'
+          import json, os, sys
+          sdk, layer_dir = sys.argv[1:]
+          library = os.path.join(sdk, "lib", "libVkLayer_khronos_validation.so")
+          with open(os.path.join(sdk, "share", "vulkan", "explicit_layer.d", "VkLayer_khronos_validation.json")) as source:
+              manifest = json.load(source)
+          if not os.path.isfile(library):
+              sys.exit(f"validation layer library missing: {library}")
+          manifest["layer"]["library_path"] = library
+          with open(os.path.join(layer_dir, "VkLayer_khronos_validation.json"), "w") as target:
+              json.dump(manifest, target)
+          PY
+          echo "VK_ADD_LAYER_PATH=$layer_dir" >> "$GITHUB_ENV"
+
       # the release package already carries the cooked content in its packed resources
       - name: Download app
         uses: actions/download-artifact@v8

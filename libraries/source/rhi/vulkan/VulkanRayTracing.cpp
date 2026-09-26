@@ -80,8 +80,14 @@ void VulkanBLAS::Build()
     {
         // TODO(tqjxlm): use a shared command buffer
         OneShotCommandBufferScope command_buffer_scope;
-        vkCmdBuildAccelerationStructuresKHR(command_buffer_scope.GetCommandContext().GetCommandBuffer(), 1, &build_info,
-                                            ranges);
+        auto &command_context = command_buffer_scope.GetCommandContext();
+
+        // a rebuild reuses the scratch buffer an earlier build submit wrote (a barrier's first scope spans submits)
+        const RHIResourceAccess build{.access = RHIAccess::AccelerationStructureBuild};
+        const RHIMemoryBarrier before_build{.from = build, .to = build};
+        command_context.Barrier({}, std::span(&before_build, 1));
+
+        vkCmdBuildAccelerationStructuresKHR(command_context.GetCommandBuffer(), 1, &build_info, ranges);
     }
 
     // after build finishes, retrieve its address on device

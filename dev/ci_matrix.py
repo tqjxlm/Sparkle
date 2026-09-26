@@ -370,6 +370,40 @@ STEP_GLFW_RUNTIME = """
           sudo apt-get install -y libglfw3
 """
 
+# the sync validation cases need the Khronos validation layer. the Vulkan SDK that
+# every build job installs into build_cache carries it; its manifest names the
+# library without a path, so the registered copy points at the library itself
+# instead of redirecting the loader's library search (and the loader) to the SDK
+STEP_VALIDATION_LAYER = """
+      - name: Restore Vulkan SDK
+        uses: actions/cache/restore@v6
+        with:
+          path: ./build_cache
+          key: @os@-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
+          restore-keys: |
+            @os@-build_cache-
+
+      - name: Register Vulkan validation layer
+        shell: bash
+        run: |
+          sdk="$PWD/build_cache/VulkanSDK/$(python3 -c "import json; print(json.load(open('prerequisites.json'))['VulkanSDK'])")"
+          layer_dir="$RUNNER_TEMP/vulkan_layers"
+          mkdir -p "$layer_dir"
+          python3 - "$sdk" "$layer_dir" <<'PY'
+          import json, os, sys
+          sdk, layer_dir = sys.argv[1:]
+          library = os.path.join(sdk, "lib", "libVkLayer_khronos_validation.so")
+          with open(os.path.join(sdk, "share", "vulkan", "explicit_layer.d", "VkLayer_khronos_validation.json")) as source:
+              manifest = json.load(source)
+          if not os.path.isfile(library):
+              sys.exit(f"validation layer library missing: {library}")
+          manifest["layer"]["library_path"] = library
+          with open(os.path.join(layer_dir, "VkLayer_khronos_validation.json"), "w") as target:
+              json.dump(manifest, target)
+          PY
+          echo "VK_ADD_LAYER_PATH=$layer_dir" >> "$GITHUB_ENV"
+"""
+
 STEP_KVM = """
       # the emulator needs hardware virtualization; hosted ubuntu runners expose
       # /dev/kvm but leave it root-only
@@ -701,7 +735,7 @@ def test_job(product, runner):
     if os_name == "windows-latest" or linux_glfw:
         text += STEP_MESA
     if linux_glfw:
-        text += STEP_GLFW_RUNTIME
+        text += STEP_GLFW_RUNTIME + render(STEP_VALIDATION_LAYER, os=os_name)
     if framework == "android":
         text += STEP_KVM
     text += render(STEP_DOWNLOAD, framework=framework, os=os_name,
