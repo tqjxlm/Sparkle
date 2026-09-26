@@ -3,6 +3,7 @@
 #include "core/Exception.h"
 #include "core/StackMemoryAllocator.h"
 #include "core/math/Types.h"
+#include "rhi/RHIBarrier.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIConfig.h"
@@ -18,6 +19,8 @@
 #include "rhi/RHIShader.h"
 #include "rhi/RHITimer.h"
 #include "rhi/RHIUiHandler.h"
+
+#include <span>
 
 namespace sparkle
 {
@@ -159,6 +162,10 @@ public:
     virtual void ReleaseRenderResources();
 
     virtual void NextSubpass() = 0;
+
+    // records one batch of barriers outside any render pass. Metal tracks hazards itself and records nothing.
+    virtual void Barrier(std::span<const RHIImageBarrier> image_barriers,
+                         std::span<const RHIMemoryBarrier> memory_barriers) = 0;
 
     virtual void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) = 0;
     virtual void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,

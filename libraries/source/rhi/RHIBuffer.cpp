@@ -26,6 +26,28 @@ public:
     };
 };
 
+RHIResourceAccess RHIBuffer::GetUsageAccess() const
+{
+    RHIResourceAccess result{.stages = RHIShaderStageMask::All};
+    auto add = [this, &result](BufferUsage usage, RHIAccess access) {
+        if (attribute_.usages & usage)
+        {
+            result.access |= access;
+        }
+    };
+
+    add(BufferUsage::TransferSrc, RHIAccess::CopySrc);
+    add(BufferUsage::TransferDst, RHIAccess::CopyDst);
+    add(BufferUsage::UniformBuffer, RHIAccess::Uniform);
+    add(BufferUsage::VertexBuffer, RHIAccess::VertexInput);
+    add(BufferUsage::IndexBuffer, RHIAccess::IndexInput);
+    add(BufferUsage::StorageBuffer, RHIAccess::StorageRead | RHIAccess::StorageWrite);
+    add(BufferUsage::DeviceAddress, RHIAccess::StorageRead);
+    add(BufferUsage::AccelerationStructureBuildInput, RHIAccess::AccelerationStructureBuild);
+
+    return result;
+}
+
 void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::vector<uint32_t> &indices,
                               uint32_t element_count, uint32_t element_size)
 {
@@ -78,6 +100,10 @@ void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::v
     rhi->DispatchCompute(pipeline_state, {element_count, 1u, 1u}, {64u, 1u, 1u});
 
     rhi->EndComputePass(compute_pass);
+
+    const RHIMemoryBarrier barrier{.from = {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute},
+                                   .to = GetUsageAccess()};
+    rhi->Barrier({}, std::span(&barrier, 1));
 }
 
 void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribute)
