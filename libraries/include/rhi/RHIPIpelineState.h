@@ -7,6 +7,8 @@
 #include "rhi/RHIShader.h"
 #include "rhi/RHIVertex.h"
 
+#include <optional>
+
 namespace sparkle
 {
 class RHIPipelineState : public RHIResource
@@ -94,9 +96,10 @@ public:
 
     virtual void CompileInternal() = 0;
 
+    // declares the attachments of the pass this pipeline draws in, so the pipeline compiles for them up front
     void SetRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
     {
-        render_pass_ = pass;
+        attachment_signature_ = pass->GetRenderingInfo().GetSignature();
     }
 
     void SetVertexBuffer(uint32_t binding, const RHIResourceRef<RHIBuffer> &buffer)
@@ -178,7 +181,7 @@ protected:
         return resource_table_[static_cast<size_t>(stage)].get();
     }
 
-    RHIResourceRef<RHIRenderPass> render_pass_;
+    std::optional<RHIAttachmentSignature> attachment_signature_;
     RHIVertexInputDeclaration vertex_input_declaration_;
     std::vector<RHIResourceRef<RHIBuffer>> vertex_buffers_;
     RHIResourceRef<RHIBuffer> index_buffer_;

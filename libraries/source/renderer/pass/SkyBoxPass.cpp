@@ -108,11 +108,9 @@ void SkyBoxPass::InitRenderResources(const RenderConfig & /*config*/)
     // TODO(tqjxlm): avoid the additional pass here.
     RHIRenderPass::Attribute pass_attribute;
     pass_attribute.color_load_op = RHIRenderPass::LoadOp::Load;
-    pass_attribute.color_initial_layout = RHIImageLayout::ColorOutput;
 
     pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Load;
     pass_attribute.depth_store_op = RHIRenderPass::StoreOp::None;
-    pass_attribute.depth_initial_layout = RHIImageLayout::DepthStencilOutput;
 
     render_pass_ = rhi_->CreateRenderPass(pass_attribute, render_target_, "SkyBoxPass");
 

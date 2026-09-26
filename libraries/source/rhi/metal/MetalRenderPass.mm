@@ -7,15 +7,15 @@
 
 namespace sparkle
 {
-static MTLLoadAction GetMetalLoadAction(RHIRenderPass::LoadOp op)
+static MTLLoadAction GetMetalLoadAction(RHILoadOp op)
 {
     switch (op)
     {
-    case RHIRenderPass::LoadOp::Load:
+    case RHILoadOp::Load:
         return MTLLoadActionLoad;
-    case RHIRenderPass::LoadOp::Clear:
+    case RHILoadOp::Clear:
         return MTLLoadActionClear;
-    case RHIRenderPass::LoadOp::None:
+    case RHILoadOp::None:
         return MTLLoadActionDontCare;
     default:
         UnImplemented(op);
@@ -23,13 +23,13 @@ static MTLLoadAction GetMetalLoadAction(RHIRenderPass::LoadOp op)
     return MTLLoadActionDontCare;
 }
 
-static MTLStoreAction GetMetalStoreAction(RHIRenderPass::StoreOp op)
+static MTLStoreAction GetMetalStoreAction(RHIStoreOp op)
 {
     switch (op)
     {
-    case RHIRenderPass::StoreOp::Store:
+    case RHIStoreOp::Store:
         return MTLStoreActionStore;
-    case RHIRenderPass::StoreOp::None:
+    case RHIStoreOp::None:
         return MTLStoreActionDontCare;
     default:
         UnImplemented(op);
@@ -46,12 +46,11 @@ MetalRenderPass::MetalRenderPass(const Attribute &attribute, const RHIResourceRe
 
 void MetalRenderPass::Begin()
 {
-    auto rhi_rt = render_target_.lock();
-    const auto &rt_attribute = rhi_rt->GetAttribute();
+    const auto &info = GetActiveRenderingInfo();
 
-    MTLRenderPassDescriptor *descriptor = GetDescriptor();
+    FillDescriptor(info);
 
-    render_encoder_ = [context->GetCurrentCommandBuffer() renderCommandEncoderWithDescriptor:descriptor];
+    render_encoder_ = [context->GetCurrentCommandBuffer() renderCommandEncoderWithDescriptor:descriptor_];
 
     SetDebugInfo(render_encoder_, GetName());
 
@@ -59,8 +58,8 @@ void MetalRenderPass::Begin()
 
     // flip the viewport to map vulkan-convention NDC (y down) to metal (y up).
     // shaders are compiled from vulkan-style slang without a baked-in y-flip.
-    auto width = (double)(rt_attribute.width >> rt_attribute.mip_level);
-    auto height = (double)(rt_attribute.height >> rt_attribute.mip_level);
+    auto width = (double)info.width;
+    auto height = (double)info.height;
     MTLViewport viewport = {0.0, height, width, -height, 0.0, 1.0};
 
     [render_encoder_ setViewport:viewport];
@@ -73,42 +72,50 @@ void MetalRenderPass::End()
 
 MTLRenderPassDescriptor *MetalRenderPass::GetDescriptor() const
 {
-    auto render_target = render_target_.lock();
-    ASSERT(render_target);
-    const auto mip_level = render_target->GetAttribute().mip_level;
+    FillDescriptor(GetRenderingInfo());
+    return descriptor_;
+}
 
-    for (auto i = 0u; i < RHIRenderTarget::MaxNumColorImage; ++i)
+void MetalRenderPass::FillDescriptor(const RHIRenderingInfo &info) const
+{
+    for (auto i = 0u; i < MaxNumColorAttachments; ++i)
     {
-        auto color_image = render_target->GetColorImage(i);
+        const auto &attachment = info.color_attachments[i];
         auto color_attachment = descriptor_.colorAttachments[i];
-        if (!color_image)
+        if (!attachment.image)
         {
             color_attachment.texture = nil;
             color_attachment.level = 0;
+            color_attachment.slice = 0;
             continue;
         }
 
-        color_attachment.texture = RHICast<MetalImage>(color_image)->GetResource();
-        color_attachment.level = mip_level;
-        color_attachment.loadAction = GetMetalLoadAction(attribute_.color_load_op);
-        color_attachment.clearColor = MTLClearColorMake(0, 0, 0, 1);
-        color_attachment.storeAction = GetMetalStoreAction(attribute_.color_store_op);
+        const auto &clear_color = attachment.clear_color;
+        color_attachment.texture = RHICast<MetalImage>(attachment.image)->GetResource();
+        color_attachment.level = attachment.mip_level;
+        color_attachment.slice = attachment.array_layer;
+        color_attachment.loadAction = GetMetalLoadAction(attachment.load_op);
+        color_attachment.clearColor =
+            MTLClearColorMake(clear_color.x(), clear_color.y(), clear_color.z(), clear_color.w());
+        color_attachment.storeAction = GetMetalStoreAction(attachment.store_op);
     }
 
-    if (render_target->GetDepthImage())
+    const auto &depth_attachment = info.depth_attachment;
+    if (depth_attachment.image)
     {
-        descriptor_.depthAttachment.texture = RHICast<MetalImage>(render_target->GetDepthImage())->GetResource();
-        descriptor_.depthAttachment.level = mip_level;
-        descriptor_.depthAttachment.loadAction = GetMetalLoadAction(attribute_.depth_load_op);
-        descriptor_.depthAttachment.clearDepth = 1.f;
-        descriptor_.depthAttachment.storeAction = GetMetalStoreAction(attribute_.depth_store_op);
+        descriptor_.depthAttachment.texture = RHICast<MetalImage>(depth_attachment.image)->GetResource();
+        descriptor_.depthAttachment.level = depth_attachment.mip_level;
+        descriptor_.depthAttachment.slice = depth_attachment.array_layer;
+        descriptor_.depthAttachment.loadAction = GetMetalLoadAction(depth_attachment.load_op);
+        descriptor_.depthAttachment.clearDepth = depth_attachment.clear_depth;
+        descriptor_.depthAttachment.storeAction = GetMetalStoreAction(depth_attachment.store_op);
     }
     else
     {
         descriptor_.depthAttachment.texture = nil;
         descriptor_.depthAttachment.level = 0;
+        descriptor_.depthAttachment.slice = 0;
     }
-    return descriptor_;
 }
 } // namespace sparkle
 
