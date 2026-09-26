@@ -9,6 +9,8 @@ static ConfigValue<uint32_t> config_msaa("msaa", "MSAA sample count (default=1)"
 static ConfigValue<std::string> config_rhi("rhi", "what rhi to use (vulkan, metal)", "rhi",
                                            Enum2Str<RHIConfig::ApiPlatform::Vulkan>());
 static ConfigValue<bool> config_validation("validation", "RHI validation (default=1)", "rhi", false);
+static ConfigValue<bool> config_validate_sync("validate_sync", "Vulkan synchronization validation, needs validation",
+                                              "rhi", false);
 static ConfigValue<bool> config_pre_transform("vulkan.android.pretransform", "enable vulkan pretransform for android",
                                               "rhi", true);
 static ConfigValue<bool> config_measure_gpu_time("measure_gpu_time", "measure gpu time", "rhi", true);
@@ -19,6 +21,7 @@ void RHIConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_vsync, use_vsync);
     ConfigCollectionHelper::RegisterConfig(this, config_msaa, msaa_samples);
     ConfigCollectionHelper::RegisterConfig(this, config_validation, enable_validation);
+    ConfigCollectionHelper::RegisterConfig(this, config_validate_sync, enable_sync_validation);
     ConfigCollectionHelper::RegisterConfig(this, config_pre_transform, enable_pre_transform);
     ConfigCollectionHelper::RegisterConfig(this, config_measure_gpu_time, measure_gpu_time);
 

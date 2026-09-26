@@ -9,10 +9,6 @@
 #include "VulkanSwapChain.h"
 #include "application/NativeView.h"
 
-#if PLATFORM_MACOS
-#include "core/math/Utilities.h"
-#endif
-
 #include <algorithm>
 #include <format>
 #include <unordered_set>
@@ -42,15 +38,21 @@ static VkResult CreateDebugUtilsMessengerExt(VkInstance instance, const VkDebugU
 }
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                                                    VkDebugUtilsMessageTypeFlagsEXT /*messageType*/,
+                                                    VkDebugUtilsMessageTypeFlagsEXT messageType,
                                                     const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, // NOLINT
-                                                    void * /*pUserData*/)
+                                                    void *pUserData)
 {
-
-    if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
-        // Message is important enough to show
-        Log(Warn, "validation error! {}", pCallbackData->pMessage);
+        if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT)
+        {
+            static_cast<std::atomic<unsigned> *>(pUserData)->fetch_add(1, std::memory_order_relaxed);
+        }
+        Log(Error, "validation error! {}", pCallbackData->pMessage);
+    }
+    else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    {
+        Log(Warn, "validation warning! {}", pCallbackData->pMessage);
     }
 
 #ifndef NDEBUG
@@ -63,7 +65,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityF
     return VK_FALSE;
 }
 
-static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo)
+static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo,
+                                             std::atomic<unsigned> &error_count)
 {
     createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -74,6 +77,7 @@ static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT 
                              VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = DebugCallback;
+    createInfo.pUserData = &error_count;
 }
 
 static void DestroyDebugUtilsMessengerExt(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger,
@@ -263,7 +267,7 @@ void VulkanContext::SetupDebugMessenger()
     }
 
     VkDebugUtilsMessengerCreateInfoEXT create_info;
-    PopulateDebugMessengerCreateInfo(create_info);
+    PopulateDebugMessengerCreateInfo(create_info, validation_error_count_);
 
     CHECK_VK_ERROR(CreateDebugUtilsMessengerExt(instance_, &create_info, nullptr, &debug_messenger_));
 }
@@ -445,14 +449,16 @@ bool VulkanContext::BeginFrame()
 
     while (true)
     {
-        // Find an available acquire semaphore (not currently in use)
+        // a failed acquire leaves its semaphore unsignaled, so only a successful one moves on to the next semaphore;
+        // advancing on failures would let repeated failed frames cycle onto a semaphore an in-flight frame still waits
+        // on
         VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
-        next_acquire_semaphore_index_ =
-            (next_acquire_semaphore_index_ + 1) % image_acquire_semaphores_per_image_.size();
 
         const auto acquire_result = swap_chain_->AcquireImage(acquire_semaphore);
         if (acquire_result == VK_SUCCESS || acquire_result == VK_SUBOPTIMAL_KHR)
         {
+            next_acquire_semaphore_index_ =
+                (next_acquire_semaphore_index_ + 1) % image_acquire_semaphores_per_image_.size();
             // Store which semaphore we're using for this frame
             acquire_semaphores_in_use_[frame_index] = acquire_semaphore;
             break;
@@ -827,32 +833,52 @@ bool VulkanContext::CreateInstance()
     create_info.pApplicationInfo = &app_info;
     create_info.enabledExtensionCount = static_cast<uint32_t>(instance_extensions_.size());
     create_info.ppEnabledExtensionNames = instance_extensions_.data();
+
+#ifdef VK_EXT_layer_settings
+    std::vector<VkLayerSettingEXT> layer_settings;
+#endif
+
 #if PLATFORM_MACOS
 #if VK_KHR_portability_enumeration
     create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
     const int use_metal_argument_buffers = 1;
+    layer_settings.push_back({"MoltenVK", "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", VK_LAYER_SETTING_TYPE_INT32_EXT, 1,
+                              &use_metal_argument_buffers});
 #ifndef NDEBUG
     const int mvk_debug_value = 1;
     const int mvk_log_level = 2;
+    layer_settings.push_back({"MoltenVK", "MVK_CONFIG_DEBUG", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_debug_value});
+    layer_settings.push_back({"MoltenVK", "MVK_CONFIG_LOG_LEVEL", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_log_level});
 #endif
-    const VkLayerSettingEXT settings[] = {
-        {"MoltenVK", "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", VK_LAYER_SETTING_TYPE_INT32_EXT, 1,
-         &use_metal_argument_buffers},
-#ifndef NDEBUG
-        {"MoltenVK", "MVK_CONFIG_DEBUG", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_debug_value},
-        {"MoltenVK", "MVK_CONFIG_LOG_LEVEL", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_log_level}
+#endif // PLATFORM_MACOS
+
+    if (enable_validation_ && rhi_->GetConfig().enable_sync_validation)
+    {
+#ifdef VK_EXT_layer_settings
+        static constexpr VkBool32 ValidateSync = VK_TRUE;
+        layer_settings.push_back(
+            {validation_layers_.front(), "validate_sync", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &ValidateSync});
+        enable_sync_validation_ = true;
+        Log(Info, "Vulkan synchronization validation enabled");
+#else
+        Log(Warn, "synchronization validation requested, but the Vulkan headers have no layer settings");
 #endif
-    };
+    }
+
+#ifdef VK_EXT_layer_settings
     const VkLayerSettingsCreateInfoEXT layer_settings_create_info = {
         .sType = VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT,
         .pNext = nullptr,
-        .settingCount = ARRAY_COUNT(settings),
-        .pSettings = settings,
+        .settingCount = static_cast<uint32_t>(layer_settings.size()),
+        .pSettings = layer_settings.data(),
     };
-    create_info.pNext = &layer_settings_create_info;
-#endif // PLATFORM_MACOS
+    if (!layer_settings.empty())
+    {
+        create_info.pNext = &layer_settings_create_info;
+    }
+#endif
 
     if (enable_validation_)
     {
