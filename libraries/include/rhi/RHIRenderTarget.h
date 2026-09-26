@@ -3,6 +3,7 @@
 #include "rhi/RHIResource.h"
 
 #include "rhi/RHIImage.h"
+#include "rhi/RHIRenderingInfo.h"
 #include <sys/types.h>
 
 namespace sparkle
@@ -12,7 +13,7 @@ class RHIBuffer;
 class RHIRenderTarget : public RHIResource
 {
 public:
-    static constexpr uint8_t MaxNumColorImage = 8;
+    static constexpr uint8_t MaxNumColorImage = MaxNumColorAttachments;
     using ColorImageArray = std::array<RHIResourceRef<RHIImage>, MaxNumColorImage>;
 
     struct Attribute
@@ -93,6 +94,12 @@ public:
     [[nodiscard]] const auto &GetColorImages() const
     {
         return color_images_;
+    }
+
+    // the hidden multisampled image rendered in place of a color image, when the backend creates one
+    [[nodiscard]] const RHIResourceRef<RHIImage> &GetMsaaImage(size_t index) const
+    {
+        return msaa_images_[index];
     }
 
     [[nodiscard]] const RHIResourceRef<RHIImage> &GetDepthImage() const

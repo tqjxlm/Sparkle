@@ -333,9 +333,9 @@ void MetalPipelineState::BindResources(id<MTLCommandEncoder> encoder, RHIShaderS
 #endif
 }
 
-void MetalGraphicsPipeline::Bind(id<MTLRenderCommandEncoder> encoder)
+void MetalGraphicsPipeline::Bind(id<MTLRenderCommandEncoder> encoder, const RHIAttachmentSignature &signature)
 {
-    [encoder setRenderPipelineState:pipeline_state_];
+    [encoder setRenderPipelineState:GetPipelineState(signature)];
     [encoder setCullMode:GetMetalCullMode(rasterization_state_.cull_mode)];
     [encoder setDepthStencilState:depth_stencil_state_];
 
@@ -352,6 +352,8 @@ void MetalGraphicsPipeline::Bind(id<MTLRenderCommandEncoder> encoder)
 
 void MetalGraphicsPipeline::CreatePipelineState()
 {
+    ASSERT_F(attachment_signature_, "Graphics pipeline {} needs SetRenderPass before Compile", GetName());
+
     for (auto *binding : resource_table_[static_cast<int>(RHIShaderStage::Vertex)]->GetBindings())
     {
         if (binding->GetType() == RHIShaderResourceReflection::ResourceType::UniformBuffer ||
@@ -362,6 +364,57 @@ void MetalGraphicsPipeline::CreatePipelineState()
         }
     }
 
+    MTLRenderPipelineDescriptor *pipeline_state_descriptor = CreatePipelineDescriptor(*attachment_signature_);
+
+    auto *vs_resource = GetResourceTable(RHIShaderStage::Vertex);
+    auto *ps_resource = GetResourceTable(RHIShaderStage::Pixel);
+
+    MTLAutoreleasedRenderPipelineReflection reflection;
+
+    NSError *error;
+    id<MTLRenderPipelineState> pipeline_state =
+        [context->GetDevice() newRenderPipelineStateWithDescriptor:pipeline_state_descriptor
+                                                           options:MTLPipelineOptionBindingInfo
+                                                        reflection:&reflection
+                                                             error:&error];
+
+    ASSERT_F(pipeline_state, "Failed to create pipeline state {}. Error: {}", GetName(),
+             [error.localizedDescription UTF8String]);
+
+    pipeline_states_.emplace_back(*attachment_signature_, pipeline_state);
+
+#if DESCRIPTOR_SET_AS_ARGUMENT_BUFFER
+    SetupShaderResources(RHIShaderStage::Vertex);
+    SetupShaderResources(RHIShaderStage::Pixel);
+#else
+    SetupShaderResources(reflection, nullptr, RHIShaderStage::Vertex);
+    SetupShaderResources(reflection, nullptr, RHIShaderStage::Pixel);
+#endif
+
+    vs_resource->Initialize();
+    ps_resource->Initialize();
+}
+
+id<MTLRenderPipelineState> MetalGraphicsPipeline::GetPipelineState(const RHIAttachmentSignature &signature)
+{
+    const auto found = std::ranges::find(pipeline_states_, signature, &decltype(pipeline_states_)::value_type::first);
+    if (found != pipeline_states_.end())
+    {
+        return found->second;
+    }
+
+    NSError *error;
+    id<MTLRenderPipelineState> pipeline_state =
+        [context->GetDevice() newRenderPipelineStateWithDescriptor:CreatePipelineDescriptor(signature) error:&error];
+
+    ASSERT_F(pipeline_state, "Failed to create pipeline state {}. Error: {}", GetName(),
+             [error.localizedDescription UTF8String]);
+
+    return pipeline_states_.emplace_back(signature, pipeline_state).second;
+}
+
+MTLRenderPipelineDescriptor *MetalGraphicsPipeline::CreatePipelineDescriptor(const RHIAttachmentSignature &signature)
+{
     auto *vertex_shader = RHICast<MetalShader>(shaders_[static_cast<int>(RHIShaderStage::Vertex)]);
     auto *pixel_shader = RHICast<MetalShader>(shaders_[static_cast<int>(RHIShaderStage::Pixel)]);
     MTLRenderPipelineDescriptor *pipeline_state_descriptor = [[MTLRenderPipelineDescriptor alloc] init];
@@ -369,23 +422,17 @@ void MetalGraphicsPipeline::CreatePipelineState()
     pipeline_state_descriptor.vertexFunction = vertex_shader->GetFunction();
     pipeline_state_descriptor.fragmentFunction = pixel_shader->GetFunction();
 
-    auto *vs_resource = GetResourceTable(RHIShaderStage::Vertex);
-    auto *ps_resource = GetResourceTable(RHIShaderStage::Pixel);
-
     pipeline_state_descriptor.vertexDescriptor = CreateVertexDescriptor(num_vertex_shader_buffers_);
 
-    auto *render_target = render_pass_->GetRenderTarget();
-    auto rt_attribute = render_target->GetAttribute();
-
-    for (auto i = 0u; i < RHIRenderTarget::MaxNumColorImage; ++i)
+    for (auto i = 0u; i < MaxNumColorAttachments; ++i)
     {
-        if (!render_target->GetColorImage(i))
+        if (signature.color_formats[i] == PixelFormat::Count)
         {
             continue;
         }
 
         auto color_attachment = pipeline_state_descriptor.colorAttachments[i];
-        color_attachment.pixelFormat = GetMetalPixelFormat(rt_attribute.color_attributes_[i].format);
+        color_attachment.pixelFormat = GetMetalPixelFormat(signature.color_formats[i]);
         if (blend_state_.enabled)
         {
             color_attachment.blendingEnabled = blend_state_.enabled;
@@ -400,35 +447,14 @@ void MetalGraphicsPipeline::CreatePipelineState()
         }
     }
 
-    if (render_target->GetDepthImage())
+    if (signature.depth_format != PixelFormat::Count)
     {
-        pipeline_state_descriptor.depthAttachmentPixelFormat =
-            GetMetalPixelFormat(rt_attribute.depth_attribute_.format);
+        pipeline_state_descriptor.depthAttachmentPixelFormat = GetMetalPixelFormat(signature.depth_format);
     }
 
     SetDebugInfo(pipeline_state_descriptor, GetName());
 
-    MTLAutoreleasedRenderPipelineReflection reflection;
-
-    NSError *error;
-    pipeline_state_ = [context->GetDevice() newRenderPipelineStateWithDescriptor:pipeline_state_descriptor
-                                                                         options:MTLPipelineOptionBindingInfo
-                                                                      reflection:&reflection
-                                                                           error:&error];
-
-    ASSERT_F(pipeline_state_, "Failed to create pipeline state {}. Error: {}", GetName(),
-             [error.localizedDescription UTF8String]);
-
-#if DESCRIPTOR_SET_AS_ARGUMENT_BUFFER
-    SetupShaderResources(RHIShaderStage::Vertex);
-    SetupShaderResources(RHIShaderStage::Pixel);
-#else
-    SetupShaderResources(reflection, nullptr, RHIShaderStage::Vertex);
-    SetupShaderResources(reflection, nullptr, RHIShaderStage::Pixel);
-#endif
-
-    vs_resource->Initialize();
-    ps_resource->Initialize();
+    return pipeline_state_descriptor;
 }
 
 MTLVertexDescriptor *MetalGraphicsPipeline::CreateVertexDescriptor(uint64_t buffer_index_offset)

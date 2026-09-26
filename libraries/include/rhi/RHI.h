@@ -320,7 +320,7 @@ public:
 
 protected:
     virtual void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) = 0;
-    virtual void EndRenderPassInternal() = 0;
+    virtual void EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) = 0;
     virtual void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
     virtual void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
     [[nodiscard]] virtual bool BeginFrameInternal() = 0;

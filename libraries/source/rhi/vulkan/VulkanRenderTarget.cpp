@@ -58,61 +58,6 @@ void VulkanRenderTarget::SyncWithSwapChain()
     color_formats_[0] = swap_chain_->GetFormat();
 }
 
-std::vector<VkImageView> VulkanRenderTarget::GetAttachments(unsigned frame_index) const
-{
-    std::vector<VkImageView> attachments;
-
-    RHIContext *rhi_context = context->GetRHI();
-
-    for (auto i = 0u; i < RHIRenderTarget::MaxNumColorImage; i++)
-    {
-        const auto &color_image = color_images_[i];
-        if (!color_image)
-        {
-            continue;
-        }
-
-        const RHIImageView *color_view;
-
-        if (IsBackBufferTarget())
-        {
-            // back buffer image does not have mipmaps
-            color_view = swap_chain_->GetImage(frame_index)->GetDefaultView(rhi_context);
-        }
-        else
-        {
-            // use mipmap level specified in render target. only ImageViewType::Image2D should be valid here.
-            ASSERT(attribute_.mip_level < color_image->GetAttributes().mip_levels);
-            ASSERT(attribute_.array_layer < color_image->GetArrayLayerCount());
-            color_view = color_images_[i]->GetView(
-                rhi_context, {.base_mip_level = attribute_.mip_level, .base_array_layer = attribute_.array_layer});
-        }
-
-        VkImageView output_color_view = RHICast<VulkanImageView>(color_view)->GetView();
-
-        if (attribute_.msaa_samples > 1)
-        {
-            const auto &msaa_view = msaa_images_[i]->GetDefaultView(rhi_context);
-            attachments.push_back(RHICast<VulkanImageView>(msaa_view)->GetView());
-        }
-
-        attachments.push_back(output_color_view);
-    }
-
-    if (depth_image_)
-    {
-        ASSERT(attribute_.mip_level < depth_image_->GetAttributes().mip_levels);
-        ASSERT(attribute_.array_layer < depth_image_->GetArrayLayerCount());
-        const auto &depth_view = depth_image_->GetView(
-            rhi_context, {.base_mip_level = attribute_.mip_level, .base_array_layer = attribute_.array_layer});
-        attachments.push_back(RHICast<VulkanImageView>(depth_view)->GetView());
-    }
-
-    ASSERT_F(!attachments.empty(), "no attachment for render target: {}", GetName());
-
-    return attachments;
-}
-
 void VulkanRenderTarget::CreateMsaaResources()
 {
     for (auto i = 0u; i < RHIRenderTarget::MaxNumColorImage; i++)

@@ -26,8 +26,6 @@ namespace sparkle
 {
 constexpr unsigned HeadlessFramesInFlight = 2;
 
-static std::vector<RHIResourceWeakRef<VulkanRenderPass>> render_passes;
-
 constexpr VkAccessFlags2 WriteAccessFlags = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
@@ -382,22 +380,6 @@ void VulkanRHI::RecreateSwapChain()
     CreateBackBufferRenderTarget();
 
     InitRenderResources();
-
-    for (const auto &render_pass_ptr : render_passes)
-    {
-        if (render_pass_ptr.expired())
-        {
-            continue;
-        }
-
-        auto render_pass = render_pass_ptr.lock();
-
-        if (render_pass->RequireBackBuffer())
-        {
-            render_pass->Cleanup();
-            render_pass->Init(back_buffer_rt_);
-        }
-    }
 }
 
 bool VulkanRHI::RecreateSurface()
@@ -533,9 +515,7 @@ RHIResourceRef<RHIRenderPass> VulkanRHI::CreateRenderPass(const RHIRenderPass::A
                                                           const RHIResourceRef<RHIRenderTarget> &rt,
                                                           const std::string &name)
 {
-    auto render_pass = CreateResource<VulkanRenderPass>(attribute, rt, name);
-    render_passes.emplace_back(render_pass);
-    return render_pass;
+    return CreateResource<VulkanRenderPass>(attribute, rt, name);
 }
 
 RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info)
@@ -632,11 +612,11 @@ void VulkanRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state,
     VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
 
     const auto &rhi_pipeline = RHICast<VulkanForwardPipelineState>(pipeline_state);
-    VkPipeline pipeline = rhi_pipeline->GetPipeline();
+    const auto *render_pass = RHICast<VulkanRenderPass>(current_render_pass_);
 
-    context->BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    context->BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          rhi_pipeline->GetPipeline(render_pass->GetActiveAttachmentSignature()));
 
-    rhi_pipeline->SetViewportAndScissor();
     rhi_pipeline->BindBuffers();
     rhi_pipeline->BindDescriptorSets();
 
@@ -668,9 +648,9 @@ void VulkanRHI::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pas
     rhi_render_pass->Begin();
 }
 
-void VulkanRHI::EndRenderPassInternal()
+void VulkanRHI::EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
 {
-    auto *rhi_render_pass = RHICast<VulkanRenderPass>(current_render_pass_);
+    auto *rhi_render_pass = RHICast<VulkanRenderPass>(pass);
     rhi_render_pass->End();
 }
 
