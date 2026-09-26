@@ -165,6 +165,8 @@ public:
         unsigned mip_count = 0;
         unsigned base_array_layer = 0;
         unsigned array_layer_count = 0;
+        // the transition leaves the previous contents undefined
+        bool discard = false;
     };
 
     RHIImage(const Attribute &attributes, const std::string &name);
@@ -288,22 +290,6 @@ public:
         return GetSubresourceState(mip_level, array_layer).layout;
     }
 
-    // CAUTION: normally this should not be used. use RHIImage::Transition instead unless you know what you are doing.
-    void SetCurrentState(RHIImageLayout layout, RHIResourceAccess access, unsigned base_mip, unsigned mip_count,
-                         unsigned base_array_layer, unsigned array_layer_count)
-    {
-        ASSERT(mip_count > 0 && base_mip + mip_count <= attributes_.mip_levels);
-        ASSERT(array_layer_count > 0 && base_array_layer + array_layer_count <= GetArrayLayerCount());
-
-        for (auto mip = base_mip; mip < base_mip + mip_count; mip++)
-        {
-            for (auto layer = base_array_layer; layer < base_array_layer + array_layer_count; layer++)
-            {
-                subresource_states_[mip * GetArrayLayerCount() + layer] = {.layout = layout, .access = access};
-            }
-        }
-    }
-
 #pragma endregion
 
 protected:
@@ -325,6 +311,21 @@ private:
 
         bool operator==(const SubresourceState &) const = default;
     };
+
+    void SetCurrentState(RHIImageLayout layout, RHIResourceAccess access, unsigned base_mip, unsigned mip_count,
+                         unsigned base_array_layer, unsigned array_layer_count)
+    {
+        ASSERT(mip_count > 0 && base_mip + mip_count <= attributes_.mip_levels);
+        ASSERT(array_layer_count > 0 && base_array_layer + array_layer_count <= GetArrayLayerCount());
+
+        for (auto mip = base_mip; mip < base_mip + mip_count; mip++)
+        {
+            for (auto layer = base_array_layer; layer < base_array_layer + array_layer_count; layer++)
+            {
+                subresource_states_[mip * GetArrayLayerCount() + layer] = {.layout = layout, .access = access};
+            }
+        }
+    }
 
     [[nodiscard]] const SubresourceState &GetSubresourceState(unsigned mip_level, unsigned array_layer) const
     {

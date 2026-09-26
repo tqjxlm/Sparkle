@@ -20,7 +20,6 @@ void UiPass::InitRenderResources(const RenderConfig &)
 {
     RHIRenderPass::Attribute pass_attrib;
     pass_attrib.color_load_op = RHIRenderPass::LoadOp::Load;
-    pass_attrib.color_initial_layout = RHIImageLayout::ColorOutput;
     render_pass_ = rhi_->CreateRenderPass(pass_attrib, render_target_, "UiPass");
 
     ui_handler_ = rhi_->GetUiHandler();

@@ -7,7 +7,6 @@
 #include "VulkanContext.h"
 #include "VulkanDescriptorSetManager.h"
 #include "VulkanRenderPass.h"
-#include "VulkanRenderTarget.h"
 #include "VulkanShader.h"
 
 namespace sparkle
@@ -158,8 +157,24 @@ void VulkanForwardPipelineState::SetupVertexInputInfo()
     vertex_input_info_.flags = vertex_input_description_.flags;
 }
 
-void VulkanForwardPipelineState::CreatePipeline()
+VkPipeline VulkanForwardPipelineState::CreatePipeline(const RHIAttachmentSignature &signature) const
 {
+    std::array<VkFormat, MaxNumColorAttachments> color_formats;
+    const auto rendering_create_info = GetVkPipelineRenderingCreateInfo(signature, color_formats);
+
+    const std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments(
+        rendering_create_info.colorAttachmentCount, color_blend_attachment_);
+
+    VkPipelineColorBlendStateCreateInfo color_blending = {};
+    color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blending.logicOpEnable = VK_FALSE;
+    color_blending.logicOp = VK_LOGIC_OP_COPY;
+    color_blending.attachmentCount = static_cast<uint32_t>(color_blend_attachments.size());
+    color_blending.pAttachments = color_blend_attachments.data();
+
+    auto multisampling = multisampling_;
+    multisampling.rasterizationSamples = GetVkMsaaSampleBit(signature.samples);
+
     VkPipelineViewportStateCreateInfo viewport_state = {};
     viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewport_state.pNext = nullptr;
@@ -176,7 +191,7 @@ void VulkanForwardPipelineState::CreatePipeline()
 
     VkGraphicsPipelineCreateInfo pipeline_info = {};
     pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipeline_info.pNext = nullptr;
+    pipeline_info.pNext = &rendering_create_info;
 
     pipeline_info.stageCount = static_cast<uint32_t>(shader_stages_.size());
     pipeline_info.pStages = shader_stages_.data();
@@ -184,55 +199,45 @@ void VulkanForwardPipelineState::CreatePipeline()
     pipeline_info.pInputAssemblyState = &input_assembly_;
     pipeline_info.pViewportState = &viewport_state;
     pipeline_info.pRasterizationState = &rasterizer_;
-    pipeline_info.pMultisampleState = &multisampling_;
-    pipeline_info.pColorBlendState = &color_blending_;
+    pipeline_info.pMultisampleState = &multisampling;
+    pipeline_info.pColorBlendState = &color_blending;
     pipeline_info.pDepthStencilState = &depth_stencil_;
     pipeline_info.pDynamicState = &dynamic_state;
     pipeline_info.layout = pipeline_layout_;
-    pipeline_info.renderPass = RHICast<VulkanRenderPass>(render_pass_)->GetRenderPass();
-    pipeline_info.subpass = 0;
     pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
 
+    VkPipeline pipeline;
     CHECK_VK_ERROR(
-        vkCreateGraphicsPipelines(context->GetDevice(), VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_));
+        vkCreateGraphicsPipelines(context->GetDevice(), VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline));
 
-    context->SetDebugInfo(reinterpret_cast<uint64_t>(pipeline_), VK_OBJECT_TYPE_PIPELINE, GetName().c_str());
+    context->SetDebugInfo(reinterpret_cast<uint64_t>(pipeline), VK_OBJECT_TYPE_PIPELINE, GetName().c_str());
+
+    return pipeline;
+}
+
+VkPipeline VulkanForwardPipelineState::GetPipeline(const RHIAttachmentSignature &signature)
+{
+    const auto found = std::ranges::find(pipelines_, signature, &decltype(pipelines_)::value_type::first);
+    if (found != pipelines_.end())
+    {
+        return found->second;
+    }
+
+    return pipelines_.emplace_back(signature, CreatePipeline(signature)).second;
 }
 
 void VulkanForwardPipelineState::SetupColorAndDepthAttachments()
 {
-    color_blend_attachments_.clear();
-
-    for (const auto &color_image : render_pass_->GetRenderTarget()->GetColorImages())
-    {
-        if (!color_image)
-        {
-            continue;
-        }
-
-        auto &blend_attachment = color_blend_attachments_.emplace_back(VkPipelineColorBlendAttachmentState{});
-
-        blend_attachment.colorWriteMask =
-            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        blend_attachment.blendEnable = blend_state_.enabled ? VK_TRUE : VK_FALSE;
-        blend_attachment.srcColorBlendFactor = GetVulkanBlendFactor(blend_state_.color_factor_src);
-        blend_attachment.dstColorBlendFactor = GetVulkanBlendFactor(blend_state_.color_factor_dst);
-        blend_attachment.colorBlendOp = GetVulkanBlendOp(blend_state_.color_op);
-        blend_attachment.srcAlphaBlendFactor = GetVulkanBlendFactor(blend_state_.alpha_factor_src);
-        blend_attachment.dstAlphaBlendFactor = GetVulkanBlendFactor(blend_state_.alpha_factor_dst);
-        blend_attachment.alphaBlendOp = GetVulkanBlendOp(blend_state_.alpha_op);
-    }
-
-    color_blending_ = {};
-    color_blending_.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    color_blending_.logicOpEnable = VK_FALSE;
-    color_blending_.logicOp = VK_LOGIC_OP_COPY;
-    color_blending_.attachmentCount = static_cast<uint32_t>(color_blend_attachments_.size());
-    color_blending_.pAttachments = color_blend_attachments_.data();
-    color_blending_.blendConstants[0] = 0.0f;
-    color_blending_.blendConstants[1] = 0.0f;
-    color_blending_.blendConstants[2] = 0.0f;
-    color_blending_.blendConstants[3] = 0.0f;
+    color_blend_attachment_ = {};
+    color_blend_attachment_.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    color_blend_attachment_.blendEnable = blend_state_.enabled ? VK_TRUE : VK_FALSE;
+    color_blend_attachment_.srcColorBlendFactor = GetVulkanBlendFactor(blend_state_.color_factor_src);
+    color_blend_attachment_.dstColorBlendFactor = GetVulkanBlendFactor(blend_state_.color_factor_dst);
+    color_blend_attachment_.colorBlendOp = GetVulkanBlendOp(blend_state_.color_op);
+    color_blend_attachment_.srcAlphaBlendFactor = GetVulkanBlendFactor(blend_state_.alpha_factor_src);
+    color_blend_attachment_.dstAlphaBlendFactor = GetVulkanBlendFactor(blend_state_.alpha_factor_dst);
+    color_blend_attachment_.alphaBlendOp = GetVulkanBlendOp(blend_state_.alpha_op);
 
     depth_stencil_ = {};
     depth_stencil_.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -272,8 +277,6 @@ void VulkanForwardPipelineState::SetupMultiSamplingStateInfo()
     multisampling_.pNext = nullptr;
 
     multisampling_.sampleShadingEnable = VK_FALSE;
-    // multisampling defaulted to no multisampling (1 sample per pixel)
-    multisampling_.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     multisampling_.minSampleShading = 1.0f;
     multisampling_.pSampleMask = nullptr;
     multisampling_.alphaToCoverageEnable = VK_FALSE;
@@ -303,25 +306,6 @@ void VulkanComputePipelineState::CompileInternal()
     context->SetDebugInfo(reinterpret_cast<uint64_t>(pipeline_), VK_OBJECT_TYPE_PIPELINE, GetName().c_str());
 }
 
-void VulkanForwardPipelineState::SetupViewport()
-{
-    auto *render_target = RHICast<VulkanRenderTarget>(render_pass_->GetRenderTarget());
-
-    ASSERT(render_target);
-
-    viewport_ = {};
-    viewport_.x = 0.0f;
-    viewport_.y = 0.0f;
-    viewport_.width = static_cast<float>(render_target->GetExtent().width);
-    viewport_.height = static_cast<float>(render_target->GetExtent().height);
-    viewport_.minDepth = 0.0f;
-    viewport_.maxDepth = 1.0f;
-
-    scissor_ = {};
-    scissor_.offset = {.x = 0, .y = 0};
-    scissor_.extent = render_target->GetExtent();
-}
-
 void VulkanForwardPipelineState::SetupInputAssemblyInfo(VkPrimitiveTopology topology)
 {
     input_assembly_ = {};
@@ -334,8 +318,6 @@ void VulkanForwardPipelineState::SetupInputAssemblyInfo(VkPrimitiveTopology topo
 
 void VulkanForwardPipelineState::InitPipelineInfo()
 {
-    SetupViewport();
-
     SetupShaderStageInfo();
 
     SetupVertexInputInfo();
@@ -363,11 +345,6 @@ void VulkanForwardPipelineState::SetupPipelineLayoutInfo()
 
     CHECK_VK_ERROR(
         vkCreatePipelineLayout(context->GetDevice(), &pipeline_layout_create_info, nullptr, &pipeline_layout_));
-}
-
-void VulkanForwardPipelineState::SetViewportAndScissor()
-{
-    context->SetViewportAndScissor(viewport_, scissor_);
 }
 
 void VulkanForwardPipelineState::BindBuffers()
@@ -406,7 +383,12 @@ void VulkanForwardPipelineState::CompileInternal()
     ASSERT(shaders_[static_cast<int>(RHIShaderStage::Compute)] == nullptr);
 
     InitPipelineInfo();
-    CreatePipeline();
+
+    // the signature declared up front compiles now rather than at the first draw
+    if (attachment_signature_)
+    {
+        GetPipeline(*attachment_signature_);
+    }
 }
 
 VulkanPipelineState::~VulkanPipelineState()
@@ -416,8 +398,23 @@ VulkanPipelineState::~VulkanPipelineState()
         return;
     }
 
-    vkDestroyPipeline(context->GetDevice(), pipeline_, nullptr);
     vkDestroyPipelineLayout(context->GetDevice(), pipeline_layout_, nullptr);
+}
+
+VulkanForwardPipelineState::~VulkanForwardPipelineState()
+{
+    for (const auto &entry : pipelines_)
+    {
+        vkDestroyPipeline(context->GetDevice(), entry.second, nullptr);
+    }
+}
+
+VulkanComputePipelineState::~VulkanComputePipelineState()
+{
+    if (compiled_)
+    {
+        vkDestroyPipeline(context->GetDevice(), pipeline_, nullptr);
+    }
 }
 
 void VulkanComputePipelineState::BindDescriptorSets()

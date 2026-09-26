@@ -19,18 +19,6 @@ public:
 
     ~VulkanRenderTarget() override;
 
-    [[nodiscard]] VkExtent2D GetExtent() const
-    {
-        return image_extent_;
-    }
-
-    [[nodiscard]] VkFormat GetFormat(size_t index) const
-    {
-        return color_formats_[index];
-    }
-
-    [[nodiscard]] std::vector<VkImageView> GetAttachments(unsigned frame_index) const;
-
     void SyncWithSwapChain();
 
     void Recreate();
