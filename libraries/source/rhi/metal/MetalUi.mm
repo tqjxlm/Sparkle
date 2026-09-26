@@ -34,15 +34,13 @@ void MetalUiHandler::Render(RHICommandContext *command_context)
 
 void MetalUiHandler::BeginFrame()
 {
-    auto *pass = RHICast<MetalRenderPass>(render_pass_);
-
     ImGuiIO &io = ImGui::GetIO();
 
     // it may be override by platform specific callbacks, so we need to set it every frame
     io.DisplaySize = ImVec2(static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().width),
                             static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().height));
 
-    ImGui_ImplMetal_NewFrame(pass->GetDescriptor());
+    ImGui_ImplMetal_NewFrame(CreateMetalRenderPassDescriptor(render_pass_->GetRenderingInfo()));
 }
 
 void MetalUiHandler::Init()
