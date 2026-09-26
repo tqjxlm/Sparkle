@@ -26,9 +26,40 @@ Gate for the phase: CI green (screenshots unchanged), Vulkan sync validation cle
 
 Gate status: CI green on every platform with screenshots unchanged; Vulkan synchronization validation clean on Forward, Deferred and GPU (lavapipe, ubuntu-glfw). Open: the on-device S25 run and the physical Apple GPU run of `pass_timestamps`.
 
+## Phase 1: graph core and renderer port
+
+Order follows §14 D22 (wrap, then native) and D11 (TLAS build and IBL cook last). Each step lands green on its own.
+
+| Step | Scope | Status |
+| --- | --- | --- |
+| 1.0 Dead code | Delete Forward prepass (§15 defect 7), SSAO (`use_ssao`, `SSAOResource`), `BlurPass`, Forward's ray-tracing branch, the double `SkyBoxPass` init | |
+| 1.1 RHI for the graph | `RHICommandContext::BeginRendering(RHIRenderingInfo)`/`EndRendering()` recording no barriers; `BeginRenderPass(pass)` becomes a wrapper whose attachment tracking moves from `VulkanRenderPass` into common code; `RHIImageState {layout, access}` public with one pure transition rule shared by `TrackTransition` and the graph; Metal `Transition` tracks state (records nothing) so plans match across backends | |
+| 1.2 Graph core | `RenderGraph`, `RGBuilder`, `RGTexture`, typed contexts (§4.3), validation active in Release, cull, transient image pool (next-frame reuse), barrier planning seeded from tracked state with write-through, load/store inference, Raster/Compute/Copy/External execution, JSON dump; `render_graph_compile` test case on synthetic graphs. No renderer uses it | |
+| 1.3 CPU on the graph | Frame built as a graph: upload as a Copy pass, legacy passes wrapped as External passes, readback as a Copy pass with `SideEffect`; CPU `Transition` calls deleted; golden graph-shape test plumbing (`*_graph_shape` cases); `cpu_render_static` gets a CI column | |
+| 1.4 GPU on the graph | Accumulator clear as a Raster pass, trace as a Compute pass, each denoiser one External pass with declared inputs/outputs | |
+| 1.5 Forward on the graph | Wrapped; Forward `Transition` calls deleted | |
+| 1.6 Deferred on the graph | Wrapped; Deferred `Transition` calls and the legacy readback helper deleted | |
+| 1.7 Declare-and-bind | Binding state in `RHICommandContext`; shader-read accesses take `ResourceTable` member pointers and bind on PSO bind (§14 D21) | |
+| 1.8 Native post chain | `AddPostChain` (tone mapping or upsample, readback, UI, present) shared by all renderers; screen color transient; PSOs take an attachment signature; UI handler set up from a signature | |
+| 1.9 Native scene passes | Shadow, skybox, forward base; then GBuffer and lighting; setters (`SetInput`, `OverrideSkyMap`, ...) replaced by handles passed each frame | |
+| 1.10 TLAS and IBL cook | `RGBuffer`, acceleration-structure accesses, mip/layer subresource accesses; TLAS build/update and IBL cook dispatches as graph passes | |
+| 1.11 Cleanup | `RHIRenderTargetPool`, render-target ownership in passes and `PipelinePass::Render` deleted; docs | |
+
+Gate for the phase: CI green (screenshots unchanged), Vulkan sync validation clean, per-renderer golden graph-shape test.
+
+Deviations from the design, from reading Phase 0 code:
+
+* Imports and transients are seeded from the physical image's tracked `{layout, access}` and the graph writes state through to the tracker per pass (design §4.1, §6.4, §6.6 updated). A transient seeded from `Undefined` with no source access would race the previous frame's use of the pooled image, and the swapchain's first write must chain to the acquire wait as `VulkanRenderPass::Begin` does today.
+* The graph reuses Phase 0's `RHIAccess`/`RHIShaderStageMask`/`RHIImageLayout` inside accesses; the builder methods are the §4.2 vocabulary.
+* `Present` needs no access: `EndFrame` transitions the back buffer from tracked state.
+* `RHIImageLayout` has no read-only depth layout; `DepthTest` uses the depth attachment layout until a pass samples and tests the same depth.
+* Graph validation and the External-pass contract (each declared image left in its declared state) abort in every build, because `ASSERT` compiles out of the Release builds CI runs.
+* Shader variants have no Phase 1 user; they arrive with pixel-local reads in Phase 3.
+* The two Phase 0 deviations (per-slot write mask, `StoreOp::None` lowering) have no user without merging and move to Phase 3.
+
 ## Workflow
 
-Each step: an implementer agent makes the change; a separate reviewer agent reviews the diff against the design and this plan; findings are fixed before the commit. Nothing is built or run locally: each step is pushed to the `render-graph` branch and its PR, and CI (builds on every platform, tidy, screenshot tests) is the validation.
+Each step: an implementer agent makes the change and raises questions or design improvements instead of guessing; the orchestrating session reviews the diff against the design and this plan; findings are fixed before the commit. Nothing is built or run locally: each step is pushed to the `render-graph` branch and its PR, and CI (builds on every platform, tidy, screenshot tests) is the validation.
 
 ## Findings
 
