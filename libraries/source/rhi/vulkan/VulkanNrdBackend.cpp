@@ -366,10 +366,11 @@ void VulkanNrdBackend::InitializePoolLayouts(VkCommandBuffer command_buffer)
     pool_layouts_initialized_ = true;
 }
 
-void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
+void VulkanNrdBackend::RunDispatches(RHICommandContext *command_context, const Dispatch *dispatches, uint32_t count)
 {
     auto *rhi = context->GetRHI();
-    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
+    auto *vulkan_context = static_cast<VulkanCommandContext *>(command_context);
+    VkCommandBuffer command_buffer = vulkan_context->GetCommandBuffer();
 
     if (!pool_layouts_initialized_)
     {
@@ -390,7 +391,7 @@ void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
                 .from = {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute},
                 .to = {.access = RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::StorageWrite,
                        .stages = RHIShaderStageMask::Compute}};
-            rhi->Barrier({}, std::span(&barrier, 1));
+            vulkan_context->Barrier({}, std::span(&barrier, 1));
         }
 
         std::vector<VkDescriptorSet> descriptor_sets(pipeline.set_layouts.size());
@@ -492,9 +493,9 @@ void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
 
         vkUpdateDescriptorSets(context->GetDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-        context->BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pso);
-        context->BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline_layout, 0, descriptor_sets.data(),
-                                    static_cast<uint32_t>(descriptor_sets.size()));
+        vulkan_context->BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pso);
+        vulkan_context->BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline_layout, 0,
+                                           descriptor_sets.data(), static_cast<uint32_t>(descriptor_sets.size()));
         vkCmdDispatch(command_buffer, dispatch.grid_width, dispatch.grid_height, 1);
     }
 }

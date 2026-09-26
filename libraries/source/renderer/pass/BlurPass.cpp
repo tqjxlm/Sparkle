@@ -151,9 +151,11 @@ void BlurPass::RenderPass(PingPongIndex index)
                                        .after_stage = RHIPipelineStage::Top,
                                        .before_stage = RHIPipelineStage::ColorOutput});
 
-    rhi_->BeginRenderPass(passes_[index]);
-    rhi_->DrawMesh(pipeline_states_[index], draw_args_);
-    rhi_->EndRenderPass();
+    auto *command_context = rhi_->GetCommandContext();
+
+    command_context->BeginRenderPass(passes_[index]);
+    command_context->DrawMesh(pipeline_states_[index], draw_args_);
+    command_context->EndRenderPass();
 }
 
 void BlurPass::BindVertexShaderResources()

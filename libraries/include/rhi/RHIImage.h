@@ -195,14 +195,6 @@ public:
 
     virtual void UploadFaces(std::array<const uint8_t *, 6> data) = 0;
 
-    virtual void CopyToBuffer(const RHIBuffer *buffer) const = 0;
-
-    virtual void CopyToImage(const RHIImage *image) const = 0;
-
-    virtual void BlitToImage(const RHIImage *image, RHISampler::FilteringMethod filter) const = 0;
-
-    virtual void GenerateMips() = 0;
-
 #pragma endregion
 
 #pragma region Attributes

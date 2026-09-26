@@ -211,11 +211,13 @@ void DirectionalLightingPass::SetSkyLight(SkyRenderProxy *sky_light)
 
 void DirectionalLightingPass::Render()
 {
-    rhi_->BeginRenderPass(pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    rhi_->DrawMesh(pipeline_state_, draw_args_);
+    command_context->BeginRenderPass(pass_);
 
-    rhi_->EndRenderPass();
+    command_context->DrawMesh(pipeline_state_, draw_args_);
+
+    command_context->EndRenderPass();
 }
 
 void DirectionalLightingPass::SetupRenderPass()
