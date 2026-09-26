@@ -119,12 +119,10 @@ void MetalCommandContext::BeginComputePassInternal(const RHIResourceRef<RHICompu
     compute_encoder_ = RHICast<MetalComputePass>(pass)->Begin(command_buffer_);
 }
 
-void MetalCommandContext::EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
+void MetalCommandContext::EndComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/)
 {
     [compute_encoder_ endEncoding];
     compute_encoder_ = nil;
-
-    RHICast<MetalComputePass>(pass)->End();
 }
 } // namespace sparkle
 

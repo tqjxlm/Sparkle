@@ -3,10 +3,20 @@
 #include "MetalContext.h"
 
 #include "MetalImage.h"
+#include "MetalTimer.h"
 
 namespace sparkle
 {
 constexpr unsigned HeadlessFramesInFlight = 2;
+
+bool MetalContext::SupportsPassTimestamps()
+{
+    if (!supports_pass_timestamps_.has_value())
+    {
+        supports_pass_timestamps_ = MetalTimer::IsSupported(device_);
+    }
+    return *supports_pass_timestamps_;
+}
 
 void MetalContext::SwapBuffer()
 {

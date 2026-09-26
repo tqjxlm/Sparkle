@@ -778,6 +778,7 @@ bool VulkanContext::PickPhysicalDevice()
                           static_cast<uint32_t>(device_properties.limits.minStorageBufferOffsetAlignment)});
 
             QuerySubgroupQuadSupport();
+            QueryTimestampSupport();
             QueryOptionalDeviceFeatures();
 
             auto max_msaa_count = GetMaxUsableSampleCount();
@@ -870,6 +871,10 @@ bool VulkanContext::CreateInstance()
     if (success)
     {
         VulkanFunctionLoader::LoadInstance(instance_);
+
+        // skip labels and names rather than call a command the loader did not resolve
+        supports_debug_utils_ = supports_debug_utils_ && vkCmdBeginDebugUtilsLabelEXT != nullptr &&
+                                vkCmdEndDebugUtilsLabelEXT != nullptr && vkSetDebugUtilsObjectNameEXT != nullptr;
     }
     return success;
 }
@@ -885,6 +890,17 @@ void VulkanContext::QuerySubgroupQuadSupport()
 
     supports_subgroup_quad_ops_ = (subgroup_properties.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT) != 0u &&
                                   (subgroup_properties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0u;
+}
+
+void VulkanContext::QueryTimestampSupport()
+{
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &queue_family_count, nullptr);
+    std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &queue_family_count, queue_families.data());
+
+    const auto graphics_family = FindQueueFamilies(physical_device_, surface_).graphicsFamily;
+    timestamp_valid_bits_ = queue_families[graphics_family].timestampValidBits;
 }
 
 void VulkanContext::QueryOptionalDeviceFeatures()
@@ -1092,6 +1108,19 @@ uint32_t VulkanContext::GetMaxUsableSampleCount()
     return 1;
 }
 
+// extensions of the loader, the driver and the implicit layers
+static bool IsInstanceExtensionAvailable(std::string_view name)
+{
+    uint32_t extension_count = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr);
+    std::vector<VkExtensionProperties> extensions(extension_count);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, extensions.data());
+
+    return std::ranges::any_of(extensions, [name](const VkExtensionProperties &extension) {
+        return std::string_view(extension.extensionName) == name;
+    });
+}
+
 void VulkanContext::GetRequiredInstanceExtensions()
 {
     std::vector<const char *> required_extensions;
@@ -1105,7 +1134,9 @@ void VulkanContext::GetRequiredInstanceExtensions()
         instance_extensions_.push_back(required_extension);
     }
 
-    if (enable_validation_)
+    // labels and object names show up in captures and tools without validation too
+    supports_debug_utils_ = enable_validation_ || IsInstanceExtensionAvailable(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (supports_debug_utils_)
     {
         instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
@@ -1117,19 +1148,9 @@ void VulkanContext::GetRequiredInstanceExtensions()
     instance_extensions_.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 
     // Only add VK_EXT_layer_settings if the loader exposes it.
+    if (IsInstanceExtensionAvailable(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME))
     {
-        uint32_t ext_count = 0;
-        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, nullptr);
-        std::vector<VkExtensionProperties> exts(ext_count);
-        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data());
-
-        bool layer_settings_available = std::ranges::any_of(exts, [](const VkExtensionProperties &e) {
-            return std::string_view(e.extensionName) == VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
-        });
-        if (layer_settings_available)
-        {
-            instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
-        }
+        instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
     }
 #endif
 #endif
@@ -1143,7 +1164,7 @@ void VulkanContext::GetRequiredInstanceExtensions()
 
 void VulkanContext::SetDebugInfo(uint64_t objectHandle, VkObjectType objectType, const char *name)
 {
-    if (!enable_validation_)
+    if (!supports_debug_utils_)
     {
         return;
     }

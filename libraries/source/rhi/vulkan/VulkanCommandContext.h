@@ -152,6 +152,10 @@ protected:
     void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
 
 private:
+    // the labels group a pass's commands in captures and validation messages
+    void BeginDebugLabel(const std::string &name) const;
+    void EndDebugLabel() const;
+
     struct CommandState
     {
         static constexpr uint32_t MaxTrackedVertexBuffers = 8;
