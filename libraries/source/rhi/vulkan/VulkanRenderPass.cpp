@@ -32,9 +32,9 @@ static void TrackAttachmentTransition(std::vector<RHIImageBarrier> &barriers, RH
     barriers.insert(barriers.end(), image_barriers.begin(), image_barriers.end());
 }
 
-void VulkanRenderPass::Begin()
+void VulkanRenderPass::Begin(VulkanCommandContext &command_context)
 {
-    auto *command_buffer = context->GetCurrentCommandBuffer();
+    auto *command_buffer = command_context.GetCommandBuffer();
 
     if (context->IsValidationEnabled())
     {
@@ -110,7 +110,7 @@ void VulkanRenderPass::Begin()
         depth_info.clearValue.depthStencil = {.depth = depth_attachment.clear_depth, .stencil = 0};
     }
 
-    context->GetRHI()->Barrier(barriers, {});
+    command_context.Barrier(barriers, {});
 
     const VkRect2D render_area{.offset = {.x = 0, .y = 0}, .extent = {.width = info.width, .height = info.height}};
 
@@ -130,12 +130,12 @@ void VulkanRenderPass::Begin()
                               .height = static_cast<float>(info.height),
                               .minDepth = 0.0f,
                               .maxDepth = 1.0f};
-    context->SetViewportAndScissor(viewport, render_area);
+    command_context.SetViewportAndScissor(viewport, render_area);
 }
 
-void VulkanRenderPass::End()
+void VulkanRenderPass::End(VulkanCommandContext &command_context)
 {
-    auto *command_buffer = context->GetCurrentCommandBuffer();
+    auto *command_buffer = command_context.GetCommandBuffer();
 
     vkCmdEndRendering(command_buffer);
 
@@ -160,7 +160,7 @@ void VulkanRenderPass::End()
                                   depth_attachment.mip_level, depth_attachment.array_layer, false);
     }
 
-    context->GetRHI()->Barrier(barriers, {});
+    command_context.Barrier(barriers, {});
 
     if (context->IsValidationEnabled())
     {

@@ -9,6 +9,7 @@ namespace sparkle
 {
 struct Mesh;
 class BLAS;
+class RHICommandContext;
 
 class MeshRenderProxy : public PrimitiveRenderProxy
 {
@@ -64,7 +65,7 @@ public:
 
     [[nodiscard]] uint32_t GetNumVertices() const;
 
-    void Render(RHIContext *rhi, const RHIResourceRef<RHIPipelineState> &pipeline_state) const;
+    void Render(RHICommandContext *command_context, const RHIResourceRef<RHIPipelineState> &pipeline_state) const;
 
     bool Intersect(const Ray &ray, IntersectionCandidate &candidate) const override;
 

@@ -43,12 +43,12 @@ void MeshPass::UpdateFrameData(const RenderConfig &, SceneRenderProxy *scene)
     }
 }
 
-void MeshPass::Render()
+void MeshPass::DrawPrimitives(RHICommandContext *command_context)
 {
     for (auto *primitive : scene_proxy_->GetPrimitives())
     {
         auto *proxy = static_cast<MeshRenderProxy *>(primitive);
-        proxy->Render(rhi_, pipeline_states_[primitive->GetPrimitiveIndex()]);
+        proxy->Render(command_context, pipeline_states_[primitive->GetPrimitiveIndex()]);
     }
 }
 

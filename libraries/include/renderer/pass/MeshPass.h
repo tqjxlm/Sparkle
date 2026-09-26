@@ -6,14 +6,14 @@
 
 namespace sparkle
 {
+class RHICommandContext;
+
 class MeshPass : public PipelinePass
 {
 public:
     MeshPass(RHIContext *ctx, SceneRenderProxy *scene_proxy) : PipelinePass(ctx), scene_proxy_(scene_proxy)
     {
     }
-
-    void Render() override;
 
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
@@ -26,6 +26,8 @@ public:
     virtual void HandleMovedPrimitive(uint32_t from, uint32_t to);
 
 protected:
+    void DrawPrimitives(RHICommandContext *command_context);
+
     SceneRenderProxy *scene_proxy_;
 
     std::vector<RHIResourceRef<RHIPipelineState>> pipeline_states_;

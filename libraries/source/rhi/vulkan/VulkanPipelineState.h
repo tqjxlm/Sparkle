@@ -155,9 +155,9 @@ public:
     // compiled on first use for each attachment signature
     VkPipeline GetPipeline(const RHIAttachmentSignature &signature);
 
-    void BindBuffers();
+    void BindBuffers(VulkanCommandContext &command_context);
 
-    void BindDescriptorSets();
+    void BindDescriptorSets(VulkanCommandContext &command_context);
 
 private:
     struct VulkanVertexInputDescription
@@ -222,7 +222,7 @@ public:
         return pipeline_;
     }
 
-    void BindDescriptorSets();
+    void BindDescriptorSets(VulkanCommandContext &command_context);
 
 private:
     VkPipeline pipeline_;

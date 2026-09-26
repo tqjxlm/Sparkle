@@ -6,6 +6,8 @@
 
 namespace sparkle
 {
+class VulkanCommandContext;
+
 inline VkFilter GetVulkanFilteringMethod(RHISampler::FilteringMethod filtering_method)
 {
     switch (filtering_method)
@@ -369,15 +371,12 @@ public:
 
     void UploadFaces(std::array<const uint8_t *, 6> data) override;
 
-    void CopyToImage(const RHIImage *image) const override;
+    void CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const;
 
-    void CopyToBuffer(const RHIBuffer *buffer) const override;
+    void BlitToImage(VulkanCommandContext &command_context, const RHIImage *image,
+                     RHISampler::FilteringMethod filter) const;
 
-    void GenerateMips() override;
-
-    void BlitToImage(const RHIImage *image, RHISampler::FilteringMethod filter) const override;
-
-    void BlitToImage(const RHIImage *image, uint8_t from_mip, uint8_t to_mip,
+    void BlitToImage(VulkanCommandContext &command_context, const RHIImage *image, uint8_t from_mip, uint8_t to_mip,
                      RHISampler::FilteringMethod filtering) const;
 
     [[nodiscard]] VkImage GetImage() const

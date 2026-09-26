@@ -2,7 +2,6 @@
 
 #include "MetalRenderPass.h"
 
-#include "MetalContext.h"
 #include "MetalImage.h"
 
 namespace sparkle
@@ -39,22 +38,21 @@ static MTLStoreAction GetMetalStoreAction(RHIStoreOp op)
 
 MetalRenderPass::MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
                                  const std::string &name)
-    : RHIRenderPass(attribute, rt, name), render_encoder_(nil),
-      descriptor_([MTLRenderPassDescriptor renderPassDescriptor])
+    : RHIRenderPass(attribute, rt, name), descriptor_([MTLRenderPassDescriptor renderPassDescriptor])
 {
 }
 
-void MetalRenderPass::Begin()
+id<MTLRenderCommandEncoder> MetalRenderPass::Begin(id<MTLCommandBuffer> command_buffer) const
 {
     const auto &info = GetActiveRenderingInfo();
 
     FillDescriptor(info);
 
-    render_encoder_ = [context->GetCurrentCommandBuffer() renderCommandEncoderWithDescriptor:descriptor_];
+    id<MTLRenderCommandEncoder> render_encoder = [command_buffer renderCommandEncoderWithDescriptor:descriptor_];
 
-    SetDebugInfo(render_encoder_, GetName());
+    SetDebugInfo(render_encoder, GetName());
 
-    ASSERT_F(render_encoder_, "Failed to create render encoder for pass {}", GetName());
+    ASSERT_F(render_encoder, "Failed to create render encoder for pass {}", GetName());
 
     // flip the viewport to map vulkan-convention NDC (y down) to metal (y up).
     // shaders are compiled from vulkan-style slang without a baked-in y-flip.
@@ -62,12 +60,9 @@ void MetalRenderPass::Begin()
     auto height = (double)info.height;
     MTLViewport viewport = {0.0, height, width, -height, 0.0, 1.0};
 
-    [render_encoder_ setViewport:viewport];
-}
+    [render_encoder setViewport:viewport];
 
-void MetalRenderPass::End()
-{
-    [render_encoder_ endEncoding];
+    return render_encoder;
 }
 
 MTLRenderPassDescriptor *MetalRenderPass::GetDescriptor() const

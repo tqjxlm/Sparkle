@@ -71,7 +71,7 @@ void VulkanBuffer::Create()
     }
 }
 
-void VulkanBuffer::CopyToBuffer(const RHIBuffer *buffer) const
+void VulkanBuffer::CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const
 {
     const auto *dst_buffer = RHICast<VulkanBuffer>(buffer);
 
@@ -87,15 +87,15 @@ void VulkanBuffer::CopyToBuffer(const RHIBuffer *buffer) const
 
     ASSERT_EQUAL(GetSize(), buffer->GetSize());
 
-    vkCmdCopyBuffer(context->GetCurrentCommandBuffer(), GetResourceThisFrame(), dst_buffer->GetResourceThisFrame(), 1,
+    vkCmdCopyBuffer(command_context.GetCommandBuffer(), GetResourceThisFrame(), dst_buffer->GetResourceThisFrame(), 1,
                     &copy_region);
 
     // the consumer of the copy is unknown here, so wait for the copy before every access the usages allow
     const RHIMemoryBarrier barrier{.from = {.access = RHIAccess::CopyDst}, .to = dst_buffer->GetUsageAccess()};
-    context->GetRHI()->Barrier({}, std::span(&barrier, 1));
+    command_context.Barrier({}, std::span(&barrier, 1));
 }
 
-void VulkanBuffer::CopyToImage(const RHIImage *image) const
+void VulkanBuffer::CopyToImage(VulkanCommandContext &command_context, const RHIImage *image) const
 {
     auto frame_index = context->GetRHI()->GetFrameIndex();
 
@@ -131,7 +131,7 @@ void VulkanBuffer::CopyToImage(const RHIImage *image) const
         copied_bytes += image->GetStorageSize(mip_level) * num_layers;
     }
 
-    vkCmdCopyBufferToImage(context->GetCurrentCommandBuffer(), buffer_resource, image_resource,
+    vkCmdCopyBufferToImage(command_context.GetCommandBuffer(), buffer_resource, image_resource,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copy_regions.size()),
                            copy_regions.data());
 }

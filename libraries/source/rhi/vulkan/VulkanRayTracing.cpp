@@ -79,9 +79,9 @@ void VulkanBLAS::Build()
 
     {
         // TODO(tqjxlm): use a shared command buffer
-        const OneShotCommandBufferScope command_buffer_scope;
-        VkCommandBuffer command_buffer = command_buffer_scope.GetCommandBuffer();
-        vkCmdBuildAccelerationStructuresKHR(command_buffer, 1, &build_info, ranges);
+        OneShotCommandBufferScope command_buffer_scope;
+        vkCmdBuildAccelerationStructuresKHR(command_buffer_scope.GetCommandContext().GetCommandBuffer(), 1, &build_info,
+                                            ranges);
     }
 
     // after build finishes, retrieve its address on device
@@ -260,13 +260,16 @@ void VulkanTLAS::BuildInternal(bool rebuild)
                                       .stages = RHIShaderStageMask::Pixel | RHIShaderStageMask::Compute};
     const RHIResourceAccess build{.access = RHIAccess::AccelerationStructureBuild};
 
-    const RHIMemoryBarrier before_build{.from = build | ray_query, .to = build};
-    context->GetRHI()->Barrier({}, std::span(&before_build, 1));
+    auto *command_context = context->GetCommandContext();
+    command_context->AssertOutsidePass("TLAS build");
 
-    vkCmdBuildAccelerationStructuresKHR(context->GetCurrentCommandBuffer(), 1, &build_info, ranges);
+    const RHIMemoryBarrier before_build{.from = build | ray_query, .to = build};
+    command_context->Barrier({}, std::span(&before_build, 1));
+
+    vkCmdBuildAccelerationStructuresKHR(command_context->GetCommandBuffer(), 1, &build_info, ranges);
 
     const RHIMemoryBarrier after_build{.from = build, .to = ray_query};
-    context->GetRHI()->Barrier({}, std::span(&after_build, 1));
+    command_context->Barrier({}, std::span(&after_build, 1));
 }
 } // namespace sparkle
 

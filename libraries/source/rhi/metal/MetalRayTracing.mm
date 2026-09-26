@@ -159,7 +159,9 @@ void MetalTLAS::Build()
     auto *blas_descriptors =
         static_cast<MTLAccelerationStructureUserIDInstanceDescriptor *>(blas_descriptor_buffer_->Lock());
 
-    auto command_buffer = context->GetCurrentCommandBuffer();
+    auto *command_context = context->GetCommandContext();
+    command_context->AssertOutsidePass("TLAS build");
+    auto command_buffer = command_context->GetCommandBuffer();
     id<MTLAccelerationStructureCommandEncoder> command_encoder = [command_buffer accelerationStructureCommandEncoder];
 
     id<MTLBuffer> compacted_size_buffer = nil;
@@ -218,7 +220,7 @@ void MetalTLAS::Build()
         }
 
         context->BeginCommandBuffer();
-        command_buffer = context->GetCurrentCommandBuffer();
+        command_buffer = command_context->GetCommandBuffer();
         command_encoder = [command_buffer accelerationStructureCommandEncoder];
 
         const auto *compacted_sizes = static_cast<const uint64_t *>(compacted_size_buffer.contents);
@@ -360,8 +362,10 @@ void MetalTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
     }
 
     auto device = context->GetDevice();
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    id<MTLAccelerationStructureCommandEncoder> command_encoder = [command_buffer accelerationStructureCommandEncoder];
+    auto *command_context = context->GetCommandContext();
+    command_context->AssertOutsidePass("TLAS update");
+    id<MTLAccelerationStructureCommandEncoder> command_encoder =
+        [command_context->GetCommandBuffer() accelerationStructureCommandEncoder];
 
     auto *blas_descriptors =
         static_cast<MTLAccelerationStructureUserIDInstanceDescriptor *>(blas_descriptor_buffer_->Lock());

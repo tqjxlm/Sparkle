@@ -394,10 +394,12 @@ void ForwardMeshPass::RebindAllShaderResources()
 
 void ForwardMeshPass::Render()
 {
-    rhi_->BeginRenderPass(base_pass_);
+    auto *command_context = rhi_->GetCommandContext();
 
-    MeshPass::Render();
+    command_context->BeginRenderPass(base_pass_);
 
-    rhi_->EndRenderPass();
+    DrawPrimitives(command_context);
+
+    command_context->EndRenderPass();
 }
 } // namespace sparkle

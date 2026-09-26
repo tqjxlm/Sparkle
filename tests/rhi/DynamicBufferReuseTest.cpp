@@ -127,7 +127,7 @@ private:
 
         rhi->BeginCommandBuffer();
         target->Upload(rhi, Data.data());
-        target->CopyToBuffer(readback.get());
+        rhi->GetCommandContext()->CopyBuffer(target.get(), readback.get());
         rhi->SubmitCommandBuffer();
         rhi->WaitForDeviceIdle();
 

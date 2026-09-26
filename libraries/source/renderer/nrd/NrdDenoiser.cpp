@@ -449,9 +449,11 @@ bool NrdDenoiser::Encode(const DenoiserInputs &inputs)
     };
     resolve_ubo_->Upload(rhi_, &resolve_ubo);
 
-    rhi_->BeginComputePass(resolve_pass_);
-    rhi_->DispatchCompute(resolve_pipeline_, dispatch, group);
-    rhi_->EndComputePass(resolve_pass_);
+    auto *command_context = rhi_->GetCommandContext();
+
+    command_context->BeginComputePass(resolve_pass_);
+    command_context->DispatchCompute(resolve_pipeline_, dispatch, group);
+    command_context->EndComputePass(resolve_pass_);
 
     ToLayout(output_, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::PixelShader);
 
@@ -486,9 +488,11 @@ void NrdDenoiser::RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &
     };
     pack_ubo_->Upload(rhi_, &pack_ubo);
 
-    rhi_->BeginComputePass(pack_pass_);
-    rhi_->DispatchCompute(pack_pipeline_, dispatch, group);
-    rhi_->EndComputePass(pack_pass_);
+    auto *command_context = rhi_->GetCommandContext();
+
+    command_context->BeginComputePass(pack_pass_);
+    command_context->DispatchCompute(pack_pipeline_, dispatch, group);
+    command_context->EndComputePass(pack_pass_);
 
     // ReBLUR reads the freshly packed inputs and writes the OUT_* textures on its own encoder.
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
@@ -639,8 +643,8 @@ void NrdDenoiser::RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &
         };
     }
 
-    rhi_->BeginComputePass(reblur_pass_);
-    backend_->RunDispatches(seam_dispatches_.data(), dispatch_count);
-    rhi_->EndComputePass(reblur_pass_);
+    command_context->BeginComputePass(reblur_pass_);
+    backend_->RunDispatches(command_context, seam_dispatches_.data(), dispatch_count);
+    command_context->EndComputePass(reblur_pass_);
 }
 } // namespace sparkle

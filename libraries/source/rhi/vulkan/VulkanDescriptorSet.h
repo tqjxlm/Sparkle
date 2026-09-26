@@ -6,6 +6,8 @@
 
 namespace sparkle
 {
+class VulkanCommandContext;
+
 inline void InitDescriptorWrite(VkWriteDescriptorSet &set_write, unsigned slot, VkDescriptorSet descriptor_set,
                                 unsigned index, VkDescriptorType type)
 {
@@ -43,7 +45,7 @@ public:
         layout_hash_ = layout_hash;
     }
 
-    void Bind(VkPipelineBindPoint bind_point, VkPipelineLayout pipeline_layout,
+    void Bind(VulkanCommandContext &command_context, VkPipelineBindPoint bind_point, VkPipelineLayout pipeline_layout,
               const RHIShaderResourceSet &resource_set, unsigned id);
 
     [[nodiscard]] bool IsDynamic() const

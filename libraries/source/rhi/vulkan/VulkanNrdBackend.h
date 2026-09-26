@@ -28,7 +28,7 @@ public:
                            const PoolTexture *transient, uint32_t transient_count, const uint32_t *samplers,
                            uint32_t sampler_count, uint32_t constant_buffer_size) override;
 
-    void RunDispatches(const Dispatch *dispatches, uint32_t count) override;
+    void RunDispatches(RHICommandContext *command_context, const Dispatch *dispatches, uint32_t count) override;
 
 private:
     // set is ~0u when the register was stripped as unused
