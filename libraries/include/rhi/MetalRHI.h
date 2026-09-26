@@ -92,7 +92,7 @@ protected:
     void EndFrameInternal() override;
 
     void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
-    void EndRenderPassInternal() override;
+    void EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
 
     void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
     void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;

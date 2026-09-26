@@ -112,7 +112,6 @@ void ForwardMeshPass::InitRenderResources(const RenderConfig &config)
 {
     use_ray_tracing_ = config.IsRayTracingMode();
     use_prepass_ = config.use_prepass;
-    bool resolve_prepass_depth = config.use_ssao;
 
     vertex_shader_ = rhi_->CreateShader<StandardVertexShader>();
 
@@ -132,23 +131,7 @@ void ForwardMeshPass::InitRenderResources(const RenderConfig &config)
     pass_attribute.color_load_op = RHIRenderPass::LoadOp::Clear;
     pass_attribute.depth_store_op = RHIRenderPass::StoreOp::Store;
 
-    if (use_prepass_)
-    {
-        pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Load;
-        if (resolve_prepass_depth)
-        {
-            // if it is resolved, it should have just been transferred
-            pass_attribute.depth_initial_layout = RHIImageLayout::TransferSrc;
-        }
-        else
-        {
-            pass_attribute.depth_initial_layout = RHIImageLayout::ColorOutput;
-        }
-    }
-    else
-    {
-        pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Clear;
-    }
+    pass_attribute.depth_load_op = use_prepass_ ? RHIRenderPass::LoadOp::Load : RHIRenderPass::LoadOp::Clear;
 
     base_pass_ = rhi_->CreateRenderPass(pass_attribute, render_target_, "BasePass");
 }

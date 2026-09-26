@@ -198,7 +198,7 @@ void MetalRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, 
 
     auto index_buffer = RHICast<MetalBuffer>(pso->GetIndexBuffer())->GetResource();
 
-    pso->Bind(encoder);
+    pso->Bind(encoder, pass->GetActiveAttachmentSignature());
 
     [encoder drawIndexedPrimitives:GetMetalPrimitiveType(pipeline_state->GetRasterizationState().polygon_mode)
                         indexCount:draw_args.index_count
@@ -310,9 +310,9 @@ void MetalRHI::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass
     RHICast<MetalRenderPass>(pass)->Begin();
 }
 
-void MetalRHI::EndRenderPassInternal()
+void MetalRHI::EndRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
 {
-    RHICast<MetalRenderPass>(current_render_pass_)->End();
+    RHICast<MetalRenderPass>(pass)->End();
 }
 
 RHIResourceRef<RHIUiHandler> MetalRHI::CreateUiHandler()

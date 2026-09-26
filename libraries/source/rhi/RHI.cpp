@@ -263,9 +263,11 @@ void RHIContext::EndRenderPass()
 {
     ASSERT_F(current_render_pass_ != nullptr, "No active render pass!");
 
-    EndRenderPassInternal();
-
+    // the internal end records barriers after the rendering ends, so the pass is no longer current
+    const auto pass = current_render_pass_;
     current_render_pass_ = nullptr;
+
+    EndRenderPassInternal(pass);
 }
 
 void RHIContext::BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
@@ -273,9 +275,18 @@ void RHIContext::BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
     ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
     ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
 
-    current_render_pass_ = pass;
+    // swap chain recreation replaces the back buffer render target
+    if (pass->TargetsBackBuffer())
+    {
+        pass->SetRenderTarget(back_buffer_rt_);
+    }
 
+    pass->CaptureRenderingInfo();
+
+    // the internal begin records the attachment barriers before the pass opens
     BeginRenderPassInternal(pass);
+
+    current_render_pass_ = pass;
 }
 
 void RHIContext::RecreateBuffer(RHIBuffer::Attribute attribute, const std::string &name,
