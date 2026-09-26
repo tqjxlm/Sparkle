@@ -254,7 +254,19 @@ void VulkanTLAS::BuildInternal(bool rebuild)
 
     const VkAccelerationStructureBuildRangeInfoKHR *ranges[1] = {&range};
 
+    // the build reads BLAS from earlier one-shot submits on the same queue (a barrier's first scope spans submits) and
+    // rewrites scratch and acceleration structure memory that earlier builds and ray queries used
+    const RHIResourceAccess ray_query{.access = RHIAccess::AccelerationStructureRead,
+                                      .stages = RHIShaderStageMask::Pixel | RHIShaderStageMask::Compute};
+    const RHIResourceAccess build{.access = RHIAccess::AccelerationStructureBuild};
+
+    const RHIMemoryBarrier before_build{.from = build | ray_query, .to = build};
+    context->GetRHI()->Barrier({}, std::span(&before_build, 1));
+
     vkCmdBuildAccelerationStructuresKHR(context->GetCurrentCommandBuffer(), 1, &build_info, ranges);
+
+    const RHIMemoryBarrier after_build{.from = build, .to = ray_query};
+    context->GetRHI()->Barrier({}, std::span(&after_build, 1));
 }
 } // namespace sparkle
 

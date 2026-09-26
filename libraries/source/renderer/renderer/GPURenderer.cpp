@@ -183,7 +183,7 @@ void GPURenderer::Render()
         rhi_->EndComputePass(compute_pass_);
 
         const auto scene_consumer_stage =
-            frame_denoiser_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
+            gbuffer_write_this_frame_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
 
         scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
                                     .after_stage = RHIPipelineStage::ComputeShader,

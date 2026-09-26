@@ -330,14 +330,14 @@ void VulkanNrdBackend::AllocateResources(uint32_t width, uint32_t height, const 
 
 void VulkanNrdBackend::InitializePoolLayouts(VkCommandBuffer command_buffer)
 {
-    std::vector<VkImageMemoryBarrier> barriers;
+    std::vector<VkImageMemoryBarrier2> barriers;
     barriers.reserve(permanent_pool_.size() + transient_pool_.size());
     for (const auto *pool : {&permanent_pool_, &transient_pool_})
     {
         for (const auto &image : *pool)
         {
-            VkImageMemoryBarrier barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            VkImageMemoryBarrier2 barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
             barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
             barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -348,14 +348,20 @@ void VulkanNrdBackend::InitializePoolLayouts(VkCommandBuffer command_buffer)
                                         .levelCount = 1,
                                         .baseArrayLayer = 0,
                                         .layerCount = 1};
-            barrier.srcAccessMask = 0;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+            barrier.srcAccessMask = VK_ACCESS_2_NONE;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
             barriers.push_back(barrier);
         }
     }
 
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-                         nullptr, 0, nullptr, static_cast<uint32_t>(barriers.size()), barriers.data());
+    VkDependencyInfo dependency_info{};
+    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency_info.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+    dependency_info.pImageMemoryBarriers = barriers.data();
+    vkCmdPipelineBarrier2(command_buffer, &dependency_info);
 
     pool_layouts_initialized_ = true;
 }
@@ -380,12 +386,11 @@ void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
 
         if (d > 0)
         {
-            VkMemoryBarrier barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+            const RHIMemoryBarrier barrier{
+                .from = {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute},
+                .to = {.access = RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::StorageWrite,
+                       .stages = RHIShaderStageMask::Compute}};
+            rhi->Barrier({}, std::span(&barrier, 1));
         }
 
         std::vector<VkDescriptorSet> descriptor_sets(pipeline.set_layouts.size());
