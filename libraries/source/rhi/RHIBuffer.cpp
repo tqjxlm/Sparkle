@@ -97,15 +97,19 @@ void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::v
 
     auto *command_context = rhi->GetCommandContext();
 
+    // the dispatch rewrites a buffer that earlier work may still access, and its later consumers are unknown here
+    const RHIResourceAccess update{.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute};
+    const RHIMemoryBarrier before_update{.from = GetUsageAccess(), .to = update};
+    command_context->Barrier({}, std::span(&before_update, 1));
+
     command_context->BeginComputePass(compute_pass);
 
     command_context->DispatchCompute(pipeline_state, {element_count, 1u, 1u}, {64u, 1u, 1u});
 
     command_context->EndComputePass(compute_pass);
 
-    const RHIMemoryBarrier barrier{.from = {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute},
-                                   .to = GetUsageAccess()};
-    command_context->Barrier({}, std::span(&barrier, 1));
+    const RHIMemoryBarrier after_update{.from = update, .to = GetUsageAccess()};
+    command_context->Barrier({}, std::span(&after_update, 1));
 }
 
 void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribute)

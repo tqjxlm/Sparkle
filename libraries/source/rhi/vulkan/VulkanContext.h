@@ -6,6 +6,8 @@
 #include "VulkanCommandContext.h"
 #include "VulkanMemory.h"
 
+#include <atomic>
+#include <optional>
 #include <queue>
 
 namespace sparkle
@@ -117,6 +119,22 @@ public:
         return timestamp_valid_bits_;
     }
 
+    // see RHIContext::GetValidationErrorCount
+    [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const
+    {
+        if (!enable_validation_)
+        {
+            return std::nullopt;
+        }
+        return validation_error_count_.load(std::memory_order_relaxed);
+    }
+
+    // see RHIContext::IsSyncValidationActive
+    [[nodiscard]] bool IsSyncValidationActive() const
+    {
+        return enable_sync_validation_;
+    }
+
     // VK_EXT_debug_utils is enabled: command buffer labels and object names are recorded
     [[nodiscard]] bool SupportsDebugUtils() const
     {
@@ -217,6 +235,9 @@ private:
     VkDebugUtilsMessengerEXT debug_messenger_;
 
     bool enable_validation_ = false;
+    bool enable_sync_validation_ = false;
+    // the messenger callback runs on whichever thread made the reported call
+    std::atomic<unsigned> validation_error_count_ = 0;
     bool supports_debug_utils_ = false;
 
     bool enable_ray_tracing_ = false;

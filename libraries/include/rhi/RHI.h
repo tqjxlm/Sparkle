@@ -21,6 +21,8 @@
 #include "rhi/RHITimer.h"
 #include "rhi/RHIUiHandler.h"
 
+#include <optional>
+
 namespace sparkle
 {
 class NativeView;
@@ -134,6 +136,18 @@ public:
     // whether the device can sample the format with linear filtering. block-compressed
     // textures fall back to a CPU decode and an uncompressed upload when unsupported
     virtual bool SupportsSampledFormat(PixelFormat format) = 0;
+
+    // errors the API validation layer has reported so far; nullopt when no validation layer is active
+    [[nodiscard]] virtual std::optional<unsigned> GetValidationErrorCount() const
+    {
+        return std::nullopt;
+    }
+
+    // the active validation layer also checks synchronization hazards between GPU accesses
+    [[nodiscard]] virtual bool IsSyncValidationActive() const
+    {
+        return false;
+    }
 
     [[nodiscard]] virtual uint32_t GetMinBufferOffsetAlignment() const
     {

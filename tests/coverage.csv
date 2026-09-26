@@ -22,6 +22,10 @@ dynamic_buffer_reuse,x,x,x,x,,x
 vulkan_image_subresources,x,,x,,,x
 pass_timestamps,,x,x,,,x
 pipeline_switch_pool,,x,x,x,,x
+sync_validation_hazard,,,,,,x
+forward_sync_validation,,,,,,x
+deferred_sync_validation,,,,,,x
+gpu_sync_validation,,,,,,x
 surface_loss_recovery,,,,,x,
 gpu_render_static,,,,,,
 cpu_render_static,,,,,,

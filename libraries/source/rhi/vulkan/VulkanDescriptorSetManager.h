@@ -76,6 +76,8 @@ public:
 private:
     void CreateDescriptorPool();
 
+    void ReturnDescriptorSet(uint32_t resource_hash, uint32_t layout_hash);
+
     VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout, const RHIShaderResourceSet &resource_set);
 
     void UpdateDescriptorSet(VulkanDescriptorSetManager::SharedDescriptorSet &shared_descriptor_set,

@@ -13,6 +13,10 @@ void VulkanDescriptorSet::Bind(VulkanCommandContext &command_context, VkPipeline
 {
     ASSERT(layout_hash_ == resource_set.GetLayoutHash());
 
+    // every draw and dispatch binds here, so bindless arrays changed since the last bind reach their sets before any
+    // work that reads them, and before a newly requested set's full write clears their dirty entries
+    context->GetDescriptorSetManager().UpdateDirtyResourceArrays();
+
     RequestOrUpdateDescriptorSet(resource_set);
 
     auto frame_index = context->GetRHI()->GetFrameIndex();
