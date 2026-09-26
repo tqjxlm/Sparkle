@@ -3,6 +3,7 @@
 #include "MetalRenderPass.h"
 
 #include "MetalImage.h"
+#include "MetalTimer.h"
 
 namespace sparkle
 {
@@ -36,9 +37,9 @@ static MTLStoreAction GetMetalStoreAction(RHIStoreOp op)
     return MTLStoreActionDontCare;
 }
 
-MetalRenderPass::MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
+MetalRenderPass::MetalRenderPass(RHIContext *rhi, const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt,
                                  const std::string &name)
-    : RHIRenderPass(attribute, rt, name), descriptor_([MTLRenderPassDescriptor renderPassDescriptor])
+    : RHIRenderPass(rhi, attribute, rt, name), descriptor_([MTLRenderPassDescriptor renderPassDescriptor])
 {
 }
 
@@ -47,6 +48,11 @@ id<MTLRenderCommandEncoder> MetalRenderPass::Begin(id<MTLCommandBuffer> command_
     const auto &info = GetActiveRenderingInfo();
 
     FillDescriptor(info);
+
+    if (auto *timer = GetActiveTimer())
+    {
+        RHICast<MetalTimer>(timer)->AttachTo(descriptor_);
+    }
 
     id<MTLRenderCommandEncoder> render_encoder = [command_buffer renderCommandEncoderWithDescriptor:descriptor_];
 

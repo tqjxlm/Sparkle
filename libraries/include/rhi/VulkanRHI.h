@@ -57,6 +57,8 @@ public:
 
     bool SupportsUnifiedImageLayouts() override;
 
+    bool SupportsPassTimestamps() override;
+
     bool HasPhysicalGpu() override;
 
     bool SupportsSampledFormat(PixelFormat format) override;

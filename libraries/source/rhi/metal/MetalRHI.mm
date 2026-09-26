@@ -106,6 +106,11 @@ bool MetalRHI::SupportsPixelLocalRead()
     return [context->GetDevice() supportsFamily:MTLGPUFamilyApple2];
 }
 
+bool MetalRHI::SupportsPassTimestamps()
+{
+    return context->SupportsPassTimestamps();
+}
+
 bool MetalRHI::SupportsSampledFormat(PixelFormat format)
 {
     switch (format)
@@ -199,7 +204,7 @@ RHIResourceRef<RHIRenderPass> MetalRHI::CreateRenderPass(const RHIRenderPass::At
                                                          const RHIResourceRef<RHIRenderTarget> &rt,
                                                          const std::string &name)
 {
-    return CreateResource<MetalRenderPass>(attribute, rt, name);
+    return CreateResource<MetalRenderPass>(this, attribute, rt, name);
 }
 
 RHIResourceRef<RHIShader> MetalRHI::CreateShader(const RHIShaderInfo *shader_info)
