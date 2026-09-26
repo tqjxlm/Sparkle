@@ -7,6 +7,7 @@
 #include "core/ConfigManager.h"
 #include "core/Logger.h"
 #include "core/math/Utilities.h"
+#include "rhi/RHI.h"
 
 #include <map>
 
@@ -42,6 +43,23 @@ TestCase::Result TestCase::Tick(AppFramework &app)
 {
     ++frame_;
     Result result = OnTick(app);
+
+    // any error an active validation layer reports fails the case, and a run asking for sync validation must have it
+    if (result != Result::Fail)
+    {
+        if (app.GetRHIConfig().enable_sync_validation && !app.GetRHI()->IsSyncValidationActive())
+        {
+            Log(Error, "Test case '{}' requested sync validation, but it is not active", GetName());
+            return Result::Fail;
+        }
+        const auto error_count = app.GetRHI()->GetValidationErrorCount().value_or(0);
+        if (error_count > accepted_validation_errors_)
+        {
+            Log(Error, "Test case '{}' got {} validation error(s)", GetName(),
+                error_count - accepted_validation_errors_);
+            return Result::Fail;
+        }
+    }
 
     if (result == Result::Pending)
     {

@@ -3,7 +3,6 @@
 #include "VulkanRenderPass.h"
 
 #include "VulkanContext.h"
-#include "VulkanDescriptorSetManager.h"
 #include "VulkanImage.h"
 
 namespace sparkle
@@ -34,8 +33,6 @@ static void TrackAttachmentTransition(std::vector<RHIImageBarrier> &barriers, RH
 
 void VulkanRenderPass::Begin(VulkanCommandContext &command_context)
 {
-    context->GetDescriptorSetManager().UpdateDirtyResourceArrays();
-
     const auto &info = GetActiveRenderingInfo();
 
     std::vector<RHIImageBarrier> barriers;

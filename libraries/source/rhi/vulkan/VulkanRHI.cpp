@@ -191,6 +191,16 @@ bool VulkanRHI::SupportsPassTimestamps()
     return context->GetTimestampValidBits() > 0;
 }
 
+std::optional<unsigned> VulkanRHI::GetValidationErrorCount() const
+{
+    return context->GetValidationErrorCount();
+}
+
+bool VulkanRHI::IsSyncValidationActive() const
+{
+    return context->IsSyncValidationActive();
+}
+
 bool VulkanRHI::HasPhysicalGpu()
 {
     VkPhysicalDeviceProperties properties;

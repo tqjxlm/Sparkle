@@ -17,7 +17,7 @@ public:
                          std::vector<VkWriteDescriptorSet> &out_set_write) const;
 
     void WriteDescriptorForDirtyResource(uint32_t slot, VkDescriptorSet descriptor_set,
-                                         std::vector<VkWriteDescriptorSet> &out_set_write);
+                                         std::vector<VkWriteDescriptorSet> &out_set_write) const;
 
     void OnResourceUpdate() override;
 };
