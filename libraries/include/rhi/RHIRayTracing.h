@@ -3,6 +3,7 @@
 #include "rhi/RHIResource.h"
 
 #include "core/math/Types.h"
+#include "rhi/RHICommandContext.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -49,14 +50,31 @@ protected:
     bool is_dirty_ = true;
 };
 
+// a top-level acceleration structure. Build and Update stage a change before the frame's passes record: they build
+// dirty BLAS, write the instances and allocate the structure. RecordBuild then records the staged build or refit.
 class RHITLAS : public RHIResource
 {
 public:
     using RHIResource::RHIResource;
 
+    // stages a build over the BLAS set with SetBLAS
     virtual void Build() = 0;
 
+    // stages a refit of the given instances, or a build when they changed structurally
     virtual void Update(const std::unordered_set<uint32_t> &instances_to_update) = 0;
+
+    [[nodiscard]] bool HasStagedBuild() const
+    {
+        return staged_ != StagedBuild::None;
+    }
+
+    void RecordBuild(RHICommandContext &command_context)
+    {
+        ASSERT(HasStagedBuild());
+        command_context.AssertOutsidePass("TLAS build");
+        RecordBuildInternal(command_context, staged_ == StagedBuild::Build);
+        staged_ = StagedBuild::None;
+    }
 
     void SetBLAS(RHIBLAS *blas, unsigned primitive_id)
     {
@@ -86,8 +104,34 @@ public:
         return std::ranges::any_of(all_blas_, [](const auto *blas) { return blas != nullptr; });
     }
 
+    // the accesses the next barrier on this resource must wait for
+    [[nodiscard]] RHITrackedAccess &GetTracked()
+    {
+        return tracked_;
+    }
+
 protected:
+    enum class StagedBuild : uint8_t
+    {
+        None,
+        Refit,
+        Build,
+    };
+
+    // a staged build covers a refit staged with it
+    void Stage(StagedBuild build)
+    {
+        staged_ = std::max(staged_, build);
+    }
+
+    // records a build when `rebuild`, otherwise a refit
+    virtual void RecordBuildInternal(RHICommandContext &command_context, bool rebuild) = 0;
+
     // the array may not be contiguous. do validate when iterating through it.
     std::vector<RHIBLAS *> all_blas_;
+
+private:
+    StagedBuild staged_ = StagedBuild::None;
+    RHITrackedAccess tracked_;
 };
 } // namespace sparkle

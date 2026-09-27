@@ -14,6 +14,7 @@ class CookHandle;
 class CookJob;
 class IBLPass;
 class Image2DCube;
+class RenderGraph;
 struct RenderConfig;
 
 class ImageBasedLighting
@@ -27,7 +28,8 @@ public:
 
     [[nodiscard]] bool NeedUpdate() const;
 
-    void CookOnTheFly(const RenderConfig &config);
+    // adds this frame's cook step of each map still cooking on the GPU
+    void AddCookPasses(RenderGraph &graph, const RenderConfig &config);
 
     [[nodiscard]] RHIResourceRef<RHIImage> GetDiffuseMap() const;
 

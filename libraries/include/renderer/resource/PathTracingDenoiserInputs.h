@@ -16,15 +16,15 @@ public:
     PathTracingDenoiserInputs(RHIContext *rhi, Vector2UInt size);
 
     void BindDummies();
-    bool EnsureAllocated(PixelFormat radiance_format);
-    void BeginWrite();
+    void EnsureAllocated(PixelFormat radiance_format);
 
     [[nodiscard]] bool IsAllocated() const
     {
         return allocated_;
     }
 
-    [[nodiscard]] DenoiserInputs GetInputs(RHIImage *accumulated_radiance) const;
+    // imports the allocated textures into `graph`
+    [[nodiscard]] DenoiserInputs Import(RenderGraph &graph, RGTexture accumulated_radiance) const;
 
     [[nodiscard]] const RHIResourceRef<RHIImage> &GetNoisyRadianceHitDistance() const
     {

@@ -247,7 +247,7 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     return is_suitable;
 }
 
-VulkanContext::VulkanContext(VulkanRHI *in_rhi) : frame_command_context_(in_rhi), rhi_(in_rhi)
+VulkanContext::VulkanContext(VulkanRHI *in_rhi) : rhi_(in_rhi)
 {
     if (!rhi_->IsHeadless())
     {
@@ -302,7 +302,7 @@ bool VulkanContext::Init()
     SetupMemoryAllocator();
     CreateCommandPool();
     descriptor_set_manager_->Init();
-    rhi_->CreateBackBufferRenderTarget();
+    rhi_->CreateBackBuffer();
 
     return true;
 }

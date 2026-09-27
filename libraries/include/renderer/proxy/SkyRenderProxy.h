@@ -25,8 +25,6 @@ public:
 
 #pragma region RenderProxy interface
 
-    void Update(RHIContext *rhi, const CameraRenderProxy &camera, const RenderConfig &config) override;
-
     void InitRenderResources(RHIContext *rhi, const RenderConfig &config) override;
 
 #pragma endregion

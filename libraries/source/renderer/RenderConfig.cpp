@@ -44,6 +44,9 @@ static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear al
 static ConfigValue<bool> config_manual_accumulation(
     "manual_accumulation", "debug: accumulate samples only while the accumulate key (space) or panel button is held",
     "renderer", false, true);
+static ConfigValue<bool> config_render_graph_cull("render_graph_cull",
+                                                  "cull render graph passes whose outputs no live pass reads",
+                                                  "renderer", true, true);
 
 void RenderConfig::Init()
 {
@@ -67,6 +70,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
     ConfigCollectionHelper::RegisterConfig(this, config_manual_accumulation, manual_accumulation);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_cull, render_graph_cull);
 
     AddUiGenerator([this] {
         if (!manual_accumulation)

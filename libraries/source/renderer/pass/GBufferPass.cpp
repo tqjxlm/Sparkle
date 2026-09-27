@@ -48,25 +48,17 @@ public:
     END_SHADER_RESOURCE_TABLE
 };
 
-GBufferPass::GBufferPass(RHIContext *ctx, SceneRenderProxy *scene_proxy,
-                         RHIRenderTarget::ColorImageArray gbuffer_images, const RHIResourceRef<RHIImage> &scene_depth)
-    : MeshPass(ctx, scene_proxy), scene_depth_(scene_depth), gbuffer_images_(std::move(gbuffer_images))
+GBufferPass::GBufferPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PixelFormat depth_format)
+    : MeshPass(ctx, scene_proxy)
 {
+    signature_.color_formats[0] = PackedDesc.format;
+    signature_.depth_format = depth_format;
 }
 
 void GBufferPass::InitRenderResources(const RenderConfig &)
 {
     vertex_shader_ = rhi_->CreateShader<StandardVertexShader>();
     pixel_shader_ = rhi_->CreateShader<GBufferPassPixelShader>();
-
-    render_target_ = rhi_->CreateRenderTarget({}, gbuffer_images_, scene_depth_, "GBufferPassRT");
-
-    RHIRenderPass::Attribute pass_attribute;
-    pass_attribute.color_load_op = RHIRenderPass::LoadOp::Clear;
-    pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Clear;
-    pass_attribute.depth_store_op = RHIRenderPass::StoreOp::Store;
-
-    pass_ = rhi_->CreateRenderPass(pass_attribute, render_target_, "GBufferPass");
 }
 
 void GBufferPass::SetupVertices(const RHIResourceRef<RHIPipelineState> &pso, MeshRenderProxy *mesh_proxy)
@@ -121,7 +113,7 @@ void GBufferPass::HandleNewPrimitive(uint32_t primitive_id)
 
     auto &pso = pipeline_states_[primitive_id];
 
-    pso->SetRenderPass(pass_);
+    pso->SetAttachmentSignature(signature_);
 
     SetupVertexShader(pso);
     SetupPixelShader(pso);
@@ -136,14 +128,14 @@ void GBufferPass::HandleUpdatedPrimitive([[maybe_unused]] uint32_t primitive_id)
 {
 }
 
-void GBufferPass::Render()
+RGTexture GBufferPass::AddTo(RenderGraph &graph, RGTexture scene_depth) const
 {
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginRenderPass(pass_);
-
-    DrawPrimitives(command_context);
-
-    command_context->EndRenderPass();
+    const auto gbuffer = graph.CreateTexture("GBufferPacked", PackedDesc);
+    graph.AddRasterPass("GBuffer", [this, gbuffer, scene_depth](RGBuilder &builder) {
+        builder.ColorWrite(gbuffer, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.DepthWrite(scene_depth, 1.f);
+        return [this](RGRasterContext &context) { DrawPrimitives(context); };
+    });
+    return gbuffer;
 }
 } // namespace sparkle

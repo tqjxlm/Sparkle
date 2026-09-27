@@ -1,7 +1,7 @@
 #include "renderer/pass/IBLPass.h"
 
 #include "io/TextureCompression.h"
-#include "renderer/pass/ClearTexturePass.h" // IWYU pragma: keep
+#include "renderer/graph/RenderGraph.h"
 #include "rhi/RHI.h"
 
 #include <cstring>
@@ -52,6 +52,29 @@ void IBLPass::Finalize()
     artifact_ready_callback_(TextureCompression::WrapFp16Payload(
         reinterpret_cast<const uint8_t *>(fp16_bytes.data()), fp16_bytes.size(), ibl_image_->GetWidth(),
         ibl_image_->GetHeight(), ibl_image_->GetAttributes().mip_levels));
+}
+
+RGTexture IBLPass::ImportCookingMap(RenderGraph &graph, const std::string &name)
+{
+    const auto map = graph.Import(name, ibl_image_);
+    if (cleared_)
+    {
+        return map;
+    }
+
+    cleared_ = true;
+    for (uint8_t mip = 0; mip < ibl_image_->GetAttributes().mip_levels; mip++)
+    {
+        for (auto layer = 0u; layer < ibl_image_->GetArrayLayerCount(); layer++)
+        {
+            graph.AddRasterPass("Clear" + name,
+                                [subresource = map.Subresource(mip, static_cast<uint8_t>(layer))](RGBuilder &builder) {
+                                    builder.ColorWrite(subresource, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                                    return [](RGRasterContext &) {};
+                                });
+        }
+    }
+    return map;
 }
 
 void IBLPass::PrepareForCooking()

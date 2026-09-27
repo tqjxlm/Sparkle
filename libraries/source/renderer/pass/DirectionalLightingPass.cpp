@@ -1,11 +1,12 @@
 #include "renderer/pass/DirectionalLightingPass.h"
 
 #include "renderer/RenderConfig.h"
+#include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/LightingInputs.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
-#include "renderer/resource/ImageBasedLighting.h"
 #include "renderer/resource/PbrResource.h"
 #include "rhi/RHI.h"
 
@@ -49,35 +50,21 @@ class DirectionalLightingPassPixelShader : public RHIShaderInfo
     };
 };
 
-DirectionalLightingPass::DirectionalLightingPass(RHIContext *ctx, const RHIResourceRef<RHIRenderTarget> &target,
-                                                 PassResources resources)
-    : ScreenQuadPass(ctx, nullptr, target), resources_(std::move(resources))
-{
-}
-
 void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)
 {
     ScreenQuadPass::UpdateFrameData(config, scene);
-
-    bool use_diffuse_ibl = (resources_.ibl != nullptr) && config.use_diffuse_ibl;
-    bool use_specular_ibl = (resources_.ibl != nullptr) && config.use_specular_ibl;
-
-    if (ibl_dirty_)
-    {
-        ibl_dirty_ = false;
-        BindPixelShaderResources();
-    }
 
     auto *sky_light = scene->GetSkyLight();
     auto *camera = scene->GetCamera();
     auto *dir_light = scene->GetDirectionalLight();
 
-    // scene proxy recreation (e.g. on scene load) replaces the camera proxy and its view buffer
-    if (resources_.camera != camera)
-    {
-        resources_.camera = camera;
-        BindPixelShaderResources();
-    }
+    const bool has_ibl = sky_light != nullptr && sky_light->GetImageBasedLighting() != nullptr;
+    const bool use_diffuse_ibl = has_ibl && config.use_diffuse_ibl;
+    const bool use_specular_ibl = has_ibl && config.use_specular_ibl;
+
+    // scene proxy recreation (e.g. on scene load) replaces the camera and its view buffer
+    auto *ps_resources = pipeline_state_->GetShaderResource<DirectionalLightingPassPixelShader>();
+    ps_resources->view().BindResource(camera->GetViewBuffer());
 
     const PbrConfig pbr_config{.mode = static_cast<uint32_t>(config.debug_mode),
                                .use_ibl_diffuse = static_cast<uint32_t>(use_diffuse_ibl ? 1 : 0),
@@ -100,125 +87,26 @@ void DirectionalLightingPass::SetupPixelShader()
 
 void DirectionalLightingPass::BindPixelShaderResources()
 {
-    auto *ps_resources = pipeline_state_->GetShaderResource<DirectionalLightingPassPixelShader>();
-
-    auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-        .usages = RHIImage::ImageUsage::Texture,
-    });
-
-    auto dummy_texture_cube = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-        .usages = RHIImage::ImageUsage::Texture,
-        .type = RHIImage::ImageType::Image2DCube,
-    });
-
-    if (resources_.shadow_map)
-    {
-        ps_resources->shadow_map().BindResource(resources_.shadow_map->GetDefaultView(rhi_));
-        ps_resources->shadow_map_sampler().BindResource(resources_.shadow_map->GetSampler());
-    }
-    else
-    {
-        ps_resources->shadow_map().BindResource(dummy_texture_2d->GetDefaultView(rhi_));
-        ps_resources->shadow_map_sampler().BindResource(dummy_texture_2d->GetSampler());
-    }
-
     ps_ub_ = rhi_->CreateBuffer({.size = sizeof(DirectionalLightingPassPixelShader::UniformBufferData),
                                  .usages = RHIBuffer::BufferUsage::UniformBuffer,
                                  .mem_properties = RHIMemoryProperty::None,
                                  .is_dynamic = true},
                                 "DirectionalLightingPassUniformBuffer");
 
-    ps_resources->view().BindResource(resources_.camera->GetViewBuffer());
-
-    ps_resources->ubo().BindResource(ps_ub_);
-
-    auto *ibl = resources_.ibl;
-
-    auto ibl_brdf = ibl ? ibl->GetBRDFMap() : dummy_texture_2d;
-    auto ibl_diffuse = (ibl && ibl->GetDiffuseMap()) ? ibl->GetDiffuseMap() : dummy_texture_cube;
-    auto ibl_specualr = (ibl && ibl->GetSpecularMap()) ? ibl->GetSpecularMap() : dummy_texture_cube;
-
-    ps_resources->ibl_brdf().BindResource(ibl_brdf->GetDefaultView(rhi_));
-    ps_resources->ibl_brdf_sampler().BindResource(ibl_brdf->GetSampler());
-
-    ps_resources->ibl_diffuse().BindResource(ibl_diffuse->GetDefaultView(rhi_));
-    ps_resources->ibl_diffuse_sampler().BindResource(ibl_diffuse->GetSampler());
-
-    ps_resources->ibl_specular().BindResource(ibl_specualr->GetDefaultView(rhi_));
-    ps_resources->ibl_specular_sampler().BindResource(ibl_specualr->GetSampler());
-
-    ps_resources->gbuffer_texture().BindResource(resources_.gbuffer.packed_texture->GetDefaultView(rhi_));
-
-    ps_resources->depth_texture().BindResource(resources_.depth_texture->GetDefaultView(rhi_));
-    ps_resources->depth_sampler().BindResource(resources_.depth_texture->GetSampler());
+    pipeline_state_->GetShaderResource<DirectionalLightingPassPixelShader>()->ubo().BindResource(ps_ub_);
 }
 
-void DirectionalLightingPass::SetDirectionalShadow(const RHIResourceRef<RHIImage> &shadow_map)
+void DirectionalLightingPass::AddTo(RenderGraph &graph, const LightingInputs &lighting, RGTexture gbuffer,
+                                    RGTexture scene_depth, RGTexture scene_color) const
 {
-    if (resources_.shadow_map == shadow_map)
-    {
-        return;
-    }
-
-    resources_.shadow_map = shadow_map;
-
-    BindPixelShaderResources();
-}
-
-void DirectionalLightingPass::SetIBL(ImageBasedLighting *ibl)
-{
-    if (resources_.ibl == ibl)
-    {
-        return;
-    }
-
-    resources_.ibl = ibl;
-
-    if (ibl->NeedUpdate())
-    {
-        ibl_changed_subscription_ = ibl->OnRenderResourceChange().Subscribe([this]() { ibl_dirty_ = true; });
-    }
-    else
-    {
-        BindPixelShaderResources();
-    }
-}
-
-void DirectionalLightingPass::SetSkyLight(SkyRenderProxy *sky_light)
-{
-    if (resources_.sky_light == sky_light)
-    {
-        return;
-    }
-
-    resources_.sky_light = sky_light;
-}
-
-void DirectionalLightingPass::Render()
-{
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginRenderPass(pass_);
-
-    command_context->DrawMesh(pipeline_state_, draw_args_);
-
-    command_context->EndRenderPass();
-}
-
-void DirectionalLightingPass::SetupRenderPass()
-{
-    RHIRenderPass::Attribute pass_attribute;
-
-    pass_ = rhi_->CreateRenderPass(pass_attribute, target_, "DirectionalLightingPass");
+    graph.AddRasterPass(name_, [this, lighting, gbuffer, scene_depth, scene_color](RGBuilder &builder) {
+        using Table = DirectionalLightingPassPixelShader::ResourceTable;
+        builder.Sampled(gbuffer, &Table::gbuffer_texture);
+        builder.Sampled(scene_depth, &Table::depth_texture, &Table::depth_sampler);
+        lighting.Sample<Table>(builder, rhi_);
+        builder.ColorWrite(scene_color, 0);
+        builder.FullyOverwrites();
+        return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
+    });
 }
 } // namespace sparkle

@@ -9,7 +9,7 @@
 namespace sparkle
 {
 OneShotCommandBufferScope::OneShotCommandBufferScope(bool should_block_next_frame)
-    : command_context_(context->GetRHI()), should_block_next_frame_(should_block_next_frame)
+    : should_block_next_frame_(should_block_next_frame)
 {
     VkCommandBufferAllocateInfo alloc_info{};
 

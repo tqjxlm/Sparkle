@@ -72,8 +72,17 @@ public:
     void WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_set, VkDescriptorType descriptor_type,
                          std::vector<VkWriteDescriptorSet> &out_set_write) const;
 
+protected:
+    void RecordBuildInternal(RHICommandContext &command_context, bool rebuild) override;
+
 private:
-    void BuildInternal(bool rebuild);
+    // the build info over the instance buffer. `geometry` must outlive it.
+    [[nodiscard]] VkAccelerationStructureBuildGeometryInfoKHR GetBuildInfo(VkAccelerationStructureGeometryKHR &geometry,
+                                                                           bool rebuild) const;
+
+    // a new structure and scratch memory sized for the instances. the old structure is destroyed once the frames that
+    // may use it complete.
+    void Allocate();
 
     RHIResourceRef<RHIBuffer> buffer_;
     RHIResourceRef<RHIBuffer> instance_buffer_;

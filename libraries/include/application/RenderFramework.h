@@ -15,11 +15,13 @@
 namespace sparkle
 {
 class Renderer;
+class RGTexturePool;
 class NativeView;
 class Scene;
 class UiManager;
 struct ThreadTaskQueue;
 
+// a named output the render thread writes to the screenshots directory: a screenshot or a render graph dump
 class ScreenshotRequest
 {
 public:
@@ -87,12 +89,18 @@ public:
     // Called from main thread. Returns a request handle the caller can poll for completion.
     [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
 
+    // Called from main thread. The renderer writes the next render graph it executes to screenshots/<name>.json.
+    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestGraphDump(const std::string &name);
+
     // Thread-safe. Returns true when the renderer has accumulated enough samples for a screenshot.
     [[nodiscard]] bool IsReadyForAutoScreenshot() const;
 
     // Thread-safe. Scene assets loaded (but not necessarily converged) — for tests that need to act
     // before the accumulator caps (e.g. toggling a mode mid-convergence).
     [[nodiscard]] bool IsSceneFullyLoaded() const;
+
+    // render thread only. the images behind render graph transients, kept across renderer recreation
+    [[nodiscard]] const RGTexturePool &GetGraphTexturePool() const;
 
 private:
     // called by main thread. converts the ui-space position into render-target space and hands
@@ -119,6 +127,7 @@ private:
     std::queue<std::vector<std::function<void()>>> tasks_per_frame_;
     std::shared_ptr<ThreadTaskQueue> task_queue_;
 
+    std::unique_ptr<RGTexturePool> graph_texture_pool_;
     std::unique_ptr<Renderer> renderer_;
 
     NativeView *native_view_ = nullptr;

@@ -25,9 +25,11 @@ public:
 
     void UpdateFrameData(const DenoiserFrameData &frame) override;
 
-    bool Encode(const DenoiserInputs &inputs) override;
+    [[nodiscard]] RGTexture AddTo(RenderGraph &graph, const DenoiserInputs &inputs) override;
 
 private:
+    void Encode(const RGPassContext &pass_context, const DenoiserInputs &inputs, float handoff_weight);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

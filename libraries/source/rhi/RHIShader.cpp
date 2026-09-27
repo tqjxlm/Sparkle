@@ -116,7 +116,9 @@ void RHIShaderResourceBinding::BindResource(RHIResource *resource, bool rebind)
              resource->GetId(), resource->GetName());
 #endif
 
-    if (resource_ != resource || rebind)
+    // ids, unlike addresses, are never reused, so a new resource at a freed one's address still dirties the set
+    const auto resource_id = resource ? std::optional(resource->GetId()) : std::nullopt;
+    if (resource_id_ != resource_id || rebind)
     {
         if (!parent_set_)
         {
@@ -130,5 +132,6 @@ void RHIShaderResourceBinding::BindResource(RHIResource *resource, bool rebind)
     }
 
     resource_ = resource;
+    resource_id_ = resource_id;
 }
 } // namespace sparkle
