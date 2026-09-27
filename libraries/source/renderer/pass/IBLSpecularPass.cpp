@@ -1,6 +1,6 @@
 #include "renderer/pass/IBLSpecularPass.h"
 
-#include "renderer/pass/ClearTexturePass.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
@@ -63,24 +63,11 @@ void IBLSpecularPass::InitRenderResources(const RenderConfig &)
     compute_pass_ = rhi_->CreateComputePass("IBLSpecularComputePass", false);
 }
 
-void IBLSpecularPass::CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch)
+void IBLSpecularPass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)
 {
     ASSERT(!IsReady());
 
-    if (sample_count_ == 0 && current_caching_level_ == 0)
-    {
-        for (uint8_t level = 0u; level < IblSettings::SpecularMipLevelCount; level++)
-        {
-            for (uint8_t face = 0u; face < 6; face++)
-            {
-                clear_target_ = rhi_->CreateRenderTarget({.mip_level = level, .array_layer = face}, ibl_image_, nullptr,
-                                                         "IBLClearPassRenderTarget");
-                clear_pass_ = PipelinePass::Create<ClearTexturePass>(config, rhi_, Vector4(0, 0, 0, 1),
-                                                                     RHIImageLayout::StorageWrite, clear_target_);
-                clear_pass_->Render();
-            }
-        }
-    }
+    const auto map = ImportCookingMap(graph, "IblSpecularCook");
 
     const auto remaining_samples = target_sample_count_ - sample_count_;
     const uint32_t batch_size = std::min(std::max(samples_per_dispatch, 1u), remaining_samples);
@@ -96,7 +83,12 @@ void IBLSpecularPass::CookOnTheFly(const RenderConfig &config, unsigned samples_
     };
     cs_ub_->Upload(rhi_, &ubo);
 
-    Render();
+    const auto level = current_caching_level_;
+    graph.AddComputePass("CookIblSpecular", compute_pass_, [this, map, level](RGBuilder &builder) {
+        builder.StorageReadWrite(map.Mip(level), &IBLSpecularMapComputeShader::ResourceTable::out_cube_map);
+        return [this, threads = Vector3UInt(ibl_image_->GetWidth(level), ibl_image_->GetHeight(level), 6u)](
+                   RGComputeContext &context) { context.DispatchCompute(pipeline_state_, threads, {16u, 16u, 1u}); };
+    });
 
     sample_count_ += batch_size;
 
@@ -167,28 +159,5 @@ void IBLSpecularPass::StartCacheLevel(uint8_t level)
 {
     current_caching_level_ = level;
     sample_count_ = 0;
-
-    auto *shader_resource = pipeline_state_->GetShaderResource<IBLSpecularMapComputeShader>();
-
-    shader_resource->out_cube_map().BindResource(
-        ibl_image_->GetView(rhi_, RHIImageView::Attribute{
-                                      .type = RHIImageView::ImageViewType::Image2DArray,
-                                      .base_mip_level = level,
-                                      .array_layer_count = 6,
-                                  }));
-}
-
-void IBLSpecularPass::Render()
-{
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginComputePass(compute_pass_);
-
-    command_context->DispatchCompute(
-        pipeline_state_,
-        {ibl_image_->GetWidth(current_caching_level_), ibl_image_->GetHeight(current_caching_level_), 6u},
-        {16u, 16u, 1u});
-
-    command_context->EndComputePass(compute_pass_);
 }
 } // namespace sparkle

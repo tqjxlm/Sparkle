@@ -2,7 +2,7 @@
 
 #include "rhi/RHIResource.h"
 
-#include "rhi/RHIRenderPass.h"
+#include "rhi/RHIRenderingInfo.h"
 
 namespace sparkle
 {
@@ -17,14 +17,16 @@ public:
 
     ~RHIUiHandler() override = 0;
 
-    void Setup(const RHIResourceRef<RHIRenderPass> &render_pass)
+    // prepares drawing into attachments of `signature`
+    void Setup(const RHIAttachmentSignature &signature)
     {
-        render_pass_ = render_pass;
+        signature_ = signature;
 
         Init();
     }
 
-    virtual void BeginFrame() = 0;
+    // starts a frame drawn into the open rendering of `info`, whose extent is the display size
+    virtual void BeginFrame(const RHIRenderingInfo &info) = 0;
 
     virtual void Render(RHICommandContext *command_context) = 0;
 
@@ -33,6 +35,6 @@ public:
 protected:
     bool is_valid_ = false;
 
-    RHIResourceRef<RHIRenderPass> render_pass_;
+    RHIAttachmentSignature signature_;
 };
 } // namespace sparkle

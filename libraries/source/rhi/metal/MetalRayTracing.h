@@ -41,8 +41,15 @@ public:
 
     void Update(const std::unordered_set<uint32_t> &instances_to_update) override;
 
+protected:
+    void RecordBuildInternal(RHICommandContext &command_context, bool rebuild) override;
+
 private:
+    // describes the instances of blas_array_
+    void UpdateDescriptor();
+
     RHIResourceRef<RHIBuffer> blas_descriptor_buffer_;
+    MTLInstanceAccelerationStructureDescriptor *tlas_descriptor_;
     id<MTLAccelerationStructure> tlas_;
     NSMutableArray *blas_array_;
     id<MTLBuffer> scratch_buffer_;

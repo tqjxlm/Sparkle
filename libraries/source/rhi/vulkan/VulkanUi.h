@@ -15,7 +15,7 @@ public:
 
     ~VulkanUiHandler() override;
 
-    void BeginFrame() override;
+    void BeginFrame(const RHIRenderingInfo &info) override;
 
     void Render(RHICommandContext *command_context) override;
 

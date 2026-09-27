@@ -4,12 +4,8 @@
 
 #include "VulkanImage.h"
 
-#include <unordered_set>
-
 namespace sparkle
 {
-class VulkanRenderTarget;
-
 struct QueueFamilyIndices
 {
     uint32_t graphicsFamily = 0xffffffff;
@@ -113,16 +109,6 @@ public:
 
     [[nodiscard]] VkResult AcquireImage(VkSemaphore semaphore);
 
-    void RegisterRenderTarget(VulkanRenderTarget *rt)
-    {
-        regitsered_rt_.insert(rt);
-    }
-
-    void UnRegisterRenderTarget(VulkanRenderTarget *rt)
-    {
-        regitsered_rt_.erase(rt);
-    }
-
     [[nodiscard]] uint32_t GetCurrentImageIndex() const
     {
         return swap_chain_index_;
@@ -162,8 +148,6 @@ private:
     VkSwapchainKHR swap_chain_;
     uint32_t swap_chain_index_ = 0;
     std::vector<RHIResourceRef<VulkanImage>> swap_chain_images_;
-
-    std::unordered_set<VulkanRenderTarget *> regitsered_rt_;
 
     VkExtent2D image_extent_;
     VkFormat color_format_;

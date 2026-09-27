@@ -211,13 +211,9 @@ void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> imag
     vkCmdPipelineBarrier2(command_buffer_, &dependency_info);
 }
 
-void VulkanCommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
+void VulkanCommandContext::DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state,
+                                            const DrawArgs &draw_args)
 {
-    if (!pipeline_state)
-    {
-        return;
-    }
-
     const auto &rhi_pipeline = RHICast<VulkanForwardPipelineState>(pipeline_state);
 
     BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, rhi_pipeline->GetPipeline(GetAttachmentSignature()));
@@ -229,8 +225,8 @@ void VulkanCommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipe
                      static_cast<int>(draw_args.first_vertex), draw_args.first_instance);
 }
 
-void VulkanCommandContext::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                                           Vector3UInt thread_per_group)
+void VulkanCommandContext::DispatchComputeInternal(const RHIResourceRef<RHIPipelineState> &pipeline,
+                                                   Vector3UInt total_threads, Vector3UInt thread_per_group)
 {
     auto *compute_pipeline = RHICast<VulkanComputePipelineState>(pipeline);
 

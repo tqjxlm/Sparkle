@@ -2,13 +2,14 @@
 
 #include "../shader/MeshPassVertexShader.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/LightingInputs.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/MeshRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
-#include "renderer/resource/ImageBasedLighting.h"
 #include "renderer/resource/PbrResource.h"
 #include "rhi/RHI.h"
 
@@ -69,11 +70,12 @@ public:
     };
 };
 
-ForwardMeshPass::ForwardMeshPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PassResources resources)
-    : MeshPass(ctx, scene_proxy), resources_(std::move(resources))
+ForwardMeshPass::ForwardMeshPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PixelFormat color_format,
+                                 PixelFormat depth_format)
+    : MeshPass(ctx, scene_proxy)
 {
-    ASSERT(resources_.scene_color);
-    ASSERT(resources_.scene_depth);
+    signature_.color_formats[0] = color_format;
+    signature_.depth_format = depth_format;
 }
 
 void ForwardMeshPass::InitRenderResources(const RenderConfig &)
@@ -87,17 +89,6 @@ void ForwardMeshPass::InitRenderResources(const RenderConfig &)
                                           .mem_properties = RHIMemoryProperty::None,
                                           .is_dynamic = true},
                                          "ForwardRendererUniformBuffer");
-
-    render_target_ =
-        rhi_->CreateRenderTarget({}, resources_.scene_color, resources_.scene_depth, "BasePassRenderTarget");
-
-    RHIRenderPass::Attribute pass_attribute;
-    pass_attribute.color_load_op = RHIRenderPass::LoadOp::Clear;
-    pass_attribute.depth_store_op = RHIRenderPass::StoreOp::Store;
-
-    pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Clear;
-
-    base_pass_ = rhi_->CreateRenderPass(pass_attribute, render_target_, "BasePass");
 }
 
 void ForwardMeshPass::SetupVertices(const RHIResourceRef<RHIPipelineState> &pso, MeshRenderProxy *mesh_proxy)
@@ -130,18 +121,13 @@ void ForwardMeshPass::UpdateFrameData(const RenderConfig &config, SceneRenderPro
 {
     MeshPass::UpdateFrameData(config, scene);
 
-    bool use_diffuse_ibl = (ibl_ != nullptr) && config.use_diffuse_ibl;
-    bool use_specular_ibl = (ibl_ != nullptr) && config.use_specular_ibl;
-
-    if (ibl_dirty_)
-    {
-        ibl_dirty_ = false;
-        RebindAllShaderResources();
-    }
-
     auto *sky_light = scene->GetSkyLight();
     auto *camera = scene->GetCamera();
     auto *directional_light = scene->GetDirectionalLight();
+
+    const bool has_ibl = sky_light != nullptr && sky_light->GetImageBasedLighting() != nullptr;
+    const bool use_diffuse_ibl = has_ibl && config.use_diffuse_ibl;
+    const bool use_specular_ibl = has_ibl && config.use_specular_ibl;
 
     const PbrConfig pbr_config{.mode = static_cast<uint32_t>(config.debug_mode),
                                .use_ibl_diffuse = static_cast<uint32_t>(use_diffuse_ibl ? 1 : 0),
@@ -182,48 +168,6 @@ void ForwardMeshPass::BindPassResources(const RHIResourceRef<RHIPipelineState> &
 
     ps_resources->view().BindResource(view_buffer);
     ps_resources->ubo().BindResource(uniform_buffer_);
-
-    auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-        .usages = RHIImage::ImageUsage::Texture,
-    });
-
-    auto dummy_texture_cube = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-        .usages = RHIImage::ImageUsage::Texture,
-        .type = RHIImage::ImageType::Image2DCube,
-    });
-
-    if (shadow_map_)
-    {
-        ps_resources->shadow_map().BindResource(shadow_map_->GetDefaultView(rhi_));
-        ps_resources->shadow_map_sampler().BindResource(shadow_map_->GetSampler());
-    }
-    else
-    {
-        ps_resources->shadow_map().BindResource(dummy_texture_2d->GetDefaultView(rhi_));
-        ps_resources->shadow_map_sampler().BindResource(dummy_texture_2d->GetSampler());
-    }
-
-    auto ibl_brdf = (ibl_ && ibl_->GetBRDFMap()) ? ibl_->GetBRDFMap() : dummy_texture_2d;
-    ps_resources->ibl_brdf().BindResource(ibl_brdf->GetDefaultView(rhi_));
-    ps_resources->ibl_brdf_sampler().BindResource(ibl_brdf->GetSampler());
-
-    auto ibl_diffuse = (ibl_ && ibl_->GetDiffuseMap()) ? ibl_->GetDiffuseMap() : dummy_texture_cube;
-    ps_resources->ibl_diffuse().BindResource(ibl_diffuse->GetDefaultView(rhi_));
-    ps_resources->ibl_diffuse_sampler().BindResource(ibl_diffuse->GetSampler());
-
-    auto ibl_specualr = (ibl_ && ibl_->GetSpecularMap()) ? ibl_->GetSpecularMap() : dummy_texture_cube;
-    ps_resources->ibl_specular().BindResource(ibl_specualr->GetDefaultView(rhi_));
-    ps_resources->ibl_specular_sampler().BindResource(ibl_specualr->GetSampler());
 }
 
 void ForwardMeshPass::HandleNewPrimitive(uint32_t primitive_id)
@@ -242,7 +186,7 @@ void ForwardMeshPass::HandleNewPrimitive(uint32_t primitive_id)
 
     auto &pso = pipeline_states_[primitive_id];
 
-    pso->SetRenderPass(base_pass_);
+    pso->SetAttachmentSignature(signature_);
 
     SetupVertexShader(pso);
     SetupPixelShader(pso);
@@ -259,56 +203,14 @@ void ForwardMeshPass::HandleUpdatedPrimitive([[maybe_unused]] uint32_t primitive
 {
 }
 
-void ForwardMeshPass::SetDirectionalShadow(const RHIResourceRef<RHIImage> &shadow_map)
+void ForwardMeshPass::AddTo(RenderGraph &graph, const LightingInputs &lighting, RGTexture scene_color,
+                            RGTexture scene_depth) const
 {
-    if (shadow_map_ == shadow_map)
-    {
-        return;
-    }
-
-    shadow_map_ = shadow_map;
-
-    RebindAllShaderResources();
-}
-
-void ForwardMeshPass::SetIBL(ImageBasedLighting *ibl)
-{
-    if (ibl_ == ibl)
-    {
-        return;
-    }
-
-    ibl_ = ibl;
-
-    if (ibl_ && ibl_->NeedUpdate())
-    {
-        ibl_changed_subscription_ = ibl_->OnRenderResourceChange().Subscribe([this]() { ibl_dirty_ = true; });
-    }
-    else
-    {
-        RebindAllShaderResources();
-    }
-}
-
-void ForwardMeshPass::RebindAllShaderResources()
-{
-    for (auto &pso : pipeline_states_)
-    {
-        if (pso != nullptr)
-        {
-            BindPassResources(pso);
-        }
-    }
-}
-
-void ForwardMeshPass::Render()
-{
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginRenderPass(base_pass_);
-
-    DrawPrimitives(command_context);
-
-    command_context->EndRenderPass();
+    graph.AddRasterPass("BasePass", [this, lighting, scene_color, scene_depth](RGBuilder &builder) {
+        lighting.Sample<ForwardPixelShader::ResourceTable>(builder, rhi_);
+        builder.ColorWrite(scene_color, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.DepthWrite(scene_depth, 1.f);
+        return [this](RGRasterContext &context) { DrawPrimitives(context); };
+    });
 }
 } // namespace sparkle

@@ -9,9 +9,9 @@
 
 namespace sparkle
 {
-// records a timed render pass twice and an untimed one once per frame until the timed pass's frame slot comes back
-// with a GPU time, which may be 0 on devices that cannot resolve it. a device without pass timestamps must report no
-// time at all.
+// records a clear timed by one pass twice and one timed by an untimed pass once per frame until the timed pass's frame
+// slot comes back with a GPU time, which may be 0 on devices that cannot resolve it. a device without pass timestamps
+// must report no time at all.
 class PassTimestampTest : public TestCase
 {
 public:
@@ -60,30 +60,33 @@ private:
         image_attribute.width = 4;
         image_attribute.height = 4;
         image_attribute.usages = RHIImage::ImageUsage::ColorAttachment;
-        auto image = rhi->CreateImage(image_attribute, "PassTimestampTestImage");
-        auto target = rhi->CreateRenderTarget({}, image, nullptr, "PassTimestampTestTarget");
+        image_ = rhi->CreateImage(image_attribute, "PassTimestampTestImage");
 
-        RHIRenderPass::Attribute pass_attribute;
-        pass_attribute.color_load_op = RHIRenderPass::LoadOp::Clear;
-        untimed_pass_ = rhi->CreateRenderPass(pass_attribute, target, "PassTimestampTestUntimedPass");
+        untimed_pass_ = rhi->CreateRenderPass("PassTimestampTestUntimedPass", false);
+        timed_pass_ = rhi->CreateRenderPass("PassTimestampTestTimedPass", true);
 
-        pass_attribute.need_timestamp = true;
-        timed_pass_ = rhi->CreateRenderPass(pass_attribute, target, "PassTimestampTestTimedPass");
-
-        target_ = target;
         supported_ = rhi->SupportsPassTimestamps();
         Log(Info, "{}: pass timestamps supported: {}", GetName(), supported_);
     }
 
     void RecordAndCheck(RHIContext *rhi)
     {
+        RHIRenderingInfo info;
+        info.color_attachments[0] = {.image = image_.get(), .load_op = RHILoadOp::Clear};
+        info.width = image_->GetWidth();
+        info.height = image_->GetHeight();
+
         rhi->BeginCommandBuffer();
         auto *command_context = rhi->GetCommandContext();
         // the second run of the timed pass must not read the timer its first run just began
         for (const auto &pass : {timed_pass_, timed_pass_, untimed_pass_})
         {
-            command_context->BeginRenderPass(pass);
-            command_context->EndRenderPass();
+            const auto barriers = image_->TrackTransition({.target_layout = RHIImageLayout::ColorOutput,
+                                                           .after_stage = RHIPipelineStage::ColorOutput,
+                                                           .before_stage = RHIPipelineStage::Bottom,
+                                                           .discard = true});
+            command_context->BeginRendering(info, pass->GetName(), pass.get(), barriers);
+            command_context->EndRendering();
         }
         rhi->SubmitCommandBuffer();
 
@@ -113,7 +116,7 @@ private:
     {
         timed_pass_ = nullptr;
         untimed_pass_ = nullptr;
-        target_ = nullptr;
+        image_ = nullptr;
         done_.store(true, std::memory_order_release);
     }
 
@@ -128,9 +131,9 @@ private:
         failed_.store(true, std::memory_order_release);
     }
 
-    RHIResourceRef<RHIRenderTarget> target_;
-    RHIResourceRef<RHIRenderPass> timed_pass_;
-    RHIResourceRef<RHIRenderPass> untimed_pass_;
+    RHIResourceRef<RHIImage> image_;
+    RHIResourceRef<RHIPass> timed_pass_;
+    RHIResourceRef<RHIPass> untimed_pass_;
     bool supported_ = false;
     unsigned recordings_ = 0;
     std::atomic<bool> task_pending_{false};

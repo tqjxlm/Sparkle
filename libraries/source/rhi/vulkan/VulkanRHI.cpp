@@ -9,8 +9,6 @@
 #include "VulkanNrdBackend.h"
 #include "VulkanPipelineState.h"
 #include "VulkanRayTracing.h"
-#include "VulkanRenderPass.h"
-#include "VulkanRenderTarget.h"
 #include "VulkanResourceArray.h"
 #include "VulkanShader.h"
 #include "VulkanSwapChain.h"
@@ -167,6 +165,7 @@ void VulkanRHI::ReleaseRenderResources()
     RHIContext::ReleaseRenderResources();
 
     frame_timers_.clear();
+    headless_back_buffer_ = nullptr;
 
     context->ReleaseRenderResources();
 }
@@ -268,7 +267,7 @@ void VulkanRHI::RecreateSwapChain()
 
     ReleaseRenderResources();
 
-    CreateBackBufferRenderTarget();
+    CreateBackBuffer();
 
     InitRenderResources();
 }
@@ -278,27 +277,9 @@ bool VulkanRHI::RecreateSurface()
     return context->RecreateSurface();
 }
 
-static auto CreateBackBufferDepth(VkExtent2D extent)
+void VulkanRHI::CreateBackBuffer()
 {
-    auto depth_format = FindDepthFormat(context->GetPhysicalDevice());
-
-    RHIImage::Attribute attribute;
-    attribute.width = extent.width;
-    attribute.height = extent.height;
-    attribute.mip_levels = 1;
-    attribute.msaa_samples = 1;
-    attribute.usages = RHIImage::ImageUsage::DepthStencilAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-
-    return context->GetRHI()->CreateResource<VulkanImage>(attribute, depth_format, "BackBufferDepth");
-}
-
-void VulkanRHI::CreateBackBufferRenderTarget()
-{
-    ASSERT(!back_buffer_rt_);
+    ASSERT(!headless_back_buffer_);
 
     if (IsHeadless())
     {
@@ -307,36 +288,41 @@ void VulkanRHI::CreateBackBufferRenderTarget()
         GetHardwareInterface()->GetFrameBufferSize(width, height);
         ASSERT_F(width > 0 && height > 0, "Invalid headless render size [{}, {}]", width, height);
 
-        VkExtent2D extent{.width = static_cast<uint32_t>(width), .height = static_cast<uint32_t>(height)};
         SetMaxFramesInFlight(HeadlessFramesInFlight);
 
-        RHIImage::Attribute color_attribute;
-        color_attribute.format = PixelFormat::B8G8R8A8Srgb;
-        color_attribute.width = extent.width;
-        color_attribute.height = extent.height;
-        color_attribute.mip_levels = 1;
-        color_attribute.msaa_samples = 1;
-        color_attribute.usages = RHIImage::ImageUsage::ColorAttachment;
-        color_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                   .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                                   .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                                   .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+        RHIImage::Attribute attribute;
+        attribute.format = PixelFormat::B8G8R8A8Srgb;
+        attribute.width = static_cast<uint32_t>(width);
+        attribute.height = static_cast<uint32_t>(height);
+        attribute.mip_levels = 1;
+        attribute.msaa_samples = 1;
+        attribute.usages = RHIImage::ImageUsage::ColorAttachment;
+        attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 
-        auto color_image = CreateImage(color_attribute, "HeadlessBackBufferColor");
-        auto depth_image = CreateBackBufferDepth(extent);
-
-        RHIRenderTarget::ColorImageArray color_images{};
-        color_images[0] = color_image;
-        back_buffer_rt_ = CreateRenderTarget({}, color_images, depth_image, "HeadlessBackBufferRT");
+        headless_back_buffer_ = CreateImage(attribute, "HeadlessBackBuffer");
     }
     else
     {
         context->RecreateSwapChain();
-        back_buffer_rt_ = CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetSwapChain()->GetExtent()),
-                                                       "BackBufferRT");
     }
 
     back_buffer_dirty_ = true;
+}
+
+RHIResourceRef<RHIImage> VulkanRHI::GetBackBuffer() const
+{
+    if (IsHeadless())
+    {
+        ASSERT_F(headless_back_buffer_, "Back buffer not initialized");
+        return headless_back_buffer_;
+    }
+
+    const auto *swap_chain = context->GetSwapChain();
+    ASSERT_F(swap_chain, "Back buffer not initialized");
+    return swap_chain->GetImage(swap_chain->GetCurrentImageIndex());
 }
 
 RHIResourceRef<RHIBuffer> VulkanRHI::CreateBuffer(const RHIBuffer::Attribute &attribute, const std::string &name)
@@ -390,21 +376,6 @@ RHIResourceRef<RHIUiHandler> VulkanRHI::CreateUiHandler()
 RHIResourceRef<RHISampler> VulkanRHI::CreateSampler(RHISampler::SamplerAttribute attribute, const std::string &name)
 {
     return CreateResource<VulkanSampler>(attribute, name);
-}
-
-RHIResourceRef<RHIRenderTarget> VulkanRHI::CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                        const RHIResourceRef<RHIImage> &depth_image,
-                                                                        const std::string &name)
-{
-    return CreateResource<VulkanRenderTarget>(attribute, depth_image, name);
-}
-
-RHIResourceRef<RHIRenderTarget> VulkanRHI::CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                              const RHIRenderTarget::ColorImageArray &color_images,
-                                                              const RHIResourceRef<RHIImage> &depth_image,
-                                                              const std::string &name)
-{
-    return CreateResource<VulkanRenderTarget>(attribute, color_images, depth_image, name);
 }
 
 RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info)

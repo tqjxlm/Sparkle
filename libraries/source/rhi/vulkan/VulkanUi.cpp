@@ -45,7 +45,6 @@ void VulkanUiHandler::Init()
 
     QueueFamilyIndices const indices = FindQueueFamilies(context->GetPhysicalDevice(), context->GetSurface());
 
-    const auto signature = render_pass_->GetRenderingInfo().GetSignature();
     std::array<VkFormat, MaxNumColorAttachments> color_formats;
 
     ImGui_ImplVulkan_InitInfo init_info = {};
@@ -58,8 +57,9 @@ void VulkanUiHandler::Init()
     init_info.PipelineCache = VK_NULL_HANDLE;
     init_info.DescriptorPool = descriptor_pool_;
     init_info.UseDynamicRendering = true;
-    init_info.PipelineInfoMain.PipelineRenderingCreateInfo = GetVkPipelineRenderingCreateInfo(signature, color_formats);
-    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(signature.samples);
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo =
+        GetVkPipelineRenderingCreateInfo(signature_, color_formats);
+    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(signature_.samples);
     init_info.MinImageCount = 2;
     init_info.ImageCount = context->GetRHI()->GetMaxFramesInFlight();
     init_info.Allocator = VK_NULL_HANDLE;
@@ -69,15 +69,14 @@ void VulkanUiHandler::Init()
     initialized_ = true;
 }
 
-void VulkanUiHandler::BeginFrame()
+void VulkanUiHandler::BeginFrame(const RHIRenderingInfo &info)
 {
     ASSERT(initialized_);
 
     ImGuiIO &io = ImGui::GetIO();
 
     // it may be override by platform specific callbacks, so we need to set it every frame
-    io.DisplaySize = ImVec2(static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().width),
-                            static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().height));
+    io.DisplaySize = ImVec2(static_cast<float>(info.width), static_cast<float>(info.height));
 
     ImGui_ImplVulkan_NewFrame();
 }

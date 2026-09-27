@@ -32,18 +32,28 @@ public:
         auto *rhi = app.GetRHI();
         TaskManager::RunInRenderThread([this, rhi] {
             auto image = rhi->CreateImage(MakeImageAttribute(), "VulkanImageSubresourceTestImage");
-            auto target = rhi->CreateRenderTarget({.mip_level = TargetMip, .array_layer = TargetLayer}, image, nullptr,
-                                                  "VulkanImageSubresourceTestTarget");
 
-            RHIRenderPass::Attribute pass_attribute;
-            pass_attribute.color_load_op = RHIRenderPass::LoadOp::Clear;
-            pass_attribute.clear_color = Vector4(1.0f, 0.0f, 1.0f, 1.0f);
-            auto pass = rhi->CreateRenderPass(pass_attribute, target, "VulkanImageSubresourceTestPass");
+            RHIRenderingInfo info;
+            info.color_attachments[0] = {.image = image.get(),
+                                         .mip_level = TargetMip,
+                                         .array_layer = TargetLayer,
+                                         .load_op = RHILoadOp::Clear,
+                                         .clear_color = Vector4(1.0f, 0.0f, 1.0f, 1.0f)};
+            info.width = image->GetWidth(TargetMip);
+            info.height = image->GetHeight(TargetMip);
 
             rhi->BeginCommandBuffer();
             auto *command_context = rhi->GetCommandContext();
-            command_context->BeginRenderPass(pass);
-            command_context->EndRenderPass();
+            const auto barriers = image->TrackTransition({.target_layout = RHIImageLayout::ColorOutput,
+                                                          .after_stage = RHIPipelineStage::ColorOutput,
+                                                          .before_stage = RHIPipelineStage::Bottom,
+                                                          .base_mip = TargetMip,
+                                                          .mip_count = 1,
+                                                          .base_array_layer = TargetLayer,
+                                                          .array_layer_count = 1,
+                                                          .discard = true});
+            command_context->BeginRendering(info, "VulkanImageSubresourceTestPass", nullptr, barriers);
+            command_context->EndRendering();
 
             VerifyRenderPassLayout(image.get());
 

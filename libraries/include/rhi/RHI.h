@@ -11,10 +11,8 @@
 #include "rhi/RHIImage.h"
 #include "rhi/RHINrdBackend.h"
 #include "rhi/RHIPIpelineState.h"
+#include "rhi/RHIPass.h"
 #include "rhi/RHIRayTracing.h"
-#include "rhi/RHIRenderPass.h"
-#include "rhi/RHIRenderTarget.h"
-#include "rhi/RHIRenderTargetPool.h"
 #include "rhi/RHIResource.h"
 #include "rhi/RHIResourceArray.h"
 #include "rhi/RHIShader.h"
@@ -78,11 +76,8 @@ public:
 
     void SetMaxFramesInFlight(unsigned max_frames_in_flight);
 
-    RHIResourceRef<RHIRenderTarget> GetBackBufferRenderTarget()
-    {
-        ASSERT_F(back_buffer_rt_, "Back buffer render target not initialized");
-        return back_buffer_rt_;
-    }
+    // the image the frame presents. a windowed Vulkan back buffer is the swap chain image acquired for the frame.
+    [[nodiscard]] virtual RHIResourceRef<RHIImage> GetBackBuffer() const = 0;
 
     void RecreateFrameBuffer(int /*width*/, int /*height*/)
     {
@@ -174,8 +169,6 @@ public:
 
     virtual void ReleaseRenderResources();
 
-    virtual void NextSubpass() = 0;
-
     virtual RHIResourceRef<RHIResourceArray> CreateResourceArray(RHIShaderResourceReflection::ResourceType type,
                                                                  unsigned capacity, const std::string &name) = 0;
 
@@ -185,25 +178,8 @@ public:
         return CreateResourceArray(type, RHIShaderResourceBinding::MaxBindlessResources, name);
     }
 
-    virtual RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                         const RHIResourceRef<RHIImage> &depth_image,
-                                                                         const std::string &name) = 0;
-
-    virtual RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                               const RHIRenderTarget::ColorImageArray &color_images,
-                                                               const RHIResourceRef<RHIImage> &depth_image,
-                                                               const std::string &name) = 0;
-
-    RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                       const RHIResourceRef<RHIImage> &color_image,
-                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                       const std::string &name)
-    {
-        return CreateRenderTarget(attribute, RHIRenderTarget::ColorImageArray{color_image}, depth_image, name);
-    }
-
-    RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                   const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name);
+    // names a render pass and, with need_timestamp, measures the renderings begun with it (see RHIPass)
+    RHIResourceRef<RHIPass> CreateRenderPass(const std::string &name, bool need_timestamp);
 
     virtual RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                                  const std::string &name) = 0;
@@ -248,11 +224,6 @@ public:
     }
 
     RHIResourceRef<RHISampler> GetSampler(RHISampler::SamplerAttribute attribute);
-
-    [[nodiscard]] RHIRenderTargetPool &GetRenderTargetPool()
-    {
-        return render_target_pool_;
-    }
 
     RHIResourceRef<RHIImage> CreateTexture(const Image2D *image, const std::string &name);
 
@@ -330,11 +301,7 @@ protected:
     std::vector<RHIResourceWeakRef<RHIResource>> registered_resources_;
 #endif
 
-    RHIResourceRef<RHIRenderTarget> back_buffer_rt_;
-
     std::unordered_map<RHISampler::SamplerAttribute, RHIResourceRef<RHISampler>> samplers_;
-
-    RHIRenderTargetPool render_target_pool_{this};
 
     bool initialization_success_ = false;
     bool back_buffer_dirty_ = true;
