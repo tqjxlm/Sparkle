@@ -100,11 +100,9 @@ RHIResourceRef<RHISampler> RHIContext::GetSampler(RHISampler::SamplerAttribute a
     return sampler;
 }
 
-RHIResourceRef<RHIRenderPass> RHIContext::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                           const RHIResourceRef<RHIRenderTarget> &rt,
-                                                           const std::string &name)
+RHIResourceRef<RHIPass> RHIContext::CreateRenderPass(const std::string &name, bool need_timestamp)
 {
-    return CreateResource<RHIRenderPass>(this, attribute, rt, name);
+    return CreateResource<RHIPass>(this, need_timestamp, name);
 }
 
 RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const std::string &name)
@@ -262,8 +260,6 @@ void RHIContext::EndFrame()
     frame_index_ = (frame_index_ + 1) % max_frames_in_flight_;
 
     total_frame_++;
-
-    render_target_pool_.Tick(total_frame_);
 }
 
 void RHIContext::RecreateBuffer(RHIBuffer::Attribute attribute, const std::string &name,
@@ -405,10 +401,6 @@ void RHIContext::FlushDeferredDeletions()
 
     is_deleting_deferred_resources_ = false;
 
-    // a flush is always preceded by WaitForDeviceIdle, so free pooled render targets can be
-    // reused right away instead of waiting out the frames-in-flight delay
-    render_target_pool_.NotifyDeviceIdle();
-
 #ifndef NDEBUG
     // After flushing all deferred deletions (always preceded by WaitForDeviceIdle),
     // no valid code should reference old resources. Clear the set to prevent
@@ -423,10 +415,7 @@ void RHIContext::ReleaseRenderResources()
 
     WaitForDeviceIdle();
 
-    back_buffer_rt_ = nullptr;
     ui_handler_instance_ = nullptr;
-
-    render_target_pool_.Clear();
 
     // deliberately NOT the sampler/dummy-texture caches: this also runs mid-session (swap chain
     // recreation on rotation, surface loss), where live pipelines still bind those resources

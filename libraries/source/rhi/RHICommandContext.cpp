@@ -4,37 +4,14 @@
 
 namespace sparkle
 {
-void RHICommandContext::BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
-{
-    // swap chain recreation replaces the back buffer render target
-    if (pass->TargetsBackBuffer())
-    {
-        pass->SetRenderTarget(rhi_->GetBackBufferRenderTarget());
-    }
-
-    const auto info = pass->GetRenderingInfo();
-    BeginRendering(info, pass->GetName(), pass->SelectTimer(), RHIRenderPass::TrackBeginTransitions(info));
-
-    current_render_pass_ = pass;
-}
-
-void RHICommandContext::EndRenderPass()
-{
-    ASSERT_F(current_render_pass_ != nullptr, "No active render pass!");
-
-    const auto pass = current_render_pass_;
-    current_render_pass_ = nullptr;
-
-    EndRendering(pass->TrackEndTransitions(rendering_info_));
-}
-
-void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer,
+void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHIPass *timed_pass,
                                        std::span<const RHIImageBarrier> barriers,
                                        std::span<const RHIMemoryBarrier> memory_barriers)
 {
     ASSERT_F(!rendering_, "Previous render pass not ended {}", rendering_name_);
     ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
 
+    auto *timer = timed_pass ? timed_pass->SelectTimer() : nullptr;
     if (timer)
     {
         timer->Begin(*this);
@@ -53,16 +30,13 @@ void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::
     rendering_ = true;
 }
 
-void RHICommandContext::EndRendering(std::span<const RHIImageBarrier> barriers)
+void RHICommandContext::EndRendering()
 {
     ASSERT_F(rendering_, "No active render pass!");
-    ASSERT_F(current_render_pass_ == nullptr, "Render pass {} must end with EndRenderPass", rendering_name_);
 
     rendering_ = false;
 
     EndRenderingInternal();
-
-    Barrier(barriers, {});
 
     EndDebugLabel();
     if (rendering_timer_)

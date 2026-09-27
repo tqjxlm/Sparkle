@@ -2,6 +2,8 @@
 
 The render graph ([libraries/include/renderer/graph/RenderGraph.h](../libraries/include/renderer/graph/RenderGraph.h)) records one frame's GPU passes from declared accesses. Passes state what they read and write in textures, buffers and acceleration structures; the graph derives culling, transient images, image layouts, barriers and attachment load/store actions, and can dump every decision it made.
 
+Every renderer records its frame through the graph. The RHI keeps only the lowering primitives: `RHICommandContext::BeginRendering` over an `RHIRenderingInfo` (attachments, load/store and clear values, with the attachments already in their attachment layouts), access-based barriers, and PSOs compiled per attachment signature. RHI tests ([tests/rhi/](../tests/rhi/)) record through these primitives directly.
+
 ## Building a Graph
 
 A graph lives for one frame: build it, `Compile()`, `Execute(command_context)`, then destroy it.
@@ -59,7 +61,7 @@ A renderer builds one graph per frame from the `RenderFramework`'s texture pool,
 | `Readback` (screenshot without UI) | Copy pass: `CopySrc` Screen, `CopyDst` ScreenshotBuffer, a staging buffer created with the pass (its size comes from `RenderGraph::GetFormat` and `GetSize`) and saved once the frame completes |
 | `Ui` (UI shown, not headless) | `ColorWrite` Screen, `NativeAccess()` for ImGui |
 | `Readback` (screenshot with UI) | as above |
-| `Present` | `Sampled` Screen, `ColorWrite` BackBuffer (fully overwritten) |
+| `Present` | `Sampled` Screen, `ColorWrite` BackBuffer (fully overwritten), the image `RHIContext::GetBackBuffer()` returns: a windowed Vulkan device's acquired swap chain image, otherwise one image whose Metal texture is the frame's drawable when windowed |
 
 Screen is a transient at output resolution whose format and sampler the renderer chooses once (`Renderer::InitPostChain`): `B8G8R8A8Srgb` with nearest sampling for the renderers that tone map on the GPU, the CPU renderer's `RGBAFloat16` with bilinear sampling otherwise. Without a screen pass, `scene` is the screen. The screen passes and `Present` are `ScreenQuadPass`es built from their output format; each samples its input with the sampler the input's image carries, and `Present` applies the window's pre-rotation. `Ui` draws into the rendering the graph begins over Screen, and the ImGui backend compiles its pipelines for Screen's format (`RHIUiHandler::Setup` takes an attachment signature).
 

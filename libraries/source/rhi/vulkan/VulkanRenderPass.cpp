@@ -29,19 +29,7 @@ void BeginVulkanRendering(VulkanCommandContext &command_context, const RHIRender
 
         color_attachment_count = slot + 1;
 
-        if (attachment.resolve_image)
-        {
-            color_info.imageView = GetAttachmentView(attachment.image, 0, 0);
-            color_info.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
-            color_info.resolveImageView =
-                GetAttachmentView(attachment.resolve_image, attachment.mip_level, attachment.array_layer);
-            color_info.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        }
-        else
-        {
-            color_info.imageView = GetAttachmentView(attachment.image, attachment.mip_level, attachment.array_layer);
-        }
-
+        color_info.imageView = GetAttachmentView(attachment.image, attachment.mip_level, attachment.array_layer);
         color_info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         color_info.loadOp = GetAttachmentLoadOp(attachment.load_op);
         color_info.storeOp = GetAttachmentStoreOp(attachment.store_op);

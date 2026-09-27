@@ -10,8 +10,8 @@ namespace sparkle
 {
 class RHICommandContext;
 
-// common base of render and compute passes. a pass created with need_timestamp measures its GPU time with one timer
-// per frame in flight, from before its opening barriers to after its closing ones. a slot's time is read at the pass's
+// names and times render and compute passes. a pass created with need_timestamp measures its GPU time with one timer
+// per frame in flight, from before its opening barriers to the end of the pass. a slot's time is read at the pass's
 // first begin in that slot per frame, so it belongs to the previous submission that used the slot and is -1 when that
 // result is not available; a pass recorded several times in one frame reports its last run. without
 // RHIContext::SupportsPassTimestamps() nothing is measured.

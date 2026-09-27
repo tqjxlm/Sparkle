@@ -4,7 +4,8 @@
 #include "rhi/RHIBarrier.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIPIpelineState.h"
-#include "rhi/RHIRenderPass.h"
+#include "rhi/RHIPass.h"
+#include "rhi/RHIRenderingInfo.h"
 
 #include <span>
 #include <string>
@@ -13,37 +14,27 @@
 
 namespace sparkle
 {
-class RHIContext;
 class RHIBuffer;
 
 // records commands into one command buffer at a time: it owns the open pass and the backend recording state
 class RHICommandContext
 {
 public:
-    explicit RHICommandContext(RHIContext *rhi) : rhi_(rhi)
-    {
-    }
+    RHICommandContext() = default;
 
     virtual ~RHICommandContext() = default;
 
     RHICommandContext(const RHICommandContext &) = delete;
     RHICommandContext &operator=(const RHICommandContext &) = delete;
 
-    // renders the pass's rendering info: its attachments are transitioned from their tracked state into the attachment
-    // layouts before the rendering, and into the pass's final layouts after it
-    void BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass);
-
-    void EndRenderPass();
-
     // begins rendering into attachments already in their attachment layouts. the only barriers it records are
-    // `barriers` and `memory_barriers`, before the rendering; the pass's debug label and the optional `timer` bracket
-    // both.
-    void BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer = nullptr,
+    // `barriers` and `memory_barriers`, before the rendering; the debug label `name` and, when given, the timer of
+    // `timed_pass` bracket both.
+    void BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHIPass *timed_pass = nullptr,
                         std::span<const RHIImageBarrier> barriers = {},
                         std::span<const RHIMemoryBarrier> memory_barriers = {});
 
-    // records `barriers` after the rendering ends, inside the pass's label and timer
-    void EndRendering(std::span<const RHIImageBarrier> barriers = {});
+    void EndRendering();
 
     // the info the open rendering began with
     [[nodiscard]] const RHIRenderingInfo &GetRenderingInfo() const
@@ -131,12 +122,9 @@ protected:
 private:
     void ApplyBindings(RHIPipelineState &pipeline);
 
-    RHIContext *rhi_;
     std::span<const RHIMemberBinding> bindings_;
     std::vector<bool> bindings_applied_;
     bool drew_or_dispatched_ = false;
-    // the pass that began the open rendering through BeginRenderPass
-    RHIResourceRef<RHIRenderPass> current_render_pass_;
     RHIResourceRef<RHIComputePass> current_compute_pass_;
     bool rendering_ = false;
     std::string rendering_name_;

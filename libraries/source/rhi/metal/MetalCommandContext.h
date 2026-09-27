@@ -9,8 +9,6 @@ namespace sparkle
 class MetalCommandContext final : public RHICommandContext
 {
 public:
-    using RHICommandContext::RHICommandContext;
-
     [[nodiscard]] id<MTLCommandBuffer> GetCommandBuffer() const
     {
         return command_buffer_;

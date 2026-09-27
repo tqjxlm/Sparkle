@@ -210,11 +210,6 @@
         "description": "Scene async failure propagation for a missing authored sky resource."
     },
     {
-        "name": "render_target_pool",
-        "test_case": "render_target_pool",
-        "description": "RHIRenderTargetPool reuse and release semantics on the render thread."
-    },
-    {
         "name": "dynamic_buffer_reuse",
         "test_case": "dynamic_buffer_reuse",
         "description": "Staged buffer uploads, dynamic suballocation capacity, reuse, and adjacent free-range coalescing."
@@ -228,7 +223,7 @@
     {
         "name": "pass_timestamps",
         "test_case": "pass_timestamps",
-        "description": "Opt-in render-pass GPU timestamps report a time once their frame slot returns, and nothing without device support."
+        "description": "Opt-in rendering GPU timestamps report a time once their frame slot returns, and nothing without device support."
     },
     {
         "name": "render_graph_compile",
@@ -288,7 +283,7 @@
     {
         "name": "pipeline_switch_pool",
         "test_case": "pipeline_switch_pool",
-        "description": "Runtime pipeline switch and pooled render-target reuse."
+        "description": "Runtime pipeline switch and graph texture pool reuse."
     },
     {
         "name": "ibl_parity",

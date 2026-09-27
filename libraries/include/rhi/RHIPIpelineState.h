@@ -3,7 +3,7 @@
 #include "rhi/RHIResource.h"
 
 #include "rhi/RHIBuffer.h"
-#include "rhi/RHIRenderPass.h"
+#include "rhi/RHIRenderingInfo.h"
 #include "rhi/RHIShader.h"
 #include "rhi/RHIVertex.h"
 
@@ -100,12 +100,6 @@ public:
     void SetAttachmentSignature(const RHIAttachmentSignature &signature)
     {
         attachment_signature_ = signature;
-    }
-
-    // declares the attachments of the pass this pipeline draws in
-    void SetRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
-    {
-        SetAttachmentSignature(pass->GetRenderingInfo().GetSignature());
     }
 
     void SetVertexBuffer(uint32_t binding, const RHIResourceRef<RHIBuffer> &buffer)

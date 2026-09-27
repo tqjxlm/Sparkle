@@ -253,9 +253,8 @@ void Renderer::InitPostChain(const RGTextureDesc &screen_desc)
         ui_pass_ = std::make_unique<UiPass>(rhi_, screen_desc.format);
     }
 
-    present_pass_ = PipelinePass::Create<ScreenQuadPass>(
-        render_config_, rhi_, "Present", rhi_->GetBackBufferRenderTarget()->GetColorImage(0)->GetAttributes().format,
-        true);
+    present_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Present",
+                                                         rhi_->GetBackBuffer()->GetAttributes().format, true);
 }
 
 void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQuadPass *screen_pass)
@@ -276,7 +275,7 @@ void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQua
         AddReadback(graph, screen, true);
     }
 
-    const auto back_buffer = graph.Import("BackBuffer", rhi_->GetBackBufferRenderTarget()->GetColorImage(0));
+    const auto back_buffer = graph.Import("BackBuffer", rhi_->GetBackBuffer());
     present_pass_->AddTo(graph, screen, back_buffer);
 }
 

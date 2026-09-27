@@ -76,7 +76,6 @@ private:
     RHIResourceRef<RHITLAS> tlas_;
 
     RHIResourceRef<RHIImage> scene_texture_;
-    RHIResourceRef<RHIRenderTarget> scene_rt_;
     std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
 
     std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;

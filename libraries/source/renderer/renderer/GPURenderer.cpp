@@ -81,9 +81,8 @@ void GPURenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
-    RHIRenderTarget::Attribute scene_rt_attribute;
-    scene_rt_attribute.SetColorAttribute(
-        RHIImage::Attribute{
+    scene_texture_ = rhi_->CreateImage(
+        {
             .format = PixelFormat::RGBAFloat,
             .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
@@ -96,10 +95,7 @@ void GPURenderer::InitRenderResources()
             .mip_levels = 1,
             .msaa_samples = 1,
         },
-        0);
-
-    scene_rt_ = rhi_->GetRenderTargetPool().Acquire(scene_rt_attribute, "GPUPipelineColorRT");
-    scene_texture_ = scene_rt_->GetColorImage(0);
+        "Accumulator");
 
     denoiser_inputs_ = std::make_unique<PathTracingDenoiserInputs>(rhi_, resolution_.scene);
 

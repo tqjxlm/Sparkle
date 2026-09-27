@@ -10,8 +10,6 @@ namespace sparkle
 class VulkanCommandContext final : public RHICommandContext
 {
 public:
-    using RHICommandContext::RHICommandContext;
-
     [[nodiscard]] VkCommandBuffer GetCommandBuffer() const
     {
         return command_buffer_;
