@@ -5,6 +5,7 @@
 #include "core/task/TaskManager.h"
 #include "renderer/graph/RGTexturePool.h"
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/ScreenQuadPass.h"
 #include "rhi/RHI.h"
 
 #include <nlohmann/json.hpp>
@@ -19,8 +20,8 @@ namespace sparkle
 {
 // builds synthetic render graphs, compares their compiled plans (culling, physical images, barriers, load/store with
 // reasons) against expected dump summaries, and executes each one. under synchronization validation that proves the
-// planned barriers order every access, including a pooled image reused by the next graph. one graph reads back a
-// cleared texture to prove the recorded passes ran.
+// planned barriers order every access, including a pooled image reused by the next graph. two graphs read back a
+// texture to prove the recorded passes ran and a draw binds the texture its pass declared.
 class RenderGraphCompileTest : public TestCase
 {
 public:
@@ -173,14 +174,7 @@ private:
 
     void ClearSampleReadback(RHIContext *rhi, const RenderConfig &config)
     {
-        const auto output = config.GetResolution().output;
-        const auto size = output.x() * output.y() * 4u;
-        auto readback =
-            rhi->CreateBuffer({.size = size,
-                               .usages = RHIBuffer::BufferUsage::TransferDst,
-                               .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                               .is_dynamic = false},
-                              "RenderGraphTestReadback");
+        auto readback = CreateReadbackBuffer(rhi, config);
 
         RGTexturePool pool(rhi);
         {
@@ -223,6 +217,65 @@ private:
         const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
         Expect(pixel[0] == 0 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255,
                "the readback pass copies the texture the sample pass cleared");
+        readback->UnLock();
+    }
+
+    [[nodiscard]] static RHIResourceRef<RHIBuffer> CreateReadbackBuffer(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto output = config.GetResolution().output;
+        return rhi->CreateBuffer({.size = output.x() * output.y() * 4u,
+                                  .usages = RHIBuffer::BufferUsage::TransferDst,
+                                  .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                                  .is_dynamic = false},
+                                 "RenderGraphTestReadback");
+    }
+
+    // a screen quad pipeline created sampling a placeholder draws a cleared texture, which reaches the readback only
+    // when the draw binds the texture its pass declared
+    void DeclaredBinding(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto placeholder = CreateImportImage(rhi, config.GetResolution().output, "RenderGraphTestPlaceholder");
+        const auto quad = PipelinePass::Create<ScreenQuadPass>(
+            config, rhi, placeholder, rhi->CreateRenderTarget({}, placeholder, nullptr, "RenderGraphTestQuadTarget"));
+        auto readback = CreateReadbackBuffer(rhi, config);
+
+        RGTexturePool pool(rhi);
+        {
+            RenderGraph graph(pool, config);
+            const auto a = graph.CreateTexture("A", Rgba8Output);
+            const auto b = graph.CreateTexture("B", Rgba8Output);
+            graph.AddRasterPass("Clear", [a](RGBuilder &builder) {
+                builder.ColorWrite(a, 0, Vector4(1.f, 0.f, 0.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            quad->AddTo(graph, "Quad", a, b);
+            graph.AddCopyPass("Readback", [b, buffer = readback.get()](RGBuilder &builder) {
+                builder.CopySrc(b);
+                builder.SideEffect();
+                return [b, buffer](RGCopyContext &context) { context.CopyToBuffer(b, buffer); };
+            });
+
+            Run(rhi, graph,
+                {
+                    "Clear: Raster",
+                    "  barrier A Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                    "  attachment A slot 0: Clear (clear) / Store (read by Quad)",
+                    "Quad: Raster",
+                    "  barrier A ColorOutput->Read [ColorWrite -> Sampled(Pixel)]",
+                    "  barrier B Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                    "  attachment B slot 0: DontCare (fully overwritten) / Store (read by Readback)",
+                    "Readback: Copy",
+                    "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "A: physical 0",
+                    "B: physical 1",
+                },
+                "declared binding");
+        }
+
+        rhi->WaitForDeviceIdle();
+        const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
+        Expect(pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255,
+               "the quad draws the texture its pass declared");
         readback->UnLock();
     }
 
@@ -530,11 +583,12 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 8> Steps{
-        &RenderGraphCompileTest::ClearSampleReadback, &RenderGraphCompileTest::CulledBranch,
-        &RenderGraphCompileTest::IntraFrameReuse,     &RenderGraphCompileTest::ImportedSeeding,
-        &RenderGraphCompileTest::LoadStore,           &RenderGraphCompileTest::NextFrameReuse,
-        &RenderGraphCompileTest::NextFrameReuse,      &RenderGraphCompileTest::ReleaseUnused,
+    static constexpr std::array<Step, 9> Steps{
+        &RenderGraphCompileTest::ClearSampleReadback, &RenderGraphCompileTest::DeclaredBinding,
+        &RenderGraphCompileTest::CulledBranch,        &RenderGraphCompileTest::IntraFrameReuse,
+        &RenderGraphCompileTest::ImportedSeeding,     &RenderGraphCompileTest::LoadStore,
+        &RenderGraphCompileTest::NextFrameReuse,      &RenderGraphCompileTest::NextFrameReuse,
+        &RenderGraphCompileTest::ReleaseUnused,
     };
 
     size_t step_ = 0;

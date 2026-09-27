@@ -22,11 +22,12 @@ ToneMapping: External
   access Screen ColorWrite
   barrier SceneColor ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
   barrier Screen Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
-Present: External
+Present: Raster
   access Screen Sampled(Pixel)
   access BackBuffer ColorWrite
   barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
   barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+  attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
 SceneColor: Imported, BasePass..ToneMapping, ColorAttachment|Texture
 SceneDepth: Imported, BasePass..SkyBox, DepthStencilAttachment
 ShadowMap: Imported, DirectionalShadow..BasePass, DepthStencilAttachment|Texture

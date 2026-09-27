@@ -116,9 +116,9 @@ protected:
     static void AddToneMappingPass(RenderGraph &graph, RGTexture scene_color, ScreenQuadPass &tone_mapping_pass,
                                    ScreenQuadPass *output_pass, RGTexture screen);
 
-    // adds the frame's tail once `screen` holds the final image: the screenshot readbacks, `ui_pass` when the ui is
-    // shown, and `present_pass` drawing `screen` into the back buffer, both legacy passes wrapped as External passes
-    void AddPresentPasses(RenderGraph &graph, RGTexture screen, UiPass *ui_pass, ScreenQuadPass &present_pass);
+    // adds the frame's tail once `screen` holds the final image: the screenshot readbacks, the legacy `ui_pass` wrapped
+    // as an External pass when the ui is shown, and `present_pass` drawing `screen` into the back buffer
+    void AddPresentPasses(RenderGraph &graph, RGTexture screen, UiPass *ui_pass, const ScreenQuadPass &present_pass);
 
     // compiles and records the frame's graph, dumping it first when a dump is pending
     void ExecuteGraph(RenderGraph &graph);

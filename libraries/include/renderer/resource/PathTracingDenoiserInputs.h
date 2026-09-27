@@ -16,7 +16,7 @@ public:
     PathTracingDenoiserInputs(RHIContext *rhi, Vector2UInt size);
 
     void BindDummies();
-    bool EnsureAllocated(PixelFormat radiance_format);
+    void EnsureAllocated(PixelFormat radiance_format);
 
     [[nodiscard]] bool IsAllocated() const
     {

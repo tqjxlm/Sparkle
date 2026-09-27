@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace sparkle
 {
@@ -60,10 +61,26 @@ public:
     // records one batch of barriers outside any render pass. Metal tracks hazards itself and records nothing.
     void Barrier(std::span<const RHIImageBarrier> image_barriers, std::span<const RHIMemoryBarrier> memory_barriers);
 
-    virtual void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) = 0;
+    // resources every pipeline drawn or dispatched through the context binds, into each of its resource tables that
+    // has the binding's member, until the bindings are set again. the render graph sets the bindings a pass declared
+    // while it records the pass; the span must outlive that time.
+    void SetBindings(std::span<const RHIMemberBinding> bindings)
+    {
+        bindings_ = bindings;
+        bindings_applied_.assign(bindings.size(), false);
+    }
 
-    virtual void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                                 Vector3UInt thread_per_group) = 0;
+    // whether the binding at `index` of the set bindings bound into a pipeline since they were set
+    [[nodiscard]] bool IsBindingApplied(size_t index) const
+    {
+        return bindings_applied_[index];
+    }
+
+    // a null pipeline draws nothing
+    void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args);
+
+    void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
+                         Vector3UInt thread_per_group);
 
     // transfers are recorded outside any pass: Vulkan forbids them inside a render pass, and Metal cannot open a
     // blit encoder while a render or compute encoder is open
@@ -78,6 +95,10 @@ public:
     void AssertOutsidePass(std::string_view command) const;
 
 protected:
+    virtual void DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state,
+                                  const DrawArgs &draw_args) = 0;
+    virtual void DispatchComputeInternal(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
+                                         Vector3UInt thread_per_group) = 0;
     virtual void BarrierInternal(std::span<const RHIImageBarrier> image_barriers,
                                  std::span<const RHIMemoryBarrier> memory_barriers) = 0;
     virtual void CopyBufferInternal(const RHIBuffer *src, const RHIBuffer *dst) = 0;
@@ -93,7 +114,11 @@ protected:
     virtual void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
 
 private:
+    void ApplyBindings(RHIPipelineState &pipeline);
+
     RHIContext *rhi_;
+    std::span<const RHIMemberBinding> bindings_;
+    std::vector<bool> bindings_applied_;
     // the pass that began the open rendering through BeginRenderPass
     RHIResourceRef<RHIRenderPass> current_render_pass_;
     RHIResourceRef<RHIComputePass> current_compute_pass_;

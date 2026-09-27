@@ -51,12 +51,12 @@ void PathTracingDenoiserInputs::BindDummies()
     allocated_ = false;
 }
 
-bool PathTracingDenoiserInputs::EnsureAllocated(PixelFormat radiance_format)
+void PathTracingDenoiserInputs::EnsureAllocated(PixelFormat radiance_format)
 {
     ASSERT(radiance_format == PixelFormat::RGBAFloat16 || radiance_format == PixelFormat::RGBAFloat);
     if (allocated_ && radiance_format_ == radiance_format)
     {
-        return false;
+        return;
     }
 
     noisy_radiance_hit_distance_ = CreateTexture(radiance_format, "GBufferRadiance");
@@ -72,7 +72,6 @@ bool PathTracingDenoiserInputs::EnsureAllocated(PixelFormat radiance_format)
 
     radiance_format_ = radiance_format;
     allocated_ = true;
-    return true;
 }
 
 DenoiserInputs PathTracingDenoiserInputs::Import(RenderGraph &graph, RGTexture accumulated_radiance) const

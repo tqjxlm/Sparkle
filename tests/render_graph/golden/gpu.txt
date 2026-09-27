@@ -6,11 +6,12 @@ ToneMapping: External
   access Screen ColorWrite
   barrier Accumulator StorageWrite->Read [StorageRead|StorageWrite(Compute) -> Sampled(Pixel)]
   barrier Screen Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
-Present: External
+Present: Raster
   access Screen Sampled(Pixel)
   access BackBuffer ColorWrite
   barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
   barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+  attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
 Accumulator: Imported, PathTrace..ToneMapping, Texture|UAV
 Screen: Imported, ToneMapping..Present, ColorAttachment|Texture
 BackBuffer: Imported, Present..Present, ColorAttachment

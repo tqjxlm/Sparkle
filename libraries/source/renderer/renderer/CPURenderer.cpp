@@ -164,12 +164,7 @@ void CPURenderer::Render()
 
     if (upsample_pass_)
     {
-        graph.AddExternalPass("Upsample", [this, screen, composite](RGBuilder &builder) {
-            builder.Sampled(screen, RHIShaderStageMask::Pixel);
-            builder.ColorWrite(composite, 0);
-            builder.FullyOverwrites();
-            return [this](RGExternalContext &) { upsample_pass_->Render(); };
-        });
+        upsample_pass_->AddTo(graph, "Upsample", screen, composite);
     }
 
     AddPresentPasses(graph, composite, ui_pass_.get(), *screen_quad_pass_);

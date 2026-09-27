@@ -170,6 +170,20 @@ public:
         return static_cast<T::ResourceTable *>(GetResourceTable(T::GetStage()));
     }
 
+    // binds into each of the pipeline's resource tables that has the binding's member, and returns whether one had it
+    bool ApplyBinding(const RHIMemberBinding &binding)
+    {
+        bool applied = false;
+        for (const auto &table : resource_table_)
+        {
+            if (table)
+            {
+                applied = binding.BindTo(*table) || applied;
+            }
+        }
+        return applied;
+    }
+
 protected:
     [[nodiscard]] const RHIShaderResourceTable *GetResourceTable(RHIShaderStage stage) const
     {

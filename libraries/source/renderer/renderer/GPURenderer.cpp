@@ -179,17 +179,20 @@ void GPURenderer::Render()
         }
 
         graph.AddComputePass("PathTrace", compute_pass_, [this, accumulator, &denoiser_inputs](RGBuilder &builder) {
-            builder.StorageReadWrite(accumulator);
+            using Table = RayTracingComputeShader::ResourceTable;
+            builder.StorageReadWrite(accumulator, &Table::imageData);
             // the tracer binds them as storage images on every dispatch, written or not
             if (denoiser_inputs)
             {
-                for (const auto texture :
-                     {denoiser_inputs->noisy_radiance_hit_distance, denoiser_inputs->normal_view_depth,
-                      denoiser_inputs->albedo_object_id, denoiser_inputs->motion_hit_metallic,
-                      denoiser_inputs->noisy_specular_radiance_hit_distance,
-                      denoiser_inputs->specular_albedo_roughness})
+                for (const auto &[texture, binding] :
+                     {std::pair{denoiser_inputs->noisy_radiance_hit_distance, &Table::gRadiance},
+                      std::pair{denoiser_inputs->normal_view_depth, &Table::gNormalDepth},
+                      std::pair{denoiser_inputs->albedo_object_id, &Table::gAlbedoObj},
+                      std::pair{denoiser_inputs->motion_hit_metallic, &Table::gMotion},
+                      std::pair{denoiser_inputs->noisy_specular_radiance_hit_distance, &Table::gRadianceSpecular},
+                      std::pair{denoiser_inputs->specular_albedo_roughness, &Table::gSpecAlbedo}})
                 {
-                    builder.StorageWrite(texture);
+                    builder.StorageWrite(texture, binding);
                 }
             }
             return [this](RGComputeContext &context) {
@@ -422,11 +425,10 @@ void GPURenderer::Update()
     }
     gbuffer_write_this_frame_ = will_dispatch && frame_denoiser_ != nullptr && frame_denoiser_->NeedsInputs();
 
-    if (gbuffer_write_this_frame_ &&
-        denoiser_inputs_->EnsureAllocated(DenoiserConfig::Get().radiance_fp16 ? PixelFormat::RGBAFloat16
-                                                                              : PixelFormat::RGBAFloat))
+    if (gbuffer_write_this_frame_)
     {
-        BindDenoiserInputs();
+        denoiser_inputs_->EnsureAllocated(DenoiserConfig::Get().radiance_fp16 ? PixelFormat::RGBAFloat16
+                                                                              : PixelFormat::RGBAFloat);
     }
 
     RayTracingComputeShader::UniformBufferData ubo{
@@ -507,9 +509,9 @@ void GPURenderer::InitSceneRenderResources()
 
     auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
     cs_resources->ubo().BindResource(uniform_buffer_);
-    cs_resources->imageData().BindResource(scene_texture_->GetDefaultView(rhi_));
     cs_resources->tlas().BindResource(tlas_);
 
+    // the dummies the tracer binds until the path trace pass declares allocated inputs
     BindDenoiserInputs();
 
     auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{

@@ -5,6 +5,9 @@
 #include "core/Exception.h"
 #include "core/Logger.h"
 
+#include <functional>
+#include <optional>
+
 namespace sparkle
 {
 enum class RHIShaderStage : uint8_t
@@ -134,6 +137,7 @@ protected:
 private:
     std::unique_ptr<RHIShaderResourceReflection> decl_;
     RHIResource *resource_ = nullptr;
+    std::optional<size_t> resource_id_;
     RHIShaderResourceSet *parent_set_ = nullptr;
 };
 
@@ -321,6 +325,34 @@ protected:
     std::vector<RHIShaderResourceBinding *> bindings_;
     std::vector<RHIShaderResourceSet> resource_sets_;
     std::unordered_map<std::string_view, RHIShaderResourceBinding *> binding_map_;
+};
+
+// a resource bound through a binding member of a ResourceTable type instead of into one table: it binds into every
+// table of that type it is applied to, so one binding serves every pipeline whose shader uses the table
+class RHIMemberBinding
+{
+public:
+    template <class Table, RHIShaderResourceReflection::ResourceType Type, class T>
+    RHIMemberBinding(RHIShaderResourceBindingTyped<Type, false> &(Table::*member)(), RHIResourceRef<T> resource)
+        : bind_([member, bound = std::move(resource)](RHIShaderResourceTable &table) {
+              auto *typed = dynamic_cast<Table *>(&table);
+              if (typed)
+              {
+                  (typed->*member)().BindResource(bound);
+              }
+              return typed != nullptr;
+          })
+    {
+    }
+
+    // binds the resource when `table` is of the member's table type and returns true, and ignores other tables
+    bool BindTo(RHIShaderResourceTable &table) const
+    {
+        return bind_(table);
+    }
+
+private:
+    std::function<bool(RHIShaderResourceTable &)> bind_;
 };
 
 class RHIShaderInfo

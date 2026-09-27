@@ -2,6 +2,7 @@
 
 #include "application/NativeView.h"
 #include "core/math/Utilities.h"
+#include "renderer/graph/RenderGraph.h"
 #include "rhi/RHI.h"
 
 namespace sparkle
@@ -151,6 +152,16 @@ void ScreenQuadPass::Render()
     command_context->DrawMesh(pipeline_state_, draw_args_);
 
     command_context->EndRenderPass();
+}
+
+void ScreenQuadPass::AddTo(RenderGraph &graph, std::string name, RGTexture input, RGTexture output) const
+{
+    graph.AddRasterPass(std::move(name), [this, input, output](RGBuilder &builder) {
+        builder.Sampled(input, &ScreenQuadPixelShader::ResourceTable::screenTexture);
+        builder.ColorWrite(output, 0);
+        builder.FullyOverwrites();
+        return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
+    });
 }
 
 void ScreenQuadPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)

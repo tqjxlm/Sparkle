@@ -32,12 +32,11 @@ public:
 
     void End();
 
-    void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
-
-    void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                         Vector3UInt thread_per_group) override;
-
 protected:
+    void DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
+    void DispatchComputeInternal(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
+                                 Vector3UInt thread_per_group) override;
+
     void BarrierInternal(std::span<const RHIImageBarrier> /*image_barriers*/,
                          std::span<const RHIMemoryBarrier> /*memory_barriers*/) override
     {

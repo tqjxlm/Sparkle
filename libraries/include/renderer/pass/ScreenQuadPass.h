@@ -9,6 +9,9 @@
 
 namespace sparkle
 {
+class RenderGraph;
+struct RGTexture;
+
 class ScreenQuadVertexShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(ScreenQuadVertexShader, RHIShaderStage::Vertex, "shaders/screen/screen.vs.slang", "shader_main")
@@ -47,6 +50,10 @@ public:
     }
 
     void Render() override;
+
+    // adds a Raster pass drawing `input` over all of `output`. the pipeline samples `input` with the sampler of the
+    // image the pass was created with.
+    void AddTo(RenderGraph &graph, std::string name, RGTexture input, RGTexture output) const;
 
     void InitRenderResources(const RenderConfig &config) override;
 

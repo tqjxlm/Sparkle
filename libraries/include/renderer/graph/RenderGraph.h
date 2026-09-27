@@ -54,6 +54,15 @@ struct RGTextureDesc
                                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 };
 
+// a binding member of a shader's ResourceTable that a texture binds to
+template <class Table, RHIShaderResourceReflection::ResourceType Type>
+using RGBinding = RHIShaderResourceBindingTyped<Type, false> &(Table::*)();
+
+template <class Table> using RGSampledBinding = RGBinding<Table, RHIShaderResourceReflection::ResourceType::Texture2D>;
+
+template <class Table>
+using RGStorageBinding = RGBinding<Table, RHIShaderResourceReflection::ResourceType::StorageImage2D>;
+
 enum class RGPassKind : uint8_t
 {
     Raster,
@@ -63,7 +72,9 @@ enum class RGPassKind : uint8_t
 };
 
 // declares the accesses of one pass. a pass declares each texture once. shader stages default to the pass kind's
-// (raster: pixel, compute: compute, external: all).
+// (raster: pixel, compute: compute, external: all). a shader access given a `binding` member of a shader's
+// ResourceTable binds the texture's image there in every pipeline the pass draws or dispatches whose shader uses that
+// table.
 class RGBuilder
 {
 public:
@@ -81,6 +92,38 @@ public:
     void StorageWrite(RGTexture texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
 
     void StorageReadWrite(RGTexture texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
+
+    template <class Table>
+    void Sampled(RGTexture texture, RGSampledBinding<Table> binding,
+                 RHIShaderStageMask stages = RHIShaderStageMask::None)
+    {
+        Sampled(texture, stages);
+        Bind(binding);
+    }
+
+    template <class Table>
+    void StorageRead(RGTexture texture, RGStorageBinding<Table> binding,
+                     RHIShaderStageMask stages = RHIShaderStageMask::None)
+    {
+        StorageRead(texture, stages);
+        Bind(binding);
+    }
+
+    template <class Table>
+    void StorageWrite(RGTexture texture, RGStorageBinding<Table> binding,
+                      RHIShaderStageMask stages = RHIShaderStageMask::None)
+    {
+        StorageWrite(texture, stages);
+        Bind(binding);
+    }
+
+    template <class Table>
+    void StorageReadWrite(RGTexture texture, RGStorageBinding<Table> binding,
+                          RHIShaderStageMask stages = RHIShaderStageMask::None)
+    {
+        StorageReadWrite(texture, stages);
+        Bind(binding);
+    }
 
     void CopySrc(RGTexture texture);
 
@@ -103,6 +146,15 @@ private:
                  std::optional<Vector4> clear);
 
     void DeclareShaderAccess(RGTexture texture, RHIAccess access, RHIShaderStageMask stages, RHIImageLayout layout);
+
+    template <class Table, RHIShaderResourceReflection::ResourceType Type> void Bind(RGBinding<Table, Type> binding)
+    {
+        BindLastAccess(
+            [binding](RHIResourceRef<RHIImageView> view) { return RHIMemberBinding(binding, std::move(view)); });
+    }
+
+    // binds the image of the access declared last
+    void BindLastAccess(std::function<RHIMemberBinding(RHIResourceRef<RHIImageView>)> binding);
 
     RenderGraph &graph_;
     uint32_t pass_;
@@ -271,6 +323,8 @@ private:
         // the color slot or DepthSlot of an attachment, NoSlot otherwise
         uint8_t slot;
         std::optional<Vector4> clear;
+        // makes the binding of the access's image view, for shader accesses given a binding member
+        std::function<RHIMemberBinding(RHIResourceRef<RHIImageView>)> binding = nullptr;
 
         // compiled
         std::optional<RHIImageBarrier> barrier = std::nullopt;
@@ -294,6 +348,7 @@ private:
         bool live = true;
         std::string cull_reason;
         RHIRenderingInfo rendering_info{};
+        std::vector<RHIMemberBinding> bindings;
     };
 
     struct Texture
@@ -334,11 +389,15 @@ private:
 
     void ResolveTextures();
 
+    void ResolveBindings();
+
     void PlanBarriers();
 
     void InferStoreOps();
 
     void CheckExternalContract(const Pass &pass) const;
+
+    void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const;
 
     RGTexturePool &pool_;
     RenderResolution resolution_;

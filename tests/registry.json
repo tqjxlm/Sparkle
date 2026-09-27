@@ -233,7 +233,7 @@
     {
         "name": "render_graph_compile",
         "test_case": "render_graph_compile",
-        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, barriers seeded from tracked state, load/store inference and the dump, then executed and read back."
+        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, barriers seeded from tracked state, load/store inference, the dump and draws binding their declared textures, then executed and read back."
     },
     {
         "name": "render_graph_sync_validation",

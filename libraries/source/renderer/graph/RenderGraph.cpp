@@ -85,6 +85,11 @@ static RHIImageState GetUniformState(const RHIImage &image)
     return state;
 }
 
+static bool HasBinding(const auto &access)
+{
+    return access.binding != nullptr;
+}
+
 static bool ReadsContents(const RHIResourceAccess &access)
 {
     return access.access & ReadAccess;
@@ -178,6 +183,11 @@ void RGBuilder::CopyDst(RGTexture texture)
     Declare(texture, {.access = RHIAccess::CopyDst}, RHIImageLayout::TransferDst, RenderGraph::NoSlot, std::nullopt);
 }
 
+void RGBuilder::BindLastAccess(std::function<RHIMemberBinding(RHIResourceRef<RHIImageView>)> binding)
+{
+    graph_.passes_[pass_].accesses.back().binding = std::move(binding);
+}
+
 void RGBuilder::FullyOverwrites()
 {
     graph_.passes_[pass_].fully_overwrites = true;
@@ -261,7 +271,8 @@ uint32_t RenderGraph::NewPass(std::string name, RGPassKind kind, RHIResourceRef<
                        .compute_pass = std::move(compute_pass),
                        .accesses = {},
                        .record = {},
-                       .cull_reason = {}});
+                       .cull_reason = {},
+                       .bindings = {}});
     return static_cast<uint32_t>(passes_.size() - 1);
 }
 
@@ -276,6 +287,7 @@ void RenderGraph::Compile()
     compiled_ = true;
 
     ResolveTextures();
+    ResolveBindings();
     PlanBarriers();
     InferStoreOps();
 }
@@ -409,6 +421,18 @@ void RenderGraph::ResolveTextures()
         }
         RGCheck(!texture.imported || !(texture.usages & ~texture.image->GetAttributes().usages),
                 "import {} lacks the usages its accesses need", texture.name);
+    }
+}
+
+// image views are created at compile, so recording only binds them
+void RenderGraph::ResolveBindings()
+{
+    for (auto &pass : passes_ | std::views::filter(&Pass::live))
+    {
+        for (const auto &access : pass.accesses | std::views::filter(HasBinding<Access>))
+        {
+            pass.bindings.push_back(access.binding(textures_[access.texture.index].image->GetDefaultView(pool_.rhi_)));
+        }
     }
 }
 
@@ -583,6 +607,7 @@ void RenderGraph::Execute(RHICommandContext &command_context)
             image->SetState(access.state, 0, image->GetAttributes().mip_levels, 0, image->GetArrayLayerCount());
         }
 
+        command_context.SetBindings(pass.bindings);
         switch (pass.kind)
         {
         case RGPassKind::Raster:
@@ -608,6 +633,20 @@ void RenderGraph::Execute(RHICommandContext &command_context)
         default:
             UnImplemented(pass.kind);
         }
+        CheckBindingsApplied(pass, command_context);
+        command_context.SetBindings({});
+    }
+}
+
+// a declared binding that no pipeline the pass drew or dispatched has would bind nothing
+void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const
+{
+    auto index = 0u;
+    for (const auto &access : pass.accesses | std::views::filter(HasBinding<Access>))
+    {
+        RGCheck(command_context.IsBindingApplied(index++),
+                "pass {} binds {} to a resource table no pipeline it drew or dispatched has", pass.name,
+                textures_[access.texture.index].name);
     }
 }
 

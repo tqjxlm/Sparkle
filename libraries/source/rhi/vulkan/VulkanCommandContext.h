@@ -22,11 +22,6 @@ public:
 
     void End();
 
-    void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
-
-    void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                         Vector3UInt thread_per_group) override;
-
     // per-command-buffer state set: every state record goes through here so redundant records are
     // dropped uniformly. raw vkCmd* state calls elsewhere would let this go stale and skip real changes.
     void BindPipeline(VkPipelineBindPoint bind_point, VkPipeline pipeline)
@@ -140,6 +135,9 @@ public:
     }
 
 protected:
+    void DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
+    void DispatchComputeInternal(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
+                                 Vector3UInt thread_per_group) override;
     void BarrierInternal(std::span<const RHIImageBarrier> image_barriers,
                          std::span<const RHIMemoryBarrier> memory_barriers) override;
     void CopyBufferInternal(const RHIBuffer *src, const RHIBuffer *dst) override;

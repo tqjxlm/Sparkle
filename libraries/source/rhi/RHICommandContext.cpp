@@ -107,6 +107,35 @@ void RHICommandContext::Barrier(std::span<const RHIImageBarrier> image_barriers,
     BarrierInternal(image_barriers, memory_barriers);
 }
 
+void RHICommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
+{
+    if (!pipeline_state)
+    {
+        return;
+    }
+
+    ApplyBindings(*pipeline_state);
+    DrawMeshInternal(pipeline_state, draw_args);
+}
+
+void RHICommandContext::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
+                                        Vector3UInt thread_per_group)
+{
+    ApplyBindings(*pipeline);
+    DispatchComputeInternal(pipeline, total_threads, thread_per_group);
+}
+
+void RHICommandContext::ApplyBindings(RHIPipelineState &pipeline)
+{
+    for (auto index = 0u; index < bindings_.size(); index++)
+    {
+        if (pipeline.ApplyBinding(bindings_[index]))
+        {
+            bindings_applied_[index] = true;
+        }
+    }
+}
+
 void RHICommandContext::CopyBuffer(const RHIBuffer *src, const RHIBuffer *dst)
 {
     AssertOutsidePass("CopyBuffer");

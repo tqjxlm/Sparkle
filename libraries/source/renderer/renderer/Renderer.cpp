@@ -242,7 +242,8 @@ void Renderer::AddToneMappingPass(RenderGraph &graph, RGTexture scene_color, Scr
                           });
 }
 
-void Renderer::AddPresentPasses(RenderGraph &graph, RGTexture screen, UiPass *ui_pass, ScreenQuadPass &present_pass)
+void Renderer::AddPresentPasses(RenderGraph &graph, RGTexture screen, UiPass *ui_pass,
+                                const ScreenQuadPass &present_pass)
 {
     const auto back_buffer = graph.Import("BackBuffer", rhi_->GetBackBufferRenderTarget()->GetColorImage(0));
 
@@ -258,12 +259,7 @@ void Renderer::AddPresentPasses(RenderGraph &graph, RGTexture screen, UiPass *ui
         AddReadback(graph, screen, true);
     }
 
-    graph.AddExternalPass("Present", [&present_pass, screen, back_buffer](RGBuilder &builder) {
-        builder.Sampled(screen, RHIShaderStageMask::Pixel);
-        builder.ColorWrite(back_buffer, 0);
-        builder.FullyOverwrites();
-        return [&present_pass](RGExternalContext &) { present_pass.Render(); };
-    });
+    present_pass.AddTo(graph, "Present", screen, back_buffer);
 }
 
 void Renderer::ExecuteGraph(RenderGraph &graph)
