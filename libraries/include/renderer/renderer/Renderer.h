@@ -166,9 +166,10 @@ private:
     // is saved once the frame completes
     void AddReadback(RenderGraph &graph, RGTexture texture, bool capture_ui);
 
-    // a staging buffer the size of `image`, saved as the screenshot once the frame completes. the caller records the
-    // copy.
-    [[nodiscard]] RHIResourceRef<RHIBuffer> CreateScreenshotBuffer(const RHIImage &image, PendingScreenshot screenshot);
+    // a staging buffer for an image of `format` and `size`, saved as the screenshot once the frame completes. the
+    // caller records the copy.
+    [[nodiscard]] RHIResourceRef<RHIBuffer> CreateScreenshotBuffer(PixelFormat format, Vector2UInt size,
+                                                                   PendingScreenshot screenshot);
 
     std::optional<PendingScreenshot> pending_screenshot_;
 

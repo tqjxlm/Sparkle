@@ -170,9 +170,9 @@ void ImageBasedLighting::RequestCpuCook(std::unique_ptr<CookJob> brdf_job, std::
     request(ibl_specular_pass_.get(), std::move(specular_job));
 }
 
-void ImageBasedLighting::CookOnTheFly(const RenderConfig &config)
+void ImageBasedLighting::AddCookPasses(RenderGraph &graph, const RenderConfig &config)
 {
-    if (cpu_cook_pending_)
+    if (cpu_cook_pending_ || !NeedUpdate())
     {
         return;
     }
@@ -212,7 +212,7 @@ void ImageBasedLighting::CookOnTheFly(const RenderConfig &config)
         }
 
         auto *pass = ibl_passes[active_pass_indices[i]];
-        pass->CookOnTheFly(config, samples_per_dispatch);
+        pass->AddTo(graph, samples_per_dispatch);
     }
 
     next_cook_pass_index_ = static_cast<uint8_t>((next_cook_pass_index_ + 1u) % ibl_passes.size());

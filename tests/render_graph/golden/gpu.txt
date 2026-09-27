@@ -1,5 +1,6 @@
 PathTrace: Compute
   access Accumulator StorageRead|StorageWrite(Compute)
+  access TLAS AccelerationStructureRead(Compute)
   barrier Accumulator Read->StorageWrite [Sampled(Pixel) -> StorageRead|StorageWrite(Compute)]
 ToneMapping: Raster
   access Accumulator Sampled(Pixel)
@@ -16,3 +17,4 @@ Present: Raster
 Accumulator: Imported, PathTrace..ToneMapping, Texture|UAV
 Screen: Transient B8G8R8A8Srgb Output, physical 0, ToneMapping..Present, ColorAttachment|Texture
 BackBuffer: Imported, Present..Present, ColorAttachment
+TLAS: Imported, PathTrace..PathTrace, AccelerationStructureRead(Compute)

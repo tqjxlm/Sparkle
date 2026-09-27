@@ -21,6 +21,12 @@ GOLDEN_DIR = os.path.join(SCRIPT_DIR, "golden")
 DUMP_NAME = "render_graph.json"
 
 
+def resource_of(entry):
+    """The resource an entry names, with its subresources unless it covers every one."""
+    subresources = entry.get("subresources")
+    return f"{entry['resource']}[{subresources}]" if subresources else entry["resource"]
+
+
 def project(dump):
     lines = []
     for graph_pass in dump["passes"]:
@@ -33,12 +39,13 @@ def project(dump):
         for access in graph_pass["accesses"]:
             clear = " clear" if access.get("clear") else ""
             lines.append(
-                f"  access {access['resource']} {access['access']}{clear}")
+                f"  access {resource_of(access)} {access['access']}{clear}")
         for barrier in graph_pass["barriers"]:
-            lines.append(f"  barrier {barrier['resource']} {barrier['from_layout']}->{barrier['to_layout']}"
-                         f" [{barrier['from']} -> {barrier['to']}]")
+            # memory barriers have no layouts
+            layouts = f" {barrier['from_layout']}->{barrier['to_layout']}" if "from_layout" in barrier else ""
+            lines.append(f"  barrier {resource_of(barrier)}{layouts} [{barrier['from']} -> {barrier['to']}]")
         for attachment in graph_pass["attachments"]:
-            lines.append(f"  attachment {attachment['resource']} slot {attachment['slot']}:"
+            lines.append(f"  attachment {resource_of(attachment)} slot {attachment['slot']}:"
                          f" {attachment['load']} ({attachment['load_reason']})"
                          f" / {attachment['store']} ({attachment['store_reason']})")
 

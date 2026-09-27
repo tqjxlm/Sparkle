@@ -1,5 +1,6 @@
 Upload: Copy
   access SceneColor CopyDst
+  access HostSceneColor CopySrc
   barrier SceneColor Undefined->TransferDst [Sampled(Pixel) -> CopyDst]
 Present: Raster
   access SceneColor Sampled(Pixel)
@@ -9,3 +10,4 @@ Present: Raster
   attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
 SceneColor: Transient RGBAFloat16 Scene, physical 0, Upload..Present, Texture|TransferDst
 BackBuffer: Imported, Present..Present, ColorAttachment
+HostSceneColor: Imported, Upload..Upload, CopySrc

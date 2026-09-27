@@ -36,9 +36,11 @@ public:
     void EndRenderPass();
 
     // begins rendering into attachments already in their attachment layouts. the only barriers it records are
-    // `barriers`, before the rendering; the pass's debug label and the optional `timer` bracket both.
+    // `barriers` and `memory_barriers`, before the rendering; the pass's debug label and the optional `timer` bracket
+    // both.
     void BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer = nullptr,
-                        std::span<const RHIImageBarrier> barriers = {});
+                        std::span<const RHIImageBarrier> barriers = {},
+                        std::span<const RHIMemoryBarrier> memory_barriers = {});
 
     // records `barriers` after the rendering ends, inside the pass's label and timer
     void EndRendering(std::span<const RHIImageBarrier> barriers = {});

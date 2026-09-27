@@ -20,8 +20,9 @@ namespace sparkle
 {
 // builds synthetic render graphs, compares their compiled plans (culling, physical images, barriers, load/store with
 // reasons) against expected dump summaries, and executes each one. under synchronization validation that proves the
-// planned barriers order every access, including a pooled image reused by the next graph. two graphs read back a
-// texture to prove the recorded passes ran and a draw binds the texture and sampler its pass declared.
+// planned barriers order every access, including a pooled image reused by the next graph and a buffer copied through.
+// graphs read back a texture to prove the recorded passes ran and a draw binds the texture and sampler its pass
+// declared.
 class RenderGraphCompileTest : public TestCase
 {
 public:
@@ -80,6 +81,15 @@ private:
         RHIResourceRef<RHIComputePass> trace_pass;
     };
 
+    // the resource an entry names, with its subresources unless it covers every one
+    static std::string GetResource(const nlohmann::json &entry)
+    {
+        const auto resource = entry.at("resource").get<std::string>();
+        return entry.contains("subresources")
+                   ? std::format("{}[{}]", resource, entry.at("subresources").get<std::string>())
+                   : resource;
+    }
+
     static std::vector<std::string> Summarize(const nlohmann::json &dump)
     {
         std::vector<std::string> lines;
@@ -95,16 +105,20 @@ private:
             lines.push_back(std::format("{}: {}", name, pass.at("kind").get<std::string>()));
             for (const auto &barrier : pass.at("barriers"))
             {
-                lines.push_back(std::format(
-                    "  barrier {} {}->{} [{} -> {}]", barrier.at("resource").get<std::string>(),
-                    barrier.at("from_layout").get<std::string>(), barrier.at("to_layout").get<std::string>(),
-                    barrier.at("from").get<std::string>(), barrier.at("to").get<std::string>()));
+                // memory barriers have no layouts
+                const auto layouts = barrier.contains("from_layout")
+                                         ? std::format(" {}->{}", barrier.at("from_layout").get<std::string>(),
+                                                       barrier.at("to_layout").get<std::string>())
+                                         : std::string();
+                lines.push_back(std::format("  barrier {}{} [{} -> {}]", GetResource(barrier), layouts,
+                                            barrier.at("from").get<std::string>(),
+                                            barrier.at("to").get<std::string>()));
             }
             for (const auto &attachment : pass.at("attachments"))
             {
                 const auto &slot = attachment.at("slot");
                 lines.push_back(std::format(
-                    "  attachment {} slot {}: {} ({}) / {} ({})", attachment.at("resource").get<std::string>(),
+                    "  attachment {} slot {}: {} ({}) / {} ({})", GetResource(attachment),
                     slot.is_string() ? slot.get<std::string>() : std::to_string(slot.get<unsigned>()),
                     attachment.at("load").get<std::string>(), attachment.at("load_reason").get<std::string>(),
                     attachment.at("store").get<std::string>(), attachment.at("store_reason").get<std::string>()));
@@ -190,11 +204,7 @@ private:
                 builder.ColorWrite(b, 0, Vector4(0.f, 1.f, 0.f, 1.f));
                 return [](RGRasterContext &) {};
             });
-            graph.AddCopyPass("Readback", [b, buffer = readback.get()](RGBuilder &builder) {
-                builder.CopySrc(b);
-                builder.SideEffect();
-                return [b, buffer](RGCopyContext &context) { context.CopyToBuffer(b, buffer); };
-            });
+            AddReadback(graph, b, readback);
 
             Run(rhi, graph,
                 {
@@ -230,6 +240,80 @@ private:
                                  "RenderGraphTestReadback");
     }
 
+    // copies `texture` into the imported `readback` buffer
+    static void AddReadback(RenderGraph &graph, RGTexture texture, const RHIResourceRef<RHIBuffer> &readback)
+    {
+        graph.AddCopyPass("Readback", [texture, buffer = graph.Import("Readback", readback)](RGBuilder &builder) {
+            builder.CopySrc(texture);
+            builder.CopyDst(buffer);
+            return [texture, buffer](RGCopyContext &context) { context.CopyToBuffer(texture, buffer); };
+        });
+    }
+
+    // a texture copied into a device buffer and back into another texture, which reuses the first one's image: the
+    // buffer's memory barrier orders the copies, and its tracked access is written through
+    void BufferRoundTrip(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto output = config.GetResolution().output;
+        auto staging =
+            rhi->CreateBuffer({.size = output.x() * output.y() * 4u,
+                               .usages = RHIBuffer::BufferUsage::TransferSrc | RHIBuffer::BufferUsage::TransferDst,
+                               .mem_properties = RHIMemoryProperty::DeviceLocal,
+                               .is_dynamic = false},
+                              "RenderGraphTestStaging");
+        auto readback = CreateReadbackBuffer(rhi, config);
+
+        RGTexturePool pool(rhi);
+        {
+            RenderGraph graph(pool, config);
+            const auto a = graph.CreateTexture("A", Rgba8Output);
+            const auto b = graph.CreateTexture("B", Rgba8Output);
+            const auto buffer = graph.Import("Staging", staging);
+            graph.AddRasterPass("Clear", [a](RGBuilder &builder) {
+                builder.ColorWrite(a, 0, Vector4(0.f, 0.f, 1.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            graph.AddCopyPass("Download", [a, buffer](RGBuilder &builder) {
+                builder.CopySrc(a);
+                builder.CopyDst(buffer);
+                return [a, buffer](RGCopyContext &context) { context.CopyToBuffer(a, buffer); };
+            });
+            graph.AddCopyPass("Upload", [buffer, b](RGBuilder &builder) {
+                builder.CopySrc(buffer);
+                builder.CopyDst(b);
+                builder.FullyOverwrites();
+                return [buffer, b](RGCopyContext &context) { context.CopyFromBuffer(buffer, b); };
+            });
+            AddReadback(graph, b, readback);
+
+            Run(rhi, graph,
+                {
+                    "Clear: Raster",
+                    "  barrier A Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                    "  attachment A slot 0: Clear (clear) / Store (read by Download)",
+                    "Download: Copy",
+                    "  barrier A ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "Upload: Copy",
+                    "  barrier B Undefined->TransferDst [CopySrc -> CopyDst]",
+                    "  barrier Staging [CopyDst -> CopySrc]",
+                    "Readback: Copy",
+                    "  barrier B TransferDst->TransferSrc [CopyDst -> CopySrc]",
+                    "A: physical 0",
+                    "B: physical 0",
+                },
+                "buffer round trip");
+        }
+
+        Expect(staging->GetTracked().GetTrackedAccess() == RHIResourceAccess{.access = RHIAccess::CopySrc},
+               "the graph writes the final access through to the buffer");
+
+        rhi->WaitForDeviceIdle();
+        const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
+        Expect(pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 255 && pixel[3] == 255,
+               "the texture copied through the buffer is read back");
+        readback->UnLock();
+    }
+
     // a screen quad pipeline created from an attachment signature, with nothing bound to sample, draws a cleared
     // texture, which reaches the readback only when the draw binds the texture and sampler its pass declared
     void DeclaredBinding(RHIContext *rhi, const RenderConfig &config)
@@ -247,11 +331,7 @@ private:
                 return [](RGRasterContext &) {};
             });
             quad->AddTo(graph, a, b);
-            graph.AddCopyPass("Readback", [b, buffer = readback.get()](RGBuilder &builder) {
-                builder.CopySrc(b);
-                builder.SideEffect();
-                return [b, buffer](RGCopyContext &context) { context.CopyToBuffer(b, buffer); };
-            });
+            AddReadback(graph, b, readback);
 
             Run(rhi, graph,
                 {
@@ -275,6 +355,81 @@ private:
         Expect(pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255,
                "the quad draws the texture its pass declared");
         readback->UnLock();
+    }
+
+    // a face of one mip cleared, another mip written and the face sampled, then the whole cube sampled: each access
+    // plans barriers for its own subresources, the clear is stored for the reader of its face rather than dropped for
+    // the writer of the other mip, and the face already sampled needs no second barrier
+    void Subresources(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto cube = rhi->CreateImage({.format = PixelFormat::R8G8B8A8Unorm,
+                                      .sampler = Rgba8Output.sampler,
+                                      .width = 8,
+                                      .height = 8,
+                                      .usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::UAV |
+                                                RHIImage::ImageUsage::Texture,
+                                      .mip_levels = 2,
+                                      .type = RHIImage::ImageType::Image2DCube},
+                                     "RenderGraphTestCube");
+        const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
+
+        RGTexturePool pool(rhi);
+        RenderGraph graph(pool, config);
+        const auto cube_texture = graph.Import("Cube", cube);
+        graph.AddRasterPass("ClearFace", [cube_texture](RGBuilder &builder) {
+            builder.ColorWrite(cube_texture.Subresource(1, 2), 0, Vector4(0.f, 0.f, 0.f, 1.f));
+            return [](RGRasterContext &) {};
+        });
+        graph.AddComputePass("WriteMip", compute_pass, [cube_texture](RGBuilder &builder) {
+            builder.StorageWrite(cube_texture.Mip(0));
+            return [](RGComputeContext &) {};
+        });
+        graph.AddComputePass("ReadFace", compute_pass, [cube_texture](RGBuilder &builder) {
+            builder.Sampled(cube_texture.Subresource(1, 2));
+            builder.SideEffect();
+            return [](RGComputeContext &) {};
+        });
+        graph.AddComputePass("ReadAll", compute_pass, [cube_texture](RGBuilder &builder) {
+            builder.Sampled(cube_texture);
+            builder.SideEffect();
+            return [](RGComputeContext &) {};
+        });
+
+        Run(rhi, graph,
+            {
+                "ClearFace: Raster",
+                "  barrier Cube[mip 1 layer 2] Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                "  attachment Cube[mip 1 layer 2] slot 0: Clear (clear) / Store (read by ReadFace)",
+                "WriteMip: Compute",
+                "  barrier Cube[mip 0] Undefined->StorageWrite [None -> StorageWrite(Compute)]",
+                "ReadFace: Compute",
+                "  barrier Cube[mip 1 layer 2] ColorOutput->Read [ColorWrite -> Sampled(Compute)]",
+                "ReadAll: Compute",
+                "  barrier Cube[mip 0 layer 0] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+                "  barrier Cube[mip 1 layer 0] Undefined->Read [None -> Sampled(Compute)]",
+                "  barrier Cube[mip 0 layer 1] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+                "  barrier Cube[mip 1 layer 1] Undefined->Read [None -> Sampled(Compute)]",
+                "  barrier Cube[mip 0 layer 2] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+                "  barrier Cube[mip 0 layer 3] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+                "  barrier Cube[mip 1 layer 3] Undefined->Read [None -> Sampled(Compute)]",
+                "  barrier Cube[mip 0 layer 4] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+                "  barrier Cube[mip 1 layer 4] Undefined->Read [None -> Sampled(Compute)]",
+                "  barrier Cube[mip 0 layer 5] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+                "  barrier Cube[mip 1 layer 5] Undefined->Read [None -> Sampled(Compute)]",
+            },
+            "subresources");
+
+        const RHIImageState sampled{.layout = RHIImageLayout::Read,
+                                    .access = {.access = RHIAccess::Sampled, .stages = RHIShaderStageMask::Compute}};
+        bool all_sampled = true;
+        for (auto mip = 0u; mip < 2; mip++)
+        {
+            for (auto layer = 0u; layer < 6; layer++)
+            {
+                all_sampled = all_sampled && cube->GetState(mip, layer) == sampled;
+            }
+        }
+        Expect(all_sampled, "the graph writes each subresource's final state through to the import");
     }
 
     void CulledBranch(RHIContext *rhi, const RenderConfig &config)
@@ -581,8 +736,9 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 9> Steps{
+    static constexpr std::array<Step, 11> Steps{
         &RenderGraphCompileTest::ClearSampleReadback, &RenderGraphCompileTest::DeclaredBinding,
+        &RenderGraphCompileTest::BufferRoundTrip,     &RenderGraphCompileTest::Subresources,
         &RenderGraphCompileTest::CulledBranch,        &RenderGraphCompileTest::IntraFrameReuse,
         &RenderGraphCompileTest::ImportedSeeding,     &RenderGraphCompileTest::LoadStore,
         &RenderGraphCompileTest::NextFrameReuse,      &RenderGraphCompileTest::NextFrameReuse,

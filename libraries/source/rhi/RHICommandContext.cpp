@@ -29,7 +29,8 @@ void RHICommandContext::EndRenderPass()
 }
 
 void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer,
-                                       std::span<const RHIImageBarrier> barriers)
+                                       std::span<const RHIImageBarrier> barriers,
+                                       std::span<const RHIMemoryBarrier> memory_barriers)
 {
     ASSERT_F(!rendering_, "Previous render pass not ended {}", rendering_name_);
     ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
@@ -40,7 +41,7 @@ void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::
     }
     BeginDebugLabel(name);
 
-    Barrier(barriers, {});
+    Barrier(barriers, memory_barriers);
 
     rendering_info_ = info;
     attachment_signature_ = info.GetSignature();

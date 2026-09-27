@@ -62,6 +62,11 @@ void DeferredRenderer::Render()
 
     RenderGraph graph(graph_texture_pool_, render_config_);
 
+    if (ibl_)
+    {
+        ibl_->AddCookPasses(graph, render_config_);
+    }
+
     const auto shadow_map = directional_shadow_pass_ ? directional_shadow_pass_->AddTo(graph) : RGTexture{};
     const auto lighting = LightingInputs::Import(graph, shadow_map, ibl_);
     const auto scene_depth = graph.CreateTexture("SceneDepth", SceneDepthDesc);

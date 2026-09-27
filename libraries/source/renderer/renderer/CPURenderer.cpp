@@ -116,12 +116,15 @@ void CPURenderer::Render()
     RenderGraph graph(graph_texture_pool_, render_config_);
     const auto scene_color =
         graph.CreateTexture("SceneColor", GetImageDesc(output_image_.GetFormat(), RGSizeClass::Scene));
+    const auto host_scene_color = graph.Import("HostSceneColor", image_buffer_);
 
-    graph.AddCopyPass("Upload", [this, scene_color](RGBuilder &builder) {
+    graph.AddCopyPass("Upload", [scene_color, host_scene_color](RGBuilder &builder) {
+        builder.CopySrc(host_scene_color);
         builder.CopyDst(scene_color);
         builder.FullyOverwrites();
-        return
-            [this, scene_color](RGCopyContext &context) { context.CopyFromBuffer(image_buffer_.get(), scene_color); };
+        return [scene_color, host_scene_color](RGCopyContext &context) {
+            context.CopyFromBuffer(host_scene_color, scene_color);
+        };
     });
 
     AddPostChain(graph, scene_color, upsample_pass_.get());

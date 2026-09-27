@@ -126,6 +126,7 @@ void GPURenderer::Render()
 
     RenderGraph graph(graph_texture_pool_, render_config_);
     const auto accumulator = graph.Import("Accumulator", scene_texture_);
+    const auto tlas = graph.Import("TLAS", tlas_);
 
     if (camera->NeedClear())
     {
@@ -143,6 +144,14 @@ void GPURenderer::Render()
 
     auto tone_mapping_input = accumulator;
 
+    if (tlas_->HasStagedBuild())
+    {
+        graph.AddCopyPass("BuildTLAS", [tlas](RGBuilder &builder) {
+            builder.AccelerationStructureBuild(tlas);
+            return [tlas](RGCopyContext &context) { context.BuildAccelerationStructure(tlas); };
+        });
+    }
+
     // base pass: render to texture
     if (tlas_->HasInstances() && !accumulation_complete && !AccumulationPaused())
     {
@@ -152,28 +161,30 @@ void GPURenderer::Render()
             denoiser_inputs = denoiser_inputs_->Import(graph, accumulator);
         }
 
-        graph.AddComputePass("PathTrace", compute_pass_, [this, accumulator, &denoiser_inputs](RGBuilder &builder) {
-            using Table = RayTracingComputeShader::ResourceTable;
-            builder.StorageReadWrite(accumulator, &Table::imageData);
-            // the tracer binds them as storage images on every dispatch, written or not
-            if (denoiser_inputs)
-            {
-                for (const auto &[texture, binding] :
-                     {std::pair{denoiser_inputs->noisy_radiance_hit_distance, &Table::gRadiance},
-                      std::pair{denoiser_inputs->normal_view_depth, &Table::gNormalDepth},
-                      std::pair{denoiser_inputs->albedo_object_id, &Table::gAlbedoObj},
-                      std::pair{denoiser_inputs->motion_hit_metallic, &Table::gMotion},
-                      std::pair{denoiser_inputs->noisy_specular_radiance_hit_distance, &Table::gRadianceSpecular},
-                      std::pair{denoiser_inputs->specular_albedo_roughness, &Table::gSpecAlbedo}})
+        graph.AddComputePass(
+            "PathTrace", compute_pass_, [this, accumulator, tlas, &denoiser_inputs](RGBuilder &builder) {
+                using Table = RayTracingComputeShader::ResourceTable;
+                builder.AccelerationStructureRead(tlas, &Table::tlas);
+                builder.StorageReadWrite(accumulator, &Table::imageData);
+                // the tracer binds them as storage images on every dispatch, written or not
+                if (denoiser_inputs)
                 {
-                    builder.StorageWrite(texture, binding);
+                    for (const auto &[texture, binding] :
+                         {std::pair{denoiser_inputs->noisy_radiance_hit_distance, &Table::gRadiance},
+                          std::pair{denoiser_inputs->normal_view_depth, &Table::gNormalDepth},
+                          std::pair{denoiser_inputs->albedo_object_id, &Table::gAlbedoObj},
+                          std::pair{denoiser_inputs->motion_hit_metallic, &Table::gMotion},
+                          std::pair{denoiser_inputs->noisy_specular_radiance_hit_distance, &Table::gRadianceSpecular},
+                          std::pair{denoiser_inputs->specular_albedo_roughness, &Table::gSpecAlbedo}})
+                    {
+                        builder.StorageWrite(texture, binding);
+                    }
                 }
-            }
-            return [this](RGComputeContext &context) {
-                context.DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u},
-                                        {16u, 16u, 1u});
-            };
-        });
+                return [this](RGComputeContext &context) {
+                    context.DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u},
+                                            {16u, 16u, 1u});
+                };
+            });
 
         // an encoded frame is displayed as-is even when it completes max_spp: the max_spp=1 motion
         // harnesses film the denoiser, and NRD's final resolve equals the accumulator bit-exactly
@@ -308,13 +319,11 @@ void GPURenderer::Update()
         }
     }
 
+    // Render records the staged build
     if (need_rebuild_tlas)
     {
         // structural change, rebuild TLAS
         tlas_->Build();
-
-        auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
-        cs_resources->tlas().BindResource(tlas_, true);
     }
     else if (!primitives_to_update.empty())
     {
@@ -467,7 +476,6 @@ void GPURenderer::InitSceneRenderResources()
 
     auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
     cs_resources->ubo().BindResource(uniform_buffer_);
-    cs_resources->tlas().BindResource(tlas_);
 
     // the dummies the tracer binds until the path trace pass declares allocated inputs
     BindDenoiserInputs();

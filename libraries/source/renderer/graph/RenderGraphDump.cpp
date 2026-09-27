@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <format>
 #include <utility>
 
 namespace sparkle
@@ -86,6 +87,21 @@ static const char *ToString(RHIStoreOp store_op)
     return store_op == RHIStoreOp::Store ? "Store" : "DontCare";
 }
 
+// e.g. "mip 1 layer 2" or "mips 0-4"; empty when the subresources cover every mip and layer
+static std::string ToString(unsigned base_mip, unsigned mip_count, unsigned base_layer, unsigned layer_count,
+                            unsigned mips, unsigned layers)
+{
+    const auto range = [](const char *name, unsigned base, unsigned count) {
+        return count == 1 ? std::format("{} {}", name, base) : std::format("{}s {}-{}", name, base, base + count - 1);
+    };
+    std::string subresources = mip_count == mips ? "" : range("mip", base_mip, mip_count);
+    if (layer_count != layers)
+    {
+        subresources += (subresources.empty() ? "" : " ") + range("layer", base_layer, layer_count);
+    }
+    return subresources;
+}
+
 nlohmann::json RenderGraph::Dump() const
 {
     auto passes = nlohmann::json::array();
@@ -102,21 +118,37 @@ nlohmann::json RenderGraph::Dump() const
         auto attachments = nlohmann::json::array();
         for (const auto &access : pass.accesses)
         {
-            const auto &resource = textures_[access.texture.index].name;
+            const auto &texture = textures_[access.texture.index];
+            const auto &resource = texture.name;
+            const auto &range = access.subresources;
+            const auto subresources = ToString(range.base_mip, range.mip_count, range.base_layer, range.layer_count,
+                                               texture.mips, texture.layers);
             nlohmann::json dumped_access{{"resource", resource}, {"access", ToString(access.access)}};
+            if (!subresources.empty())
+            {
+                dumped_access["subresources"] = subresources;
+            }
             if (access.clear)
             {
                 dumped_access["clear"] = true;
             }
             accesses.push_back(std::move(dumped_access));
 
-            if (access.barrier)
+            for (const auto &barrier : access.barriers)
             {
-                barriers.push_back({{"resource", resource},
-                                    {"from_layout", Enum2Str(access.barrier->from_layout)},
-                                    {"to_layout", Enum2Str(access.barrier->to_layout)},
-                                    {"from", ToString(access.barrier->from)},
-                                    {"to", ToString(access.barrier->to)}});
+                nlohmann::json dumped_barrier{{"resource", resource},
+                                              {"from_layout", Enum2Str(barrier.from_layout)},
+                                              {"to_layout", Enum2Str(barrier.to_layout)},
+                                              {"from", ToString(barrier.from)},
+                                              {"to", ToString(barrier.to)}};
+                if (const auto barrier_subresources =
+                        ToString(barrier.base_mip, barrier.mip_count, barrier.base_array_layer,
+                                 barrier.array_layer_count, texture.mips, texture.layers);
+                    !barrier_subresources.empty())
+                {
+                    dumped_barrier["subresources"] = barrier_subresources;
+                }
+                barriers.push_back(std::move(dumped_barrier));
             }
 
             if (!pass.live || pass.kind != RGPassKind::Raster || access.slot == NoSlot)
@@ -128,12 +160,26 @@ nlohmann::json RenderGraph::Dump() const
             const bool depth = access.slot == DepthSlot;
             const auto load_op = depth ? info.depth_attachment.load_op : info.color_attachments[access.slot].load_op;
             const auto store_op = depth ? info.depth_attachment.store_op : info.color_attachments[access.slot].store_op;
-            attachments.push_back({{"resource", resource},
-                                   {"slot", depth ? nlohmann::json("depth") : nlohmann::json(access.slot)},
-                                   {"load", ToString(load_op)},
-                                   {"load_reason", access.load_reason},
-                                   {"store", ToString(store_op)},
-                                   {"store_reason", access.store_reason}});
+            nlohmann::json attachment{
+                {"resource", resource},        {"slot", depth ? nlohmann::json("depth") : nlohmann::json(access.slot)},
+                {"load", ToString(load_op)},   {"load_reason", access.load_reason},
+                {"store", ToString(store_op)}, {"store_reason", access.store_reason}};
+            if (!subresources.empty())
+            {
+                attachment["subresources"] = subresources;
+            }
+            attachments.push_back(std::move(attachment));
+        }
+        for (const auto &access : pass.buffer_accesses)
+        {
+            const auto &resource = buffers_[access.buffer].name;
+            accesses.push_back({{"resource", resource}, {"access", ToString(access.access)}});
+            if (access.barrier)
+            {
+                barriers.push_back({{"resource", resource},
+                                    {"from", ToString(access.barrier->from)},
+                                    {"to", ToString(access.barrier->to)}});
+            }
         }
         dumped["accesses"] = std::move(accesses);
         dumped["barriers"] = std::move(barriers);
@@ -164,6 +210,19 @@ nlohmann::json RenderGraph::Dump() const
         if (texture.physical)
         {
             dumped["physical"] = *texture.physical;
+        }
+        resources.push_back(std::move(dumped));
+    }
+
+    // buffers and acceleration structures are imports; their usage is the union of their accesses
+    for (const auto &buffer : buffers_)
+    {
+        nlohmann::json dumped{{"name", buffer.name}, {"kind", "Imported"}};
+        if (buffer.first_pass)
+        {
+            dumped["first_use"] = passes_[*buffer.first_pass].name;
+            dumped["last_use"] = passes_[buffer.last_pass].name;
+            dumped["usage"] = ToString(buffer.accesses);
         }
         resources.push_back(std::move(dumped));
     }

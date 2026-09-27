@@ -140,18 +140,18 @@ std::optional<Renderer::PendingScreenshot> Renderer::TakeScreenshotRequest(bool 
     return std::exchange(pending_screenshot_, std::nullopt);
 }
 
-RHIResourceRef<RHIBuffer> Renderer::CreateScreenshotBuffer(const RHIImage &image, PendingScreenshot screenshot)
+RHIResourceRef<RHIBuffer> Renderer::CreateScreenshotBuffer(PixelFormat format, Vector2UInt size,
+                                                           PendingScreenshot screenshot)
 {
     auto staging_buffer =
-        rhi_->CreateBuffer({.size = image.GetStorageSize(),
+        rhi_->CreateBuffer({.size = GetImageMipByteSize(format, size.x(), size.y()),
                             .usages = RHIBuffer::BufferUsage::TransferDst,
                             .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
                             .is_dynamic = false},
                            "ScreenshotReadbackStagingBuffer");
 
-    const auto width = image.GetWidth();
-    const auto height = image.GetHeight();
-    const auto format = image.GetAttributes().format;
+    const auto width = size.x();
+    const auto height = size.y();
     auto *rhi = rhi_;
 
     rhi_->EnqueueEndOfFrameTasks([rhi, staging_buffer, width, height, format,
@@ -190,13 +190,13 @@ void Renderer::AddReadback(RenderGraph &graph, RGTexture texture, bool capture_u
         return;
     }
 
-    graph.AddCopyPass("Readback", [this, texture, screenshot = std::move(*request)](RGBuilder &builder) {
+    const auto staging_buffer =
+        graph.Import("ScreenshotBuffer",
+                     CreateScreenshotBuffer(graph.GetFormat(texture), graph.GetSize(texture), std::move(*request)));
+    graph.AddCopyPass("Readback", [texture, staging_buffer](RGBuilder &builder) {
         builder.CopySrc(texture);
-        builder.SideEffect();
-        return [this, texture, screenshot](RGCopyContext &context) {
-            auto staging_buffer = CreateScreenshotBuffer(*context.GetImage(texture), screenshot);
-            context.CopyToBuffer(texture, staging_buffer.get());
-        };
+        builder.CopyDst(staging_buffer);
+        return [texture, staging_buffer](RGCopyContext &context) { context.CopyToBuffer(texture, staging_buffer); };
     });
 }
 
