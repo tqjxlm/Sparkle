@@ -42,7 +42,11 @@ void MetalContext::CreateBackBuffer()
                          .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
     attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
 
-    back_buffer_color_ = context->GetRHI()->CreateResource<MetalImage>(attribute, nullptr, "BackBufferColor");
+    // a windowed back buffer takes each frame's drawable texture (SwapBuffer); a headless one owns a texture, so passes
+    // rendering only into it have a valid attachment
+    back_buffer_color_ = headless_
+                             ? context->GetRHI()->CreateResource<MetalImage>(attribute, "BackBufferColor")
+                             : context->GetRHI()->CreateResource<MetalImage>(attribute, nullptr, "BackBufferColor");
 }
 
 MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
