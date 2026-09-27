@@ -51,8 +51,8 @@ void MetalContext::CreateBackBuffer()
 
 MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
                            uint32_t headless_height)
-    : view_(mtk_view), rhi_(context), command_context_(context), headless_(is_headless),
-      headless_width_(headless_width), headless_height_(headless_height)
+    : view_(mtk_view), rhi_(context), headless_(is_headless), headless_width_(headless_width),
+      headless_height_(headless_height)
 {
     if (headless_)
     {

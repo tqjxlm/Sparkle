@@ -154,6 +154,12 @@ public:
     void PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::vector<uint32_t> &indices,
                        uint32_t element_count, uint32_t element_size);
 
+    // the accesses the next barrier on this resource must wait for
+    [[nodiscard]] RHITrackedAccess &GetTracked()
+    {
+        return tracked_;
+    }
+
 protected:
     Attribute attribute_;
 
@@ -161,6 +167,9 @@ protected:
     RHIBufferSubAllocation dynamic_allocation_;
 
     uint8_t *mapped_address_ = nullptr;
+
+private:
+    RHITrackedAccess tracked_;
 };
 
 RegisterEnumAsFlag(RHIBuffer::BufferUsage);

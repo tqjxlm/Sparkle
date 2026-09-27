@@ -32,21 +32,19 @@ void MetalUiHandler::Render(RHICommandContext *command_context)
     ImGui_ImplMetal_RenderDrawData(draw_data, metal_context->GetCommandBuffer(), metal_context->GetRenderEncoder());
 }
 
-void MetalUiHandler::BeginFrame()
+void MetalUiHandler::BeginFrame(const RHIRenderingInfo &info)
 {
     ImGuiIO &io = ImGui::GetIO();
 
     // it may be override by platform specific callbacks, so we need to set it every frame
-    io.DisplaySize = ImVec2(static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().width),
-                            static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().height));
+    io.DisplaySize = ImVec2(static_cast<float>(info.width), static_cast<float>(info.height));
 
-    ImGui_ImplMetal_NewFrame(CreateMetalRenderPassDescriptor(render_pass_->GetRenderingInfo()));
+    ImGui_ImplMetal_NewFrame(CreateMetalRenderPassDescriptor(info));
 }
 
+// ImGui compiles its Metal pipelines for the framebuffer it draws into, so the signature needs no setup
 void MetalUiHandler::Init()
 {
-    // manually touch resources
-    BeginFrame();
 }
 } // namespace sparkle
 

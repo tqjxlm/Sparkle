@@ -6,7 +6,7 @@
 
 namespace sparkle
 {
-class RHICommandContext;
+class RGRasterContext;
 
 class MeshPass : public PipelinePass
 {
@@ -26,7 +26,7 @@ public:
     virtual void HandleMovedPrimitive(uint32_t from, uint32_t to);
 
 protected:
-    void DrawPrimitives(RHICommandContext *command_context);
+    void DrawPrimitives(RGRasterContext &context) const;
 
     SceneRenderProxy *scene_proxy_;
 

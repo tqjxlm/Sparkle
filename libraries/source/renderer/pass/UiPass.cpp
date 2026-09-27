@@ -1,30 +1,27 @@
 #include "renderer/pass/UiPass.h"
 
+#include "renderer/graph/RenderGraph.h"
 #include "rhi/RHI.h"
-#include "rhi/RHIUiHandler.h"
 
 namespace sparkle
 {
-void UiPass::Render()
+UiPass::UiPass(RHIContext *rhi, PixelFormat screen_format) : ui_handler_(rhi->GetUiHandler())
 {
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginRenderPass(render_pass_);
-
-    ui_handler_->BeginFrame();
-
-    ui_handler_->Render(command_context);
-
-    command_context->EndRenderPass();
+    RHIAttachmentSignature signature;
+    signature.color_formats[0] = screen_format;
+    ui_handler_->Setup(signature);
 }
 
-void UiPass::InitRenderResources(const RenderConfig &)
+void UiPass::AddTo(RenderGraph &graph, RGTexture screen) const
 {
-    RHIRenderPass::Attribute pass_attrib;
-    pass_attrib.color_load_op = RHIRenderPass::LoadOp::Load;
-    render_pass_ = rhi_->CreateRenderPass(pass_attrib, render_target_, "UiPass");
-
-    ui_handler_ = rhi_->GetUiHandler();
-    ui_handler_->Setup(render_pass_);
+    graph.AddRasterPass("Ui", [this, screen](RGBuilder &builder) {
+        builder.ColorWrite(screen, 0);
+        builder.NativeAccess();
+        return [this](RGRasterContext &context) {
+            auto &command_context = context.GetNativeContext();
+            ui_handler_->BeginFrame(command_context.GetRenderingInfo());
+            ui_handler_->Render(&command_context);
+        };
+    });
 }
 } // namespace sparkle

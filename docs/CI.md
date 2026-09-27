@@ -118,7 +118,7 @@ The paravirtual device also renders MTLHeap-placed resources as solid magenta th
 
 ## Screenshot Ground Truth
 
-The suite compares auto-generated screenshots with the published ground truth. CI coverage spans forward and deferred; pass `--case forward_render_static`, for example, to focus one pipeline during development. `TestScene` is the packaged default scene (`resources/packed/TestScene.usda`, see [USD.md](USD.md)) and is loaded when no `--scene` override is present. Ground-truth images are updated manually.
+The suite compares auto-generated screenshots with the published ground truth. CI coverage spans forward and deferred, plus cpu and gpu on `ubuntu-glfw-release`, where lavapipe runs the path tracer's ray queries in software (`cpu_render_static_64spp` and `gpu_render_static_64spp` stop at 64 samples per pixel, so they gate with a FLIP threshold that allows for the remaining noise); pass `--case forward_render_static`, for example, to focus one pipeline during development. `TestScene` is the packaged default scene (`resources/packed/TestScene.usda`, see [USD.md](USD.md)) and is loaded when no `--scene` override is present. Ground-truth images are updated manually.
 
 ### TestScene
 

@@ -40,7 +40,8 @@ void MetalCommandContext::End()
     command_buffer_ = nil;
 }
 
-void MetalCommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
+void MetalCommandContext::DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state,
+                                           const DrawArgs &draw_args)
 {
     ASSERT(render_encoder_);
 
@@ -60,8 +61,8 @@ void MetalCommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipel
                               baseInstance:draw_args.first_instance];
 }
 
-void MetalCommandContext::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                                          Vector3UInt thread_per_group)
+void MetalCommandContext::DispatchComputeInternal(const RHIResourceRef<RHIPipelineState> &pipeline,
+                                                  Vector3UInt total_threads, Vector3UInt thread_per_group)
 {
     ASSERT(compute_encoder_);
 

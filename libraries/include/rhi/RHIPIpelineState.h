@@ -3,7 +3,7 @@
 #include "rhi/RHIResource.h"
 
 #include "rhi/RHIBuffer.h"
-#include "rhi/RHIRenderPass.h"
+#include "rhi/RHIRenderingInfo.h"
 #include "rhi/RHIShader.h"
 #include "rhi/RHIVertex.h"
 
@@ -96,10 +96,10 @@ public:
 
     virtual void CompileInternal() = 0;
 
-    // declares the attachments of the pass this pipeline draws in, so the pipeline compiles for them up front
-    void SetRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
+    // declares the attachments this pipeline draws into, so the pipeline compiles for them up front
+    void SetAttachmentSignature(const RHIAttachmentSignature &signature)
     {
-        attachment_signature_ = pass->GetRenderingInfo().GetSignature();
+        attachment_signature_ = signature;
     }
 
     void SetVertexBuffer(uint32_t binding, const RHIResourceRef<RHIBuffer> &buffer)
@@ -168,6 +168,20 @@ public:
         ASSERT(compiled_);
 
         return static_cast<T::ResourceTable *>(GetResourceTable(T::GetStage()));
+    }
+
+    // binds into each of the pipeline's resource tables that has the binding's member, and returns whether one had it
+    bool ApplyBinding(const RHIMemberBinding &binding)
+    {
+        bool applied = false;
+        for (const auto &table : resource_table_)
+        {
+            if (table)
+            {
+                applied = binding.BindTo(*table) || applied;
+            }
+        }
+        return applied;
     }
 
 protected:

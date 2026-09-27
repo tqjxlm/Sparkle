@@ -42,9 +42,6 @@ struct RHIColorAttachment
 {
     // null marks an unused slot
     RHIImage *image = nullptr;
-    // the single-sample image a multisampled `image` resolves into. mip_level and array_layer then address this image,
-    // and the multisampled image has a single subresource.
-    RHIImage *resolve_image = nullptr;
     unsigned mip_level = 0;
     unsigned array_layer = 0;
     RHILoadOp load_op = RHILoadOp::None;

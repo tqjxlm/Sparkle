@@ -75,6 +75,7 @@ RenderFramework::RenderFramework(NativeView *native_view, RHIContext *rhi, UiMan
     : native_view_(native_view), rhi_(rhi), ui_manager_(ui_manager), scene_(scene),
       frame_rate_monitor_(LogInterval, false, [this](float delta_time) { MeasurePerformance(delta_time); })
 {
+    graph_texture_pool_ = std::make_unique<RGTexturePool>(rhi_);
     task_queue_ = std::make_shared<ThreadTaskQueue>();
     TaskDispatcher::Instance().RegisterTaskQueue(task_queue_, ThreadName::Render);
 
@@ -131,6 +132,7 @@ void RenderFramework::RenderThreadMain()
     rhi_->WaitForDeviceIdle();
 
     renderer_ = nullptr;
+    graph_texture_pool_ = nullptr;
 
     Log(Info, "Render thread exit.");
 }
@@ -308,7 +310,7 @@ void RenderFramework::RecreateRendererIfNecessary()
         rhi_->FlushDeferredDeletions();
     }
 
-    renderer_ = Renderer::CreateRenderer(render_config_, rhi_, scene_->GetRenderProxy());
+    renderer_ = Renderer::CreateRenderer(render_config_, rhi_, scene_->GetRenderProxy(), *graph_texture_pool_);
 
     // the scene-loaded notification is one-shot; a renderer created after it must not miss it
     // (readiness stays false otherwise, and e.g. GPURenderer then resets NRD history every frame)
@@ -432,6 +434,11 @@ bool RenderFramework::IsSceneFullyLoaded() const
     return scene_loaded_notified_;
 }
 
+const RGTexturePool &RenderFramework::GetGraphTexturePool() const
+{
+    return *graph_texture_pool_;
+}
+
 std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const std::string &name)
 {
     auto request = std::make_shared<ScreenshotRequest>(name);
@@ -439,6 +446,14 @@ std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const 
         std::scoped_lock<std::mutex> lock(screenshot_queue_mutex_);
         screenshot_queue_.push(request);
     }
+    return request;
+}
+
+std::shared_ptr<ScreenshotRequest> RenderFramework::RequestGraphDump(const std::string &name)
+{
+    auto request = std::make_shared<ScreenshotRequest>(name);
+    TaskManager::RunInRenderThread(
+        [this, request] { renderer_->RequestGraphDump(request->GetName(), [request] { request->MarkCompleted(); }); });
     return request;
 }
 

@@ -4,12 +4,16 @@
 #include "application/RenderFramework.h"
 #include "core/Logger.h"
 #include "core/task/TaskManager.h"
+#include "renderer/graph/RGTexturePool.h"
 #include "rhi/RHI.h"
 
 #include <atomic>
 
 namespace sparkle
 {
+// switches forward -> gpu or deferred -> forward. the graph texture pool outlives the renderers, so each new renderer
+// reuses an image the previous one left (every pipeline ends in the shared post chain's screen) and creates fewer
+// images than its graphs hold.
 class PipelineSwitchPoolTest : public TestCase
 {
     static constexpr uint32_t SettleFrames = 30;
@@ -41,7 +45,7 @@ public:
             {
                 return Result::Pending;
             }
-            RunOnRenderThread([this, rhi] { baseline_ = rhi->GetRenderTargetPool().GetStats(); });
+            Snapshot(app);
             phase_ = Phase::SwitchAway;
             wait_until_frame_ = frame_ + SettleFrames;
             return Result::Pending;
@@ -64,6 +68,16 @@ public:
             {
                 return Result::Pending;
             }
+            VerifyReuse(app, "switching away");
+            phase_ = Phase::SnapshotBack;
+            return Result::Pending;
+
+        case Phase::SnapshotBack:
+            Snapshot(app);
+            phase_ = Phase::SwitchForward;
+            return Result::Pending;
+
+        case Phase::SwitchForward:
             EnforceConfig("pipeline", std::string("forward"));
             Log(Info, "{}: switched pipeline back to forward at runtime", GetName());
             phase_ = Phase::Verify;
@@ -75,14 +89,7 @@ public:
             {
                 return Result::Pending;
             }
-            RunOnRenderThread([this, rhi] {
-                const auto &stats = rhi->GetRenderTargetPool().GetStats();
-                Log(Info, "{}: pool stats since baseline: created {}, reused {}, released {}", GetName(),
-                    stats.num_created - baseline_.num_created, stats.num_reused - baseline_.num_reused,
-                    stats.num_released - baseline_.num_released);
-                Expect(stats.num_reused >= baseline_.num_reused + 1,
-                       "returning to forward reuses a pooled render target");
-            });
+            VerifyReuse(app, "returning to forward");
             phase_ = Phase::Done;
             return Result::Pending;
 
@@ -105,9 +112,34 @@ private:
         WaitLoaded,
         SwitchAway,
         SwitchBack,
+        SnapshotBack,
+        SwitchForward,
         Verify,
         Done,
     };
+
+    void Snapshot(AppFramework &app)
+    {
+        const auto *framework = app.GetRenderFramework();
+        RunOnRenderThread([this, framework] { baseline_ = framework->GetGraphTexturePool().GetStats(); });
+    }
+
+    // the settled renderer's graphs hold every image in the pool: images only the previous renderer used were released
+    // after RGTexturePool::UnusedGraphsBeforeRelease graphs
+    void VerifyReuse(AppFramework &app, const char *what)
+    {
+        const auto *framework = app.GetRenderFramework();
+        RunOnRenderThread([this, framework, what] {
+            const auto &pool = framework->GetGraphTexturePool();
+            const auto &stats = pool.GetStats();
+            const auto created = stats.num_created - baseline_.num_created;
+            Log(Info, "{}: {}: graph images created {}, reused {}, released {}, held {}", GetName(), what, created,
+                stats.num_reused - baseline_.num_reused, stats.num_released - baseline_.num_released,
+                pool.GetImageCount());
+            Expect(created < pool.GetImageCount(),
+                   std::string(what) + " reuses a graph image the previous renderer left in the pool");
+        });
+    }
 
     template <typename Task> void RunOnRenderThread(Task &&task)
     {
@@ -138,7 +170,7 @@ private:
     std::atomic<bool> failed_{false};
 
     // only accessed from the render thread
-    RHIRenderTargetPool::Stats baseline_;
+    RGTexturePool::Stats baseline_;
 };
 
 static TestCaseRegistrar<PipelineSwitchPoolTest> pipeline_switch_pool_test_registrar("pipeline_switch_pool");

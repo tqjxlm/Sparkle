@@ -42,7 +42,9 @@ class VulkanRHI final : public RHIContext
 public:
     using RHIContext::RHIContext;
     ~VulkanRHI() override = default;
-    void CreateBackBufferRenderTarget();
+    void CreateBackBuffer();
+
+    [[nodiscard]] RHIResourceRef<RHIImage> GetBackBuffer() const override;
 
     bool InitRHI(NativeView *inWindow, std::string &error) override;
     void InitRenderResources() override;
@@ -73,20 +75,6 @@ public:
     void SubmitCommandBuffer() override;
 
     RHICommandContext *GetCommandContext() override;
-
-    void NextSubpass() override
-    {
-        UnImplemented();
-    }
-
-    RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                 const RHIResourceRef<RHIImage> &depth_image,
-                                                                 const std::string &name) override;
-
-    RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                       const RHIRenderTarget::ColorImageArray &color_images,
-                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                       const std::string &name) override;
 
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
@@ -128,6 +116,8 @@ protected:
 
 private:
     std::vector<RHIResourceRef<RHITimer>> frame_timers_;
+    // a windowed back buffer is the swap chain's
+    RHIResourceRef<RHIImage> headless_back_buffer_;
 };
 } // namespace sparkle
 

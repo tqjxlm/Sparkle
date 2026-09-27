@@ -3,17 +3,16 @@
 #include "renderer/pass/MeshPass.h"
 
 #include "core/math/Types.h"
+#include "renderer/graph/RenderGraph.h"
 #include "rhi/RHIBuffer.h"
-#include "rhi/RHIRenderTarget.h"
 
 namespace sparkle
 {
+// draws the scene's depth as the directional light sees it into a shadow map
 class DepthPass : public MeshPass
 {
 public:
     DepthPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, unsigned width, unsigned height);
-
-    void Render() override;
 
     void InitRenderResources(const RenderConfig &config) override;
 
@@ -23,12 +22,10 @@ public:
     {
     }
 
-    [[nodiscard]] RHIResourceRef<RHIRenderTarget> GetOutput() const
-    {
-        return depth_target_;
-    }
-
     void SetProjectionMatrix(const Mat4 &matrix);
+
+    // adds a Raster pass drawing into a new ShadowMap, cleared, and returns it
+    [[nodiscard]] RGTexture AddTo(RenderGraph &graph) const;
 
 private:
     struct ViewUBO
@@ -36,13 +33,8 @@ private:
         Mat4 view_projection_matrix;
     };
 
-    RHIResourceRef<RHIImage> depth_texture_;
+    RGTextureDesc shadow_map_desc_;
 
-    RHIResourceRef<RHIRenderTarget> depth_target_;
     RHIResourceRef<RHIBuffer> view_buffer_;
-    RHIResourceRef<RHIRenderPass> pass_;
-
-    unsigned width_;
-    unsigned height_;
 };
 } // namespace sparkle

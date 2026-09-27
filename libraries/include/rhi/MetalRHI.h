@@ -15,6 +15,7 @@ public:
 
     bool InitRHI(NativeView *inWindow, std::string &error) override;
     void InitRenderResources() override;
+    [[nodiscard]] RHIResourceRef<RHIImage> GetBackBuffer() const override;
     void WaitForDeviceIdle() override;
     void CaptureNextFrames(int count) override;
 
@@ -43,17 +44,6 @@ public:
 
     bool RecreateSurface() override;
     void RecreateSwapChain() override;
-    void NextSubpass() override;
-
-    RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                 const RHIResourceRef<RHIImage> &depth_image,
-                                                                 const std::string &name) override;
-
-    RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                       const RHIRenderTarget::ColorImageArray &color_images,
-                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                       const std::string &name) override;
-
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
 

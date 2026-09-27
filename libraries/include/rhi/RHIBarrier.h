@@ -131,4 +131,23 @@ struct RHIMemoryBarrier
     RHIResourceAccess from;
     RHIResourceAccess to;
 };
+
+// the tracked state of a buffer or acceleration structure, which memory barriers synchronize: the accesses the next
+// barrier must wait for. the render graph plans from it and writes each pass's result back.
+class RHITrackedAccess
+{
+public:
+    [[nodiscard]] const RHIResourceAccess &GetTrackedAccess() const
+    {
+        return tracked_access_;
+    }
+
+    void SetTrackedAccess(const RHIResourceAccess &access)
+    {
+        tracked_access_ = access;
+    }
+
+private:
+    RHIResourceAccess tracked_access_;
+};
 } // namespace sparkle

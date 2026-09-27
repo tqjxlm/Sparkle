@@ -6,14 +6,14 @@
 #include "renderer/resource/GBuffer.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIImage.h"
-#include "rhi/RHIRenderTarget.h"
 
 namespace sparkle
 {
 class CPURenderer : public Renderer
 {
 public:
-    CPURenderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy);
+    CPURenderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
+                RGTexturePool &graph_texture_pool);
 
     [[nodiscard]] RenderConfig::Pipeline GetRenderMode() const override
     {
@@ -43,17 +43,9 @@ private:
     CameraRenderProxy *camera_;
 
     RHIResourceRef<RHIBuffer> image_buffer_;
-    RHIResourceRef<RHIImage> screen_texture_;
-    RHIResourceRef<RHIRenderTarget> screen_rt_;
 
-    // output-resolution surface that ui, screenshots and present read. aliases screen_texture_/
-    // screen_rt_ unless sub-resolution rendering makes upsample_pass_ fill a dedicated target.
-    RHIResourceRef<RHIImage> composite_texture_;
-    RHIResourceRef<RHIRenderTarget> composite_rt_;
+    // fills the screen from the uploaded image when sub-resolution rendering makes them differ
     std::unique_ptr<class ScreenQuadPass> upsample_pass_;
-
-    std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
-    std::unique_ptr<class UiPass> ui_pass_;
 
     Image2D output_image_;
 

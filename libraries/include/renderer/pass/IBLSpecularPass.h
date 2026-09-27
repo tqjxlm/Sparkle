@@ -11,16 +11,14 @@ public:
 
     ~IBLSpecularPass() override;
 
-    void CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch) override;
+    void AddTo(RenderGraph &graph, unsigned samples_per_dispatch) override;
 
     void InitRenderResources(const RenderConfig &config) override;
-
-    void Render() override;
 
 protected:
     RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format) override;
 
-    // update level-related resources and reset progress
+    // starts cooking mip `level`
     void StartCacheLevel(uint8_t level);
 
 private:

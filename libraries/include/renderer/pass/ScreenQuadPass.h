@@ -5,10 +5,13 @@
 #include "core/math/Types.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHIPIpelineState.h"
-#include "rhi/RHIRenderTarget.h"
 
 namespace sparkle
 {
+class RenderGraph;
+class RGBuilder;
+struct RGTexture;
+
 class ScreenQuadVertexShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(ScreenQuadVertexShader, RHIShaderStage::Vertex, "shaders/screen/screen.vs.slang", "shader_main")
@@ -35,66 +38,50 @@ public:
         Vector2 uv;
     };
 
-    ScreenQuadPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &input,
-                   const RHIResourceRef<RHIRenderTarget> &target)
-        : PipelinePass(ctx), source_texture_(input), target_(target)
-    {
-        ASSERT(target_);
-    }
+    // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at slot 0.
+    // `to_back_buffer` applies the window's pre-rotation.
+    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, bool to_back_buffer = false);
 
-    ScreenQuadPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &input) : PipelinePass(ctx), source_texture_(input)
-    {
-    }
-
-    void Render() override;
+    // adds a Raster pass drawing `input`, sampled with the sampler its image carries, over all of `output`
+    void AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const;
 
     void InitRenderResources(const RenderConfig &config) override;
 
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
-    [[nodiscard]] RHIResourceRef<RHIRenderPass> GetRenderPass() const
-    {
-        return pass_;
-    }
-
-    // Re-point the pass at a different source image and re-bind (e.g. switching the tone-mapping input
-    // between the raw scene texture and the denoised output when the denoiser is toggled at runtime).
-    // Must be called after InitRenderResources, on the render thread.
-    void SetInput(const RHIResourceRef<RHIImage> &input)
-    {
-        if (source_texture_.get() == input.get())
-        {
-            return;
-        }
-        source_texture_ = input;
-        BindPixelShaderResources();
-    }
-
 protected:
-    virtual void SetupRenderPass();
-    virtual void SetupPipeline();
-    virtual void SetupVertices();
-    virtual void SetupVertexShader();
     virtual void SetupPixelShader();
-    virtual void CompilePipeline();
-    virtual void BindVertexShaderResources();
-    virtual void BindPixelShaderResources();
+
+    // binds what the pixel shader reads beyond the graph's bindings
+    virtual void BindPixelShaderResources()
+    {
+    }
+
+    // declares the pass's input, bound to the pixel shader's texture and sampler
+    virtual void SampleInput(RGBuilder &builder, RGTexture input) const;
 
     const static std::array<ScreenVertex, 4> Vertices;
     const static std::array<uint32_t, 6> Indices;
-
-    RHIResourceRef<RHIImage> source_texture_;
-    RHIResourceRef<RHIRenderTarget> target_;
 
     RHIResourceRef<RHIBuffer> vertex_buffer_;
     RHIResourceRef<RHIBuffer> index_buffer_;
 
     RHIResourceRef<RHIPipelineState> pipeline_state_;
-    RHIResourceRef<RHIRenderPass> pass_;
 
     RHIResourceRef<RHIBuffer> vs_ub_;
     RHIResourceRef<RHIBuffer> ps_ub_;
 
     DrawArgs draw_args_;
+
+    std::string name_;
+
+private:
+    void SetupPipeline();
+    void SetupVertices();
+    void SetupVertexShader();
+    void BindVertexShaderResources();
+
+    RHIAttachmentSignature signature_;
+    bool to_back_buffer_ = false;
 };
 } // namespace sparkle

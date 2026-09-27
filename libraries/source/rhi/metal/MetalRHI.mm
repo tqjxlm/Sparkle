@@ -9,7 +9,6 @@
 #include "MetalNrdBackend.h"
 #include "MetalPipelineState.h"
 #include "MetalRayTracing.h"
-#include "MetalRenderTarget.h"
 #include "MetalResourceArray.h"
 #include "MetalShader.h"
 #include "MetalTimer.h"
@@ -50,30 +49,14 @@ bool MetalRHI::InitRHI(NativeView *inWindow, std::string &error)
     }
 }
 
-static auto CreateBackBufferDepth(CGSize extent)
-{
-    RHIImage::Attribute attribute;
-    attribute.width = extent.width;
-    attribute.height = extent.height;
-    attribute.mip_levels = 1;
-    attribute.msaa_samples = 1;
-    attribute.format = PixelFormat::D32;
-    attribute.usages = RHIImage::ImageUsage::DepthStencilAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-    attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
-
-    return context->GetRHI()->CreateResource<MetalImage>(attribute, "BackBufferDepth");
-}
-
 void MetalRHI::InitRenderResources()
 {
     context->CreateBackBuffer();
+}
 
-    auto rt_name = IsHeadless() ? "HeadlessBackBufferRT" : "BackBufferRT";
-    back_buffer_rt_ = CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetDrawableSize()), rt_name);
+RHIResourceRef<RHIImage> MetalRHI::GetBackBuffer() const
+{
+    return context->GetBackBufferColor();
 }
 
 void MetalRHI::CleanupInternal()
@@ -177,26 +160,6 @@ bool MetalRHI::RecreateSurface()
 void MetalRHI::RecreateSwapChain()
 {
     UnImplemented();
-}
-
-void MetalRHI::NextSubpass()
-{
-    UnImplemented();
-}
-
-RHIResourceRef<RHIRenderTarget> MetalRHI::CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                                       const std::string &name)
-{
-    return CreateResource<MetalRenderTarget>(attribute, depth_image, name);
-}
-
-RHIResourceRef<RHIRenderTarget> MetalRHI::CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                             const RHIRenderTarget::ColorImageArray &color_images,
-                                                             const RHIResourceRef<RHIImage> &depth_image,
-                                                             const std::string &name)
-{
-    return CreateResource<MetalRenderTarget>(attribute, color_images, depth_image, name);
 }
 
 RHIResourceRef<RHIShader> MetalRHI::CreateShader(const RHIShaderInfo *shader_info)

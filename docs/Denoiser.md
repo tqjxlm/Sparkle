@@ -22,7 +22,9 @@ ToneMappingPass           consumes the selected provider output
 screenshots / UI / present
 ```
 
-The scene-resolution inputs are allocated only when the active provider needs them. Each provider owns its output, temporal history, intermediates, and SDK objects. Provider changes are frame-coherent: a new output becomes visible only after a trace dispatch has written every required input and the new provider has encoded successfully. Switching off immediately returns tone mapping to the progressive accumulator.
+The scene-resolution inputs are allocated only when the active provider needs them. Each provider owns its output, temporal history, intermediates, and SDK objects. Provider changes are frame-coherent: a new output becomes visible only in a frame whose trace dispatch writes every required input and which the new provider encodes. Switching off immediately returns tone mapping to the progressive accumulator.
+
+Each provider adds its frame to the GPU renderer's render graph as one External pass (`Denoiser::AddTo`) that samples the path-tracing inputs and the accumulator and writes the provider's persistent output (and NRD's output history); what that pass declares is listed in [RenderGraph.md](RenderGraph.md#renderers). A provider whose encode fails inside that pass stops being ready, and the next frame selects the fallback.
 
 Key files: [RHIDenoiser](../libraries/include/rhi/RHIDenoiser.h), [DenoiserFactory](../libraries/include/renderer/denoiser/DenoiserFactory.h), [PathTracingDenoiserInputs](../libraries/include/renderer/resource/PathTracingDenoiserInputs.h).
 

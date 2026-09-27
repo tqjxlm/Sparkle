@@ -19,37 +19,21 @@ class DepthOnlyPixelShader : public RHIShaderInfo
 };
 
 DepthPass::DepthPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, unsigned width, unsigned height)
-    : MeshPass(ctx, scene_proxy), width_(width), height_(height)
+    : MeshPass(ctx, scene_proxy),
+      shadow_map_desc_{.format = PixelFormat::D32,
+                       .size_class = RGSizeClass::Absolute,
+                       .width = width,
+                       .height = height,
+                       .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToBorder,
+                                   .border_color = RHISampler::BorderColor::FloatOpaqueWhite,
+                                   .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                                   .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                                   .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest}}
 {
 }
 
 void DepthPass::InitRenderResources(const RenderConfig &)
 {
-    {
-        RHIImage::Attribute attribute;
-        attribute.width = width_;
-        attribute.height = height_;
-        attribute.format = PixelFormat::D32;
-        attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::DepthStencilAttachment;
-        attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToBorder,
-                             .border_color = RHISampler::BorderColor::FloatOpaqueWhite,
-                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-
-        depth_texture_ = rhi_->CreateImage(attribute, "DepthPassDepthBuffer");
-    }
-
-    depth_target_ = rhi_->CreateRenderTarget({}, nullptr, depth_texture_, "DepthRT");
-
-    RHIRenderPass::Attribute pass_attribute;
-    pass_attribute.color_load_op = RHIRenderPass::LoadOp::None;
-    pass_attribute.color_store_op = RHIRenderPass::StoreOp::None;
-    pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Clear;
-    pass_attribute.depth_store_op = RHIRenderPass::StoreOp::Store;
-
-    pass_ = rhi_->CreateRenderPass(pass_attribute, depth_target_, "DepthPass");
-
     vertex_shader_ = rhi_->CreateShader<DepthOnlyVertexShader>();
     pixel_shader_ = rhi_->CreateShader<DepthOnlyPixelShader>();
 
@@ -68,7 +52,9 @@ void DepthPass::HandleNewPrimitive(uint32_t primitive_id)
     const RHIResourceRef<RHIPipelineState> pso =
         rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Graphics, "DepthDrawPipelineState");
 
-    pso->SetRenderPass(pass_);
+    RHIAttachmentSignature signature;
+    signature.depth_format = shadow_map_desc_.format;
+    pso->SetAttachmentSignature(signature);
 
     pso->SetShader<RHIShaderStage::Vertex>(vertex_shader_);
 
@@ -97,14 +83,13 @@ void DepthPass::SetProjectionMatrix(const Mat4 &matrix)
     view_buffer_->Upload(rhi_, &view_ubo);
 }
 
-void DepthPass::Render()
+RGTexture DepthPass::AddTo(RenderGraph &graph) const
 {
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginRenderPass(pass_);
-
-    DrawPrimitives(command_context);
-
-    command_context->EndRenderPass();
+    const auto shadow_map = graph.CreateTexture("ShadowMap", shadow_map_desc_);
+    graph.AddRasterPass("DirectionalShadow", [this, shadow_map](RGBuilder &builder) {
+        builder.DepthWrite(shadow_map, 1.f);
+        return [this](RGRasterContext &context) { DrawPrimitives(context); };
+    });
+    return shadow_map;
 }
 } // namespace sparkle

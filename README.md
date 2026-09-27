@@ -84,6 +84,7 @@ For detailed usage of the app, please refer to [docs/Run.md](docs/Run.md).
 * [docs/CI.md](docs/CI.md) — CI gates and local validation
 * [docs/Cooking.md](docs/Cooking.md) — build-time asset cooking
 * [docs/USD.md](docs/USD.md) — USD import and export
+* [docs/RenderGraph.md](docs/RenderGraph.md) — render graph: declared pass accesses, derived barriers and load/store, dump
 * [docs/Denoiser.md](docs/Denoiser.md) — path-tracing denoisers: NRD and MetalFX integration
 * [docs/RenderingValidation.md](docs/RenderingValidation.md) — rendering validation and debugging methodology
 
