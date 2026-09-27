@@ -8,6 +8,9 @@
 #include "VulkanContext.h"
 #include "VulkanDescriptorSet.h"
 
+#include <algorithm>
+#include <cstring>
+
 namespace sparkle
 {
 void VulkanBLAS::Build()
@@ -146,7 +149,9 @@ void VulkanTLAS::Build()
                              .is_dynamic = false},
         "TLASInstanceBuffer", instance_buffer_);
 
-    instance_buffer_->UploadImmediate(instances.data());
+    std::memcpy(instance_buffer_->Lock(), instances.data(),
+                instances.size() * sizeof(VkAccelerationStructureInstanceKHR));
+    instance_buffer_->UnLock();
 
     BuildInternal(true);
 
@@ -207,7 +212,9 @@ void VulkanTLAS::BuildInternal(bool rebuild)
     build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     build_info.mode =
         rebuild ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
-    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    // Update() refits the structure in place, which requires it to be built for updates
+    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
     build_info.geometryCount = 1;
     build_info.pGeometries = &tlas_geo_info;
 
@@ -243,12 +250,13 @@ void VulkanTLAS::BuildInternal(bool rebuild)
         CHECK_VK_ERROR(
             vkCreateAccelerationStructureKHR(context->GetDevice(), &create_info, nullptr, &acceleration_structure_));
 
-        context->GetRHI()->RecreateBuffer(RHIBuffer::Attribute{.size = size_info.buildScratchSize,
-                                                               .usages = RHIBuffer::BufferUsage::StorageBuffer |
-                                                                         RHIBuffer::BufferUsage::DeviceAddress,
-                                                               .mem_properties = RHIMemoryProperty::DeviceLocal,
-                                                               .is_dynamic = false},
-                                          "TLASScratchBuffer", scratch_buffer_);
+        context->GetRHI()->RecreateBuffer(
+            RHIBuffer::Attribute{.size = std::max(size_info.buildScratchSize, size_info.updateScratchSize),
+                                 .usages =
+                                     RHIBuffer::BufferUsage::StorageBuffer | RHIBuffer::BufferUsage::DeviceAddress,
+                                 .mem_properties = RHIMemoryProperty::DeviceLocal,
+                                 .is_dynamic = false},
+            "TLASScratchBuffer", scratch_buffer_);
     }
 
     build_info.scratchData = RHICast<VulkanBuffer>(scratch_buffer_)->GetDeviceAddress();
