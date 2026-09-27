@@ -6,6 +6,7 @@
 #include "core/math/Ray.h"
 #include "core/math/Sampler.h"
 #include "core/task/TaskManager.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/UiPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
@@ -57,7 +58,7 @@ void CPURenderer::InitRenderResources()
             .width = size.x(),
             .height = size.y(),
             .usages = usages,
-            .msaa_samples = static_cast<uint8_t>(rhi_->GetConfig().msaa_samples),
+            .msaa_samples = 1,
         };
     };
 
@@ -149,59 +150,31 @@ void CPURenderer::Render()
         ToneMappingPass(output_image_);
     }
 
-    // GPU workload: copy the image to a texture
-    {
-        image_buffer_->Upload(rhi_, output_image_.GetRawData());
+    image_buffer_->Upload(rhi_, output_image_.GetRawData());
 
-        screen_texture_->Transition({.target_layout = RHIImageLayout::TransferDst,
-                                     .after_stage = RHIPipelineStage::Top,
-                                     .before_stage = RHIPipelineStage::Transfer});
+    RenderGraph graph(graph_texture_pool_, render_config_);
+    const auto screen = graph.Import("Screen", screen_texture_);
+    const auto composite = upsample_pass_ ? graph.Import("Composite", composite_texture_) : screen;
 
-        rhi_->GetCommandContext()->CopyBufferToImage(image_buffer_.get(), screen_texture_.get());
-    }
-
-    // the stage that last wrote composite_texture_, driving downstream transitions
-    auto composite_stage = RHIPipelineStage::Transfer;
+    graph.AddCopyPass("Upload", [this, screen](RGBuilder &builder) {
+        builder.CopyDst(screen);
+        builder.FullyOverwrites();
+        return [this, screen](RGCopyContext &context) { context.CopyFromBuffer(image_buffer_.get(), screen); };
+    });
 
     if (upsample_pass_)
     {
-        screen_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                     .after_stage = RHIPipelineStage::Transfer,
-                                     .before_stage = RHIPipelineStage::PixelShader});
-
-        upsample_pass_->Render();
-
-        composite_stage = RHIPipelineStage::ColorOutput;
+        graph.AddExternalPass("Upsample", [this, screen, composite](RGBuilder &builder) {
+            builder.Sampled(screen, RHIShaderStageMask::Pixel);
+            builder.ColorWrite(composite, 0);
+            builder.FullyOverwrites();
+            return [this](RGExternalContext &) { upsample_pass_->Render(); };
+        });
     }
 
-    if (ReadbackFinalOutputIfRequested(composite_rt_.get(), false, composite_stage))
-    {
-        composite_stage = RHIPipelineStage::Transfer;
-    }
+    AddPresentPasses(graph, composite, ui_pass_.get(), *screen_quad_pass_);
 
-    // post process: ui
-    if (render_config_.render_ui && ui_pass_)
-    {
-        composite_texture_->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                        .after_stage = composite_stage,
-                                        .before_stage = RHIPipelineStage::ColorOutput});
-        ui_pass_->Render();
-
-        composite_stage = RHIPipelineStage::ColorOutput;
-        if (ReadbackFinalOutputIfRequested(composite_rt_.get(), true, RHIPipelineStage::ColorOutput))
-        {
-            composite_stage = RHIPipelineStage::Transfer;
-        }
-    }
-
-    composite_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = composite_stage,
-                                    .before_stage = RHIPipelineStage::PixelShader});
-
-    // screen pass: render it on a screen quad
-    {
-        screen_quad_pass_->Render();
-    }
+    ExecuteGraph(graph);
 
     dispatched_sample_count_ += actual_sample_per_pixel_;
     camera_->AccumulateSample(actual_sample_per_pixel_);

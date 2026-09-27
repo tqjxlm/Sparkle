@@ -177,6 +177,11 @@ public:
         command_context_.CopyImageToBuffer(GetImage(src), dst);
     }
 
+    void CopyFromBuffer(const RHIBuffer *src, RGTexture dst)
+    {
+        command_context_.CopyBufferToImage(src, GetImage(dst));
+    }
+
 private:
     friend class RenderGraph;
     using RGPassContext::RGPassContext;
@@ -217,7 +222,8 @@ public:
     [[nodiscard]] RGTexture CreateTexture(std::string name, const RGTextureDesc &desc);
 
     // a persistent single-sampled image. passes writing it are never culled; its tracked state is where planning
-    // starts, and the graph writes each pass's resulting state back to it
+    // starts, and the graph writes each pass's resulting state back to it. importing an image again returns the first
+    // import's texture and name.
     [[nodiscard]] RGTexture Import(std::string name, const RHIResourceRef<RHIImage> &image);
 
     // `setup` declares the pass's accesses on the builder and returns the function that records the pass

@@ -24,6 +24,12 @@ public:
 
     void OverrideSkyMap(const RHIResourceRef<RHIImage> &sky_map);
 
+    // the cube map the pass samples, null when it draws the sky light's color
+    [[nodiscard]] const RHIResourceRef<RHIImage> &GetSkyMap() const
+    {
+        return sky_map_to_render_;
+    }
+
 private:
     void SetupVertexShader();
     void SetupPixelShader();

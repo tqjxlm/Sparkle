@@ -1,0 +1,46 @@
+DirectionalShadow: External
+  access ShadowMap DepthWrite clear
+  barrier ShadowMap Undefined->DepthStencilOutput [DepthWrite|Sampled(Pixel) -> DepthWrite]
+GBuffer: External
+  access GBufferPacked ColorWrite clear
+  access SceneDepth DepthWrite clear
+  barrier GBufferPacked Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
+  barrier SceneDepth Undefined->DepthStencilOutput [DepthWrite -> DepthWrite]
+Lighting: External
+  access GBufferPacked Sampled(Pixel)
+  access SceneDepth Sampled(Pixel)
+  access ShadowMap Sampled(Pixel)
+  access IblBrdf Sampled(Pixel)
+  access IblDiffuse Sampled(Pixel)
+  access IblSpecular Sampled(Pixel)
+  access SceneColor ColorWrite
+  barrier GBufferPacked ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier SceneDepth DepthStencilOutput->Read [DepthWrite -> Sampled(Pixel)]
+  barrier ShadowMap DepthStencilOutput->Read [DepthWrite -> Sampled(Pixel)]
+  barrier SceneColor Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
+SkyBox: External
+  access SkyMap Sampled(Pixel)
+  access SceneColor ColorWrite
+  access SceneDepth DepthTest
+  barrier SceneColor ColorOutput->ColorOutput [ColorWrite -> ColorWrite]
+  barrier SceneDepth Read->DepthStencilOutput [DepthWrite|Sampled(Pixel) -> DepthWrite]
+ToneMapping: External
+  access SceneColor Sampled(Pixel)
+  access Screen ColorWrite
+  barrier SceneColor ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier Screen Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
+Present: External
+  access Screen Sampled(Pixel)
+  access BackBuffer ColorWrite
+  barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+GBufferPacked: Imported, GBuffer..Lighting, ColorAttachment|Texture
+SceneDepth: Imported, GBuffer..SkyBox, DepthStencilAttachment|Texture
+SceneColor: Imported, Lighting..ToneMapping, ColorAttachment|Texture
+ShadowMap: Imported, DirectionalShadow..Lighting, DepthStencilAttachment|Texture
+IblBrdf: Imported, Lighting..Lighting, Texture
+IblDiffuse: Imported, Lighting..Lighting, Texture
+IblSpecular: Imported, Lighting..Lighting, Texture
+SkyMap: Imported, SkyBox..SkyBox, Texture
+Screen: Imported, ToneMapping..Present, ColorAttachment|Texture
+BackBuffer: Imported, Present..Present, ColorAttachment

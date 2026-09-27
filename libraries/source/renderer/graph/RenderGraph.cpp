@@ -239,8 +239,12 @@ RGTexture RenderGraph::CreateTexture(std::string name, const RGTextureDesc &desc
 RGTexture RenderGraph::Import(std::string name, const RHIResourceRef<RHIImage> &image)
 {
     RGCheck(image && image->GetAttributes().msaa_samples == 1, "import {} is not a single-sampled image", name);
-    RGCheck(std::ranges::none_of(textures_, [&image](const Texture &texture) { return texture.imported == image; }),
-            "{} is imported twice", image->GetName());
+    if (const auto found =
+            std::ranges::find_if(textures_, [&image](const Texture &texture) { return texture.imported == image; });
+        found != textures_.end())
+    {
+        return {.index = static_cast<uint32_t>(found - textures_.begin())};
+    }
 
     textures_.push_back({.name = std::move(name),
                          .imported = image,

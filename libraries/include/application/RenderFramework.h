@@ -20,6 +20,7 @@ class Scene;
 class UiManager;
 struct ThreadTaskQueue;
 
+// a named output the render thread writes to the screenshots directory: a screenshot or a render graph dump
 class ScreenshotRequest
 {
 public:
@@ -86,6 +87,9 @@ public:
 
     // Called from main thread. Returns a request handle the caller can poll for completion.
     [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
+
+    // Called from main thread. The renderer writes the next render graph it executes to screenshots/<name>.json.
+    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestGraphDump(const std::string &name);
 
     // Thread-safe. Returns true when the renderer has accumulated enough samples for a screenshot.
     [[nodiscard]] bool IsReadyForAutoScreenshot() const;

@@ -1,0 +1,38 @@
+DirectionalShadow: External
+  access ShadowMap DepthWrite clear
+  barrier ShadowMap Undefined->DepthStencilOutput [DepthWrite|Sampled(Pixel) -> DepthWrite]
+BasePass: External
+  access ShadowMap Sampled(Pixel)
+  access IblBrdf Sampled(Pixel)
+  access IblDiffuse Sampled(Pixel)
+  access IblSpecular Sampled(Pixel)
+  access SceneColor ColorWrite clear
+  access SceneDepth DepthWrite clear
+  barrier ShadowMap DepthStencilOutput->Read [DepthWrite -> Sampled(Pixel)]
+  barrier SceneColor Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
+  barrier SceneDepth Undefined->DepthStencilOutput [DepthWrite -> DepthWrite]
+SkyBox: External
+  access SkyMap Sampled(Pixel)
+  access SceneColor ColorWrite
+  access SceneDepth DepthTest
+  barrier SceneColor ColorOutput->ColorOutput [ColorWrite -> ColorWrite]
+  barrier SceneDepth DepthStencilOutput->DepthStencilOutput [DepthWrite -> DepthWrite]
+ToneMapping: External
+  access SceneColor Sampled(Pixel)
+  access Screen ColorWrite
+  barrier SceneColor ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier Screen Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
+Present: External
+  access Screen Sampled(Pixel)
+  access BackBuffer ColorWrite
+  barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+SceneColor: Imported, BasePass..ToneMapping, ColorAttachment|Texture
+SceneDepth: Imported, BasePass..SkyBox, DepthStencilAttachment
+ShadowMap: Imported, DirectionalShadow..BasePass, DepthStencilAttachment|Texture
+IblBrdf: Imported, BasePass..BasePass, Texture
+IblDiffuse: Imported, BasePass..BasePass, Texture
+IblSpecular: Imported, BasePass..BasePass, Texture
+SkyMap: Imported, SkyBox..SkyBox, Texture
+Screen: Imported, ToneMapping..Present, ColorAttachment|Texture
+BackBuffer: Imported, Present..Present, ColorAttachment

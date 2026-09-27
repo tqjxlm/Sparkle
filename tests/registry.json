@@ -50,7 +50,7 @@
     {
         "name": "gpu_render_static",
         "test_case": "screenshot",
-        "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Needs hardware ray tracing, which no hosted runner exposes, so it stays local-only.",
+        "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Converging it is too slow on the software-rendering runners, so it stays local-only; gpu_render_static_64spp gates a partly converged frame in CI.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu"],
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
@@ -68,6 +68,30 @@
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
             "args": ["--framework", "{framework}", "--pipeline", "cpu"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "cpu_render_static_64spp",
+        "test_case": "screenshot",
+        "description": "Still frame on the cpu path-tracing pipeline after 64 samples per pixel, FLIP-compared against the published ground truth. The ground truth is converged, so the gate allows for the remaining sampling noise.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--max_spp", "64"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "cpu", "--flip_threshold", "0.1"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "gpu_render_static_64spp",
+        "test_case": "screenshot",
+        "description": "Still frame on the gpu path-tracing pipeline after 64 samples per pixel, FLIP-compared against the published ground truth. The ground truth is converged, so the gate allows for the remaining sampling noise. Without ray query support the pipeline falls back to forward.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--max_spp", "64"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "gpu", "--flip_threshold", "0.1"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -90,6 +114,13 @@
         "test_case": "screenshot",
         "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward.",
         "app_args": ["--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "cpu_sync_validation",
+        "test_case": "screenshot",
+        "description": "One cpu path-traced sample under the Vulkan validation layer with synchronization validation, covering the cpu render graph's upload, screenshot readback and present; any validation error, or a missing layer, fails the case.",
+        "app_args": ["--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180", "--validation", "true", "--validate_sync", "true"],
         "scene_args": ["--scene", "{scene}"]
     },
     {
@@ -209,6 +240,50 @@
         "test_case": "render_graph_compile",
         "description": "render_graph_compile under Vulkan synchronization validation, so every planned barrier batch must order the accesses it separates.",
         "app_args": ["--validation", "true", "--validate_sync", "true"]
+    },
+    {
+        "name": "cpu_graph_shape",
+        "test_case": "render_graph_dump",
+        "description": "The cpu pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "cpu"]
+        }
+    },
+    {
+        "name": "gpu_graph_shape",
+        "test_case": "render_graph_dump_accumulating",
+        "description": "The gpu pipeline's render graph of a frame that traces samples into the accumulator (passes, accesses, barriers, load/store, resources), compared against its golden graph shape. Needs ray query support; without it the pipeline falls back to forward, whose graph differs from the golden.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--width", "320", "--height", "180"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "gpu"]
+        }
+    },
+    {
+        "name": "forward_graph_shape",
+        "test_case": "render_graph_dump",
+        "description": "The forward pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--width", "320", "--height", "180"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "forward"]
+        }
+    },
+    {
+        "name": "deferred_graph_shape",
+        "test_case": "render_graph_dump",
+        "description": "The deferred pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "deferred"]
+        }
     },
     {
         "name": "pipeline_switch_pool",

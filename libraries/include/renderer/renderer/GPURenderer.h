@@ -56,7 +56,7 @@ private:
 
     [[nodiscard]] Denoiser *GetOrCreateDenoiser(DenoiserProvider provider);
 
-    [[nodiscard]] Denoiser *SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective);
+    [[nodiscard]] Denoiser *SelectDenoiser(DenoiserProvider requested);
 
     void BindBindlessResources();
 
@@ -83,7 +83,6 @@ private:
     RHIResourceRef<RHIRenderTarget> tone_mapping_rt_;
     std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
 
-    std::unique_ptr<class ClearTexturePass> clear_pass_;
     std::unique_ptr<class UiPass> ui_pass_;
 
     RHIResourceRef<RHIPipelineState> pipeline_state_;
@@ -93,7 +92,6 @@ private:
     std::vector<DenoiserSlot> denoiser_slots_;
 
     Denoiser *frame_denoiser_ = nullptr;
-    DenoiserProvider frame_provider_ = DenoiserProvider::Off;
     DenoiserProvider requested_provider_ = DenoiserProvider::Off;
     bool gbuffer_write_this_frame_ = false;
     bool denoiser_reset_this_frame_ = false;

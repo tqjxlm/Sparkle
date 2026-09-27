@@ -1,0 +1,16 @@
+PathTrace: Compute
+  access Accumulator StorageRead|StorageWrite(Compute)
+  barrier Accumulator Read->StorageWrite [Sampled(Pixel) -> StorageRead|StorageWrite(Compute)]
+ToneMapping: External
+  access Accumulator Sampled(Pixel)
+  access Screen ColorWrite
+  barrier Accumulator StorageWrite->Read [StorageRead|StorageWrite(Compute) -> Sampled(Pixel)]
+  barrier Screen Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
+Present: External
+  access Screen Sampled(Pixel)
+  access BackBuffer ColorWrite
+  barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+Accumulator: Imported, PathTrace..ToneMapping, Texture|UAV
+Screen: Imported, ToneMapping..Present, ColorAttachment|Texture
+BackBuffer: Imported, Present..Present, ColorAttachment

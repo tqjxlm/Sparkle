@@ -4,7 +4,7 @@
 #include "renderer/BindlessManager.h"
 #include "renderer/denoiser/Denoiser.h"
 #include "renderer/denoiser/DenoiserFactory.h"
-#include "renderer/pass/ClearTexturePass.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/ToneMappingPass.h"
 #include "renderer/pass/UiPass.h"
@@ -128,9 +128,6 @@ void GPURenderer::InitRenderResources()
 
     tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_texture_, tone_mapping_rt_);
 
-    clear_pass_ = PipelinePass::Create<ClearTexturePass>(render_config_, rhi_, Vector4::Zero(),
-                                                         RHIImageLayout::StorageWrite, scene_rt_);
-
     screen_quad_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, tone_mapping_output_,
                                                              rhi_->GetBackBufferRenderTarget());
 
@@ -153,9 +150,15 @@ void GPURenderer::Render()
 
     auto *camera = scene_render_proxy_->GetCamera();
 
+    RenderGraph graph(graph_texture_pool_, render_config_);
+    const auto accumulator = graph.Import("Accumulator", scene_texture_);
+
     if (camera->NeedClear())
     {
-        clear_pass_->Render();
+        graph.AddRasterPass("ClearAccumulator", [accumulator](RGBuilder &builder) {
+            builder.ColorWrite(accumulator, 0, Vector4::Zero());
+            return [](RGRasterContext &) {};
+        });
         camera->ClearPixels();
     }
 
@@ -164,99 +167,67 @@ void GPURenderer::Render()
     const bool accumulation_complete =
         !camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
 
+    auto tone_mapping_input = accumulator;
+
     // base pass: render to texture
     if (tlas_->HasInstances() && !accumulation_complete && !AccumulationPaused())
     {
-        scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                    .after_stage = RHIPipelineStage::Top,
-                                    .before_stage = RHIPipelineStage::ComputeShader});
-
+        std::optional<DenoiserInputs> denoiser_inputs;
         if (denoiser_inputs_->IsAllocated())
         {
-            denoiser_inputs_->BeginWrite();
+            denoiser_inputs = denoiser_inputs_->Import(graph, accumulator);
         }
 
-        auto *command_context = rhi_->GetCommandContext();
-
-        command_context->BeginComputePass(compute_pass_);
-
-        command_context->DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u},
-                                         {16u, 16u, 1u});
-
-        command_context->EndComputePass(compute_pass_);
-
-        const auto scene_consumer_stage =
-            gbuffer_write_this_frame_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
-
-        scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = RHIPipelineStage::ComputeShader,
-                                    .before_stage = scene_consumer_stage});
+        graph.AddComputePass("PathTrace", compute_pass_, [this, accumulator, &denoiser_inputs](RGBuilder &builder) {
+            builder.StorageReadWrite(accumulator);
+            // the tracer binds them as storage images on every dispatch, written or not
+            if (denoiser_inputs)
+            {
+                for (const auto texture :
+                     {denoiser_inputs->noisy_radiance_hit_distance, denoiser_inputs->normal_view_depth,
+                      denoiser_inputs->albedo_object_id, denoiser_inputs->motion_hit_metallic,
+                      denoiser_inputs->noisy_specular_radiance_hit_distance,
+                      denoiser_inputs->specular_albedo_roughness})
+                {
+                    builder.StorageWrite(texture);
+                }
+            }
+            return [this](RGComputeContext &context) {
+                context.DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u},
+                                        {16u, 16u, 1u});
+            };
+        });
 
         // an encoded frame is displayed as-is even when it completes max_spp: the max_spp=1 motion
         // harnesses film the denoiser, and NRD's final resolve equals the accumulator bit-exactly
-        if (frame_denoiser_ && !gbuffer_write_this_frame_)
+        if (gbuffer_write_this_frame_ && denoiser_inputs)
+        {
+            tone_mapping_input = frame_denoiser_->AddTo(graph, *denoiser_inputs);
+            tone_mapping_pass_->SetInput(frame_denoiser_->GetOutput());
+        }
+        else
         {
             tone_mapping_pass_->SetInput(scene_texture_);
         }
-        else if (frame_denoiser_ && gbuffer_write_this_frame_)
-        {
-            const bool encoded = frame_denoiser_->Encode(denoiser_inputs_->GetInputs(scene_texture_.get()));
-            if (encoded && frame_denoiser_->GetOutput())
-            {
-                tone_mapping_pass_->SetInput(frame_denoiser_->GetOutput());
-            }
-            else
-            {
-                if (DenoiserSlot *slot = FindDenoiserSlot(frame_provider_))
-                {
-                    slot->failed = true;
-                }
-                Log(Error, "Denoiser {} failed while encoding; the next frame will select a fallback",
-                    frame_denoiser_->GetName());
-            }
-        }
     }
-
-    // a frame without a dispatch leaves the clear pass's storage layout on the scene texture
-    scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                .after_stage = RHIPipelineStage::ColorOutput,
-                                .before_stage = RHIPipelineStage::PixelShader});
-
-    // screen space passes (post processing)
+    else if (tone_mapping_pass_->GetInput() != scene_texture_)
     {
-        tone_mapping_pass_->Render();
-
-        bool has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, false, RHIPipelineStage::ColorOutput);
-        const bool has_readback_without_ui = has_readback;
-        const bool rendered_ui = render_config_.render_ui && ui_pass_;
-
-        if (rendered_ui)
-        {
-            if (has_readback)
-            {
-                tone_mapping_output_->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                                  .after_stage = RHIPipelineStage::Transfer,
-                                                  .before_stage = RHIPipelineStage::ColorOutput});
-            }
-
-            ui_pass_->Render();
-        }
-
-        has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, true, RHIPipelineStage::ColorOutput);
-
-        RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
-        if (has_readback || (!rendered_ui && has_readback_without_ui))
-        {
-            final_after_stage = RHIPipelineStage::Transfer;
-        }
-
-        tone_mapping_output_->Transition({.target_layout = RHIImageLayout::Read,
-                                          .after_stage = final_after_stage,
-                                          .before_stage = RHIPipelineStage::PixelShader});
+        // a frame without a dispatch keeps displaying the last denoised output
+        tone_mapping_input = graph.Import("DenoiserOutput", tone_mapping_pass_->GetInput());
     }
 
-    // screen pass: render texture on a screen quad
-    screen_quad_pass_->Render();
+    const auto screen = graph.Import("Screen", tone_mapping_output_);
+
+    graph.AddExternalPass("ToneMapping", [this, tone_mapping_input, screen](RGBuilder &builder) {
+        builder.Sampled(tone_mapping_input, RHIShaderStageMask::Pixel);
+        builder.ColorWrite(screen, 0);
+        builder.FullyOverwrites();
+        return [this](RGExternalContext &) { tone_mapping_pass_->Render(); };
+    });
+
+    AddPresentPasses(graph, screen, ui_pass_.get(), *screen_quad_pass_);
+
+    ExecuteGraph(graph);
 }
 
 GPURenderer::~GPURenderer() = default;
@@ -273,12 +244,10 @@ void GPURenderer::Update()
 
     auto *camera = scene_render_proxy_->GetCamera();
     const DenoiserProvider requested = DenoiserConfig::Get().provider;
-    DenoiserProvider selected_provider = DenoiserProvider::Off;
-    Denoiser *selected_denoiser = SelectDenoiser(requested, selected_provider);
+    Denoiser *selected_denoiser = SelectDenoiser(requested);
 
     const bool selection_changed = requested != requested_provider_ || selected_denoiser != frame_denoiser_;
     requested_provider_ = requested;
-    frame_provider_ = selected_provider;
     frame_denoiser_ = selected_denoiser;
     denoiser_reset_this_frame_ = selection_changed;
 
@@ -289,13 +258,6 @@ void GPURenderer::Update()
     else if (selection_changed)
     {
         camera->MarkPixelDirty();
-    }
-
-    if (frame_denoiser_ && frame_denoiser_->NeedsInputs() &&
-        denoiser_inputs_->EnsureAllocated(DenoiserConfig::Get().radiance_fp16 ? PixelFormat::RGBAFloat16
-                                                                              : PixelFormat::RGBAFloat))
-    {
-        BindDenoiserInputs();
     }
 
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
@@ -460,6 +422,13 @@ void GPURenderer::Update()
     }
     gbuffer_write_this_frame_ = will_dispatch && frame_denoiser_ != nullptr && frame_denoiser_->NeedsInputs();
 
+    if (gbuffer_write_this_frame_ &&
+        denoiser_inputs_->EnsureAllocated(DenoiserConfig::Get().radiance_fp16 ? PixelFormat::RGBAFloat16
+                                                                              : PixelFormat::RGBAFloat))
+    {
+        BindDenoiserInputs();
+    }
+
     RayTracingComputeShader::UniformBufferData ubo{
         .camera = camera->GetUniformBufferData(render_config_),
         .view_projection = camera->GetViewProjectionMatrix(),
@@ -597,6 +566,13 @@ Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
         return nullptr;
     }
 
+    if (slot->denoiser && !slot->denoiser->IsReady())
+    {
+        slot->failed = true;
+        Log(Error, "Denoiser {} failed while encoding; selecting a fallback", slot->denoiser->GetName());
+        return nullptr;
+    }
+
     if (!slot->denoiser)
     {
         const DenoiserConfig &config = DenoiserConfig::Get();
@@ -604,6 +580,7 @@ Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
             .input_size = resolution_.scene,
             .output_size = resolution_.output,
             .radiance_format = config.radiance_fp16 ? PixelFormat::RGBAFloat16 : PixelFormat::RGBAFloat,
+            .accumulator_format = scene_texture_->GetAttributes().format,
             .max_frames_in_flight = rhi_->GetMaxFramesInFlight(),
             .synchronous_initialization = config.metalfx_sync_init,
         };
@@ -620,9 +597,8 @@ Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
     return slot->denoiser.get();
 }
 
-Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective)
+Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested)
 {
-    effective = DenoiserProvider::Off;
     if (requested == DenoiserProvider::Off)
     {
         return nullptr;
@@ -646,7 +622,6 @@ Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvid
         const DenoiserProvider provider = denoiser_slots_[index].provider;
         if (Denoiser *denoiser = GetOrCreateDenoiser(provider))
         {
-            effective = provider;
             return denoiser;
         }
     }

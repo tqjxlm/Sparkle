@@ -1,6 +1,7 @@
 #include "renderer/renderer/DeferredRenderer.h"
 
 #include "core/Profiler.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/DepthPass.h"
 #include "renderer/pass/DirectionalLightingPass.h"
 #include "renderer/pass/GBufferPass.h"
@@ -14,6 +15,8 @@
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/ImageBasedLighting.h"
 #include "rhi/RHI.h"
+
+#include <vector>
 
 namespace sparkle
 {
@@ -112,15 +115,6 @@ void DeferredRenderer::Render()
 {
     PROFILE_SCOPE("DeferredRenderer::Render");
 
-    if (directional_shadow_pass_)
-    {
-        directional_shadow_pass_->Render();
-
-        directional_shadow_pass_->GetOutput()->GetDepthImage()->Transition({.target_layout = RHIImageLayout::Read,
-                                                                            .after_stage = RHIPipelineStage::LateZ,
-                                                                            .before_stage = RHIPipelineStage::Bottom});
-    }
-
     if (ibl_cook_pending_)
     {
         if (!ibl_->NeedUpdate())
@@ -130,81 +124,54 @@ void DeferredRenderer::Render()
         }
     }
 
-    // geometry pass: render to gbuffer
-    gbuffer_pass_->Render();
+    RenderGraph graph(graph_texture_pool_, render_config_);
+    const auto gbuffer = graph.Import("GBufferPacked", gbuffer_.packed_texture);
+    const auto scene_depth = graph.Import("SceneDepth", scene_depth_);
+    const auto scene_color = graph.Import("SceneColor", scene_color_);
 
-    gbuffer_.Transition({.target_layout = RHIImageLayout::Read,
-                         .after_stage = RHIPipelineStage::ColorOutput,
-                         .before_stage = RHIPipelineStage::PixelShader});
+    // lighting reconstructs world positions from the depth it samples
+    std::vector<RGTexture> lighting_inputs{gbuffer, scene_depth};
+    if (directional_shadow_pass_)
+    {
+        lighting_inputs.push_back(AddDirectionalShadowPass(graph, *directional_shadow_pass_));
+    }
 
-    // lighting pass: render to scene_color
+    // an IBL map exists once it is ready, and lighting samples it from then on
+    if (ibl_)
+    {
+        ImportIblMaps(graph, *ibl_, lighting_inputs);
+    }
 
-    // lighting pass need depth buffer to reconstruct world position
-    scene_depth_->Transition({.target_layout = RHIImageLayout::Read,
-                              .after_stage = RHIPipelineStage::LateZ,
-                              .before_stage = RHIPipelineStage::PixelShader});
+    graph.AddExternalPass("GBuffer", [this, gbuffer, scene_depth](RGBuilder &builder) {
+        // the values the pass clears to
+        builder.ColorWrite(gbuffer, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.DepthWrite(scene_depth, 1.f);
+        return [this](RGExternalContext &) { gbuffer_pass_->Render(); };
+    });
 
-    directional_lighting_pass_->Render();
-
-    // later passes may still need depth buffer
-    scene_depth_->Transition({.target_layout = RHIImageLayout::DepthStencilOutput,
-                              .after_stage = RHIPipelineStage::PixelShader,
-                              .before_stage = RHIPipelineStage::EarlyZ});
+    graph.AddExternalPass("Lighting", [this, &lighting_inputs, scene_color](RGBuilder &builder) {
+        for (const auto input : lighting_inputs)
+        {
+            builder.Sampled(input, RHIShaderStageMask::Pixel);
+        }
+        builder.ColorWrite(scene_color, 0);
+        builder.FullyOverwrites();
+        return [this](RGExternalContext &) { directional_lighting_pass_->Render(); };
+    });
 
     if (sky_box_pass_)
     {
-        sky_box_pass_->Render();
+        AddSkyBoxPass(graph, *sky_box_pass_, scene_color, scene_depth);
     }
 
-    scene_color_->Transition({.target_layout = RHIImageLayout::Read,
-                              .after_stage = RHIPipelineStage::ColorOutput,
-                              .before_stage = RHIPipelineStage::PixelShader});
+    const auto screen = graph.Import("Screen", screen_color_);
 
-    // screen space passes (post processing): render to screen_color
-    {
-        if (debug_output_pass_)
-        {
-            debug_output_pass_->Render();
-        }
-        else
-        {
-            tone_mapping_pass_->Render();
-        }
+    // the debug output mode shows its image in place of the tone-mapped scene
+    AddToneMappingPass(graph, scene_color, *tone_mapping_pass_, debug_output_pass_.get(), screen);
 
-        bool has_readback =
-            ReadbackFinalOutputIfRequested(screen_color_rt_.get(), false, RHIPipelineStage::ColorOutput);
-        const bool has_readback_without_ui = has_readback;
-        const bool rendered_ui = render_config_.render_ui && ui_pass_;
+    AddPresentPasses(graph, screen, ui_pass_.get(), *present_pass_);
 
-        if (rendered_ui)
-        {
-            if (has_readback)
-            {
-                screen_color_->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                           .after_stage = RHIPipelineStage::Transfer,
-                                           .before_stage = RHIPipelineStage::ColorOutput});
-            }
-
-            ui_pass_->Render();
-        }
-
-        has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), true, RHIPipelineStage::ColorOutput);
-
-        RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
-        if (has_readback || (!rendered_ui && has_readback_without_ui))
-        {
-            final_after_stage = RHIPipelineStage::Transfer;
-        }
-
-        screen_color_->Transition({.target_layout = RHIImageLayout::Read,
-                                   .after_stage = final_after_stage,
-                                   .before_stage = RHIPipelineStage::PixelShader});
-    }
-
-    // screen pass: copy screen_color to final buffer
-    {
-        present_pass_->Render();
-    }
+    ExecuteGraph(graph);
 }
 
 bool DeferredRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)

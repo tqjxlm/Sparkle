@@ -1,0 +1,10 @@
+Upload: Copy
+  access Screen CopyDst
+  barrier Screen Undefined->TransferDst [Sampled(Pixel) -> CopyDst]
+Present: External
+  access Screen Sampled(Pixel)
+  access BackBuffer ColorWrite
+  barrier Screen TransferDst->Read [CopyDst -> Sampled(Pixel)]
+  barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+Screen: Imported, Upload..Present, Texture|TransferDst
+BackBuffer: Imported, Present..Present, ColorAttachment

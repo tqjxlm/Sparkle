@@ -57,6 +57,11 @@ public:
         return pass_;
     }
 
+    [[nodiscard]] const RHIResourceRef<RHIImage> &GetInput() const
+    {
+        return source_texture_;
+    }
+
     // Re-point the pass at a different source image and re-bind (e.g. switching the tone-mapping input
     // between the raw scene texture and the denoised output when the denoiser is toggled at runtime).
     // Must be called after InitRenderResources, on the render thread.

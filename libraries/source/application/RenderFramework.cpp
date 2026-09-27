@@ -442,6 +442,14 @@ std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const 
     return request;
 }
 
+std::shared_ptr<ScreenshotRequest> RenderFramework::RequestGraphDump(const std::string &name)
+{
+    auto request = std::make_shared<ScreenshotRequest>(name);
+    TaskManager::RunInRenderThread(
+        [this, request] { renderer_->RequestGraphDump(request->GetName(), [request] { request->MarkCompleted(); }); });
+    return request;
+}
+
 bool RenderFramework::IsReadyForAutoScreenshot() const
 {
     return ready_for_auto_screenshot_.load(std::memory_order_acquire);

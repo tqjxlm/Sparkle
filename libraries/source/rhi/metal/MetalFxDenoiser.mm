@@ -238,14 +238,13 @@ struct MetalFxDenoiser::Impl
         return DenoiserHandoff(frame.maximum_samples);
     }
 
-    bool BindInputs(const DenoiserInputs &inputs)
+    bool BindInputs(const RGPassContext &pass_context, const DenoiserInputs &inputs)
     {
-        if (!inputs.accumulated_radiance || !inputs.normal_view_depth || !inputs.albedo_object_id ||
-            !inputs.motion_hit_metallic || !inputs.specular_albedo_roughness)
-        {
-            Log(Error, "MetalFX: missing required path-tracing input");
-            return false;
-        }
+        auto *accumulated_radiance = pass_context.GetImage(inputs.accumulated_radiance);
+        auto *normal_view_depth = pass_context.GetImage(inputs.normal_view_depth);
+        auto *albedo_object_id = pass_context.GetImage(inputs.albedo_object_id);
+        auto *motion_hit_metallic = pass_context.GetImage(inputs.motion_hit_metallic);
+        auto *specular_albedo_roughness = pass_context.GetImage(inputs.specular_albedo_roughness);
 
         const auto valid_input = [this](const RHIImage *image, PixelFormat format, const char *name) {
             const auto attributes = image->GetAttributes();
@@ -258,21 +257,21 @@ struct MetalFxDenoiser::Impl
             Log(Error, "MetalFX: {} does not match the denoiser input descriptor", name);
             return false;
         };
-        if (!valid_input(inputs.accumulated_radiance, PixelFormat::Count, "accumulated radiance") ||
-            !valid_input(inputs.normal_view_depth, PixelFormat::RGBAFloat, "normal and depth") ||
-            !valid_input(inputs.albedo_object_id, PixelFormat::RGBAFloat, "albedo and object ID") ||
-            !valid_input(inputs.motion_hit_metallic, PixelFormat::RGBAFloat16, "motion and hit state") ||
-            !valid_input(inputs.specular_albedo_roughness, PixelFormat::RGBAFloat16, "specular albedo and roughness"))
+        if (!valid_input(accumulated_radiance, PixelFormat::Count, "accumulated radiance") ||
+            !valid_input(normal_view_depth, PixelFormat::RGBAFloat, "normal and depth") ||
+            !valid_input(albedo_object_id, PixelFormat::RGBAFloat, "albedo and object ID") ||
+            !valid_input(motion_hit_metallic, PixelFormat::RGBAFloat16, "motion and hit state") ||
+            !valid_input(specular_albedo_roughness, PixelFormat::RGBAFloat16, "specular albedo and roughness"))
         {
             return false;
         }
 
         auto *resources = prepare_pipeline->GetShaderResource<MetalFxPrepareShader>();
-        resources->sceneRadiance().BindResource(inputs.accumulated_radiance->GetDefaultView(rhi), true);
-        resources->normalViewDepth().BindResource(inputs.normal_view_depth->GetDefaultView(rhi), true);
-        resources->albedoObjectId().BindResource(inputs.albedo_object_id->GetDefaultView(rhi), true);
-        resources->motionHitMetallic().BindResource(inputs.motion_hit_metallic->GetDefaultView(rhi), true);
-        resources->specularAlbedoRoughness().BindResource(inputs.specular_albedo_roughness->GetDefaultView(rhi), true);
+        resources->sceneRadiance().BindResource(accumulated_radiance->GetDefaultView(rhi), true);
+        resources->normalViewDepth().BindResource(normal_view_depth->GetDefaultView(rhi), true);
+        resources->albedoObjectId().BindResource(albedo_object_id->GetDefaultView(rhi), true);
+        resources->motionHitMetallic().BindResource(motion_hit_metallic->GetDefaultView(rhi), true);
+        resources->specularAlbedoRoughness().BindResource(specular_albedo_roughness->GetDefaultView(rhi), true);
         return true;
     }
 
@@ -383,7 +382,9 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const DenoiserDesc &desc) : im
                                                      desc.input_size, "MetalFxNormal");
         impl_->roughness = impl_->CreatePreparedTexture(PixelFormat::R16Float, scaler.roughnessTextureUsage, true,
                                                         desc.input_size, "MetalFxRoughness");
-        impl_->output = impl_->CreatePreparedTexture(PixelFormat::RGBAFloat16, scaler.outputTextureUsage, false,
+        // writable: while the scaler output is displayed, the render graph declares the scaler's write as a
+        // storage write
+        impl_->output = impl_->CreatePreparedTexture(PixelFormat::RGBAFloat16, scaler.outputTextureUsage, true,
                                                      desc.output_size, "MetalFxOutput");
 
         if (!impl_->color || !impl_->depth || !impl_->motion || !impl_->diffuse_albedo || !impl_->specular_albedo ||
@@ -468,11 +469,40 @@ void MetalFxDenoiser::UpdateFrameData(const DenoiserFrameData &frame)
     impl_->frame = frame;
 }
 
-bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
+// the prepared textures and, while resolving, the scaler output stay private to the pass and keep their own
+// transitions
+RGTexture MetalFxDenoiser::AddTo(RenderGraph &graph, const DenoiserInputs &inputs)
 {
-    if (!NeedsInputs() || !impl_->BindInputs(inputs))
+    ASSERT(NeedsInputs());
+
+    // the displayed image is the scaler output until the handoff starts, then its resolve into the accumulator
+    const float handoff_weight = impl_->GetHandoff().ComputeWeight(static_cast<float>(impl_->frame.accumulated_samples),
+                                                                   impl_->frame.final_frame);
+    impl_->display_scaler_output = handoff_weight <= 0.f;
+    const auto output = impl_->display_scaler_output ? graph.Import("MetalFxOutput", impl_->output)
+                                                     : graph.Import("MetalFxResolvedOutput", impl_->resolved_output);
+
+    graph.AddExternalPass("MetalFx", [this, inputs, output, handoff_weight](RGBuilder &builder) {
+        for (const auto input : {inputs.normal_view_depth, inputs.albedo_object_id, inputs.motion_hit_metallic,
+                                 inputs.specular_albedo_roughness, inputs.accumulated_radiance})
+        {
+            builder.Sampled(input, RHIShaderStageMask::Compute);
+        }
+        builder.StorageWrite(output);
+        return [this, inputs, handoff_weight](RGExternalContext &pass_context) {
+            Encode(pass_context, inputs, handoff_weight);
+        };
+    });
+    return output;
+}
+
+void MetalFxDenoiser::Encode(const RGPassContext &pass_context, const DenoiserInputs &inputs,
+                             [[maybe_unused]] float handoff_weight)
+{
+    if (!impl_->BindInputs(pass_context, inputs))
     {
-        return false;
+        impl_->ready = false;
+        return;
     }
 
     const auto &size = impl_->desc.input_size;
@@ -480,13 +510,6 @@ bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
         .projection = impl_->frame.projection, .resolution = size, .far_depth = 1.f};
     impl_->prepare_ubo->Upload(impl_->rhi, &ubo);
 
-    for (RHIImage *input : {inputs.normal_view_depth, inputs.albedo_object_id, inputs.motion_hit_metallic,
-                            inputs.specular_albedo_roughness})
-    {
-        input->Transition({.target_layout = RHIImageLayout::Read,
-                           .after_stage = RHIPipelineStage::ComputeShader,
-                           .before_stage = RHIPipelineStage::ComputeShader});
-    }
     for (const auto &output : {impl_->color, impl_->depth, impl_->motion, impl_->diffuse_albedo, impl_->specular_albedo,
                                impl_->normal, impl_->roughness})
     {
@@ -515,7 +538,8 @@ bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
         id<MTLFXTemporalDenoisedScaler> scaler = impl_->scaler;
         if (!scaler)
         {
-            return false;
+            impl_->ready = false;
+            return;
         }
 
         // CPU-writing a shared texture races frames in flight that still read it: only rewrite on change
@@ -549,9 +573,7 @@ bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
         scaler.worldToViewMatrix = ToSimdMatrix(impl_->frame.view);
         scaler.viewToClipMatrix = ToSimdMatrix(impl_->frame.projection);
 
-        const float weight = impl_->GetHandoff().ComputeWeight(static_cast<float>(impl_->frame.accumulated_samples),
-                                                               impl_->frame.final_frame);
-        const bool run_resolve = weight > 0.f;
+        const bool run_resolve = !impl_->display_scaler_output;
         impl_->timings.Sample({true, run_resolve});
 
         // MetalFX encodes on the command buffer, which needs no encoder open
@@ -561,39 +583,29 @@ bool MetalFxDenoiser::Encode(const DenoiserInputs &inputs)
         [scaler encodeToCommandBuffer:command_buffer];
         [command_buffer popDebugGroup];
 
-        impl_->display_scaler_output = !run_resolve;
-        impl_->output->Transition(
-            {.target_layout = RHIImageLayout::Read,
-             .after_stage = RHIPipelineStage::ComputeShader,
-             .before_stage = run_resolve ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader});
         if (run_resolve)
         {
+            impl_->output->Transition({.target_layout = RHIImageLayout::Read,
+                                       .after_stage = RHIPipelineStage::ComputeShader,
+                                       .before_stage = RHIPipelineStage::ComputeShader});
+
             const auto &output_size = impl_->desc.output_size;
             MetalFxResolveShader::UniformBufferData resolve_ubo_data{
-                .output_resolution = output_size, .input_resolution = size, .handoff_weight = weight};
+                .output_resolution = output_size, .input_resolution = size, .handoff_weight = handoff_weight};
             impl_->resolve_ubo->Upload(impl_->rhi, &resolve_ubo_data);
 
             auto *resolve_resources = impl_->resolve_pipeline->GetShaderResource<MetalFxResolveShader>();
-            resolve_resources->sceneAccum().BindResource(inputs.accumulated_radiance->GetDefaultView(impl_->rhi), true);
-
-            impl_->resolved_output->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                                .after_stage = RHIPipelineStage::Top,
-                                                .before_stage = RHIPipelineStage::ComputeShader});
+            resolve_resources->sceneAccum().BindResource(
+                pass_context.GetImage(inputs.accumulated_radiance)->GetDefaultView(impl_->rhi), true);
 
             command_context->BeginComputePass(impl_->resolve_pass);
             command_context->DispatchCompute(impl_->resolve_pipeline, {output_size.x(), output_size.y(), 1u},
                                              {16u, 16u, 1u});
             command_context->EndComputePass(impl_->resolve_pass);
-
-            impl_->resolved_output->Transition({.target_layout = RHIImageLayout::Read,
-                                                .after_stage = RHIPipelineStage::ComputeShader,
-                                                .before_stage = RHIPipelineStage::PixelShader});
         }
         impl_->reset_history = false;
-        return true;
     }
 #endif
-    return false;
 }
 
 std::unique_ptr<Denoiser> CreateMetalFxDenoiser(RHIContext *rhi, const DenoiserDesc &desc)

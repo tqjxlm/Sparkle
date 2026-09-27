@@ -350,6 +350,8 @@ private:
         RGTexturePool pool(rhi);
         RenderGraph graph(pool, config);
         const auto history_texture = graph.Import("History", history);
+        Expect(graph.Import("HistoryAgain", history) == history_texture,
+               "importing an image again returns its first import");
         const auto color = graph.CreateTexture("Color", Rgba8Output);
         graph.AddRasterPass("SampleHistory", [history_texture, color](RGBuilder &builder) {
             builder.Sampled(history_texture);

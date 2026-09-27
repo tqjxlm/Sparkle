@@ -22,15 +22,4 @@ void GBuffer::InitRenderResources(RHIContext *rhi, const Vector2UInt &image_size
 
     images[0] = packed_texture;
 }
-
-void GBuffer::Transition(const RHIImage::TransitionRequest &request) const
-{
-    for (const auto &image : images)
-    {
-        if (image)
-        {
-            image->Transition(request);
-        }
-    }
-}
 } // namespace sparkle

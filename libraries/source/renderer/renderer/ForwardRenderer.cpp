@@ -1,6 +1,7 @@
 #include "renderer/renderer/ForwardRenderer.h"
 
 #include "core/Profiler.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/DepthPass.h"
 #include "renderer/pass/ForwardMeshPass.h"
 #include "renderer/pass/ScreenQuadPass.h"
@@ -13,6 +14,8 @@
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/ImageBasedLighting.h"
 #include "rhi/RHI.h"
+
+#include <vector>
 
 namespace sparkle
 {
@@ -96,15 +99,6 @@ void ForwardRenderer::Render()
 {
     PROFILE_SCOPE("ForwardRenderer::Render");
 
-    if (directional_shadow_pass_)
-    {
-        directional_shadow_pass_->Render();
-
-        directional_shadow_pass_->GetOutput()->GetDepthImage()->Transition({.target_layout = RHIImageLayout::Read,
-                                                                            .after_stage = RHIPipelineStage::LateZ,
-                                                                            .before_stage = RHIPipelineStage::Bottom});
-    }
-
     if (ibl_cook_pending_)
     {
         if (!ibl_->NeedUpdate())
@@ -114,63 +108,46 @@ void ForwardRenderer::Render()
         }
     }
 
-    // base pass: render to scene_color
-    scene_color_pass_->Render();
+    RenderGraph graph(graph_texture_pool_, render_config_);
+    const auto scene_color = graph.Import("SceneColor", scene_color_);
+    const auto scene_depth = graph.Import("SceneDepth", scene_depth_);
+
+    std::vector<RGTexture> base_pass_inputs;
+    if (directional_shadow_pass_)
+    {
+        base_pass_inputs.push_back(AddDirectionalShadowPass(graph, *directional_shadow_pass_));
+    }
+
+    // an IBL map exists once it is ready, and the base pass samples it from then on
+    if (ibl_)
+    {
+        ImportIblMaps(graph, *ibl_, base_pass_inputs);
+    }
+
+    graph.AddExternalPass("BasePass", [this, &base_pass_inputs, scene_color, scene_depth](RGBuilder &builder) {
+        for (const auto input : base_pass_inputs)
+        {
+            builder.Sampled(input, RHIShaderStageMask::Pixel);
+        }
+        // the values the pass clears to
+        builder.ColorWrite(scene_color, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.DepthWrite(scene_depth, 1.f);
+        return [this](RGExternalContext &) { scene_color_pass_->Render(); };
+    });
 
     if (sky_box_pass_)
     {
-        sky_box_pass_->Render();
+        AddSkyBoxPass(graph, *sky_box_pass_, scene_color, scene_depth);
     }
 
-    scene_color_->Transition({.target_layout = RHIImageLayout::Read,
-                              .after_stage = RHIPipelineStage::ColorOutput,
-                              .before_stage = RHIPipelineStage::PixelShader});
+    const auto screen = graph.Import("Screen", screen_color_);
 
-    // screen space passes (post processing): render to screen_color
-    {
-        if (texture_output_pass_)
-        {
-            texture_output_pass_->Render();
-        }
-        else
-        {
-            tone_mapping_pass_->Render();
-        }
+    // the texture output mode shows its image in place of the tone-mapped scene
+    AddToneMappingPass(graph, scene_color, *tone_mapping_pass_, texture_output_pass_.get(), screen);
 
-        bool has_readback =
-            ReadbackFinalOutputIfRequested(screen_color_rt_.get(), false, RHIPipelineStage::ColorOutput);
-        const bool has_readback_without_ui = has_readback;
-        const bool rendered_ui = render_config_.render_ui && ui_pass_;
+    AddPresentPasses(graph, screen, ui_pass_.get(), *present_pass_);
 
-        if (rendered_ui)
-        {
-            if (has_readback)
-            {
-                screen_color_->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                           .after_stage = RHIPipelineStage::Transfer,
-                                           .before_stage = RHIPipelineStage::ColorOutput});
-            }
-
-            ui_pass_->Render();
-        }
-
-        has_readback = ReadbackFinalOutputIfRequested(screen_color_rt_.get(), true, RHIPipelineStage::ColorOutput);
-
-        RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
-        if (has_readback || (!rendered_ui && has_readback_without_ui))
-        {
-            final_after_stage = RHIPipelineStage::Transfer;
-        }
-
-        screen_color_->Transition({.target_layout = RHIImageLayout::Read,
-                                   .after_stage = final_after_stage,
-                                   .before_stage = RHIPipelineStage::PixelShader});
-    }
-
-    // screen pass: copy screen_color to final buffer
-    {
-        present_pass_->Render();
-    }
+    ExecuteGraph(graph);
 }
 
 bool ForwardRenderer::UpdateOutputMode(RenderConfig::OutputImage mode)

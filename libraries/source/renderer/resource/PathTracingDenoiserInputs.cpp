@@ -75,37 +75,23 @@ bool PathTracingDenoiserInputs::EnsureAllocated(PixelFormat radiance_format)
     return true;
 }
 
-void PathTracingDenoiserInputs::BeginWrite()
+DenoiserInputs PathTracingDenoiserInputs::Import(RenderGraph &graph, RGTexture accumulated_radiance) const
 {
     ASSERT(allocated_);
-    for (const auto &image : {noisy_radiance_hit_distance_, normal_view_depth_, albedo_object_id_, motion_hit_metallic_,
-                              noisy_specular_radiance_hit_distance_, specular_albedo_roughness_})
-    {
-        image->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                           .after_stage = RHIPipelineStage::Top,
-                           .before_stage = RHIPipelineStage::ComputeShader});
-    }
-}
-
-DenoiserInputs PathTracingDenoiserInputs::GetInputs(RHIImage *accumulated_radiance) const
-{
     return {
-        .noisy_radiance_hit_distance = noisy_radiance_hit_distance_.get(),
-        .normal_view_depth = normal_view_depth_.get(),
-        .albedo_object_id = albedo_object_id_.get(),
-        .motion_hit_metallic = motion_hit_metallic_.get(),
-        .noisy_specular_radiance_hit_distance = noisy_specular_radiance_hit_distance_.get(),
-        .specular_albedo_roughness = specular_albedo_roughness_.get(),
+        .noisy_radiance_hit_distance = graph.Import("GBufferRadiance", noisy_radiance_hit_distance_),
+        .normal_view_depth = graph.Import("GBufferNormalDepth", normal_view_depth_),
+        .albedo_object_id = graph.Import("GBufferAlbedoObj", albedo_object_id_),
+        .motion_hit_metallic = graph.Import("GBufferMotion", motion_hit_metallic_),
+        .noisy_specular_radiance_hit_distance =
+            graph.Import("GBufferRadianceSpecular", noisy_specular_radiance_hit_distance_),
+        .specular_albedo_roughness = graph.Import("GBufferSpecAlbedo", specular_albedo_roughness_),
         .accumulated_radiance = accumulated_radiance,
     };
 }
 
 RHIResourceRef<RHIImage> PathTracingDenoiserInputs::CreateTexture(PixelFormat format, const std::string &name) const
 {
-    auto image = rhi_->CreateImage(MakeImageAttributes(format, size_), name);
-    image->Transition({.target_layout = RHIImageLayout::Read,
-                       .after_stage = RHIPipelineStage::Top,
-                       .before_stage = RHIPipelineStage::ComputeShader});
-    return image;
+    return rhi_->CreateImage(MakeImageAttributes(format, size_), name);
 }
 } // namespace sparkle
