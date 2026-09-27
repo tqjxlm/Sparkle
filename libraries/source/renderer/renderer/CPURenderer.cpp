@@ -8,7 +8,6 @@
 #include "core/task/TaskManager.h"
 #include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/ScreenQuadPass.h"
-#include "renderer/pass/UiPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/PrimitiveRenderProxy.h"
@@ -21,14 +20,25 @@
 namespace sparkle
 {
 CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                         SceneRenderProxy *scene_render_proxy)
-    : Renderer(render_config, rhi_context, scene_render_proxy),
+                         SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
+    : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool),
       output_image_(resolution_.scene.x(), resolution_.scene.y(), PixelFormat::RGBAFloat16)
 {
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Cpu);
 }
 
 CPURenderer::~CPURenderer() = default;
+
+// the uploaded image and the screen are sampled bilinearly, which upsampling needs
+static RGTextureDesc GetImageDesc(PixelFormat format, RGSizeClass size_class)
+{
+    return {.format = format,
+            .size_class = size_class,
+            .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+                        .filtering_method_min = RHISampler::FilteringMethod::Linear,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Linear}};
+}
 
 bool CPURenderer::IsReadyForAutoScreenshot() const
 {
@@ -48,52 +58,11 @@ void CPURenderer::InitRenderResources()
                                         .is_dynamic = true},
                                        "RayTracingOutputBuffer");
 
-    auto color_buffer_attribute = [this](const Vector2UInt &size, RHIImage::ImageUsage usages) {
-        return RHIImage::Attribute{
-            .format = output_image_.GetFormat(),
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                        .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Linear},
-            .width = size.x(),
-            .height = size.y(),
-            .usages = usages,
-            .msaa_samples = 1,
-        };
-    };
-
-    screen_texture_ = rhi_->CreateImage(
-        color_buffer_attribute(resolution_.scene, RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst |
-                                                      RHIImage::ImageUsage::ColorAttachment |
-                                                      RHIImage::ImageUsage::TransferSrc),
-        "CpuPipelineColorBuffer");
-
-    screen_rt_ = rhi_->CreateRenderTarget({}, screen_texture_, nullptr, "CpuPipelineRenderTarget");
+    InitPostChain(GetImageDesc(output_image_.GetFormat(), RGSizeClass::Output));
 
     if (resolution_.NeedUpsample())
     {
-        composite_texture_ =
-            rhi_->CreateImage(color_buffer_attribute(resolution_.output, RHIImage::ImageUsage::Texture |
-                                                                             RHIImage::ImageUsage::ColorAttachment |
-                                                                             RHIImage::ImageUsage::TransferSrc),
-                              "CpuPipelineCompositeBuffer");
-
-        composite_rt_ = rhi_->CreateRenderTarget({}, composite_texture_, nullptr, "CpuPipelineCompositeRenderTarget");
-
-        upsample_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, screen_texture_, composite_rt_);
-    }
-    else
-    {
-        composite_texture_ = screen_texture_;
-        composite_rt_ = screen_rt_;
-    }
-
-    screen_quad_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, composite_texture_,
-                                                             rhi_->GetBackBufferRenderTarget());
-
-    if (!rhi_->IsHeadless())
-    {
-        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, composite_rt_);
+        upsample_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Upsample", screen_desc_.format);
     }
 
     gbuffer_.Resize(resolution_.scene.x(), resolution_.scene.y());
@@ -107,14 +76,6 @@ void CPURenderer::InitRenderResources()
 
 void CPURenderer::Update()
 {
-    PROFILE_SCOPE("CPURenderer::Update");
-
-    screen_quad_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
-    if (ui_pass_)
-    {
-        ui_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-    }
 }
 
 void CPURenderer::Render()
@@ -153,21 +114,17 @@ void CPURenderer::Render()
     image_buffer_->Upload(rhi_, output_image_.GetRawData());
 
     RenderGraph graph(graph_texture_pool_, render_config_);
-    const auto screen = graph.Import("Screen", screen_texture_);
-    const auto composite = upsample_pass_ ? graph.Import("Composite", composite_texture_) : screen;
+    const auto scene_color =
+        graph.CreateTexture("SceneColor", GetImageDesc(output_image_.GetFormat(), RGSizeClass::Scene));
 
-    graph.AddCopyPass("Upload", [this, screen](RGBuilder &builder) {
-        builder.CopyDst(screen);
+    graph.AddCopyPass("Upload", [this, scene_color](RGBuilder &builder) {
+        builder.CopyDst(scene_color);
         builder.FullyOverwrites();
-        return [this, screen](RGCopyContext &context) { context.CopyFromBuffer(image_buffer_.get(), screen); };
+        return
+            [this, scene_color](RGCopyContext &context) { context.CopyFromBuffer(image_buffer_.get(), scene_color); };
     });
 
-    if (upsample_pass_)
-    {
-        upsample_pass_->AddTo(graph, "Upsample", screen, composite);
-    }
-
-    AddPresentPasses(graph, composite, ui_pass_.get(), *screen_quad_pass_);
+    AddPostChain(graph, scene_color, upsample_pass_.get());
 
     ExecuteGraph(graph);
 

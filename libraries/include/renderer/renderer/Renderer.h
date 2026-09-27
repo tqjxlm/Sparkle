@@ -3,6 +3,7 @@
 #include "core/math/Types.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/graph/RGTexturePool.h"
+#include "renderer/graph/RenderGraph.h"
 #include "rhi/RHIImage.h"
 
 #include <atomic>
@@ -20,13 +21,9 @@ struct AppConfig;
 class CameraRenderProxy;
 class MaterialRenderProxy;
 class MeshRenderProxy;
-class RenderGraph;
-class DepthPass;
 class ImageBasedLighting;
 class ScreenQuadPass;
-class SkyBoxPass;
 class UiPass;
-struct RGTexture;
 
 // A renderer performs the following functionalities:
 // 1. process a scene of geometries
@@ -37,9 +34,10 @@ struct RGTexture;
 class Renderer
 {
 public:
-    Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy);
+    Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
+             RGTexturePool &graph_texture_pool);
 
-    virtual ~Renderer() = default;
+    virtual ~Renderer();
 
     virtual void InitRenderResources() = 0;
 
@@ -80,7 +78,8 @@ public:
     [[nodiscard]] virtual bool IsReadyForAutoScreenshot() const;
 
     static std::unique_ptr<Renderer> CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                                                    SceneRenderProxy *scene_render_proxy);
+                                                    SceneRenderProxy *scene_render_proxy,
+                                                    RGTexturePool &graph_texture_pool);
 
     void SetDebugPoint(float x, float y)
     {
@@ -96,29 +95,39 @@ public:
 protected:
     virtual void Update() = 0;
 
-    // when a screenshot with or without ui is pending, adds a pass that copies `texture` into a staging buffer, which
-    // is saved once the frame completes
-    void AddReadback(RenderGraph &graph, RGTexture texture, bool capture_ui);
+    // the screen of renderers that tone map on the GPU
+    static constexpr RGTextureDesc ToneMappedScreenDesc{
+        .format = PixelFormat::B8G8R8A8Srgb,
+        .size_class = RGSizeClass::Output,
+        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest}};
 
-    // adds the legacy `shadow_pass` as an External pass clearing and writing its shadow map, and returns the shadow map
-    [[nodiscard]] static RGTexture AddDirectionalShadowPass(RenderGraph &graph, DepthPass &shadow_pass);
+    // the scene depth of the renderers that rasterize the scene
+    static constexpr RGTextureDesc SceneDepthDesc{.format = PixelFormat::D32, .size_class = RGSizeClass::Scene};
 
-    // appends the imports of the IBL maps that are ready, which are the ones lighting binds
-    static void ImportIblMaps(RenderGraph &graph, const ImageBasedLighting &ibl, std::vector<RGTexture> &textures);
+    // the scene color of the renderers that rasterize the scene. tone mapping samples it bilinearly with edge clamping
+    // when it upsamples.
+    [[nodiscard]] RGTextureDesc GetSceneColorDesc() const;
 
-    // adds the legacy `sky_box_pass` as an External pass drawing its sky map into `scene_color` where `scene_depth`
-    // passes the depth test
-    static void AddSkyBoxPass(RenderGraph &graph, SkyBoxPass &sky_box_pass, RGTexture scene_color,
-                              RGTexture scene_depth);
+    // the image output mode `mode` shows in place of the tone-mapped scene, null for the scene
+    [[nodiscard]] static RHIResourceRef<RHIImage> GetOutputImage(RenderConfig::OutputImage mode,
+                                                                 const ImageBasedLighting *ibl);
 
-    // adds the legacy `tone_mapping_pass` from `scene_color` to `screen` as an External pass, or `output_pass` in its
-    // place when set, which shows its own input image
-    static void AddToneMappingPass(RenderGraph &graph, RGTexture scene_color, ScreenQuadPass &tone_mapping_pass,
-                                   ScreenQuadPass *output_pass, RGTexture screen);
+    // the cube map the sky box shows in output mode `mode`: an IBL map once it is ready in the IBL map modes, otherwise
+    // `sky_map`
+    [[nodiscard]] static RHIResourceRef<RHIImage> GetSkyBoxMap(RenderConfig::OutputImage mode,
+                                                               const ImageBasedLighting *ibl,
+                                                               const RHIResourceRef<RHIImage> &sky_map);
 
-    // adds the frame's tail once `screen` holds the final image: the screenshot readbacks, the legacy `ui_pass` wrapped
-    // as an External pass when the ui is shown, and `present_pass` drawing `screen` into the back buffer
-    void AddPresentPasses(RenderGraph &graph, RGTexture screen, UiPass *ui_pass, const ScreenQuadPass &present_pass);
+    // creates the passes of the post chain, which ends in a Screen texture of `screen_desc`
+    void InitPostChain(const RGTextureDesc &screen_desc);
+
+    // adds the passes every frame ends with: `screen_pass` drawing `scene` into the Screen transient (tone mapping, a
+    // debug image or upsampling), or `scene` as the screen without one; the screenshot readbacks; the ui when shown;
+    // and the present drawing the screen into the back buffer
+    void AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQuadPass *screen_pass);
 
     // compiles and records the frame's graph, dumping it first when a dump is pending
     void ExecuteGraph(RenderGraph &graph);
@@ -135,8 +144,13 @@ protected:
 
     std::atomic<int32_t> pending_async_tasks_{0};
 
-    // images behind the transients of the renderer's graphs, kept across frames
-    RGTexturePool graph_texture_pool_;
+    // images behind the transients of the renderer's graphs, kept across frames and renderers
+    RGTexturePool &graph_texture_pool_;
+
+    RGTextureDesc screen_desc_;
+    // null when headless
+    std::unique_ptr<UiPass> ui_pass_;
+    std::unique_ptr<ScreenQuadPass> present_pass_;
 
 private:
     struct PendingScreenshot
@@ -147,6 +161,10 @@ private:
     };
 
     [[nodiscard]] std::optional<PendingScreenshot> TakeScreenshotRequest(bool capture_ui);
+
+    // when a screenshot with or without ui is pending, adds a pass that copies `texture` into a staging buffer, which
+    // is saved once the frame completes
+    void AddReadback(RenderGraph &graph, RGTexture texture, bool capture_ui);
 
     // a staging buffer the size of `image`, saved as the screenshot once the frame completes. the caller records the
     // copy.

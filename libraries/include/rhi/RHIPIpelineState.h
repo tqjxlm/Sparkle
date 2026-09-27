@@ -96,10 +96,16 @@ public:
 
     virtual void CompileInternal() = 0;
 
-    // declares the attachments of the pass this pipeline draws in, so the pipeline compiles for them up front
+    // declares the attachments this pipeline draws into, so the pipeline compiles for them up front
+    void SetAttachmentSignature(const RHIAttachmentSignature &signature)
+    {
+        attachment_signature_ = signature;
+    }
+
+    // declares the attachments of the pass this pipeline draws in
     void SetRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
     {
-        attachment_signature_ = pass->GetRenderingInfo().GetSignature();
+        SetAttachmentSignature(pass->GetRenderingInfo().GetSignature());
     }
 
     void SetVertexBuffer(uint32_t binding, const RHIResourceRef<RHIBuffer> &buffer)

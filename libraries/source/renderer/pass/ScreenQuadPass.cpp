@@ -28,15 +28,20 @@ const std::array<ScreenQuadPass::ScreenVertex, 4> ScreenQuadPass::Vertices{{
 
 const std::array<uint32_t, 6> ScreenQuadPass::Indices{0, 2, 1, 0, 3, 2};
 
+ScreenQuadPass::ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, bool to_back_buffer)
+    : PipelinePass(ctx), name_(std::move(name)), to_back_buffer_(to_back_buffer)
+{
+    signature_.color_formats[0] = output_format;
+}
+
 void ScreenQuadPass::InitRenderResources(const RenderConfig &)
 {
-    SetupRenderPass();
     SetupPipeline();
     SetupVertices();
     SetupVertexShader();
     SetupPixelShader();
 
-    CompilePipeline();
+    pipeline_state_->Compile();
 
     BindVertexShaderResources();
     BindPixelShaderResources();
@@ -44,21 +49,10 @@ void ScreenQuadPass::InitRenderResources(const RenderConfig &)
     draw_args_.index_count = 6;
 }
 
-void ScreenQuadPass::CompilePipeline()
-{
-    pipeline_state_->Compile();
-}
-
-void ScreenQuadPass::SetupRenderPass()
-{
-    RHIRenderPass::Attribute pass_attribute;
-    pass_ = rhi_->CreateRenderPass(pass_attribute, target_, "ScreenPass");
-}
-
 void ScreenQuadPass::SetupPipeline()
 {
     pipeline_state_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Graphics, "ScreenQuadPipeline");
-    pipeline_state_->SetRenderPass(pass_);
+    pipeline_state_->SetAttachmentSignature(signature_);
 
     RHIPipelineState::DepthState depth_state;
     depth_state.write_depth = false;
@@ -125,7 +119,7 @@ void ScreenQuadPass::BindVertexShaderResources()
         ScreenQuadVertexShader::UniformBufferData ubo;
         ubo.pre_rotation.setIdentity();
 
-        if (target_->IsBackBufferTarget())
+        if (to_back_buffer_)
         {
             ubo.pre_rotation.topLeftCorner(2, 2) =
                 NativeView::GetRotationMatrix(rhi_->GetHardwareInterface()->GetWindowOrientation());
@@ -136,32 +130,20 @@ void ScreenQuadPass::BindVertexShaderResources()
     vs_resources->ubo().BindResource(vs_ub_);
 }
 
-void ScreenQuadPass::BindPixelShaderResources()
+void ScreenQuadPass::AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const
 {
-    auto *ps_resources = pipeline_state_->GetShaderResource<ScreenQuadPixelShader>();
-    ps_resources->screenTexture().BindResource(source_texture_->GetDefaultView(rhi_));
-    ps_resources->screenTextureSampler().BindResource(source_texture_->GetSampler());
-}
-
-void ScreenQuadPass::Render()
-{
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginRenderPass(pass_);
-
-    command_context->DrawMesh(pipeline_state_, draw_args_);
-
-    command_context->EndRenderPass();
-}
-
-void ScreenQuadPass::AddTo(RenderGraph &graph, std::string name, RGTexture input, RGTexture output) const
-{
-    graph.AddRasterPass(std::move(name), [this, input, output](RGBuilder &builder) {
-        builder.Sampled(input, &ScreenQuadPixelShader::ResourceTable::screenTexture);
+    graph.AddRasterPass(name_, [this, input, output](RGBuilder &builder) {
+        SampleInput(builder, input);
         builder.ColorWrite(output, 0);
         builder.FullyOverwrites();
         return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
     });
+}
+
+void ScreenQuadPass::SampleInput(RGBuilder &builder, RGTexture input) const
+{
+    using Table = ScreenQuadPixelShader::ResourceTable;
+    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler);
 }
 
 void ScreenQuadPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)
@@ -169,7 +151,7 @@ void ScreenQuadPass::UpdateFrameData(const RenderConfig &config, SceneRenderProx
     PipelinePass::UpdateFrameData(config, scene);
 
     // in case of swapchain being recreated, we may have to reset the back buffer
-    if (target_->IsBackBufferTarget() && rhi_->IsBackBufferDirty())
+    if (to_back_buffer_ && rhi_->IsBackBufferDirty())
     {
         ScreenQuadVertexShader::UniformBufferData ubo;
         ubo.pre_rotation.topLeftCorner(2, 2) =

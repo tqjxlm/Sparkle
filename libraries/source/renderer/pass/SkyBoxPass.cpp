@@ -1,11 +1,10 @@
 #include "renderer/pass/SkyBoxPass.h"
 
-#include "application/NativeView.h"
+#include "core/math/Utilities.h"
 #include "io/Mesh.h"
-#include "renderer/pass/ScreenQuadPass.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
-#include "renderer/proxy/SkyRenderProxy.h"
 #include "rhi/RHI.h"
 
 namespace sparkle
@@ -27,17 +26,6 @@ class SkyBoxVertexShader : public RHIShaderInfo
     };
 };
 
-class SkyLightPixelShader : public RHIShaderInfo
-{
-    REGISTGER_SHADER(SkyLightPixelShader, RHIShaderStage::Pixel, "shaders/screen/sky_light.ps.slang", "shader_main")
-
-    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
-
-    USE_SHADER_RESOURCE(ubo, RHIShaderResourceReflection::ResourceType::UniformBuffer)
-
-    END_SHADER_RESOURCE_TABLE
-};
-
 class SkyBoxPixelShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(SkyBoxPixelShader, RHIShaderStage::Pixel, "shaders/standard/sky_box.ps.slang", "shader_main")
@@ -50,74 +38,27 @@ class SkyBoxPixelShader : public RHIShaderInfo
     END_SHADER_RESOURCE_TABLE
 };
 
-SkyBoxPass::SkyBoxPass(RHIContext *rhi, const SkyRenderProxy *sky_proxy, const RHIResourceRef<RHIImage> &color_buffer,
-                       const RHIResourceRef<RHIImage> &depth_buffer)
-    : PipelinePass(rhi), sky_proxy_(sky_proxy), color_buffer_(color_buffer), depth_buffer_(depth_buffer)
+SkyBoxPass::SkyBoxPass(RHIContext *rhi, PixelFormat color_format, PixelFormat depth_format) : PipelinePass(rhi)
 {
-    sky_map_to_render_ = sky_proxy->GetSkyMap();
-}
-
-void SkyBoxPass::OverrideSkyMap(const RHIResourceRef<RHIImage> &sky_map)
-{
-    if (sky_map)
-    {
-        sky_map_to_render_ = sky_map;
-    }
-    else
-    {
-        sky_map_to_render_ = sky_proxy_->GetSkyMap();
-    }
-    BindShaderResources();
-}
-
-void SkyBoxPass::Render()
-{
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginRenderPass(render_pass_);
-
-    command_context->DrawMesh(pipeline_state_, draw_args_);
-
-    command_context->EndRenderPass();
+    signature_.color_formats[0] = color_format;
+    signature_.depth_format = depth_format;
 }
 
 void SkyBoxPass::UpdateFrameData(const RenderConfig & /*config*/, SceneRenderProxy *scene)
 {
-    if (sky_map_to_render_)
-    {
-        const auto *camera = scene->GetCamera();
-        Mat4 view_matrix_without_translation = Mat4::Zero();
-        view_matrix_without_translation.topLeftCorner<3, 3>() = camera->GetViewMatrix().topLeftCorner<3, 3>();
-        view_matrix_without_translation(3, 3) = 1;
-        SkyBoxVertexShader::UniformBufferData view_ubo{.view_matrix = view_matrix_without_translation,
-                                                       .projection_matrix = camera->GetProjectionMatrix()};
-        vs_ub_->Upload(rhi_, &view_ubo);
-    }
-    else if (rhi_->IsBackBufferDirty())
-    {
-        ScreenQuadVertexShader::UniformBufferData ubo;
-        ubo.pre_rotation.topLeftCorner(2, 2) =
-            NativeView::GetRotationMatrix(rhi_->GetHardwareInterface()->GetWindowOrientation());
-
-        vs_ub_->UploadImmediate(&ubo);
-    }
+    const auto *camera = scene->GetCamera();
+    Mat4 view_matrix_without_translation = Mat4::Zero();
+    view_matrix_without_translation.topLeftCorner<3, 3>() = camera->GetViewMatrix().topLeftCorner<3, 3>();
+    view_matrix_without_translation(3, 3) = 1;
+    SkyBoxVertexShader::UniformBufferData view_ubo{.view_matrix = view_matrix_without_translation,
+                                                   .projection_matrix = camera->GetProjectionMatrix()};
+    vs_ub_->Upload(rhi_, &view_ubo);
 }
 
 void SkyBoxPass::InitRenderResources(const RenderConfig & /*config*/)
 {
-    render_target_ = rhi_->CreateRenderTarget({}, color_buffer_, depth_buffer_, "SkyBoxRenderTarget");
-
-    // TODO(tqjxlm): avoid the additional pass here.
-    RHIRenderPass::Attribute pass_attribute;
-    pass_attribute.color_load_op = RHIRenderPass::LoadOp::Load;
-
-    pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Load;
-    pass_attribute.depth_store_op = RHIRenderPass::StoreOp::None;
-
-    render_pass_ = rhi_->CreateRenderPass(pass_attribute, render_target_, "SkyBoxPass");
-
     pipeline_state_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Graphics, "SkyBoxPipeline");
-    pipeline_state_->SetRenderPass(render_pass_);
+    pipeline_state_->SetAttachmentSignature(signature_);
 
     RHIPipelineState::DepthState depth_state;
     depth_state.test_state = RHIPipelineState::DepthTestState::LessEqual;
@@ -128,138 +69,57 @@ void SkyBoxPass::InitRenderResources(const RenderConfig & /*config*/)
     rasterization_state.cull_mode = RHIPipelineState::FaceCullMode::Back;
     pipeline_state_->SetRasterizationState(rasterization_state);
 
-    SetupVertexShader();
-    SetupPixelShader();
-    SetupVertices();
-
-    pipeline_state_->Compile();
-
-    BindShaderResources();
-}
-
-void SkyBoxPass::SetupVertexShader()
-{
-    vertex_shader_ =
-        sky_map_to_render_ ? rhi_->CreateShader<SkyBoxVertexShader>() : rhi_->CreateShader<ScreenQuadVertexShader>();
-
+    vertex_shader_ = rhi_->CreateShader<SkyBoxVertexShader>();
     pipeline_state_->SetShader<RHIShaderStage::Vertex>(vertex_shader_);
-}
 
-void SkyBoxPass::SetupPixelShader()
-{
-    pixel_shader_ =
-        sky_map_to_render_ ? rhi_->CreateShader<SkyBoxPixelShader>() : rhi_->CreateShader<SkyLightPixelShader>();
+    pixel_shader_ = rhi_->CreateShader<SkyBoxPixelShader>();
     pipeline_state_->SetShader<RHIShaderStage::Pixel>(pixel_shader_);
-}
 
-void SkyBoxPass::SetupVertices()
-{
-    if (sky_map_to_render_)
-    {
-        auto unit_cube = Mesh::GetUnitCube();
+    auto unit_cube = Mesh::GetUnitCube();
 
-        vertex_buffer_ =
-            rhi_->CreateBuffer({.size = ARRAY_SIZE(unit_cube->vertices),
-                                .usages = RHIBuffer::BufferUsage::VertexBuffer,
-                                .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                                .is_dynamic = false},
-                               "UnitBoxVertexBuffer");
-        index_buffer_ =
-            rhi_->CreateBuffer({.size = ARRAY_SIZE(unit_cube->indices),
-                                .usages = RHIBuffer::BufferUsage::IndexBuffer,
-                                .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                                .is_dynamic = false},
-                               "UnitBoxIndexBuffer");
+    vertex_buffer_ =
+        rhi_->CreateBuffer({.size = ARRAY_SIZE(unit_cube->vertices),
+                            .usages = RHIBuffer::BufferUsage::VertexBuffer,
+                            .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                            .is_dynamic = false},
+                           "UnitBoxVertexBuffer");
+    index_buffer_ =
+        rhi_->CreateBuffer({.size = ARRAY_SIZE(unit_cube->indices),
+                            .usages = RHIBuffer::BufferUsage::IndexBuffer,
+                            .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                            .is_dynamic = false},
+                           "UnitBoxIndexBuffer");
 
-        vertex_buffer_->UploadImmediate(unit_cube->vertices.data());
-        index_buffer_->UploadImmediate(unit_cube->indices.data());
-    }
-    else
-    {
-        const static std::array<ScreenVertex, 4> Vertices{{
-            {.position = Vector3{-1, -1, 0}, .uv = Vector2{0, 0}},
-            {.position = Vector3{1, -1, 0}, .uv = Vector2{1, 0}},
-            {.position = Vector3{1, 1, 0}, .uv = Vector2{1, 1}},
-            {.position = Vector3{-1, 1, 0}, .uv = Vector2{0, 1}},
-        }};
-        const static std::array<uint32_t, 6> Indices{0, 2, 1, 0, 3, 2};
-
-        vertex_buffer_ =
-            rhi_->CreateBuffer({.size = ARRAY_SIZE(Vertices),
-                                .usages = RHIBuffer::BufferUsage::VertexBuffer,
-                                .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                                .is_dynamic = false},
-                               "ScreenVertexBuffer");
-        index_buffer_ =
-            rhi_->CreateBuffer({.size = ARRAY_SIZE(Indices),
-                                .usages = RHIBuffer::BufferUsage::IndexBuffer,
-                                .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                                .is_dynamic = false},
-                               "ScreenIndexBuffer");
-
-        vertex_buffer_->UploadImmediate(Vertices.data());
-        index_buffer_->UploadImmediate(Indices.data());
-    }
+    vertex_buffer_->UploadImmediate(unit_cube->vertices.data());
+    index_buffer_->UploadImmediate(unit_cube->indices.data());
 
     pipeline_state_->SetVertexBuffer(0, vertex_buffer_);
     pipeline_state_->SetIndexBuffer(index_buffer_);
 
-    if (sky_map_to_render_)
-    {
-        auto &vertex_delcaration = pipeline_state_->GetVertexInputDeclaration();
-        vertex_delcaration.SetAttribute(0, 0, {RHIVertexFormat::R32G32B32Float, 0});
+    auto &vertex_delcaration = pipeline_state_->GetVertexInputDeclaration();
+    vertex_delcaration.SetAttribute(0, 0, {RHIVertexFormat::R32G32B32Float, 0});
 
-        draw_args_.index_count = static_cast<uint32_t>(Mesh::GetUnitCube()->indices.size());
-    }
-    else
-    {
-        auto &vertex_delcaration = pipeline_state_->GetVertexInputDeclaration();
-        vertex_delcaration.SetAttribute(0, 0, {RHIVertexFormat::R32G32B32Float, offsetof(ScreenVertex, position)});
-        vertex_delcaration.SetAttribute(1, 0, {RHIVertexFormat::R32G32Float, offsetof(ScreenVertex, uv)});
+    draw_args_.index_count = static_cast<uint32_t>(unit_cube->indices.size());
 
-        draw_args_.index_count = 6;
-    }
+    pipeline_state_->Compile();
+
+    vs_ub_ = rhi_->CreateBuffer({.size = sizeof(SkyBoxVertexShader::UniformBufferData),
+                                 .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                 .mem_properties = RHIMemoryProperty::None,
+                                 .is_dynamic = true},
+                                "SkyBoxVSUBO");
+
+    pipeline_state_->GetShaderResource<SkyBoxVertexShader>()->view().BindResource(vs_ub_);
 }
 
-void SkyBoxPass::BindShaderResources()
+void SkyBoxPass::AddTo(RenderGraph &graph, RGTexture sky_map, RGTexture scene_color, RGTexture scene_depth) const
 {
-    if (sky_map_to_render_)
-    {
-        vs_ub_ = rhi_->CreateBuffer({.size = sizeof(SkyBoxVertexShader::UniformBufferData),
-                                     .usages = RHIBuffer::BufferUsage::UniformBuffer,
-                                     .mem_properties = RHIMemoryProperty::None,
-                                     .is_dynamic = true},
-                                    "SkyBoxVSUBO");
-
-        auto *vs_resources = pipeline_state_->GetShaderResource<SkyBoxVertexShader>();
-        vs_resources->view().BindResource(vs_ub_);
-
-        auto *ps_resources = pipeline_state_->GetShaderResource<SkyBoxPixelShader>();
-        ps_resources->sky_map().BindResource(sky_map_to_render_->GetDefaultView(rhi_));
-        ps_resources->sky_map_sampler().BindResource(sky_map_to_render_->GetSampler());
-    }
-    else
-    {
-        vs_ub_ = rhi_->CreateBuffer({.size = sizeof(ScreenQuadVertexShader::UniformBufferData),
-                                     .usages = RHIBuffer::BufferUsage::UniformBuffer,
-                                     .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                                     .is_dynamic = false},
-                                    "SkyScreenVSUBO");
-
-        auto *vs_resources = pipeline_state_->GetShaderResource<ScreenQuadVertexShader>();
-        vs_resources->ubo().BindResource(vs_ub_);
-
-        ps_ub_ = rhi_->CreateBuffer({.size = sizeof(SkyRenderProxy::UniformBufferData),
-                                     .usages = RHIBuffer::BufferUsage::UniformBuffer,
-                                     .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                                     .is_dynamic = false},
-                                    "SkyLightUBO");
-
-        auto ubo = sky_proxy_->GetRenderData();
-        ps_ub_->UploadImmediate(&ubo);
-
-        auto *ps_resources = pipeline_state_->GetShaderResource<SkyLightPixelShader>();
-        ps_resources->ubo().BindResource(ps_ub_);
-    }
+    graph.AddRasterPass("SkyBox", [this, sky_map, scene_color, scene_depth](RGBuilder &builder) {
+        using Table = SkyBoxPixelShader::ResourceTable;
+        builder.Sampled(sky_map, &Table::sky_map, &Table::sky_map_sampler);
+        builder.ColorWrite(scene_color, 0);
+        builder.DepthTest(scene_depth);
+        return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
+    });
 }
 } // namespace sparkle

@@ -5,9 +5,7 @@
 #include "core/ThreadManager.h"
 #include "io/Image.h"
 #include "renderer/graph/RenderGraph.h"
-#include "renderer/pass/DepthPass.h"
 #include "renderer/pass/ScreenQuadPass.h"
-#include "renderer/pass/SkyBoxPass.h"
 #include "renderer/pass/UiPass.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/renderer/CPURenderer.h"
@@ -25,7 +23,8 @@
 namespace sparkle
 {
 std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                                                   SceneRenderProxy *scene_render_proxy)
+                                                   SceneRenderProxy *scene_render_proxy,
+                                                   RGTexturePool &graph_texture_pool)
 {
     ASSERT(ThreadManager::IsInRenderThread());
 
@@ -34,16 +33,18 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
     switch (render_config.pipeline)
     {
     case RenderConfig::Pipeline::Cpu:
-        renderer = std::make_unique<CPURenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer = std::make_unique<CPURenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     case RenderConfig::Pipeline::Gpu:
-        renderer = std::make_unique<GPURenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer = std::make_unique<GPURenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     case RenderConfig::Pipeline::Forward:
-        renderer = std::make_unique<ForwardRenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer =
+            std::make_unique<ForwardRenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     case RenderConfig::Pipeline::Deferred:
-        renderer = std::make_unique<DeferredRenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer =
+            std::make_unique<DeferredRenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     default:
         UnImplemented(render_config.pipeline);
@@ -62,9 +63,10 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
     return renderer;
 }
 
-Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy)
+Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
+                   RGTexturePool &graph_texture_pool)
     : rhi_(rhi_context), scene_render_proxy_(scene_render_proxy), resolution_(render_config.GetResolution()),
-      render_config_(render_config), graph_texture_pool_(rhi_context)
+      render_config_(render_config), graph_texture_pool_(graph_texture_pool)
 {
     Log(Info, "View size [{}, {}]", resolution_.output.x(), resolution_.output.y());
 
@@ -75,11 +77,15 @@ Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, S
     }
 }
 
+Renderer::~Renderer() = default;
+
 void Renderer::Tick()
 {
     scene_render_proxy_->Update(rhi_, *scene_render_proxy_->GetCamera(), render_config_);
 
     Update();
+
+    present_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 
     scene_render_proxy_->EndUpdate(rhi_);
 }
@@ -194,72 +200,84 @@ void Renderer::AddReadback(RenderGraph &graph, RGTexture texture, bool capture_u
     });
 }
 
-RGTexture Renderer::AddDirectionalShadowPass(RenderGraph &graph, DepthPass &shadow_pass)
+RGTextureDesc Renderer::GetSceneColorDesc() const
 {
-    const auto shadow_map = graph.Import("ShadowMap", shadow_pass.GetOutput()->GetDepthImage());
-    graph.AddExternalPass("DirectionalShadow", [&shadow_pass, shadow_map](RGBuilder &builder) {
-        builder.DepthWrite(shadow_map, 1.f);
-        return [&shadow_pass](RGExternalContext &) { shadow_pass.Render(); };
-    });
-    return shadow_map;
-}
-
-void Renderer::ImportIblMaps(RenderGraph &graph, const ImageBasedLighting &ibl, std::vector<RGTexture> &textures)
-{
-    for (const auto &[name, map] :
-         {std::pair{"IblBrdf", ibl.GetBRDFMap()}, std::pair{"IblDiffuse", ibl.GetDiffuseMap()},
-          std::pair{"IblSpecular", ibl.GetSpecularMap()}})
+    RGTextureDesc desc{.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Scene};
+    if (resolution_.NeedUpsample())
     {
-        if (map)
-        {
-            textures.push_back(graph.Import(name, map));
-        }
+        desc.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+                        .filtering_method_min = RHISampler::FilteringMethod::Linear,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
     }
+    else
+    {
+        desc.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
+                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+    }
+    return desc;
 }
 
-void Renderer::AddSkyBoxPass(RenderGraph &graph, SkyBoxPass &sky_box_pass, RGTexture scene_color, RGTexture scene_depth)
+RHIResourceRef<RHIImage> Renderer::GetOutputImage(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl)
 {
-    const auto sky_map = graph.Import("SkyMap", sky_box_pass.GetSkyMap());
-    graph.AddExternalPass("SkyBox", [&sky_box_pass, sky_map, scene_color, scene_depth](RGBuilder &builder) {
-        builder.Sampled(sky_map, RHIShaderStageMask::Pixel);
-        builder.ColorWrite(scene_color, 0);
-        builder.DepthTest(scene_depth);
-        return [&sky_box_pass](RGExternalContext &) { sky_box_pass.Render(); };
-    });
+    if (ibl && mode == RenderConfig::OutputImage::IBLBrdfTexture)
+    {
+        return ibl->GetBRDFMap();
+    }
+    return nullptr;
 }
 
-void Renderer::AddToneMappingPass(RenderGraph &graph, RGTexture scene_color, ScreenQuadPass &tone_mapping_pass,
-                                  ScreenQuadPass *output_pass, RGTexture screen)
+RHIResourceRef<RHIImage> Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
+                                                const RHIResourceRef<RHIImage> &sky_map)
 {
-    ScreenQuadPass &screen_pass = output_pass ? *output_pass : tone_mapping_pass;
-    const auto input = output_pass ? graph.Import("OutputImage", output_pass->GetInput()) : scene_color;
-    graph.AddExternalPass(output_pass ? "OutputImage" : "ToneMapping",
-                          [&screen_pass, input, screen](RGBuilder &builder) {
-                              builder.Sampled(input, RHIShaderStageMask::Pixel);
-                              builder.ColorWrite(screen, 0);
-                              builder.FullyOverwrites();
-                              return [&screen_pass](RGExternalContext &) { screen_pass.Render(); };
-                          });
+    RHIResourceRef<RHIImage> ibl_map;
+    if (ibl && mode == RenderConfig::OutputImage::IBLDiffuseMap)
+    {
+        ibl_map = ibl->GetDiffuseMap();
+    }
+    else if (ibl && mode == RenderConfig::OutputImage::IBLSpecularMap)
+    {
+        ibl_map = ibl->GetSpecularMap();
+    }
+    return ibl_map ? ibl_map : sky_map;
 }
 
-void Renderer::AddPresentPasses(RenderGraph &graph, RGTexture screen, UiPass *ui_pass,
-                                const ScreenQuadPass &present_pass)
+void Renderer::InitPostChain(const RGTextureDesc &screen_desc)
 {
-    const auto back_buffer = graph.Import("BackBuffer", rhi_->GetBackBufferRenderTarget()->GetColorImage(0));
+    screen_desc_ = screen_desc;
+
+    if (!rhi_->IsHeadless())
+    {
+        ui_pass_ = std::make_unique<UiPass>(rhi_, screen_desc.format);
+    }
+
+    present_pass_ = PipelinePass::Create<ScreenQuadPass>(
+        render_config_, rhi_, "Present", rhi_->GetBackBufferRenderTarget()->GetColorImage(0)->GetAttributes().format,
+        true);
+}
+
+void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQuadPass *screen_pass)
+{
+    auto screen = scene;
+    if (screen_pass)
+    {
+        screen = graph.CreateTexture("Screen", screen_desc_);
+        screen_pass->AddTo(graph, scene, screen);
+    }
 
     AddReadback(graph, screen, false);
 
-    if (render_config_.render_ui && ui_pass)
+    if (render_config_.render_ui && ui_pass_)
     {
-        graph.AddExternalPass("Ui", [ui_pass, screen](RGBuilder &builder) {
-            builder.ColorWrite(screen, 0);
-            return [ui_pass](RGExternalContext &) { ui_pass->Render(); };
-        });
+        ui_pass_->AddTo(graph, screen);
 
         AddReadback(graph, screen, true);
     }
 
-    present_pass.AddTo(graph, "Present", screen, back_buffer);
+    const auto back_buffer = graph.Import("BackBuffer", rhi_->GetBackBufferRenderTarget()->GetColorImage(0));
+    present_pass_->AddTo(graph, screen, back_buffer);
 }
 
 void Renderer::ExecuteGraph(RenderGraph &graph)

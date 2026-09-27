@@ -21,7 +21,7 @@ namespace sparkle
 // builds synthetic render graphs, compares their compiled plans (culling, physical images, barriers, load/store with
 // reasons) against expected dump summaries, and executes each one. under synchronization validation that proves the
 // planned barriers order every access, including a pooled image reused by the next graph. two graphs read back a
-// texture to prove the recorded passes ran and a draw binds the texture its pass declared.
+// texture to prove the recorded passes ran and a draw binds the texture and sampler its pass declared.
 class RenderGraphCompileTest : public TestCase
 {
 public:
@@ -230,13 +230,11 @@ private:
                                  "RenderGraphTestReadback");
     }
 
-    // a screen quad pipeline created sampling a placeholder draws a cleared texture, which reaches the readback only
-    // when the draw binds the texture its pass declared
+    // a screen quad pipeline created from an attachment signature, with nothing bound to sample, draws a cleared
+    // texture, which reaches the readback only when the draw binds the texture and sampler its pass declared
     void DeclaredBinding(RHIContext *rhi, const RenderConfig &config)
     {
-        auto placeholder = CreateImportImage(rhi, config.GetResolution().output, "RenderGraphTestPlaceholder");
-        const auto quad = PipelinePass::Create<ScreenQuadPass>(
-            config, rhi, placeholder, rhi->CreateRenderTarget({}, placeholder, nullptr, "RenderGraphTestQuadTarget"));
+        const auto quad = PipelinePass::Create<ScreenQuadPass>(config, rhi, "Quad", Rgba8Output.format);
         auto readback = CreateReadbackBuffer(rhi, config);
 
         RGTexturePool pool(rhi);
@@ -248,7 +246,7 @@ private:
                 builder.ColorWrite(a, 0, Vector4(1.f, 0.f, 0.f, 1.f));
                 return [](RGRasterContext &) {};
             });
-            quad->AddTo(graph, "Quad", a, b);
+            quad->AddTo(graph, a, b);
             graph.AddCopyPass("Readback", [b, buffer = readback.get()](RGBuilder &builder) {
                 builder.CopySrc(b);
                 builder.SideEffect();

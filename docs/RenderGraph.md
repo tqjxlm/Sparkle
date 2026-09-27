@@ -23,13 +23,13 @@ graph.Execute(*rhi->GetCommandContext());
 
 * **Textures.** `CreateTexture` makes a transient: single-sampled, one mip, with a size class resolved from `RenderResolution` (`Scene`, `Output`, or `Absolute` with an explicit size). Its image usage is the union of its declared accesses. `Import` brings in a persistent image (history, swap chain, IBL maps); importing an image again returns the texture, and name, of its first import, so passes that sample the same image need not coordinate.
 * **Handles.** `RGTexture` is a plain index. Passes run in declaration order, and every access depends on the last write before it in that order, so handles need no versions.
-* **Accesses.** `ColorWrite(slot, clear)`, `DepthWrite(clear)`, `DepthTest`, `Sampled`, `StorageRead`, `StorageWrite`, `StorageReadWrite`, `CopySrc`, `CopyDst`. Shader accesses take an optional stage mask; the default is the pass kind's stage (raster: pixel, compute: compute, external: all). A pass declares each texture once. `FullyOverwrites()` states that the pass writes every texel, which discards previous contents; `SideEffect()` keeps a pass whose outputs nothing reads (readback, present).
-* **Bindings.** A shader access (`Sampled`, `StorageRead`, `StorageWrite`, `StorageReadWrite`) may name the binding member of a shader's `ResourceTable` that reads the texture, e.g. `&ToneMappingPixelShader::ResourceTable::screenTexture` (a `Texture2D` member for `Sampled`, a `StorageImage2D` member for storage accesses). While the pass records, every pipeline drawn or dispatched through the command context binds the texture's default view there, in each of its resource tables of that type, so each input is written once and serves every pipeline of the pass that uses the table. Every binding must reach at least one pipeline the pass draws or dispatches. Views are created at compile. Samplers, uniform buffers and other resources outside the graph stay bound by the pass.
+* **Accesses.** `ColorWrite(slot, clear)`, `DepthWrite(clear)`, `DepthTest`, `Sampled`, `StorageRead`, `StorageWrite`, `StorageReadWrite`, `CopySrc`, `CopyDst`. Shader accesses take an optional stage mask; the default is the pass kind's stage (raster: pixel, compute: compute, external: all). A pass declares each texture once. `FullyOverwrites()` states that the pass writes every texel, which discards previous contents; `SideEffect()` keeps a pass whose outputs nothing reads (readback, present); `NativeAccess()` lets a Raster pass record foreign commands (ImGui) through the raw command context, inside the rendering the graph begins over its attachments.
+* **Bindings.** A shader access (`Sampled`, `StorageRead`, `StorageWrite`, `StorageReadWrite`) may name the binding member of a shader's `ResourceTable` that reads the texture, e.g. `&ToneMappingPixelShader::ResourceTable::screenTexture` (a `Texture2D` member for `Sampled`, a `StorageImage2D` member for storage accesses). While the pass records, every pipeline drawn or dispatched through the command context binds the texture's default view there, in each of its resource tables of that type, so each input is written once and serves every pipeline of the pass that uses the table. A `Sampled` access may also name a `Sampler` member, e.g. `&ToneMappingPixelShader::ResourceTable::screenTextureSampler`, which binds the sampler the texture's image carries (`RGTextureDesc::sampler` for transients), so a pass holds no sampler state for its inputs. An input that may be missing is declared with `SampledOrPlaceholder`: an invalid texture binds the given placeholder image, which is outside the graph, and its sampler instead, so no pipeline keeps an image an earlier graph bound. Every binding must reach at least one pipeline the pass draws or dispatches, unless the pass draws nothing (an empty scene). Views are created at compile. Uniform buffers and other resources outside the graph stay bound by the pass.
 * **Pass kinds.** Each kind's execute function receives a context that exposes only what the kind may record:
 
 | Kind | Context records | The graph around it |
 | --- | --- | --- |
-| Raster | draws | begins and ends rendering over the declared attachments; the opening barriers sit inside the pass's debug label |
+| Raster | draws; with `NativeAccess()`, anything the open rendering allows through `GetNativeContext()`, and the foreign code resets the backend state it records around | begins and ends rendering over the declared attachments; the opening barriers sit inside the pass's debug label |
 | Compute | dispatches | brackets it with the given `RHIComputePass`, whose label and timer cover the barriers |
 | Copy | copies between images and buffers | records the barriers before it |
 | External | anything, through the raw `RHICommandContext` | records the barriers before it, then checks the contract below |
@@ -38,7 +38,7 @@ graph.Execute(*rhi->GetCommandContext());
 
 ## Compilation
 
-`Compile()` records nothing. Declaration errors abort in every build, including Release: an invalid or doubly declared handle, an access the pass kind may not declare, two attachments in one slot, a raster pass without attachments, a transient read before any pass writes it, attachments of different sizes, an import lacking the usages its accesses need, a broken External contract, and a binding that no pipeline its pass drew or dispatched has.
+`Compile()` records nothing. Declaration errors abort in every build, including Release: an invalid or doubly declared handle, an access the pass kind may not declare, two attachments in one slot, a raster pass without attachments, a transient read before any pass writes it, attachments of different sizes, an import lacking the usages its accesses need, a broken External contract, and a binding that no pipeline its pass drew or dispatched has, in a pass that drew or dispatched.
 
 * **Culling.** Walking backwards, a pass lives if it has a side effect, writes an import, or writes contents a later live pass uses. A write uses the previous contents unless it clears or its pass fully overwrites. Culled passes are dumped with their unread outputs. `render_graph_cull` (default `true`) turns culling off.
 * **Transients.** Transients whose lifetimes (first to last live pass) do not overlap share one image when format, extent and sampler match, in order of first use, so a graph of the same shape maps each transient to the same image every frame. Images come from an `RGTexturePool`, which the owner of the graph keeps across frames. The pool serves one graph at a time and hands the same images to the next graph immediately; images unused for `RGTexturePool::UnusedGraphsBeforeRelease` graphs go through deferred deletion.
@@ -49,22 +49,28 @@ graph.Execute(*rhi->GetCommandContext());
 
 ## Renderers
 
-A renderer builds one graph per frame from its `graph_texture_pool_` and hands it to `Renderer::ExecuteGraph`, which compiles it, writes its dump when one is requested, and records it. `Renderer::AddReadback` adds the screenshot readback: when a screenshot is pending, a `Readback` Copy pass with `SideEffect()` copies the texture into a staging buffer that is saved once the frame completes. `Renderer::AddPresentPasses` adds the tail every renderer shares once its screen texture holds the final image: the readback without UI, `Ui` when the UI is shown, the readback with UI, and `Present`, a Raster pass that draws the screen texture over the imported back buffer (`ScreenQuadPass::AddTo`).
+A renderer builds one graph per frame from the `RenderFramework`'s texture pool, which outlives renderer recreation so a pipeline switch reuses the images both pipelines' graphs need (`pipeline_switch_pool` checks it), and hands it to `Renderer::ExecuteGraph`, which compiles it, writes its dump when one is requested, and records it. Every renderer ends its frame with `Renderer::AddPostChain(graph, scene, screen_pass)`, whose passes are Raster passes unless stated:
 
-The CPU renderer runs on the graph. Its screen texture, the composite target (only when `render_scale` < 1) and the back buffer are imports, because the legacy passes bind them at construction. Each frame:
+| Pass | Declares |
+| --- | --- |
+| the screen pass (`ToneMapping`, `OutputImage` or `Upsample`), when given | `Sampled` scene, `ColorWrite` Screen (fully overwritten) |
+| `Readback` (screenshot without UI) | Copy pass with `SideEffect()`: `CopySrc` Screen into a staging buffer that is saved once the frame completes |
+| `Ui` (UI shown, not headless) | `ColorWrite` Screen, `NativeAccess()` for ImGui |
+| `Readback` (screenshot with UI) | as above |
+| `Present` | `Sampled` Screen, `ColorWrite` BackBuffer (fully overwritten) |
+
+Screen is a transient at output resolution whose format and sampler the renderer chooses once (`Renderer::InitPostChain`): `B8G8R8A8Srgb` with nearest sampling for the renderers that tone map on the GPU, the CPU renderer's `RGBAFloat16` with bilinear sampling otherwise. Without a screen pass, `scene` is the screen. The screen passes and `Present` are `ScreenQuadPass`es built from their output format; each samples its input with the sampler the input's image carries, and `Present` applies the window's pre-rotation. `Ui` draws into the rendering the graph begins over Screen, and the ImGui backend compiles its pipelines for Screen's format (`RHIUiHandler::Setup` takes an attachment signature).
+
+The CPU renderer runs on the graph. Each frame:
 
 | Pass | Kind | Declares |
 | --- | --- | --- |
-| `Upload` | Copy | `CopyDst` Screen (fully overwritten) from the host buffer the path tracer filled |
-| `Upsample` (`render_scale` < 1) | Raster | `Sampled` Screen, `ColorWrite` Composite (fully overwritten) |
-| `Readback` (screenshot without UI) | Copy | `CopySrc` Composite |
-| `Ui` (UI shown) | External | `ColorWrite` Composite |
-| `Readback` (screenshot with UI) | Copy | `CopySrc` Composite |
-| `Present` | Raster | `Sampled` Composite, `ColorWrite` BackBuffer (fully overwritten) |
+| `Upload` | Copy | `CopyDst` SceneColor (fully overwritten) from the host buffer the path tracer filled |
+| `Upsample` (`render_scale` < 1), `Readback`, `Ui`, `Present` | | the post chain; without upsampling SceneColor is the screen |
 
-Without upsampling, Composite is the Screen texture. `Upsample` and `Present` draw a `ScreenQuadPass` that binds its declared input. The `Ui` External pass wraps the legacy `UiPass` render pass, whose final layout is its attachment layout, so every transition around it comes from the graph.
+SceneColor is a transient at scene resolution, already tone-mapped on the CPU, sampled bilinearly so the upsampling filters.
 
-The GPU renderer runs on the graph. The accumulator, the path-tracing denoiser inputs (once a denoiser has needed them), the denoiser's output (and NRD's output history), the tone-mapped screen texture and the back buffer are imports. Each frame:
+The GPU renderer runs on the graph. The accumulator, the path-tracing denoiser inputs (once a denoiser has needed them) and the denoiser's output (and NRD's output history) are imports. Each frame:
 
 | Pass | Kind | Declares |
 | --- | --- | --- |
@@ -72,33 +78,30 @@ The GPU renderer runs on the graph. The accumulator, the path-tracing denoiser i
 | `PathTrace` (accumulating) | Compute | `StorageReadWrite` Accumulator; `StorageWrite` of the six denoiser inputs once allocated, because the tracer binds them as storage images on every dispatch (dummies until then); each declaration binds its image to the tracer |
 | `Nrd` (NRD encodes) | External | `Sampled` (compute) of the six inputs and Accumulator; `StorageWrite` NrdOutput, `StorageReadWrite` NrdOutputHistory |
 | `MetalFx` (MetalFX encodes) | External | `Sampled` (compute) of the four auxiliary inputs and Accumulator; `StorageWrite` of the displayed image: MetalFxOutput (the scaler's output) before the handoff starts, MetalFxResolvedOutput after |
-| `ToneMapping` | External | `Sampled` of the displayed texture, `ColorWrite` Screen (fully overwritten) |
-| `Readback`, `Ui`, `Present` | | as `Renderer::AddPresentPasses` adds them |
+| `ToneMapping`, `Readback`, `Ui`, `Present` | | the post chain from the displayed texture |
 
 `PathTrace` runs on the renderer's timed `RHIComputePass`, which dynamic spp reads back. The displayed texture is the provider's output when it encodes this frame, the Accumulator when a frame traces without denoising, and otherwise whatever tone mapping displayed last (a converged or paused frame keeps the last denoised output, imported as DenoiserOutput). A denoiser's pass keeps its internal textures private: NRD's pool and `IN_*`/`OUT_*` textures and MetalFX's prepared textures (and its scaler output while it resolves) keep their own transitions, and every image the pass declares ends in its declared state.
 
-The Forward renderer runs on the graph. Its legacy passes bind their images at construction, so the scene color and depth, the directional shadow map, the IBL maps, the sky map, the tone-mapped screen texture and the back buffer are imports. Each frame:
+The Forward renderer runs on the graph. The directional shadow map, scene color and scene depth are transients; the IBL maps and the sky map are imports. Each frame:
 
 | Pass | Kind | Declares |
 | --- | --- | --- |
-| `DirectionalShadow` (directional light) | External | `DepthWrite` ShadowMap, cleared |
-| `BasePass` | External | `Sampled` of ShadowMap and of each ready IBL map (IblBrdf, IblDiffuse, IblSpecular); `ColorWrite` SceneColor and `DepthWrite` SceneDepth, both cleared |
-| `SkyBox` (sky map) | External | `Sampled` of the sky map the pass draws (an IBL map in the IBL map output modes); `ColorWrite` SceneColor, `DepthTest` SceneDepth |
-| `ToneMapping`, or `OutputImage` (`IBLBrdfTexture` output) | External | `Sampled` SceneColor (OutputImage: the BRDF map), `ColorWrite` Screen (fully overwritten) |
-| `Readback`, `Ui`, `Present` | | as `Renderer::AddPresentPasses` adds them |
+| `DirectionalShadow` (directional light) | Raster | `DepthWrite` ShadowMap (`shadow_map_resolution` squared), cleared |
+| `BasePass` | Raster | `Sampled` ShadowMap and each ready IBL map (IblBrdf, IblDiffuse, IblSpecular); `ColorWrite` SceneColor and `DepthWrite` SceneDepth, both cleared |
+| `SkyBox` (sky map) | Raster | `Sampled` of the sky map it draws (an IBL map in the IBL map output modes); `ColorWrite` SceneColor, `DepthTest` SceneDepth |
+| `ToneMapping`, `Readback`, `Ui`, `Present` | | the post chain from SceneColor; the `IBLBrdfTexture` output mode draws the BRDF map in `OutputImage` instead of `ToneMapping`, and the scene passes are culled |
 
-Tone mapping upsamples when `render_scale` < 1, so the graph has the same passes at any scale. IBL maps are imported only once ready: cook dispatches record during `Tick`, outside the graph, into images the graph never imports, and a finished map leaves its cook with every subresource in one tracked state.
+Tone mapping upsamples when `render_scale` < 1, so the graph has the same passes at any scale; the scene color then carries a bilinear, edge-clamped sampler (`Renderer::GetSceneColorDesc`). The renderer passes each pass its inputs every frame: the shadow map and IBL maps as `LightingInputs`, where a missing one (no directional light, a map still cooking) samples a placeholder, and the sky box's map and the output image as the output mode selects them (`Renderer::GetSkyBoxMap`, `GetOutputImage`). IBL maps are imported only once ready: cook dispatches record during `Tick`, outside the graph, into images the graph never imports, and a finished map leaves its cook with every subresource in one tracked state.
 
-The Deferred renderer runs on the graph with the same imports as Forward, plus the packed GBuffer. It shares the Forward renderer's shadow, IBL, sky box and tone mapping wrappers (`Renderer::AddDirectionalShadowPass`, `ImportIblMaps`, `AddSkyBoxPass`, `AddToneMappingPass`). Each frame:
+The Deferred renderer runs on the graph with the same shadow, IBL maps, sky box and post chain as Forward; the packed GBuffer is a transient too. Each frame:
 
 | Pass | Kind | Declares |
 | --- | --- | --- |
-| `DirectionalShadow` (directional light) | External | `DepthWrite` ShadowMap, cleared |
-| `GBuffer` | External | `ColorWrite` GBufferPacked and `DepthWrite` SceneDepth, both cleared |
-| `Lighting` | External | `Sampled` of GBufferPacked, SceneDepth, ShadowMap and each ready IBL map; `ColorWrite` SceneColor (fully overwritten) |
-| `SkyBox` (sky map) | External | as in Forward: `Sampled` sky map, `ColorWrite` SceneColor, `DepthTest` SceneDepth |
-| `ToneMapping`, or `OutputImage` (`IBLBrdfTexture` output) | External | as in Forward |
-| `Readback`, `Ui`, `Present` | | as `Renderer::AddPresentPasses` adds them |
+| `DirectionalShadow` (directional light) | Raster | as in Forward |
+| `GBuffer` | Raster | `ColorWrite` GBufferPacked and `DepthWrite` SceneDepth, both cleared |
+| `Lighting` | Raster | `Sampled` of GBufferPacked, SceneDepth, ShadowMap and each ready IBL map; `ColorWrite` SceneColor (fully overwritten) |
+| `SkyBox` (sky map) | Raster | as in Forward: `Sampled` sky map, `ColorWrite` SceneColor, `DepthTest` SceneDepth |
+| `ToneMapping`, `Readback`, `Ui`, `Present` | | as in Forward |
 
 Lighting reconstructs world positions from the scene depth it samples, and the sky box then depth-tests against it, so the graph moves SceneDepth from the depth attachment layout to `Read` and back within the frame.
 
@@ -108,6 +111,6 @@ Lighting reconstructs world positions from the scene depth it samples, and the s
 
 ## Tests
 
-`render_graph_compile` builds synthetic graphs, compares their dump summaries against expected plans, executes them and reads results back, including a screen quad whose pipeline was created sampling a placeholder and draws the texture its pass declared. `render_graph_sync_validation` runs it under Vulkan synchronization validation (see [Test.md](Test.md#validation-layer)).
+`render_graph_compile` builds synthetic graphs, compares their dump summaries against expected plans, executes them and reads results back, including a screen quad whose pipeline was created from an attachment signature with nothing bound and draws the texture and sampler its pass declared. `render_graph_sync_validation` runs it under Vulkan synchronization validation (see [Test.md](Test.md#validation-layer)).
 
 Each renderer on the graph has a golden graph shape in [tests/render_graph/golden/](../tests/render_graph/golden/) (`<pipeline>.txt`), checked by a `<pipeline>_graph_shape` registry case. The `render_graph_dump` test case waits until the scene is ready for a screenshot and asks the renderer (`RenderFramework::RequestGraphDump`) to write the next graph it executes to `screenshots/render_graph.json`, which the device runners pull like screenshots. [tests/render_graph/graph_shape_test.py](../tests/render_graph/graph_shape_test.py) projects the dump to one line per pass, access, barrier, attachment and resource and prints a unified diff against the golden; `--update` rewrites the golden from the dump. A converged GPU frame traces nothing, so `gpu_graph_shape` runs `render_graph_dump_accumulating`, which asks for the dump as soon as the scene is loaded, while the accumulator still converges; the golden is a frame without a denoiser, clear or screenshot, and needs ray query support (lavapipe has it). The forward and deferred goldens are frames with a directional light, a sky map and ready IBL maps. Tests run headless, so the goldens show no `Ui` pass, and the back buffer's first barrier has no present access to wait for.

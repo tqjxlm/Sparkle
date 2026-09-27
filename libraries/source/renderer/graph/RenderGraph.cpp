@@ -85,11 +85,6 @@ static RHIImageState GetUniformState(const RHIImage &image)
     return state;
 }
 
-static bool HasBinding(const auto &access)
-{
-    return access.binding != nullptr;
-}
-
 static bool ReadsContents(const RHIResourceAccess &access)
 {
     return access.access & ReadAccess;
@@ -122,6 +117,7 @@ void RGBuilder::Declare(RGTexture texture, RHIResourceAccess access, RHIImageLay
                              .layout = layout,
                              .slot = slot,
                              .clear = std::move(clear),
+                             .bindings = {},
                              .load_reason = {},
                              .store_reason = {}});
 }
@@ -183,9 +179,14 @@ void RGBuilder::CopyDst(RGTexture texture)
     Declare(texture, {.access = RHIAccess::CopyDst}, RHIImageLayout::TransferDst, RenderGraph::NoSlot, std::nullopt);
 }
 
-void RGBuilder::BindLastAccess(std::function<RHIMemberBinding(RHIResourceRef<RHIImageView>)> binding)
+void RGBuilder::BindLastAccess(ImageBinding binding)
 {
-    graph_.passes_[pass_].accesses.back().binding = std::move(binding);
+    graph_.passes_[pass_].accesses.back().bindings.push_back(std::move(binding));
+}
+
+void RGBuilder::BindPlaceholder(const RHIResourceRef<RHIImage> &placeholder, ImageBinding binding)
+{
+    graph_.passes_[pass_].placeholders.emplace_back(placeholder, std::move(binding));
 }
 
 void RGBuilder::FullyOverwrites()
@@ -198,12 +199,26 @@ void RGBuilder::SideEffect()
     graph_.passes_[pass_].side_effect = true;
 }
 
+void RGBuilder::NativeAccess()
+{
+    auto &pass = graph_.passes_[pass_];
+    RGCheck(pass.kind == RGPassKind::Raster, "{} pass {} cannot declare native access", Enum2Str(pass.kind), pass.name);
+    pass.native_access = true;
+}
+
 RHIImage *RGPassContext::GetImage(RGTexture texture) const
 {
     const auto &pass = graph_.passes_[pass_];
     RGCheck(std::ranges::any_of(pass.accesses, [texture](const auto &access) { return access.texture == texture; }),
             "pass {} uses a texture it did not declare", pass.name);
     return graph_.textures_[texture.index].image;
+}
+
+RHICommandContext &RGPassContext::GetNativeContext() const
+{
+    const auto &pass = graph_.passes_[pass_];
+    RGCheck(pass.native_access, "pass {} records raw commands without declaring native access", pass.name);
+    return command_context_;
 }
 
 RenderGraph::RenderGraph(RGTexturePool &pool, const RenderConfig &config)
@@ -270,6 +285,7 @@ uint32_t RenderGraph::NewPass(std::string name, RGPassKind kind, RHIResourceRef<
                        .kind = kind,
                        .compute_pass = std::move(compute_pass),
                        .accesses = {},
+                       .placeholders = {},
                        .record = {},
                        .cull_reason = {},
                        .bindings = {}});
@@ -429,9 +445,16 @@ void RenderGraph::ResolveBindings()
 {
     for (auto &pass : passes_ | std::views::filter(&Pass::live))
     {
-        for (const auto &access : pass.accesses | std::views::filter(HasBinding<Access>))
+        for (const auto &access : pass.accesses)
         {
-            pass.bindings.push_back(access.binding(textures_[access.texture.index].image->GetDefaultView(pool_.rhi_)));
+            for (const auto &binding : access.bindings)
+            {
+                pass.bindings.push_back(binding(pool_.rhi_, *textures_[access.texture.index].image));
+            }
+        }
+        for (const auto &[image, binding] : pass.placeholders)
+        {
+            pass.bindings.push_back(binding(pool_.rhi_, *image));
         }
     }
 }
@@ -638,15 +661,24 @@ void RenderGraph::Execute(RHICommandContext &command_context)
     }
 }
 
-// a declared binding that no pipeline the pass drew or dispatched has would bind nothing
+// a declared binding that no pipeline the pass drew or dispatched has would bind nothing. a pass that drew nothing (an
+// empty scene) bound nothing to check.
 void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const
 {
-    auto index = 0u;
-    for (const auto &access : pass.accesses | std::views::filter(HasBinding<Access>))
+    if (!command_context.DrewOrDispatched())
     {
-        RGCheck(command_context.IsBindingApplied(index++),
-                "pass {} binds {} to a resource table no pipeline it drew or dispatched has", pass.name,
-                textures_[access.texture.index].name);
+        return;
+    }
+
+    size_t index = 0;
+    for (const auto &access : pass.accesses)
+    {
+        for (const auto end = index + access.bindings.size(); index < end; index++)
+        {
+            RGCheck(command_context.IsBindingApplied(index),
+                    "pass {} binds {} to a resource table no pipeline it drew or dispatched has", pass.name,
+                    textures_[access.texture.index].name);
+        }
     }
 }
 

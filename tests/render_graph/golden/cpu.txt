@@ -1,11 +1,11 @@
 Upload: Copy
-  access Screen CopyDst
-  barrier Screen Undefined->TransferDst [Sampled(Pixel) -> CopyDst]
+  access SceneColor CopyDst
+  barrier SceneColor Undefined->TransferDst [Sampled(Pixel) -> CopyDst]
 Present: Raster
-  access Screen Sampled(Pixel)
+  access SceneColor Sampled(Pixel)
   access BackBuffer ColorWrite
-  barrier Screen TransferDst->Read [CopyDst -> Sampled(Pixel)]
+  barrier SceneColor TransferDst->Read [CopyDst -> Sampled(Pixel)]
   barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
   attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
-Screen: Imported, Upload..Present, Texture|TransferDst
+SceneColor: Transient RGBAFloat16 Scene, physical 0, Upload..Present, Texture|TransferDst
 BackBuffer: Imported, Present..Present, ColorAttachment

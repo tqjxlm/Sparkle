@@ -2,52 +2,29 @@
 
 #include "renderer/pass/ScreenQuadPass.h"
 
-#include "core/Event.h"
-#include "renderer/proxy/CameraRenderProxy.h"
-#include "renderer/resource/GBuffer.h"
-
 namespace sparkle
 {
-class ImageBasedLighting;
-class DirectionalLightRenderProxy;
-class SkyRenderProxy;
+struct LightingInputs;
 
+// lights the surfaces of a GBuffer with the directional light and the sky light
 class DirectionalLightingPass : public ScreenQuadPass
 {
 public:
-    struct PassResources
+    // draws into a color attachment of `output_format` at slot 0
+    DirectionalLightingPass(RHIContext *ctx, PixelFormat output_format) : ScreenQuadPass(ctx, "Lighting", output_format)
     {
-        GBuffer gbuffer;
-        CameraRenderProxy *camera;
-        DirectionalLightRenderProxy *light;
-        RHIResourceRef<RHIImage> depth_texture;
-        RHIResourceRef<RHIImage> shadow_map = nullptr;
-        ImageBasedLighting *ibl = nullptr;
-        SkyRenderProxy *sky_light = nullptr;
-    };
-
-    DirectionalLightingPass(RHIContext *ctx, const RHIResourceRef<RHIRenderTarget> &target, PassResources resources);
-
-#pragma region ScreenQuadPass interface
+    }
 
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
+
+    // adds a Raster pass lighting the surfaces of `gbuffer` at the depths of `scene_depth`, both sampled, into all of
+    // `scene_color`
+    void AddTo(RenderGraph &graph, const LightingInputs &lighting, RGTexture gbuffer, RGTexture scene_depth,
+               RGTexture scene_color) const;
+
+protected:
     void SetupPixelShader() override;
+
     void BindPixelShaderResources() override;
-    void Render() override;
-    void SetupRenderPass() override;
-
-#pragma endregion
-
-    void SetDirectionalShadow(const RHIResourceRef<RHIImage> &shadow_map);
-
-    void SetIBL(ImageBasedLighting *ibl);
-
-    void SetSkyLight(SkyRenderProxy *sky_light);
-
-private:
-    PassResources resources_;
-
-    bool ibl_dirty_ = false;
-    std::unique_ptr<EventSubscription> ibl_changed_subscription_;
 };
 } // namespace sparkle

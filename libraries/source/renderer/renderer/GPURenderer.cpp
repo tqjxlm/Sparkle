@@ -5,9 +5,7 @@
 #include "renderer/denoiser/Denoiser.h"
 #include "renderer/denoiser/DenoiserFactory.h"
 #include "renderer/graph/RenderGraph.h"
-#include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/ToneMappingPass.h"
-#include "renderer/pass/UiPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/MeshRenderProxy.h"
@@ -65,8 +63,8 @@ class RayTracingComputeShader : public RHIShaderInfo
 };
 
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                         SceneRenderProxy *scene_render_proxy)
-    : Renderer(render_config, rhi_context, scene_render_proxy),
+                         SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
+    : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool),
       spp_logger_(1.f, false, [this](float) { MeasurePerformance(); })
 {
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Gpu);
@@ -103,38 +101,14 @@ void GPURenderer::InitRenderResources()
     scene_rt_ = rhi_->GetRenderTargetPool().Acquire(scene_rt_attribute, "GPUPipelineColorRT");
     scene_texture_ = scene_rt_->GetColorImage(0);
 
-    RHIRenderTarget::Attribute tone_mapping_rt_attribute;
-    tone_mapping_rt_attribute.SetColorAttribute(
-        RHIImage::Attribute{
-            .format = PixelFormat::B8G8R8A8Srgb,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = resolution_.output.x(),
-            .height = resolution_.output.y(),
-            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment |
-                      RHIImage::ImageUsage::TransferSrc,
-            .msaa_samples = 1,
-        },
-        0);
-
-    tone_mapping_rt_ = rhi_->GetRenderTargetPool().Acquire(tone_mapping_rt_attribute, "ToneMappingRT");
-    tone_mapping_output_ = tone_mapping_rt_->GetColorImage(0);
-
     denoiser_inputs_ = std::make_unique<PathTracingDenoiserInputs>(rhi_, resolution_.scene);
 
     InitSceneRenderResources();
 
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_texture_, tone_mapping_rt_);
+    InitPostChain(ToneMappedScreenDesc);
 
-    screen_quad_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, tone_mapping_output_,
-                                                             rhi_->GetBackBufferRenderTarget());
-
-    if (!rhi_->IsHeadless())
-    {
-        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, tone_mapping_rt_);
-    }
+    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, screen_desc_.format);
+    displayed_image_ = scene_texture_;
 
     performance_history_.resize(rhi_->GetMaxFramesInFlight());
 
@@ -206,29 +180,20 @@ void GPURenderer::Render()
         if (gbuffer_write_this_frame_ && denoiser_inputs)
         {
             tone_mapping_input = frame_denoiser_->AddTo(graph, *denoiser_inputs);
-            tone_mapping_pass_->SetInput(frame_denoiser_->GetOutput());
+            displayed_image_ = frame_denoiser_->GetOutput();
         }
         else
         {
-            tone_mapping_pass_->SetInput(scene_texture_);
+            displayed_image_ = scene_texture_;
         }
     }
-    else if (tone_mapping_pass_->GetInput() != scene_texture_)
+    else if (displayed_image_ != scene_texture_)
     {
         // a frame without a dispatch keeps displaying the last denoised output
-        tone_mapping_input = graph.Import("DenoiserOutput", tone_mapping_pass_->GetInput());
+        tone_mapping_input = graph.Import("DenoiserOutput", displayed_image_);
     }
 
-    const auto screen = graph.Import("Screen", tone_mapping_output_);
-
-    graph.AddExternalPass("ToneMapping", [this, tone_mapping_input, screen](RGBuilder &builder) {
-        builder.Sampled(tone_mapping_input, RHIShaderStageMask::Pixel);
-        builder.ColorWrite(screen, 0);
-        builder.FullyOverwrites();
-        return [this](RGExternalContext &) { tone_mapping_pass_->Render(); };
-    });
-
-    AddPresentPasses(graph, screen, ui_pass_.get(), *screen_quad_pass_);
+    AddPostChain(graph, tone_mapping_input, tone_mapping_pass_.get());
 
     ExecuteGraph(graph);
 }
@@ -256,7 +221,7 @@ void GPURenderer::Update()
 
     if (requested == DenoiserProvider::Off)
     {
-        tone_mapping_pass_->SetInput(scene_texture_);
+        displayed_image_ = scene_texture_;
     }
     else if (selection_changed)
     {
@@ -459,13 +424,6 @@ void GPURenderer::Update()
         ubo.dir_light = dir_light->GetRenderData();
     }
     uniform_buffer_->Upload(rhi_, &ubo);
-
-    screen_quad_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
-    if (ui_pass_)
-    {
-        ui_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-    }
 
     tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 

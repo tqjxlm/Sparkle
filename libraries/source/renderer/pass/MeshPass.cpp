@@ -1,5 +1,6 @@
 #include "renderer/pass/MeshPass.h"
 
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/proxy/MeshRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "rhi/RHI.h"
@@ -43,12 +44,12 @@ void MeshPass::UpdateFrameData(const RenderConfig &, SceneRenderProxy *scene)
     }
 }
 
-void MeshPass::DrawPrimitives(RHICommandContext *command_context)
+void MeshPass::DrawPrimitives(RGRasterContext &context) const
 {
     for (auto *primitive : scene_proxy_->GetPrimitives())
     {
-        auto *proxy = static_cast<MeshRenderProxy *>(primitive);
-        proxy->Render(command_context, pipeline_states_[primitive->GetPrimitiveIndex()]);
+        const auto *proxy = static_cast<const MeshRenderProxy *>(primitive);
+        context.DrawMesh(pipeline_states_[primitive->GetPrimitiveIndex()], proxy->GetDrawArgs());
     }
 }
 

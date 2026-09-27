@@ -352,7 +352,7 @@ void MetalGraphicsPipeline::Bind(id<MTLRenderCommandEncoder> encoder, const RHIA
 
 void MetalGraphicsPipeline::CreatePipelineState()
 {
-    ASSERT_F(attachment_signature_, "Graphics pipeline {} needs SetRenderPass before Compile", GetName());
+    ASSERT_F(attachment_signature_, "Graphics pipeline {} needs an attachment signature before Compile", GetName());
 
     for (auto *binding : resource_table_[static_cast<int>(RHIShaderStage::Vertex)]->GetBindings())
     {

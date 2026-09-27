@@ -15,7 +15,6 @@ class PipelinePass
 {
 public:
     virtual void InitRenderResources(const RenderConfig &config) = 0;
-    virtual void Render() = 0;
     virtual ~PipelinePass() = default;
 
     template <class T, typename... Args>

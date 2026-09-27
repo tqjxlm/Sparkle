@@ -10,11 +10,13 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sparkle
 {
 class RGTexturePool;
+class RHIContext;
 class RenderGraph;
 struct RenderConfig;
 
@@ -63,6 +65,8 @@ template <class Table> using RGSampledBinding = RGBinding<Table, RHIShaderResour
 template <class Table>
 using RGStorageBinding = RGBinding<Table, RHIShaderResourceReflection::ResourceType::StorageImage2D>;
 
+template <class Table> using RGSamplerBinding = RGBinding<Table, RHIShaderResourceReflection::ResourceType::Sampler>;
+
 enum class RGPassKind : uint8_t
 {
     Raster,
@@ -74,7 +78,7 @@ enum class RGPassKind : uint8_t
 // declares the accesses of one pass. a pass declares each texture once. shader stages default to the pass kind's
 // (raster: pixel, compute: compute, external: all). a shader access given a `binding` member of a shader's
 // ResourceTable binds the texture's image there in every pipeline the pass draws or dispatches whose shader uses that
-// table.
+// table; a sampled access given a `sampler_binding` member too binds the sampler the image carries there.
 class RGBuilder
 {
 public:
@@ -99,6 +103,29 @@ public:
     {
         Sampled(texture, stages);
         Bind(binding);
+    }
+
+    template <class Table>
+    void Sampled(RGTexture texture, RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding,
+                 RHIShaderStageMask stages = RHIShaderStageMask::None)
+    {
+        Sampled(texture, binding, stages);
+        BindLastAccess(SamplerBinding(sampler_binding));
+    }
+
+    // Sampled when `texture` is valid. otherwise the input is missing, and `placeholder`, an image outside the graph,
+    // binds there with its sampler, so no pipeline keeps an image an earlier graph bound.
+    template <class Table>
+    void SampledOrPlaceholder(RGTexture texture, const RHIResourceRef<RHIImage> &placeholder,
+                              RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding)
+    {
+        if (texture.IsValid())
+        {
+            Sampled(texture, binding, sampler_binding);
+            return;
+        }
+        BindPlaceholder(placeholder, ViewBinding(binding));
+        BindPlaceholder(placeholder, SamplerBinding(sampler_binding));
     }
 
     template <class Table>
@@ -135,6 +162,10 @@ public:
     // the pass runs even when nothing reads its outputs (readback, present)
     void SideEffect();
 
+    // the raster pass records foreign commands (ImGui) through the raw command context, inside the rendering the graph
+    // begins over its attachments. the foreign code resets the backend state it records around.
+    void NativeAccess();
+
 private:
     friend class RenderGraph;
 
@@ -147,14 +178,32 @@ private:
 
     void DeclareShaderAccess(RGTexture texture, RHIAccess access, RHIShaderStageMask stages, RHIImageLayout layout);
 
-    template <class Table, RHIShaderResourceReflection::ResourceType Type> void Bind(RGBinding<Table, Type> binding)
+    // makes the binding of an image
+    using ImageBinding = std::function<RHIMemberBinding(RHIContext *, RHIImage &)>;
+
+    template <class Table, RHIShaderResourceReflection::ResourceType Type>
+    static ImageBinding ViewBinding(RGBinding<Table, Type> binding)
     {
-        BindLastAccess(
-            [binding](RHIResourceRef<RHIImageView> view) { return RHIMemberBinding(binding, std::move(view)); });
+        return [binding](RHIContext *rhi, RHIImage &image) {
+            return RHIMemberBinding(binding, image.GetDefaultView(rhi));
+        };
     }
 
-    // binds the image of the access declared last
-    void BindLastAccess(std::function<RHIMemberBinding(RHIResourceRef<RHIImageView>)> binding);
+    template <class Table> static ImageBinding SamplerBinding(RGSamplerBinding<Table> binding)
+    {
+        return [binding](RHIContext *, RHIImage &image) { return RHIMemberBinding(binding, image.GetSampler()); };
+    }
+
+    template <class Table, RHIShaderResourceReflection::ResourceType Type> void Bind(RGBinding<Table, Type> binding)
+    {
+        BindLastAccess(ViewBinding(binding));
+    }
+
+    // adds a binding of the image of the access declared last
+    void BindLastAccess(ImageBinding binding);
+
+    // adds a binding of `placeholder` to the pass
+    void BindPlaceholder(const RHIResourceRef<RHIImage> &placeholder, ImageBinding binding);
 
     RenderGraph &graph_;
     uint32_t pass_;
@@ -172,6 +221,9 @@ protected:
         : command_context_(command_context), graph_(graph), pass_(pass)
     {
     }
+
+    // the raw command context of a pass that declared NativeAccess
+    [[nodiscard]] RHICommandContext &GetNativeContext() const;
 
     RHICommandContext &command_context_;
 
@@ -197,6 +249,8 @@ public:
     {
         return command_context_.GetAttachmentSignature();
     }
+
+    using RGPassContext::GetNativeContext;
 
 private:
     friend class RenderGraph;
@@ -323,8 +377,8 @@ private:
         // the color slot or DepthSlot of an attachment, NoSlot otherwise
         uint8_t slot;
         std::optional<Vector4> clear;
-        // makes the binding of the access's image view, for shader accesses given a binding member
-        std::function<RHIMemberBinding(RHIResourceRef<RHIImageView>)> binding = nullptr;
+        // make the bindings of the access's image, for shader accesses given binding members
+        std::vector<std::function<RHIMemberBinding(RHIContext *, RHIImage &)>> bindings;
 
         // compiled
         std::optional<RHIImageBarrier> barrier = std::nullopt;
@@ -340,8 +394,12 @@ private:
         RGPassKind kind;
         RHIResourceRef<RHIComputePass> compute_pass;
         std::vector<Access> accesses;
+        // images outside the graph bound in place of missing inputs, with the bindings they make
+        std::vector<std::pair<RHIResourceRef<RHIImage>, std::function<RHIMemberBinding(RHIContext *, RHIImage &)>>>
+            placeholders;
         bool fully_overwrites = false;
         bool side_effect = false;
+        bool native_access = false;
         std::function<void(RHICommandContext &)> record;
 
         // compiled

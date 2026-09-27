@@ -15,7 +15,7 @@ public:
 
     void InitRenderResources(const RenderConfig &config) override;
 
-    void Render() override;
+    void Render();
 
 protected:
     RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format) override;

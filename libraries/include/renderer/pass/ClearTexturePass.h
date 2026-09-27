@@ -15,7 +15,7 @@ public:
                      const RHIResourceRef<RHIRenderTarget> &target);
 
     void InitRenderResources(const RenderConfig &config) override;
-    void Render() override;
+    void Render();
 
 protected:
     Vector4 clear_value_;

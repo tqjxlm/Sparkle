@@ -2,7 +2,7 @@
 
 #include "renderer/pass/MeshPass.h"
 
-#include "rhi/RHIRenderTarget.h"
+#include "renderer/graph/RenderGraph.h"
 
 namespace sparkle
 {
@@ -11,8 +11,11 @@ class MeshRenderProxy;
 class GBufferPass : public MeshPass
 {
 public:
-    GBufferPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, RHIRenderTarget::ColorImageArray gbuffer_images,
-                const RHIResourceRef<RHIImage> &scene_depth);
+    // the scene's surfaces, packed into one texel per pixel
+    static constexpr RGTextureDesc PackedDesc{.format = PixelFormat::RGBAUInt32, .size_class = RGSizeClass::Scene};
+
+    // draws into a packed GBuffer at slot 0 and a depth attachment of `depth_format`
+    GBufferPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PixelFormat depth_format);
 
     void InitRenderResources(const RenderConfig &config) override;
 
@@ -20,7 +23,8 @@ public:
 
     void HandleUpdatedPrimitive(uint32_t primitive_id) override;
 
-    void Render() override;
+    // adds a Raster pass drawing into a new GBufferPacked and `scene_depth`, both cleared, and returns the GBuffer
+    [[nodiscard]] RGTexture AddTo(RenderGraph &graph, RGTexture scene_depth) const;
 
 private:
     static void SetupVertices(const RHIResourceRef<RHIPipelineState> &pso, MeshRenderProxy *mesh_proxy);
@@ -28,12 +32,6 @@ private:
     void SetupPixelShader(const RHIResourceRef<RHIPipelineState> &pso) const;
     void BindShaderResources(const RHIResourceRef<RHIPipelineState> &pso, MeshRenderProxy *mesh_proxy) const;
 
-    RHIResourceRef<RHIImage> scene_depth_;
-
-    RHIResourceRef<RHIRenderTarget> render_target_;
-
-    RHIResourceRef<RHIRenderPass> pass_;
-
-    RHIRenderTarget::ColorImageArray gbuffer_images_;
+    RHIAttachmentSignature signature_;
 };
 } // namespace sparkle

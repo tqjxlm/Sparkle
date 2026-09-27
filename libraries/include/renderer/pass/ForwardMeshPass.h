@@ -2,23 +2,18 @@
 
 #include "renderer/pass/MeshPass.h"
 
-#include "core/Event.h"
-
 namespace sparkle
 {
-class ImageBasedLighting;
 class MeshRenderProxy;
+class RenderGraph;
+struct LightingInputs;
+struct RGTexture;
 
 class ForwardMeshPass : public MeshPass
 {
 public:
-    struct PassResources
-    {
-        RHIResourceRef<RHIImage> scene_color;
-        RHIResourceRef<RHIImage> scene_depth;
-    };
-
-    ForwardMeshPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PassResources resources);
+    // draws into a color attachment of `color_format` at slot 0 and a depth attachment of `depth_format`
+    ForwardMeshPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PixelFormat color_format, PixelFormat depth_format);
 
     void InitRenderResources(const RenderConfig &config) override;
 
@@ -28,13 +23,8 @@ public:
 
     void HandleUpdatedPrimitive(uint32_t primitive_id) override;
 
-    void SetDirectionalShadow(const RHIResourceRef<RHIImage> &shadow_map);
-
-    void SetIBL(ImageBasedLighting *ibl);
-
-    void RebindAllShaderResources();
-
-    void Render() override;
+    // adds a Raster pass shading the scene, lit by `lighting`, into `scene_color` and `scene_depth`, both cleared
+    void AddTo(RenderGraph &graph, const LightingInputs &lighting, RGTexture scene_color, RGTexture scene_depth) const;
 
 private:
     static void SetupVertices(const RHIResourceRef<RHIPipelineState> &pso, MeshRenderProxy *mesh_proxy);
@@ -42,16 +32,8 @@ private:
     void SetupPixelShader(const RHIResourceRef<RHIPipelineState> &pso) const;
     void BindPassResources(const RHIResourceRef<RHIPipelineState> &pso) const;
 
+    RHIAttachmentSignature signature_;
+
     RHIResourceRef<RHIBuffer> uniform_buffer_;
-    RHIResourceRef<RHIRenderPass> base_pass_;
-    RHIResourceRef<RHIRenderTarget> render_target_;
-
-    RHIResourceRef<RHIImage> shadow_map_;
-    ImageBasedLighting *ibl_ = nullptr;
-
-    bool ibl_dirty_ = false;
-    std::unique_ptr<EventSubscription> ibl_changed_subscription_;
-
-    PassResources resources_;
 };
 } // namespace sparkle

@@ -43,6 +43,12 @@ public:
     // records `barriers` after the rendering ends, inside the pass's label and timer
     void EndRendering(std::span<const RHIImageBarrier> barriers = {});
 
+    // the info the open rendering began with
+    [[nodiscard]] const RHIRenderingInfo &GetRenderingInfo() const
+    {
+        return rendering_info_;
+    }
+
     // the signature pipelines drawing in the open rendering compile against
     [[nodiscard]] const RHIAttachmentSignature &GetAttachmentSignature() const
     {
@@ -68,12 +74,19 @@ public:
     {
         bindings_ = bindings;
         bindings_applied_.assign(bindings.size(), false);
+        drew_or_dispatched_ = false;
     }
 
     // whether the binding at `index` of the set bindings bound into a pipeline since they were set
     [[nodiscard]] bool IsBindingApplied(size_t index) const
     {
         return bindings_applied_[index];
+    }
+
+    // whether a pipeline drew or dispatched since the bindings were set
+    [[nodiscard]] bool DrewOrDispatched() const
+    {
+        return drew_or_dispatched_;
     }
 
     // a null pipeline draws nothing
@@ -119,6 +132,7 @@ private:
     RHIContext *rhi_;
     std::span<const RHIMemberBinding> bindings_;
     std::vector<bool> bindings_applied_;
+    bool drew_or_dispatched_ = false;
     // the pass that began the open rendering through BeginRenderPass
     RHIResourceRef<RHIRenderPass> current_render_pass_;
     RHIResourceRef<RHIComputePass> current_compute_pass_;
