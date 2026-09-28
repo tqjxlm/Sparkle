@@ -31,7 +31,7 @@ public:
             return Result::Pending;
         }
 
-        if (failed_.load(std::memory_order_acquire))
+        if (HasFailed())
         {
             return Result::Fail;
         }
@@ -94,7 +94,7 @@ public:
             return Result::Pending;
 
         case Phase::Done:
-            return failed_.load(std::memory_order_acquire) ? Result::Fail : Result::Pass;
+            return HasFailed() ? Result::Fail : Result::Pass;
 
         default:
             return Result::Fail;
@@ -150,24 +150,10 @@ private:
         });
     }
 
-    void Expect(bool condition, const std::string &what)
-    {
-        if (condition)
-        {
-            Log(Info, "{}: OK - {}", GetName(), what);
-        }
-        else
-        {
-            Log(Error, "{}: FAILED - {}", GetName(), what);
-            failed_.store(true, std::memory_order_release);
-        }
-    }
-
     Phase phase_ = Phase::WaitLoaded;
     uint32_t wait_until_frame_ = 0;
 
     std::atomic<bool> task_pending_{false};
-    std::atomic<bool> failed_{false};
 
     // only accessed from the render thread
     RGTexturePool::Stats baseline_;

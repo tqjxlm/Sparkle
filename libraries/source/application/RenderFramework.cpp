@@ -3,6 +3,7 @@
 #include "application/InputManager.h"
 #include "application/NativeView.h"
 #include "application/UiManager.h"
+#include "core/ConfigManager.h"
 #include "core/CoreStates.h"
 #include "core/FileManager.h"
 #include "core/Path.h"
@@ -11,6 +12,8 @@
 #include "core/task/TaskDispatcher.h"
 #include "core/task/TaskManager.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/graph/RGTexturePool.h"
+#include "renderer/pass/PostChain.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/renderer/Renderer.h"
 #include "rhi/RHI.h"
@@ -18,12 +21,14 @@
 #include "scene/SceneNode.h"
 
 #include <imgui.h>
+#include <nlohmann/json.hpp>
 
 #include <cctype>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <mutex>
+#include <utility>
 
 constexpr float LogInterval = 1.f;
 
@@ -65,9 +70,67 @@ std::string BuildScreenshotName(const Scene *scene, RenderConfig::Pipeline pipel
     localtime_r(&now_time, &local_tm);
 #endif
 
-    return std::format("{}_{}_{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}.png", scene_name, Enum2Str(pipeline),
+    return std::format("{}_{}_{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}", scene_name, Enum2Str(pipeline),
                        local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday, local_tm.tm_hour,
                        local_tm.tm_min, local_tm.tm_sec);
+}
+
+// writes `dump` to screenshots/<name>.json
+void SaveGraphDump(const nlohmann::json &dump, const std::string &name)
+{
+    const auto path = Path::External((std::filesystem::path("screenshots") / (name + ".json")).string());
+    const auto text = dump.dump(4);
+    const auto saved_path = FileManager::GetNativeFileManager()->Write(path, text.data(), text.size());
+    if (saved_path.empty())
+    {
+        Log(Error, "Failed to save render graph dump to {}", path.Resolved().string());
+    }
+    else
+    {
+        Log(Info, "Render graph dump saved to {}", saved_path);
+    }
+}
+
+// a string field of an entry of a render graph dump
+const char *DumpString(const nlohmann::json &entry, const char *key)
+{
+    return entry.at(key).get_ref<const std::string &>().c_str();
+}
+
+// the texture the dumped graph shows in place of the frame, null when it shows the frame
+const char *FindViewedTexture(const nlohmann::json &dump)
+{
+    for (const auto &pass : dump.at("passes"))
+    {
+        if (pass.at("name").get_ref<const std::string &>() == PostChain::GraphViewPassName)
+        {
+            return DumpString(pass.at("accesses").at(0), "resource");
+        }
+    }
+    return nullptr;
+}
+
+// the name of the pass a dumped resource names by index under `key`, e.g. its first use
+const char *DumpPassName(const nlohmann::json &dump, const nlohmann::json &resource, const char *key)
+{
+    return DumpString(dump.at("passes").at(resource.at(key).get<size_t>()), "name");
+}
+
+// the format and size class of a dumped transient, e.g. "RGBAFloat16 Scene", or the kind of an import
+std::string DescribeResource(const nlohmann::json &resource)
+{
+    if (!resource.contains("format"))
+    {
+        return resource.at("kind").get<std::string>();
+    }
+
+    auto description = std::format("{} {}", DumpString(resource, "format"), DumpString(resource, "size_class"));
+    if (resource.contains("width"))
+    {
+        description +=
+            std::format(" {}x{}", resource.at("width").get<uint32_t>(), resource.at("height").get<uint32_t>());
+    }
+    return description;
 }
 } // namespace
 
@@ -155,7 +218,13 @@ void RenderFramework::RenderLoop()
         {
             renderer_->Tick();
 
-            renderer_->Render();
+            if (const auto dump = renderer_->Render(!graph_dump_consumers_.empty()))
+            {
+                for (const auto &on_dump : std::exchange(graph_dump_consumers_, {}))
+                {
+                    on_dump(dump);
+                }
+            }
 
             ready_for_auto_screenshot_.store(IsSceneFullyLoaded() && renderer_->IsReadyForAutoScreenshot(),
                                              std::memory_order_release);
@@ -367,20 +436,20 @@ void RenderFramework::EndFrame()
 {
     PROFILE_SCOPE("RenderFramework::EndFrame");
 
+    // a recorded frame is submitted even when the surface is lost while it records: recording already advanced the
+    // CPU-side state (tracked resource states, staged builds, timer queries), and a lost surface only fails the present
+    rhi_->EndFrame();
+
+    // reset debug point
+    renderer_->SetDebugPoint(-1., -1.);
+
     if (!native_view_->CanRender())
     {
         Log(Debug, "lost rendering surface. releasing render resources now...");
 
         rhi_->ReleaseRenderResources();
         rhi_->DestroySurface();
-
-        return;
     }
-
-    rhi_->EndFrame();
-
-    // reset debug point
-    renderer_->SetDebugPoint(-1., -1.);
 }
 
 void RenderFramework::ConsumeRenderThreadTasks()
@@ -452,8 +521,12 @@ std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const 
 std::shared_ptr<ScreenshotRequest> RenderFramework::RequestGraphDump(const std::string &name)
 {
     auto request = std::make_shared<ScreenshotRequest>(name);
-    TaskManager::RunInRenderThread(
-        [this, request] { renderer_->RequestGraphDump(request->GetName(), [request] { request->MarkCompleted(); }); });
+    TaskManager::RunInRenderThread([this, request] {
+        graph_dump_consumers_.emplace_back([request](const std::shared_ptr<const nlohmann::json> &dump) {
+            SaveGraphDump(*dump, request->GetName());
+            request->MarkCompleted();
+        });
+    });
     return request;
 }
 
@@ -496,7 +569,7 @@ void RenderFramework::DrawUi()
     ImGui::BeginDisabled(saving);
     if (ImGui::Button("Save Screenshot"))
     {
-        auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline);
+        auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline) + ".png";
         const bool capture_ui = should_capture_ui_;
 
         last_saved_screenshot_path_ = screenshot_name;
@@ -521,6 +594,133 @@ void RenderFramework::DrawUi()
     if (!last_saved_screenshot_path_.empty())
     {
         ImGui::TextWrapped(saving ? "Saving: %s" : "Saved: %s", last_saved_screenshot_path_.c_str());
+    }
+}
+
+void RenderFramework::DrawGraphUi()
+{
+    TaskManager::RunInRenderThread([this]() {
+        graph_dump_consumers_.emplace_back([this](std::shared_ptr<const nlohmann::json> dump) {
+            std::scoped_lock<std::mutex> lock(graph_dump_mutex_);
+            graph_dump_ = std::move(dump);
+        });
+    });
+
+    ImGui::TextUnformatted("Render Graph");
+    ImGui::Separator();
+
+    if (ImGui::Button("Save Graph Dump"))
+    {
+        saved_graph_dump_ = RequestGraphDump(BuildScreenshotName(scene_, render_config_.pipeline));
+    }
+
+    if (saved_graph_dump_)
+    {
+        ImGui::TextWrapped(saved_graph_dump_->IsCompleted() ? "Saved: %s.json" : "Saving: %s.json",
+                           saved_graph_dump_->GetName().c_str());
+    }
+
+    std::shared_ptr<const nlohmann::json> graph_dump;
+    {
+        std::scoped_lock<std::mutex> lock(graph_dump_mutex_);
+        graph_dump = graph_dump_;
+    }
+
+    if (!graph_dump)
+    {
+        return;
+    }
+
+    const auto *viewed_texture = FindViewedTexture(*graph_dump);
+    ImGui::Text("Shows: %s", viewed_texture ? viewed_texture : "the frame");
+
+    ImGui::SeparatorText("Passes");
+
+    if (ImGui::BeginTable("passes", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+    {
+        ImGui::TableSetupColumn("Pass");
+        ImGui::TableSetupColumn("Kind");
+        ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto &pass : graph_dump->at("passes"))
+        {
+            const bool culled = pass.at("culled").get<bool>();
+
+            ImGui::TableNextRow();
+            ImGui::BeginDisabled(culled);
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(DumpString(pass, "name"));
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(DumpString(pass, "kind"));
+
+            ImGui::TableNextColumn();
+            if (culled)
+            {
+                ImGui::TextWrapped("culled: %s", DumpString(pass, "cull_reason"));
+            }
+            else if (pass.contains("gpu_ms"))
+            {
+                ImGui::Text("%.3f", pass.at("gpu_ms").get<double>());
+            }
+
+            ImGui::EndDisabled();
+        }
+
+        ImGui::EndTable();
+    }
+
+    ImGui::SeparatorText("Resources");
+
+    auto *view_config = ConfigManager::Instance().GetConfig<std::string>("render_graph_view");
+    ASSERT(view_config);
+    const auto view = view_config->Get();
+
+    // selecting a texture shows it in place of the frame
+    if (ImGui::BeginTable("resources", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+    {
+        ImGui::TableSetupColumn("Resource");
+        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        if (ImGui::Selectable("Frame", view.empty(), ImGuiSelectableFlags_SpanAllColumns) && !view.empty())
+        {
+            view_config->Set("");
+        }
+
+        for (const auto &resource : graph_dump->at("resources"))
+        {
+            const auto &name = resource.at("name").get_ref<const std::string &>();
+
+            ImGui::TableNextRow();
+
+            ImGui::TableNextColumn();
+            if (resource.at("type").get_ref<const std::string &>() != "Texture")
+            {
+                ImGui::TextUnformatted(name.c_str());
+            }
+            else if (ImGui::Selectable(name.c_str(), name == view, ImGuiSelectableFlags_SpanAllColumns) && name != view)
+            {
+                view_config->Set(name);
+            }
+
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s", DescribeResource(resource).c_str());
+
+            ImGui::TableNextColumn();
+            if (resource.contains("first_use"))
+            {
+                ImGui::TextWrapped("%s..%s", DumpPassName(*graph_dump, resource, "first_use"),
+                                   DumpPassName(*graph_dump, resource, "last_use"));
+            }
+        }
+
+        ImGui::EndTable();
     }
 }
 } // namespace sparkle

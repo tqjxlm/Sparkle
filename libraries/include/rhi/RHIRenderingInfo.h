@@ -12,14 +12,14 @@ constexpr uint8_t MaxNumColorAttachments = 8;
 
 enum class RHILoadOp : uint8_t
 {
-    None,
+    DontCare,
     Load,
     Clear,
 };
 
 enum class RHIStoreOp : uint8_t
 {
-    None,
+    DontCare,
     Store,
 };
 
@@ -44,7 +44,7 @@ struct RHIColorAttachment
     RHIImage *image = nullptr;
     unsigned mip_level = 0;
     unsigned array_layer = 0;
-    RHILoadOp load_op = RHILoadOp::None;
+    RHILoadOp load_op = RHILoadOp::DontCare;
     RHIStoreOp store_op = RHIStoreOp::Store;
     Vector4 clear_color{0, 0, 0, 1};
 };
@@ -54,8 +54,8 @@ struct RHIDepthAttachment
     RHIImage *image = nullptr;
     unsigned mip_level = 0;
     unsigned array_layer = 0;
-    RHILoadOp load_op = RHILoadOp::None;
-    RHIStoreOp store_op = RHIStoreOp::None;
+    RHILoadOp load_op = RHILoadOp::DontCare;
+    RHIStoreOp store_op = RHIStoreOp::DontCare;
     float clear_depth = 1.f;
 };
 

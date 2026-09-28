@@ -102,8 +102,6 @@ public:
         return attribute_.usages;
     }
 
-    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
-
     [[nodiscard]] size_t GetOffset(unsigned frame_index) const
     {
         if (IsDynamic())
@@ -138,6 +136,8 @@ public:
     // async upload that happens on the GPU
     // it does not block resources and avoids writing to resources in use
     // the cost is higher memory footprint
+    // a dynamic buffer is written on the host. any other buffer records a staging copy into the open command buffer
+    // (see RHIContext::GetCommandContext), so a graph pass must not upload it
     void Upload(RHIContext *rhi, const void *data);
 
     virtual void *Lock() = 0;
@@ -151,6 +151,7 @@ public:
                       sizeof(T));
     }
 
+    // records a dispatch into the open command buffer (see RHIContext::GetCommandContext)
     void PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::vector<uint32_t> &indices,
                        uint32_t element_count, uint32_t element_size);
 
@@ -169,6 +170,12 @@ protected:
     uint8_t *mapped_address_ = nullptr;
 
 private:
+    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
+
+    // barriers before and after `access`, against every access the usages allow: for a write whose earlier accesses and
+    // later consumers are unknown
+    [[nodiscard]] std::pair<RHIMemoryBarrier, RHIMemoryBarrier> GetUsageBarriers(const RHIResourceAccess &access) const;
+
     RHITrackedAccess tracked_;
 };
 

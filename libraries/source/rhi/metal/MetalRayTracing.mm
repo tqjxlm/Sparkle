@@ -160,13 +160,15 @@ void MetalTLAS::Build()
         static_cast<MTLAccelerationStructureUserIDInstanceDescriptor *>(blas_descriptor_buffer_->Lock());
 
     auto *command_context = context->GetCommandContext();
+    ASSERT_F(command_context, "TLAS {} builds outside a command buffer", GetName());
     command_context->AssertOutsidePass("BLAS build");
     auto command_buffer = command_context->GetCommandBuffer();
-    id<MTLAccelerationStructureCommandEncoder> command_encoder = [command_buffer accelerationStructureCommandEncoder];
 
+    id<MTLAccelerationStructureCommandEncoder> command_encoder = nil;
     id<MTLBuffer> compacted_size_buffer = nil;
     if (dirty_blas_count > 0)
     {
+        command_encoder = [command_buffer accelerationStructureCommandEncoder];
         compacted_size_buffer = [context->GetDevice() newBufferWithLength:sizeof(uint64_t) * dirty_blas_count
                                                                   options:MTLResourceStorageModeShared];
         if (!compacted_size_buffer)
@@ -202,7 +204,10 @@ void MetalTLAS::Build()
 
     blas_descriptor_buffer_->UnLock();
 
-    [command_encoder endEncoding];
+    if (command_encoder)
+    {
+        [command_encoder endEncoding];
+    }
 
     if (!built_blas.empty())
     {

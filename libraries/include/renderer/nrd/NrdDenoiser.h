@@ -71,9 +71,9 @@ private:
 
     [[nodiscard]] RHIResourceRef<RHIImage> CreateFullScreenTexture(PixelFormat format, const std::string &name) const;
 
-    void Encode(const RGPassContext &context, const DenoiserInputs &inputs);
+    void Encode(RGExternalContext &context, const DenoiserInputs &inputs);
 
-    void RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &group);
+    void RenderReblur(RHICommandContext &command_context, const Vector3UInt &dispatch, const Vector3UInt &group);
 
     RHIContext *rhi_;
     Vector2UInt input_size_;

@@ -176,11 +176,11 @@ void MetalNrdBackend::AllocateResources(uint32_t width, uint32_t height, const P
         transient_count, sampler_count, constant_buffer_size, width, height);
 }
 
-void MetalNrdBackend::RunDispatches(RHICommandContext *command_context, const Dispatch *dispatches, uint32_t count)
+void MetalNrdBackend::RunDispatches(RHICommandContext &command_context, const Dispatch *dispatches, uint32_t count)
 {
-    ASSERT_F(command_context->GetCurrentComputePass(),
+    ASSERT_F(command_context.GetCurrentComputePass(),
              "MetalNrdBackend: RunDispatches must run inside an active compute pass");
-    id<MTLComputeCommandEncoder> encoder = static_cast<MetalCommandContext *>(command_context)->GetComputeEncoder();
+    id<MTLComputeCommandEncoder> encoder = static_cast<MetalCommandContext &>(command_context).GetComputeEncoder();
 
     for (uint32_t d = 0; d < count; d++)
     {

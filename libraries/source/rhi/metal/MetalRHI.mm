@@ -82,12 +82,6 @@ bool MetalRHI::SupportsHardwareRayTracing()
     return context->GetDevice().supportsRaytracing;
 }
 
-bool MetalRHI::SupportsPixelLocalRead()
-{
-    // framebuffer fetch (programmable blending) exists on Apple-family GPUs only
-    return [context->GetDevice() supportsFamily:MTLGPUFamilyApple2];
-}
-
 bool MetalRHI::SupportsPassTimestamps()
 {
     return context->SupportsPassTimestamps();
@@ -117,6 +111,27 @@ bool MetalRHI::SupportsSampledFormat(PixelFormat format)
     }
 }
 
+// Metal feature set tables: 32-bit float color formats and Depth32Float filter on Apple9 and later, and elsewhere only
+// where the device reports supports32BitFloatFiltering; integer formats never filter. Depth24Unorm_Stencil8 exists only
+// on some Mac GPUs and is treated as unfilterable.
+bool MetalRHI::SupportsLinearFiltering(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::R32UInt:
+    case PixelFormat::RGBAUInt32:
+    case PixelFormat::D24S8:
+        return false;
+    case PixelFormat::R32Float:
+    case PixelFormat::RGBAFloat:
+    case PixelFormat::D32:
+        return [context->GetDevice() supportsFamily:MTLGPUFamilyApple9] ||
+               context->GetDevice().supports32BitFloatFiltering;
+    default:
+        return SupportsSampledFormat(format);
+    }
+}
+
 bool MetalRHI::BeginFrameInternal()
 {
     context->BeginFrame();
@@ -128,7 +143,9 @@ void MetalRHI::EndFrameInternal()
     if (GetConfig().measure_gpu_time)
     {
         auto frame_index = GetFrameIndex();
-        [context->GetCommandContext()->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
+        auto *command_context = context->GetCommandContext();
+        ASSERT_F(command_context, "the frame ends outside its command buffer");
+        [command_context->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
           frame_stats_[frame_index].elapsed_time_ms = (command_buffer.GPUEndTime - command_buffer.GPUStartTime) * 1e3f;
         }];
     }
@@ -141,12 +158,13 @@ void MetalRHI::SubmitCommandBuffer()
     context->SubmitCommandBuffer();
 }
 
-void MetalRHI::BeginCommandBuffer()
+RHICommandContext &MetalRHI::BeginCommandBufferInternal()
 {
     context->BeginCommandBuffer();
+    return *context->GetCommandContext();
 }
 
-RHICommandContext *MetalRHI::GetCommandContext()
+RHICommandContext *MetalRHI::GetCommandContextInternal()
 {
     return context->GetCommandContext();
 }

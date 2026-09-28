@@ -6,16 +6,20 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace sparkle
 {
+class RGPassTimers;
 class RGTexturePool;
 class RHIContext;
 class RenderGraph;
@@ -52,13 +56,6 @@ struct RGSubresources
     uint8_t layer_count = All;
 
     bool operator==(const RGSubresources &) const = default;
-
-    // for resolved counts
-    [[nodiscard]] bool Overlaps(const RGSubresources &other) const
-    {
-        return base_mip < other.base_mip + other.mip_count && other.base_mip < base_mip + mip_count &&
-               base_layer < other.base_layer + other.layer_count && other.base_layer < base_layer + layer_count;
-    }
 };
 
 // subresources of a texture: every one, unless narrowed with RGTexture::Mip or Subresource
@@ -119,11 +116,6 @@ struct RGTextureDesc
     // Absolute only
     uint32_t width = 0;
     uint32_t height = 0;
-    // images carry the sampler shaders sample them with
-    RHISampler::SamplerAttribute sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 };
 
 // a binding member of a shader's ResourceTable that a texture binds to
@@ -154,7 +146,7 @@ enum class RGPassKind : uint8_t
 // compute, external: all). a shader access given a `binding` member of a shader's ResourceTable binds the resource
 // there in every pipeline the pass draws or dispatches whose shader uses that table: a sampled binding views the whole
 // image, a storage binding the access's single mip (a cube's layers as a 2D array). a sampled access given a
-// `sampler_binding` member too binds the sampler the image carries there.
+// `sampler_binding` member too binds a sampler of the given attributes there.
 class RGBuilder
 {
 public:
@@ -166,8 +158,6 @@ public:
     void DepthTest(RGTextureRange texture);
 
     void Sampled(RGTextureRange texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
-
-    void StorageRead(RGTextureRange texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
 
     void StorageWrite(RGTextureRange texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
 
@@ -183,33 +173,26 @@ public:
 
     template <class Table>
     void Sampled(RGTextureRange texture, RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding,
-                 RHIShaderStageMask stages = RHIShaderStageMask::None)
+                 const RHISampler::SamplerAttribute &sampler, RHIShaderStageMask stages = RHIShaderStageMask::None)
     {
         Sampled(texture, binding, stages);
-        BindLastAccess(SamplerBinding(sampler_binding));
+        BindLastAccess(SamplerBinding(sampler_binding, sampler));
     }
 
     // Sampled when `texture` is valid. otherwise the input is missing, and `placeholder`, an image outside the graph,
-    // binds there with its sampler, so no pipeline keeps an image an earlier graph bound.
+    // binds there instead, so no pipeline keeps an image an earlier graph bound.
     template <class Table>
     void SampledOrPlaceholder(RGTexture texture, const RHIResourceRef<RHIImage> &placeholder,
-                              RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding)
+                              RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding,
+                              const RHISampler::SamplerAttribute &sampler)
     {
         if (texture.IsValid())
         {
-            Sampled(texture, binding, sampler_binding);
+            Sampled(texture, binding, sampler_binding, sampler);
             return;
         }
         BindPlaceholder(placeholder, ViewBinding(binding));
-        BindPlaceholder(placeholder, SamplerBinding(sampler_binding));
-    }
-
-    template <class Table>
-    void StorageRead(RGTextureRange texture, RGStorageBinding<Table> binding,
-                     RHIShaderStageMask stages = RHIShaderStageMask::None)
-    {
-        StorageRead(texture, stages);
-        Bind(binding);
+        BindPlaceholder(placeholder, SamplerBinding(sampler_binding, sampler));
     }
 
     template <class Table>
@@ -252,7 +235,8 @@ public:
         BindLastBufferAccess(RHIMemberBinding(binding, GetAccelerationStructure(acceleration_structure)));
     }
 
-    // the pass writes every texel of the textures it writes, so their previous contents are discarded
+    // the pass writes every texel of the textures it writes, so the previous contents of those it does not also read
+    // are discarded
     void FullyOverwrites();
 
     // the pass runs even when nothing reads its outputs
@@ -298,10 +282,14 @@ private:
         };
     }
 
-    template <class Table> static ImageBinding SamplerBinding(RGSamplerBinding<Table> binding)
+    [[nodiscard]] static RHIResourceRef<RHISampler> GetSampler(RHIContext *rhi,
+                                                               const RHISampler::SamplerAttribute &sampler);
+
+    template <class Table>
+    static ImageBinding SamplerBinding(RGSamplerBinding<Table> binding, const RHISampler::SamplerAttribute &sampler)
     {
-        return [binding](RHIContext *, RHIImage &image, const RGSubresources &) {
-            return RHIMemberBinding(binding, image.GetSampler());
+        return [binding, sampler](RHIContext *rhi, RHIImage &, const RGSubresources &) {
+            return RHIMemberBinding(binding, GetSampler(rhi, sampler));
         };
     }
 
@@ -325,16 +313,16 @@ public:
     // the image behind a texture the pass declared
     [[nodiscard]] RHIImage *GetImage(RGTexture texture) const;
 
-    // the buffer behind a buffer the pass declared
-    [[nodiscard]] RHIBuffer *GetBuffer(RGBuffer buffer) const;
-
-    [[nodiscard]] RHITLAS *GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const;
-
 protected:
     RGPassContext(const RenderGraph &graph, uint32_t pass, RHICommandContext &command_context)
         : command_context_(command_context), graph_(graph), pass_(pass)
     {
     }
+
+    // the buffer behind a buffer the pass declared
+    [[nodiscard]] RHIBuffer *GetBuffer(RGBuffer buffer) const;
+
+    [[nodiscard]] RHITLAS *GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const;
 
     // the raw command context of a pass that declared NativeAccess
     [[nodiscard]] RHICommandContext &GetNativeContext() const;
@@ -342,8 +330,6 @@ protected:
     RHICommandContext &command_context_;
 
 private:
-    friend class RenderGraph;
-
     // aborts unless the pass declared the buffer or acceleration structure
     void CheckDeclared(uint32_t buffer) const;
 
@@ -360,11 +346,6 @@ public:
     void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
     {
         command_context_.DrawMesh(pipeline_state, draw_args);
-    }
-
-    [[nodiscard]] const RHIAttachmentSignature &GetAttachmentSignature() const
-    {
-        return command_context_.GetAttachmentSignature();
     }
 
     using RGPassContext::GetNativeContext;
@@ -433,6 +414,11 @@ private:
     using RGPassContext::RGPassContext;
 };
 
+// declares a pass's accesses on the builder and returns the function that records the pass through a `Context`
+template <typename Setup, typename Context>
+concept RGPassSetup =
+    std::invocable<Setup, RGBuilder &> && std::invocable<std::invoke_result_t<Setup, RGBuilder &>, Context &>;
+
 // one frame's passes and textures, rebuilt every frame. passes run in declaration order; each depends on the last
 // writer before it. Compile culls unused passes, backs transients with pooled images and plans barriers and load/store
 // actions without recording anything; Execute records the live passes. planning reads the images' tracked states, so
@@ -440,7 +426,7 @@ private:
 class RenderGraph
 {
 public:
-    RenderGraph(RGTexturePool &pool, const RenderConfig &config);
+    RenderGraph(RHIContext *rhi, RGTexturePool &pool, const RenderConfig &config);
 
     ~RenderGraph();
 
@@ -458,9 +444,20 @@ public:
     // a persistent buffer, imported like an image: planning starts from its tracked access
     [[nodiscard]] RGBuffer Import(std::string name, const RHIResourceRef<RHIBuffer> &buffer);
 
+    // the host reads the buffer once the graph's commands complete: right after the last live pass that uses it, the
+    // graph makes the buffer's contents visible to the host
+    void ReadOnHost(RGBuffer buffer);
+
     // a top-level acceleration structure, imported like a buffer
     [[nodiscard]] RGAccelerationStructure Import(std::string name,
                                                  const RHIResourceRef<RHITLAS> &acceleration_structure);
+
+    // the first texture created or imported as `name`, invalid when there is none
+    [[nodiscard]] RGTexture FindTexture(std::string_view name) const;
+
+    // whether a pass added now may sample the texture through a 2D binding: a single-layer import with texture usage,
+    // or a transient an earlier pass writes
+    [[nodiscard]] bool CanSample2D(RGTexture texture) const;
 
     [[nodiscard]] PixelFormat GetFormat(RGTexture texture) const;
 
@@ -468,33 +465,36 @@ public:
     [[nodiscard]] Vector2UInt GetSize(RGTexture texture) const;
 
     // `setup` declares the pass's accesses on the builder and returns the function that records the pass
-    template <typename Setup> void AddRasterPass(std::string name, Setup &&setup)
+    template <RGPassSetup<RGRasterContext> Setup> void AddRasterPass(std::string name, Setup &&setup)
     {
         AddPass<RGRasterContext>(std::move(name), nullptr, std::forward<Setup>(setup));
     }
 
     // `compute_pass` brackets the recording, labelling and timing it
-    template <typename Setup>
+    template <RGPassSetup<RGComputeContext> Setup>
     void AddComputePass(std::string name, RHIResourceRef<RHIComputePass> compute_pass, Setup &&setup)
     {
         AddPass<RGComputeContext>(std::move(name), std::move(compute_pass), std::forward<Setup>(setup));
     }
 
-    template <typename Setup> void AddCopyPass(std::string name, Setup &&setup)
+    template <RGPassSetup<RGCopyContext> Setup> void AddCopyPass(std::string name, Setup &&setup)
     {
         AddPass<RGCopyContext>(std::move(name), nullptr, std::forward<Setup>(setup));
     }
 
-    template <typename Setup> void AddExternalPass(std::string name, Setup &&setup)
+    template <RGPassSetup<RGExternalContext> Setup> void AddExternalPass(std::string name, Setup &&setup)
     {
         AddPass<RGExternalContext>(std::move(name), nullptr, std::forward<Setup>(setup));
     }
 
     void Compile();
 
-    void Execute(RHICommandContext &command_context);
+    // raster passes are timed by `timers` when given, compute passes by their RHIComputePass
+    void Execute(RHICommandContext &command_context, RGPassTimers *timers = nullptr);
 
-    // the compiled graph. it names size classes instead of pixel sizes, so it does not depend on the resolution.
+    // the compiled graph, with the GPU time of each executed pass whose timer has a result. it names size classes
+    // instead of pixel sizes, so a steady frame dumps the same passes, accesses, barriers and attachments at any
+    // resolution.
     [[nodiscard]] nlohmann::json Dump() const;
 
 private:
@@ -504,114 +504,27 @@ private:
     static constexpr uint8_t NoSlot = std::numeric_limits<uint8_t>::max();
     static constexpr uint8_t DepthSlot = MaxNumColorAttachments;
 
-    struct Access
-    {
-        RGTexture texture;
-        // resolved against the texture's mips and layers
-        RGSubresources subresources;
-        RHIResourceAccess access;
-        RHIImageLayout layout;
-        // the color slot or DepthSlot of an attachment, NoSlot otherwise
-        uint8_t slot;
-        std::optional<Vector4> clear;
-        // make the bindings of the access's image, for shader accesses given binding members
-        std::vector<std::function<RHIMemberBinding(RHIContext *, RHIImage &, const RGSubresources &)>> bindings;
-
-        // compiled
-        std::vector<RHIImageBarrier> barriers;
-        // of each subresource after the pass's barriers, mip by mip
-        std::vector<RHIImageState> states;
-        std::string load_reason;
-        std::string store_reason;
-    };
-
-    // an access to a buffer or acceleration structure
-    struct BufferAccess
-    {
-        uint32_t buffer;
-        RHIResourceAccess access;
-        std::vector<RHIMemberBinding> bindings;
-
-        // compiled
-        std::optional<RHIMemoryBarrier> barrier = std::nullopt;
-        // after the pass's barriers
-        RHIResourceAccess state{};
-    };
-
-    struct Pass
-    {
-        std::string name;
-        RGPassKind kind;
-        RHIResourceRef<RHIComputePass> compute_pass;
-        std::vector<Access> accesses;
-        std::vector<BufferAccess> buffer_accesses;
-        // images outside the graph bound in place of missing inputs, with the bindings they make
-        std::vector<std::pair<RHIResourceRef<RHIImage>,
-                              std::function<RHIMemberBinding(RHIContext *, RHIImage &, const RGSubresources &)>>>
-            placeholders;
-        bool fully_overwrites = false;
-        bool side_effect = false;
-        bool native_access = false;
-        std::function<void(RHICommandContext &)> record;
-
-        // compiled
-        bool live = true;
-        std::string cull_reason;
-        RHIRenderingInfo rendering_info{};
-        std::vector<RHIMemberBinding> bindings;
-    };
-
-    struct Texture
-    {
-        std::string name;
-        RGTextureDesc desc{};
-        RHIResourceRef<RHIImage> imported;
-
-        // compiled
-        RHIImage *image = nullptr;
-        uint32_t width = 0;
-        uint32_t height = 0;
-        uint8_t mips = 1;
-        uint8_t layers = 1;
-        RHIImage::ImageUsage usages = RHIImage::ImageUsage::Undefined;
-        std::optional<uint32_t> first_pass = std::nullopt;
-        uint32_t last_pass = 0;
-        // the transient's index among the images the pool backs this graph with
-        std::optional<uint32_t> physical = std::nullopt;
-    };
-
-    // an imported buffer or acceleration structure
-    struct Buffer
-    {
-        std::string name;
-        RHIResourceRef<RHIBuffer> buffer;
-        RHIResourceRef<RHITLAS> acceleration_structure;
-
-        // compiled
-        std::optional<uint32_t> first_pass = std::nullopt;
-        uint32_t last_pass = 0;
-        RHIResourceAccess accesses{};
-
-        [[nodiscard]] RHITrackedAccess &GetTracked() const
-        {
-            return buffer ? buffer->GetTracked() : acceleration_structure->GetTracked();
-        }
-    };
+    struct Access;
+    struct BufferAccess;
+    struct Pass;
+    struct Texture;
+    struct Buffer;
 
     template <typename Context, typename Setup>
     void AddPass(std::string name, RHIResourceRef<RHIComputePass> compute_pass, Setup &&setup)
     {
         const auto index = NewPass(std::move(name), Context::Kind, std::move(compute_pass));
         RGBuilder builder(*this, index);
-        passes_[index].record = [this, index,
-                                 record = std::function<void(Context &)>(std::forward<Setup>(setup)(builder))](
-                                    RHICommandContext &command_context) {
+        SetRecord(index, [this, index, record = std::invoke(std::forward<Setup>(setup), builder)](
+                             RHICommandContext &command_context) mutable {
             Context context(*this, index, command_context);
             record(context);
-        };
+        });
     }
 
     uint32_t NewPass(std::string name, RGPassKind kind, RHIResourceRef<RHIComputePass> compute_pass);
+
+    void SetRecord(uint32_t pass, std::function<void(RHICommandContext &)> record);
 
     // the index of `buffer`, or of its first import
     uint32_t ImportBuffer(Buffer buffer);
@@ -632,18 +545,31 @@ private:
     // resulting states
     void PlanAccess(Access &access, bool discard, std::vector<RHIImageState> &states) const;
 
+    [[nodiscard]] const Texture &GetTexture(RGTexture texture) const;
+
     void InferStoreOps();
 
-    void CheckExternalContract(const Pass &pass) const;
+    // the attachments of each live raster pass, with the load and store actions planned for them
+    void BuildRenderingInfos();
 
-    void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const;
+    void CheckDeclaredStates(const Pass &pass) const;
 
+    static void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context);
+
+    void CheckBoundResourcesDeclared(const Pass &pass, const RHICommandContext &command_context) const;
+
+    void CheckBindingDeclared(const Pass &pass, const RHIShaderResourceBinding &binding) const;
+
+    RHIContext *rhi_;
     RGTexturePool &pool_;
     RenderResolution resolution_;
     bool cull_;
+    bool full_barriers_;
     std::vector<Pass> passes_;
     std::vector<Texture> textures_;
     std::vector<Buffer> buffers_;
+    // from the pool's BeginGraph in Compile
+    bool pool_serves_ = false;
     bool compiled_ = false;
     bool executed_ = false;
 };

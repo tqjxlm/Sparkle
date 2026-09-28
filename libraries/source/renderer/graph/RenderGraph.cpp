@@ -1,8 +1,11 @@
 #include "renderer/graph/RenderGraph.h"
 
 #include "RGCheck.h"
+#include "RenderGraphInternal.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/graph/RGPassTimers.h"
 #include "renderer/graph/RGTexturePool.h"
+#include "rhi/RHI.h"
 
 #include <algorithm>
 #include <iterator>
@@ -37,8 +40,14 @@ static bool KindAllows(RGPassKind kind, RHIAccess access)
     }
 }
 
-static RHIShaderStageMask GetDefaultStages(RGPassKind kind)
+// the given stages, or the pass kind's when none are given
+static RHIShaderStageMask ResolveStages(RGPassKind kind, RHIShaderStageMask stages)
 {
+    if (stages != RHIShaderStageMask::None)
+    {
+        return stages;
+    }
+
     switch (kind)
     {
     case RGPassKind::Raster:
@@ -82,8 +91,8 @@ static RHIImage::ImageUsage GetImageUsage(RHIAccess access)
     return usages;
 }
 
-// the store op of a depth attachment writes it even when the pass only tests depth (StoreOp::None lowers to
-// DONT_CARE), so barriers treat depth tests as depth writes
+// the store op of a depth attachment writes it even when the pass only tests depth (DontCare may write), so barriers
+// treat depth tests as depth writes
 static RHIResourceAccess GetSyncAccess(const RHIResourceAccess &access)
 {
     return access.access & RHIAccess::DepthTest ? RHIResourceAccess{.access = RHIAccess::DepthWrite} : access;
@@ -101,12 +110,52 @@ template <typename Function> static void ForEachSubresource(const RGSubresources
     }
 }
 
+// for resolved counts
+static bool Overlaps(const RGSubresources &a, const RGSubresources &b)
+{
+    return a.base_mip < b.base_mip + b.mip_count && b.base_mip < a.base_mip + a.mip_count &&
+           a.base_layer < b.base_layer + b.layer_count && b.base_layer < a.base_layer + a.layer_count;
+}
+
+// for resolved counts
+static bool Contains(const RGSubresources &outer, const RGSubresources &inner)
+{
+    return outer.base_mip <= inner.base_mip && inner.base_mip + inner.mip_count <= outer.base_mip + outer.mip_count &&
+           outer.base_layer <= inner.base_layer &&
+           inner.base_layer + inner.layer_count <= outer.base_layer + outer.layer_count;
+}
+
 static RGSubresources GetAllSubresources(const RHIImage &image)
 {
     return {.base_mip = 0,
             .mip_count = image.GetAttributes().mip_levels,
             .base_layer = 0,
             .layer_count = static_cast<uint8_t>(image.GetArrayLayerCount())};
+}
+
+static RGSubresources GetViewedSubresources(const RHIImageView::Attribute &view)
+{
+    return {.base_mip = static_cast<uint8_t>(view.base_mip_level),
+            .mip_count = static_cast<uint8_t>(view.mip_level_count),
+            .base_layer = static_cast<uint8_t>(view.base_array_layer),
+            .layer_count = static_cast<uint8_t>(view.array_layer_count)};
+}
+
+// the accesses a binding of `type` makes to a graph resource. graph buffers are only copied, so no binding may hold
+// one.
+static RHIAccess GetBindingAccess(RHIShaderResourceReflection::ResourceType type)
+{
+    switch (type)
+    {
+    case RHIShaderResourceReflection::ResourceType::Texture2D:
+        return RHIAccess::Sampled;
+    case RHIShaderResourceReflection::ResourceType::StorageImage2D:
+        return RHIAccess::StorageRead | RHIAccess::StorageWrite;
+    case RHIShaderResourceReflection::ResourceType::AccelerationStructure:
+        return RHIAccess::AccelerationStructureRead;
+    default:
+        return RHIAccess::None;
+    }
 }
 
 static bool ReadsContents(const RHIResourceAccess &access)
@@ -118,6 +167,30 @@ static bool ReadsContents(const RHIResourceAccess &access)
 static bool UsesContents(const RHIResourceAccess &access, bool clear, bool fully_overwrites)
 {
     return ReadsContents(access) || !(clear || (fully_overwrites && access.HasWrite()));
+}
+
+// whether one of `accesses` names `resource` through `member`
+template <typename Accesses, typename Resource, typename Member>
+static bool Declares(const Accesses &accesses, const Resource &resource, Member member)
+{
+    return std::ranges::find(accesses, resource, member) != std::ranges::end(accesses);
+}
+
+// the resource behind a buffer or acceleration structure handle, which must name a resource of that kind
+template <typename Resource, typename Buffer> static const RHIResourceRef<Resource> &GetResource(const Buffer &buffer)
+{
+    const auto *resource = std::get_if<RHIResourceRef<Resource>>(&buffer.resource);
+    RGCheck(resource != nullptr, "{} is not {}", buffer.name,
+            std::is_same_v<Resource, RHITLAS> ? "an acceleration structure" : "a buffer");
+    return *resource;
+}
+
+// aborts unless a pass of `kind` may declare `access` to `name` and has not declared it yet
+static void CheckDeclarable(RGPassKind kind, const std::string &pass, const std::string &name, RHIAccess access,
+                            bool declared)
+{
+    RGCheck(KindAllows(kind, access), "a {} pass cannot declare this access to {}", Enum2Str(kind), name);
+    RGCheck(!declared, "pass {} declares {} twice", pass, name);
 }
 
 void RGBuilder::Declare(RGTextureRange texture, RHIResourceAccess access, RHIImageLayout layout, uint8_t slot,
@@ -142,15 +215,12 @@ void RGBuilder::Declare(RGTextureRange texture, RHIResourceAccess access, RHIIma
     RGCheck(slot == RenderGraph::NoSlot || (subresources.mip_count == 1 && subresources.layer_count == 1),
             "pass {} attaches more than one subresource of {}", pass.name, name);
 
-    RGCheck(KindAllows(pass.kind, access.access), "a {} pass cannot declare this access to {}", Enum2Str(pass.kind),
-            name);
-    for (const auto &declared : pass.accesses)
-    {
-        RGCheck(declared.texture != texture.texture || !declared.subresources.Overlaps(subresources),
-                "pass {} declares {} twice", pass.name, name);
-        RGCheck(slot == RenderGraph::NoSlot || declared.slot != slot, "pass {} binds two attachments to slot {}",
-                pass.name, slot);
-    }
+    CheckDeclarable(pass.kind, pass.name, name, access.access,
+                    std::ranges::any_of(pass.accesses, [&texture, &subresources](const RenderGraph::Access &declared) {
+                        return declared.texture == texture.texture && Overlaps(declared.subresources, subresources);
+                    }));
+    RGCheck(slot == RenderGraph::NoSlot || !Declares(pass.accesses, slot, &RenderGraph::Access::slot),
+            "pass {} binds two attachments to slot {}", pass.name, slot);
 
     pass.accesses.push_back({.texture = texture.texture,
                              .subresources = subresources,
@@ -169,8 +239,8 @@ void RGBuilder::DeclareShaderAccess(RGTextureRange texture, RHIAccess access, RH
                                     RHIImageLayout layout)
 {
     const auto kind = graph_.passes_[pass_].kind;
-    Declare(texture, {.access = access, .stages = stages == RHIShaderStageMask::None ? GetDefaultStages(kind) : stages},
-            layout, RenderGraph::NoSlot, std::nullopt);
+    Declare(texture, {.access = access, .stages = ResolveStages(kind, stages)}, layout, RenderGraph::NoSlot,
+            std::nullopt);
 }
 
 void RGBuilder::ColorWrite(RGTextureRange texture, uint8_t slot, std::optional<Vector4> clear)
@@ -194,11 +264,6 @@ void RGBuilder::DepthTest(RGTextureRange texture)
 void RGBuilder::Sampled(RGTextureRange texture, RHIShaderStageMask stages)
 {
     DeclareShaderAccess(texture, RHIAccess::Sampled, stages, RHIImageLayout::Read);
-}
-
-void RGBuilder::StorageRead(RGTextureRange texture, RHIShaderStageMask stages)
-{
-    DeclareShaderAccess(texture, RHIAccess::StorageRead, stages, RHIImageLayout::StorageWrite);
 }
 
 void RGBuilder::StorageWrite(RGTextureRange texture, RHIShaderStageMask stages)
@@ -228,12 +293,8 @@ void RGBuilder::DeclareBuffer(uint32_t buffer, RHIResourceAccess access)
     RGCheck(buffer < graph_.buffers_.size(), "pass {} declares an invalid buffer", pass.name);
 
     const auto &name = graph_.buffers_[buffer].name;
-    RGCheck(KindAllows(pass.kind, access.access), "a {} pass cannot declare this access to {}", Enum2Str(pass.kind),
-            name);
-    RGCheck(
-        std::ranges::none_of(pass.buffer_accesses,
-                             [buffer](const RenderGraph::BufferAccess &declared) { return declared.buffer == buffer; }),
-        "pass {} declares {} twice", pass.name, name);
+    CheckDeclarable(pass.kind, pass.name, name, access.access,
+                    Declares(pass.buffer_accesses, buffer, &RenderGraph::BufferAccess::buffer));
 
     pass.buffer_accesses.push_back({.buffer = buffer, .access = access, .bindings = {}});
 }
@@ -257,13 +318,12 @@ void RGBuilder::AccelerationStructureRead(RGAccelerationStructure acceleration_s
 {
     const auto kind = graph_.passes_[pass_].kind;
     DeclareBuffer(acceleration_structure.index,
-                  {.access = RHIAccess::AccelerationStructureRead,
-                   .stages = stages == RHIShaderStageMask::None ? GetDefaultStages(kind) : stages});
+                  {.access = RHIAccess::AccelerationStructureRead, .stages = ResolveStages(kind, stages)});
 }
 
 RHIResourceRef<RHITLAS> RGBuilder::GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const
 {
-    return graph_.buffers_[acceleration_structure.index].acceleration_structure;
+    return GetResource<RHITLAS>(graph_.buffers_[acceleration_structure.index]);
 }
 
 void RGBuilder::BindLastBufferAccess(RHIMemberBinding binding)
@@ -289,6 +349,11 @@ RHIResourceRef<RHIImageView> RGBuilder::GetView(RHIContext *rhi, RHIImage &image
               .mip_level_count = 1,
               .base_array_layer = subresources.base_layer,
               .array_layer_count = subresources.layer_count});
+}
+
+RHIResourceRef<RHISampler> RGBuilder::GetSampler(RHIContext *rhi, const RHISampler::SamplerAttribute &sampler)
+{
+    return rhi->GetSampler(sampler);
 }
 
 void RGBuilder::BindLastAccess(ImageBinding binding)
@@ -321,7 +386,7 @@ void RGBuilder::NativeAccess()
 RHIImage *RGPassContext::GetImage(RGTexture texture) const
 {
     const auto &pass = graph_.passes_[pass_];
-    RGCheck(std::ranges::any_of(pass.accesses, [texture](const auto &access) { return access.texture == texture; }),
+    RGCheck(Declares(pass.accesses, texture, &RenderGraph::Access::texture),
             "pass {} uses a texture it did not declare", pass.name);
     return graph_.textures_[texture.index].image;
 }
@@ -329,20 +394,19 @@ RHIImage *RGPassContext::GetImage(RGTexture texture) const
 RHIBuffer *RGPassContext::GetBuffer(RGBuffer buffer) const
 {
     CheckDeclared(buffer.index);
-    return graph_.buffers_[buffer.index].buffer.get();
+    return GetResource<RHIBuffer>(graph_.buffers_[buffer.index]).get();
 }
 
 RHITLAS *RGPassContext::GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const
 {
     CheckDeclared(acceleration_structure.index);
-    return graph_.buffers_[acceleration_structure.index].acceleration_structure.get();
+    return GetResource<RHITLAS>(graph_.buffers_[acceleration_structure.index]).get();
 }
 
 void RGPassContext::CheckDeclared(uint32_t buffer) const
 {
     const auto &pass = graph_.passes_[pass_];
-    RGCheck(std::ranges::any_of(pass.buffer_accesses,
-                                [buffer](const RenderGraph::BufferAccess &access) { return access.buffer == buffer; }),
+    RGCheck(Declares(pass.buffer_accesses, buffer, &RenderGraph::BufferAccess::buffer),
             "pass {} uses a buffer it did not declare", pass.name);
 }
 
@@ -353,14 +417,15 @@ RHICommandContext &RGPassContext::GetNativeContext() const
     return command_context_;
 }
 
-RenderGraph::RenderGraph(RGTexturePool &pool, const RenderConfig &config)
-    : pool_(pool), resolution_(config.GetResolution()), cull_(config.render_graph_cull)
+RenderGraph::RenderGraph(RHIContext *rhi, RGTexturePool &pool, const RenderConfig &config)
+    : rhi_(rhi), pool_(pool), resolution_(config.GetResolution()), cull_(config.render_graph_cull),
+      full_barriers_(config.render_graph_full_barriers)
 {
 }
 
 RenderGraph::~RenderGraph()
 {
-    if (compiled_)
+    if (pool_serves_)
     {
         pool_.EndGraph();
     }
@@ -416,21 +481,24 @@ RGTexture RenderGraph::Import(std::string name, const RHIResourceRef<RHIImage> &
 RGBuffer RenderGraph::Import(std::string name, const RHIResourceRef<RHIBuffer> &buffer)
 {
     RGCheck(buffer, "import {} is not a buffer", name);
-    return {.index = ImportBuffer({.name = std::move(name), .buffer = buffer, .acceleration_structure = nullptr})};
+    return {.index = ImportBuffer({.name = std::move(name), .resource = buffer})};
+}
+
+void RenderGraph::ReadOnHost(RGBuffer buffer)
+{
+    RGCheck(buffer.index < buffers_.size(), "the host reads an invalid buffer");
+    buffers_[buffer.index].read_on_host = true;
 }
 
 RGAccelerationStructure RenderGraph::Import(std::string name, const RHIResourceRef<RHITLAS> &acceleration_structure)
 {
     RGCheck(acceleration_structure, "import {} is not an acceleration structure", name);
-    return {.index = ImportBuffer(
-                {.name = std::move(name), .buffer = nullptr, .acceleration_structure = acceleration_structure})};
+    return {.index = ImportBuffer({.name = std::move(name), .resource = acceleration_structure})};
 }
 
 uint32_t RenderGraph::ImportBuffer(Buffer buffer)
 {
-    const auto found = std::ranges::find_if(buffers_, [&buffer](const Buffer &imported) {
-        return imported.buffer == buffer.buffer && imported.acceleration_structure == buffer.acceleration_structure;
-    });
+    const auto found = std::ranges::find(buffers_, buffer.Get(), &Buffer::Get);
     if (found != buffers_.end())
     {
         return static_cast<uint32_t>(found - buffers_.begin());
@@ -440,15 +508,42 @@ uint32_t RenderGraph::ImportBuffer(Buffer buffer)
     return static_cast<uint32_t>(buffers_.size() - 1);
 }
 
+RGTexture RenderGraph::FindTexture(std::string_view name) const
+{
+    const auto found = std::ranges::find(textures_, name, &Texture::name);
+    return found == textures_.end() ? RGTexture{}
+                                    : RGTexture{.index = static_cast<uint32_t>(found - textures_.begin())};
+}
+
+const RenderGraph::Texture &RenderGraph::GetTexture(RGTexture texture) const
+{
+    RGCheck(texture.index < textures_.size(), "an invalid texture has no format or size");
+    return textures_[texture.index];
+}
+
+bool RenderGraph::CanSample2D(RGTexture texture) const
+{
+    const auto &found = GetTexture(texture);
+    if (found.imported)
+    {
+        return found.layers == 1 && found.imported->GetAttributes().usages & RHIImage::ImageUsage::Texture;
+    }
+    return std::ranges::any_of(passes_, [texture](const Pass &pass) {
+        return std::ranges::any_of(pass.accesses, [texture](const Access &access) {
+            return access.texture == texture && access.access.HasWrite();
+        });
+    });
+}
+
 PixelFormat RenderGraph::GetFormat(RGTexture texture) const
 {
-    const auto &found = textures_[texture.index];
+    const auto &found = GetTexture(texture);
     return found.imported ? found.imported->GetAttributes().format : found.desc.format;
 }
 
 Vector2UInt RenderGraph::GetSize(RGTexture texture) const
 {
-    const auto &found = textures_[texture.index];
+    const auto &found = GetTexture(texture);
     return {found.width, found.height};
 }
 
@@ -462,25 +557,34 @@ uint32_t RenderGraph::NewPass(std::string name, RGPassKind kind, RHIResourceRef<
                        .placeholders = {},
                        .record = {},
                        .cull_reason = {},
-                       .bindings = {}});
+                       .bindings = {},
+                       .bound_resources = {},
+                       .host_reads = {}});
     return static_cast<uint32_t>(passes_.size() - 1);
+}
+
+void RenderGraph::SetRecord(uint32_t pass, std::function<void(RHICommandContext &)> record)
+{
+    passes_[pass].record = std::move(record);
 }
 
 void RenderGraph::Compile()
 {
-    RGCheck(!compiled_, "the graph compiles once");
+    RGCheck(!pool_serves_, "the graph compiles once");
 
     Validate();
     Cull();
 
     pool_.BeginGraph();
-    compiled_ = true;
+    pool_serves_ = true;
 
     ResolveTextures();
     ResolveBuffers();
     ResolveBindings();
     PlanBarriers();
     InferStoreOps();
+    BuildRenderingInfos();
+    compiled_ = true;
 }
 
 void RenderGraph::Validate() const
@@ -507,6 +611,7 @@ void RenderGraph::Validate() const
 // a pass lives when it has a side effect, writes an import, or writes contents a later live pass uses
 void RenderGraph::Cull()
 {
+    // per texture, not per subresource: exact while transients have one subresource; imports keep every writer anyway
     std::vector<bool> needed(textures_.size(), false);
     for (auto &pass : passes_ | std::views::reverse)
     {
@@ -540,7 +645,7 @@ void RenderGraph::Cull()
     }
 }
 
-// transients whose lifetimes do not overlap share an image when format, extent and sampler match
+// transients whose lifetimes do not overlap share an image when format and extent match
 void RenderGraph::ResolveTextures()
 {
     for (auto pass_index = 0u; pass_index < passes_.size(); pass_index++)
@@ -550,8 +655,7 @@ void RenderGraph::ResolveTextures()
             auto &texture = textures_[access.texture.index];
             if (passes_[pass_index].live)
             {
-                texture.first_pass = texture.first_pass.value_or(pass_index);
-                texture.last_pass = pass_index;
+                texture.lifetime.Extend(pass_index);
                 texture.usages = texture.usages | GetImageUsage(access.access.access);
             }
         }
@@ -572,7 +676,7 @@ void RenderGraph::ResolveTextures()
         for (const auto &access : passes_[pass_index].accesses)
         {
             auto &texture = textures_[access.texture.index];
-            if (texture.imported || texture.first_pass != pass_index || texture.physical)
+            if (texture.imported || texture.lifetime.first != pass_index || texture.physical)
             {
                 continue;
             }
@@ -580,19 +684,18 @@ void RenderGraph::ResolveTextures()
             const auto found = std::ranges::find_if(physicals, [&texture, pass_index](const Physical &physical) {
                 const auto &first = *physical.first;
                 return physical.last_pass < pass_index && first.desc.format == texture.desc.format &&
-                       first.width == texture.width && first.height == texture.height &&
-                       first.desc.sampler == texture.desc.sampler;
+                       first.width == texture.width && first.height == texture.height;
             });
             if (found == physicals.end())
             {
                 texture.physical = static_cast<uint32_t>(physicals.size());
-                physicals.push_back({.first = &texture, .usages = texture.usages, .last_pass = texture.last_pass});
+                physicals.push_back({.first = &texture, .usages = texture.usages, .last_pass = texture.lifetime.last});
             }
             else
             {
                 texture.physical = static_cast<uint32_t>(found - physicals.begin());
                 found->usages = found->usages | texture.usages;
-                found->last_pass = texture.last_pass;
+                found->last_pass = texture.lifetime.last;
             }
         }
     }
@@ -602,12 +705,9 @@ void RenderGraph::ResolveTextures()
     for (const auto &physical : physicals)
     {
         const auto &first = *physical.first;
-        images.push_back(pool_.Acquire({.format = first.desc.format,
-                                        .width = first.width,
-                                        .height = first.height,
-                                        .sampler = first.desc.sampler,
-                                        .usages = physical.usages},
-                                       first.name));
+        images.push_back(pool_.Acquire(
+            {.format = first.desc.format, .width = first.width, .height = first.height, .usages = physical.usages},
+            first.name));
     }
 
     for (auto &texture : textures_)
@@ -633,15 +733,15 @@ void RenderGraph::ResolveBuffers()
         for (const auto &access : passes_[pass_index].buffer_accesses)
         {
             auto &buffer = buffers_[access.buffer];
-            buffer.first_pass = buffer.first_pass.value_or(pass_index);
-            buffer.last_pass = pass_index;
+            buffer.lifetime.Extend(pass_index);
             buffer.accesses = buffer.accesses | access.access;
         }
     }
 
-    for (const auto &buffer : buffers_ | std::views::filter([](const Buffer &b) { return b.buffer != nullptr; }))
+    for (const auto &buffer : buffers_)
     {
-        RGCheck(!(GetBufferUsage(buffer.accesses.access) & ~buffer.buffer->GetUsage()),
+        const auto *imported = std::get_if<RHIResourceRef<RHIBuffer>>(&buffer.resource);
+        RGCheck(imported == nullptr || !(GetBufferUsage(buffer.accesses.access) & ~(*imported)->GetUsage()),
                 "import {} lacks the usages its accesses need", buffer.name);
     }
 }
@@ -653,28 +753,53 @@ void RenderGraph::ResolveBindings()
     {
         for (const auto &access : pass.accesses)
         {
+            const auto &texture = textures_[access.texture.index];
             for (const auto &binding : access.bindings)
             {
-                pass.bindings.push_back(
-                    binding(pool_.rhi_, *textures_[access.texture.index].image, access.subresources));
+                pass.bindings.push_back(binding(rhi_, *texture.image, access.subresources));
+                pass.bound_resources.emplace_back(texture.name);
             }
         }
         for (const auto &access : pass.buffer_accesses)
         {
             std::ranges::copy(access.bindings, std::back_inserter(pass.bindings));
+            pass.bound_resources.resize(pass.bindings.size(), buffers_[access.buffer].name);
         }
         for (const auto &[image, binding] : pass.placeholders)
         {
-            pass.bindings.push_back(binding(pool_.rhi_, *image, GetAllSubresources(*image)));
+            pass.bindings.push_back(binding(rhi_, *image, GetAllSubresources(*image)));
+            pass.bound_resources.emplace_back(std::nullopt);
         }
     }
+}
+
+// buffers and acceleration structures follow the access rule: the memory barrier `access` needs after `state`, which
+// becomes the state after it. a build also waits for earlier builds: the BLAS it reads, submitted before the frame, and
+// the scratch memory it reuses.
+static std::optional<RHIMemoryBarrier> PlanMemoryBarrier(RHIResourceAccess &state, const RHIResourceAccess &access)
+{
+    const auto next = TransitionAccess(state, access);
+    if (!next)
+    {
+        return std::nullopt;
+    }
+
+    const bool build = access.access & RHIAccess::AccelerationStructureBuild;
+    const auto from = build ? state | access : state;
+    state = *next;
+    if (from.access == RHIAccess::None)
+    {
+        return std::nullopt;
+    }
+    return RHIMemoryBarrier{.from = from, .to = access};
 }
 
 // each access transitions its subresources from the states the previous accesses left, seeded from the tracked states.
 // writes to contents nobody may use again discard them.
 void RenderGraph::PlanBarriers()
 {
-    // per image, the planned state of each subresource, layer by layer within a mip
+    // per physical image, the planned state of each subresource, layer by layer within a mip. transients sharing an
+    // image share its states, so a later one waits for the accesses of the earlier one.
     std::unordered_map<const RHIImage *, std::vector<RHIImageState>> states;
     std::vector<const Pass *> last_writer(textures_.size(), nullptr);
     std::vector<RHIResourceAccess> buffer_states;
@@ -683,22 +808,10 @@ void RenderGraph::PlanBarriers()
 
     for (auto &pass : passes_ | std::views::filter(&Pass::live))
     {
-        // memory barriers follow the image rule without layouts. a build also waits for earlier builds: the BLAS it
-        // reads, submitted before the frame, and the scratch memory it reuses.
         for (auto &access : pass.buffer_accesses)
         {
             auto &state = buffer_states[access.buffer];
-            if (const auto next = TransitionImageState({.layout = RHIImageLayout::Undefined, .access = state},
-                                                       {.layout = RHIImageLayout::Undefined, .access = access.access}))
-            {
-                const bool build = access.access.access & RHIAccess::AccelerationStructureBuild;
-                const auto from = build ? state | access.access : state;
-                if (from.access != RHIAccess::None)
-                {
-                    access.barrier = RHIMemoryBarrier{.from = from, .to = access.access};
-                }
-                state = next->access;
-            }
+            access.barrier = PlanMemoryBarrier(state, access.access);
             access.state = state;
         }
 
@@ -716,9 +829,8 @@ void RenderGraph::PlanBarriers()
             }
 
             const auto *writer = last_writer[access.texture.index];
-            const bool fully_overwritten = pass.fully_overwrites && access.access.HasWrite();
-            const bool discard = access.clear || fully_overwritten ||
-                                 (access.access.HasWrite() && writer == nullptr && !texture.imported);
+            const bool uses_contents = UsesContents(access.access, access.clear.has_value(), pass.fully_overwrites);
+            const bool discard = !uses_contents || (access.access.HasWrite() && writer == nullptr && !texture.imported);
             PlanAccess(access, discard, image_states);
 
             const bool attachment = access.slot != NoSlot;
@@ -732,54 +844,42 @@ void RenderGraph::PlanBarriers()
                 continue;
             }
 
-            RHILoadOp load_op = RHILoadOp::Load;
             if (access.clear)
             {
-                load_op = RHILoadOp::Clear;
+                access.load_op = RHILoadOp::Clear;
                 access.load_reason = "clear";
             }
-            else if (fully_overwritten)
+            else if (!uses_contents)
             {
-                load_op = RHILoadOp::None;
+                access.load_op = RHILoadOp::DontCare;
                 access.load_reason = "fully overwritten";
             }
             else if (discard)
             {
-                load_op = RHILoadOp::None;
+                access.load_op = RHILoadOp::DontCare;
                 access.load_reason = "no earlier writer";
             }
             else
             {
                 access.load_reason = writer ? "written by " + writer->name : "imported";
             }
-
-            const auto mip = access.subresources.base_mip;
-            const auto layer = access.subresources.base_layer;
-            const auto width = std::max(texture.width >> mip, 1u);
-            const auto height = std::max(texture.height >> mip, 1u);
-            auto &info = pass.rendering_info;
-            RGCheck(info.width == 0 || (info.width == width && info.height == height),
-                    "attachments of pass {} differ in size", pass.name);
-            info.width = width;
-            info.height = height;
-            if (access.slot == DepthSlot)
-            {
-                info.depth_attachment = {.image = texture.image,
-                                         .mip_level = mip,
-                                         .array_layer = layer,
-                                         .load_op = load_op,
-                                         .clear_depth = access.clear ? access.clear->x() : 1.f};
-            }
-            else
-            {
-                info.color_attachments[access.slot] = {.image = texture.image,
-                                                       .mip_level = mip,
-                                                       .array_layer = layer,
-                                                       .load_op = load_op,
-                                                       .clear_color =
-                                                           access.clear.value_or(Vector4(0.f, 0.f, 0.f, 1.f))};
-            }
         }
+    }
+
+    // a buffer the host reads becomes visible to it right after its last live pass, from the state that pass left
+    for (auto index = 0u; index < buffers_.size(); index++)
+    {
+        const auto &buffer = buffers_[index];
+        if (!buffer.read_on_host || !buffer.lifetime.first)
+        {
+            continue;
+        }
+
+        auto &state = buffer_states[index];
+        const RHIResourceAccess host_read{.access = RHIAccess::HostRead};
+        const auto barrier = PlanMemoryBarrier(state, host_read);
+        passes_[buffer.lifetime.last].host_reads.push_back(
+            {.buffer = index, .access = host_read, .bindings = {}, .barrier = barrier, .state = state});
     }
 }
 
@@ -793,7 +893,6 @@ void RenderGraph::PlanAccess(Access &access, bool discard, std::vector<RHIImageS
         return states[mip * layers + layer];
     };
     const RHIImageState target{.layout = access.layout, .access = GetSyncAccess(access.access)};
-    const bool attachment = access.slot != NoSlot;
 
     const auto transition = [&](RGSubresources subresources) {
         const auto state = state_of(subresources.base_mip, subresources.base_layer);
@@ -803,13 +902,12 @@ void RenderGraph::PlanAccess(Access &access, bool discard, std::vector<RHIImageS
             return;
         }
 
-        // an attachment's own access in the source chains a swap chain image's first write to the acquire
         access.barriers.push_back({.image = image,
                                    .base_mip = subresources.base_mip,
                                    .mip_count = subresources.mip_count,
                                    .base_array_layer = subresources.base_layer,
                                    .array_layer_count = subresources.layer_count,
-                                   .from = attachment ? state.access | target.access : state.access,
+                                   .from = state.access,
                                    .to = target.access,
                                    .from_layout = discard ? RHIImageLayout::Undefined : state.layout,
                                    .to_layout = access.layout});
@@ -861,18 +959,17 @@ void RenderGraph::InferStoreOps()
 
         for (auto &access : pass.accesses | std::views::filter([](const Access &a) { return a.slot != NoSlot; }))
         {
-            auto store_op = RHIStoreOp::None;
             access.store_reason = "no later reader";
             if (textures_[access.texture.index].imported)
             {
-                store_op = RHIStoreOp::Store;
+                access.store_op = RHIStoreOp::Store;
                 access.store_reason = "imported";
             }
 
             for (const auto &later : passes_ | std::views::drop(pass_index + 1) | std::views::filter(&Pass::live))
             {
                 const auto next = std::ranges::find_if(later.accesses, [&access](const Access &a) {
-                    return a.texture == access.texture && a.subresources.Overlaps(access.subresources);
+                    return a.texture == access.texture && Overlaps(a.subresources, access.subresources);
                 });
                 if (next == later.accesses.end())
                 {
@@ -881,36 +978,105 @@ void RenderGraph::InferStoreOps()
 
                 if (UsesContents(next->access, next->clear.has_value(), later.fully_overwrites))
                 {
-                    store_op = RHIStoreOp::Store;
+                    access.store_op = RHIStoreOp::Store;
                     access.store_reason = "read by " + later.name;
                 }
                 else
                 {
-                    store_op = RHIStoreOp::None;
+                    access.store_op = RHIStoreOp::DontCare;
                     access.store_reason = "overwritten by " + later.name;
                 }
                 break;
-            }
-
-            auto &info = pass.rendering_info;
-            if (access.slot == DepthSlot)
-            {
-                info.depth_attachment.store_op = store_op;
-            }
-            else
-            {
-                info.color_attachments[access.slot].store_op = store_op;
             }
         }
     }
 }
 
+void RenderGraph::BuildRenderingInfos()
+{
+    for (auto &pass :
+         passes_ | std::views::filter([](const Pass &pass) { return pass.live && pass.kind == RGPassKind::Raster; }))
+    {
+        auto &info = pass.rendering_info;
+        for (const auto &access : pass.accesses | std::views::filter([](const Access &a) { return a.slot != NoSlot; }))
+        {
+            const auto &texture = textures_[access.texture.index];
+            const auto mip = access.subresources.base_mip;
+            const auto layer = access.subresources.base_layer;
+            const auto width = std::max(texture.width >> mip, 1u);
+            const auto height = std::max(texture.height >> mip, 1u);
+            RGCheck(info.width == 0 || (info.width == width && info.height == height),
+                    "attachments of pass {} differ in size", pass.name);
+            info.width = width;
+            info.height = height;
+            if (access.slot == DepthSlot)
+            {
+                info.depth_attachment = {.image = texture.image,
+                                         .mip_level = mip,
+                                         .array_layer = layer,
+                                         .load_op = access.load_op,
+                                         .store_op = access.store_op,
+                                         .clear_depth = access.clear ? access.clear->x() : 1.f};
+            }
+            else
+            {
+                info.color_attachments[access.slot] = {.image = texture.image,
+                                                       .mip_level = mip,
+                                                       .array_layer = layer,
+                                                       .load_op = access.load_op,
+                                                       .store_op = access.store_op,
+                                                       .clear_color =
+                                                           access.clear.value_or(Vector4(0.f, 0.f, 0.f, 1.f))};
+            }
+        }
+    }
+}
+
+// writes the state each buffer access leaves through to its buffer, returning the accesses' barriers
+template <typename BufferAccesses, typename Buffers>
+static std::vector<RHIMemoryBarrier> WriteThrough(const BufferAccesses &accesses, const Buffers &buffers)
+{
+    std::vector<RHIMemoryBarrier> barriers;
+    for (const auto &access : accesses)
+    {
+        if (access.barrier)
+        {
+            barriers.push_back(*access.barrier);
+        }
+        buffers[access.buffer].GetTracked().SetTrackedAccess(access.state);
+    }
+    return barriers;
+}
+
 // the graph writes each pass's planned state through to the tracked state before recording the pass, so foreign code
-// and the next frame start from it
-void RenderGraph::Execute(RHICommandContext &command_context)
+// and the next frame start from it. with full barriers, each pass also waits for every earlier command. right after the
+// last pass using a buffer the host reads, a barrier makes the buffer visible to the host.
+void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *timers)
 {
     RGCheck(compiled_ && !executed_, "the graph executes once, after compiling");
     executed_ = true;
+    const RHIContext::GraphExecutionScope graph_execution(*rhi_);
+
+    // after a throw, no pass stays open and no binding into the graph stays set
+    struct RecordingScope
+    {
+        RHICommandContext &command_context;
+
+        ~RecordingScope()
+        {
+            if (command_context.IsRendering())
+            {
+                command_context.EndRendering();
+            }
+            if (const auto compute_pass = command_context.GetCurrentComputePass())
+            {
+                command_context.EndComputePass(compute_pass);
+            }
+            command_context.SetBindings({});
+        }
+    };
+
+    const RecordingScope recording{.command_context = command_context};
 
     for (auto &pass : passes_ | std::views::filter(&Pass::live))
     {
@@ -924,75 +1090,142 @@ void RenderGraph::Execute(RHICommandContext &command_context)
                 image->SetState(*state++, mip, 1, layer, 1);
             });
         }
-        std::vector<RHIMemoryBarrier> memory_barriers;
-        for (const auto &access : pass.buffer_accesses)
+        auto memory_barriers = WriteThrough(pass.buffer_accesses, buffers_);
+        if (full_barriers_)
         {
-            if (access.barrier)
-            {
-                memory_barriers.push_back(*access.barrier);
-            }
-            buffers_[access.buffer].GetTracked().SetTrackedAccess(access.state);
+            memory_barriers.push_back({.from = {.access = RHIAccess::Any}, .to = {.access = RHIAccess::Any}});
         }
 
         command_context.SetBindings(pass.bindings);
+        RHIPass *timed_pass = nullptr;
         switch (pass.kind)
         {
         case RGPassKind::Raster:
-            command_context.BeginRendering(pass.rendering_info, pass.name, nullptr, barriers, memory_barriers);
+            timed_pass = timers ? timers->Get(pass.name) : nullptr;
+            command_context.BeginRendering(pass.rendering_info, pass.name, timed_pass, barriers, memory_barriers);
             pass.record(command_context);
             command_context.EndRendering();
             break;
         case RGPassKind::Compute:
-            command_context.BeginComputePass(pass.compute_pass);
-            command_context.Barrier(barriers, memory_barriers);
+            timed_pass = pass.compute_pass.get();
+            command_context.BeginComputePass(pass.compute_pass, barriers, memory_barriers);
             pass.record(command_context);
             command_context.EndComputePass(pass.compute_pass);
             break;
         case RGPassKind::Copy:
+        case RGPassKind::External: {
+            const RHICommandContext::DebugLabelScope label(command_context, pass.name);
             command_context.Barrier(barriers, memory_barriers);
             pass.record(command_context);
             break;
-        case RGPassKind::External:
-            command_context.Barrier(barriers, memory_barriers);
-            pass.record(command_context);
-            CheckExternalContract(pass);
-            break;
+        }
         default:
             UnImplemented(pass.kind);
         }
+        CheckDeclaredStates(pass);
         CheckBindingsApplied(pass, command_context);
+        CheckBoundResourcesDeclared(pass, command_context);
         command_context.SetBindings({});
+
+        command_context.Barrier({}, WriteThrough(pass.host_reads, buffers_));
+
+        if (timed_pass)
+        {
+            pass.gpu_ms = timed_pass->GetExecutionTime();
+        }
     }
 }
 
 // a declared binding that no pipeline the pass drew or dispatched has would bind nothing. a pass that drew nothing (an
-// empty scene) bound nothing to check.
-void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const
+// empty scene) bound nothing to check. placeholders stand in for missing inputs and are not checked.
+void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context)
 {
-    if (!command_context.DrewOrDispatched())
+    if (command_context.GetPipelines().empty())
     {
         return;
     }
 
-    size_t index = 0;
-    const auto check = [&pass, &command_context, &index](size_t count, const std::string &resource) {
-        for (const auto end = index + count; index < end; index++)
-        {
-            RGCheck(command_context.IsBindingApplied(index),
-                    "pass {} binds {} to a resource table no pipeline it drew or dispatched has", pass.name, resource);
-        }
-    };
-    for (const auto &access : pass.accesses)
+    for (size_t index = 0; index < pass.bindings.size(); index++)
     {
-        check(access.bindings.size(), textures_[access.texture.index].name);
-    }
-    for (const auto &access : pass.buffer_accesses)
-    {
-        check(access.bindings.size(), buffers_[access.buffer].name);
+        const auto &resource = pass.bound_resources[index];
+        RGCheck(!resource || command_context.IsBindingApplied(index),
+                "pass {} binds {} to a resource table no pipeline it drew or dispatched has", pass.name,
+                resource.value_or(""));
     }
 }
 
-void RenderGraph::CheckExternalContract(const Pass &pass) const
+// a pipeline's resource tables keep what earlier passes and frames bound, so a raster or compute pass must declare
+// every graph resource left bound in a pipeline it drew or dispatched. external passes bind foreign resources.
+void RenderGraph::CheckBoundResourcesDeclared(const Pass &pass, const RHICommandContext &command_context) const
+{
+    if (pass.kind != RGPassKind::Raster && pass.kind != RGPassKind::Compute)
+    {
+        return;
+    }
+
+    for (const auto *pipeline : command_context.GetPipelines())
+    {
+        for (const auto &table : pipeline->GetResourceTables())
+        {
+            if (!table)
+            {
+                continue;
+            }
+            for (const auto *binding : table->GetBindings())
+            {
+                if (binding->GetResource() && !binding->IsBindless())
+                {
+                    CheckBindingDeclared(pass, *binding);
+                }
+            }
+        }
+    }
+}
+
+// the pass must declare a graph resource bound at `binding` with an access the binding makes, over the subresources
+// its view covers
+void RenderGraph::CheckBindingDeclared(const Pass &pass, const RHIShaderResourceBinding &binding) const
+{
+    const auto check = [&pass, &binding](bool declared, const std::string &name) {
+        RGCheck(declared, "pass {} binds {} to {} without declaring the access that binding makes", pass.name, name,
+                binding.GetReflection()->name);
+    };
+    const auto type = binding.GetType();
+    const auto needed = GetBindingAccess(type);
+
+    if (type == RHIShaderResourceReflection::ResourceType::Texture2D ||
+        type == RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    {
+        const auto *view = static_cast<const RHIImageView *>(binding.GetResource());
+        const auto texture = std::ranges::find(textures_, view->GetImage(), &Texture::image);
+        if (texture != textures_.end())
+        {
+            const auto viewed = GetViewedSubresources(view->GetAttribute());
+            check(std::ranges::any_of(pass.accesses,
+                                      [this, view, needed, &viewed](const Access &access) {
+                                          return textures_[access.texture.index].image == view->GetImage() &&
+                                                 access.access.access & needed && Contains(access.subresources, viewed);
+                                      }),
+                  texture->name);
+        }
+        return;
+    }
+
+    const auto *resource = binding.GetResource();
+    const auto buffer = std::ranges::find(buffers_, resource, &Buffer::Get);
+    if (buffer != buffers_.end())
+    {
+        const auto index = static_cast<uint32_t>(buffer - buffers_.begin());
+        check(std::ranges::any_of(pass.buffer_accesses,
+                                  [index, needed](const BufferAccess &access) {
+                                      return access.buffer == index && access.access.access & needed;
+                                  }),
+              buffer->name);
+    }
+}
+
+// a pass that transitions a declared image behind the graph's back would desync the plan from the tracked state
+void RenderGraph::CheckDeclaredStates(const Pass &pass) const
 {
     for (const auto &access : pass.accesses)
     {
@@ -1001,8 +1234,8 @@ void RenderGraph::CheckExternalContract(const Pass &pass) const
         ForEachSubresource(access.subresources, [&pass, &texture, &planned](unsigned mip, unsigned layer) {
             const auto state = texture.image->GetState(mip, layer);
             RGCheck(state.layout == planned->layout && planned->access.Contains(state.access),
-                    "external pass {} left {} in layout {} with accesses beyond its declaration", pass.name,
-                    texture.name, Enum2Str(state.layout));
+                    "pass {} left {} in layout {} with accesses beyond its declaration", pass.name, texture.name,
+                    Enum2Str(state.layout));
             planned++;
         });
     }

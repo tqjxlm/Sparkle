@@ -59,12 +59,6 @@ RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_
         output_attribute.usages |= RHIImage::ImageUsage::UAV;
     }
 
-    output_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                                .enable_anisotropy = false};
-
     return rhi_->CreateImage(output_attribute, "ibl_brdf_map");
 }
 
@@ -88,7 +82,7 @@ void IBLBrdfPass::InitRenderResources(const RenderConfig &)
     auto *shader_resource = pipeline_state_->GetShaderResource<IBLBrdfComputeShader>();
     shader_resource->ubo().BindResource(cs_ub_);
 
-    compute_pass_ = rhi_->CreateComputePass("IBLBrdfComputePass", false);
+    compute_pass_ = rhi_->CreateComputePass("IBLBrdfComputePass", true);
 }
 
 void IBLBrdfPass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)

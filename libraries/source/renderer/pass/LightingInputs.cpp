@@ -26,10 +26,6 @@ RHIResourceRef<RHIImage> LightingInputs::GetPlaceholder(RHIContext *rhi, RHIImag
 {
     return rhi->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
         .usages = RHIImage::ImageUsage::Texture,
         .type = type,
     });

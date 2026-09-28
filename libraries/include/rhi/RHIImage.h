@@ -15,15 +15,12 @@
 
 namespace sparkle
 {
+class RHICommandContext;
+
 enum class RHIPipelineStage : uint8_t
 {
     Top,
-    DrawIndirect,
-    VertexInput,
-    VertexShader,
     PixelShader,
-    EarlyZ,
-    LateZ,
     ColorOutput,
     ComputeShader,
     Transfer,
@@ -114,7 +111,6 @@ public:
         UAV = 1u << 4,
         ColorAttachment = 1u << 5,
         DepthStencilAttachment = 1u << 6,
-        TransientAttachment = 1u << 7,
     };
 
     enum class ImageType : uint8_t
@@ -126,7 +122,6 @@ public:
     struct Attribute
     {
         PixelFormat format = PixelFormat::Count;
-        RHISampler::SamplerAttribute sampler;
         uint32_t width = 1;
         uint32_t height = 1;
         RHIImage::ImageUsage usages = RHIImage::ImageUsage::Undefined;
@@ -144,7 +139,6 @@ public:
         {
             uint32_t hash = 0;
             HashCombine(hash, format);
-            HashCombine(hash, sampler.GetHash());
             HashCombine(hash, usages);
             HashCombine(hash, memory_properties);
             HashCombine(hash, type);
@@ -165,16 +159,9 @@ public:
         unsigned mip_count = 0;
         unsigned base_array_layer = 0;
         unsigned array_layer_count = 0;
-        // the transition leaves the previous contents undefined
-        bool discard = false;
     };
 
     RHIImage(const Attribute &attributes, const std::string &name);
-
-    [[nodiscard]] RHIResourceRef<RHISampler> GetSampler() const
-    {
-        return sampler_;
-    }
 
     [[nodiscard]] RHIResourceRef<RHIImageView> GetView(RHIContext *rhi, const RHIImageView::Attribute &attribute);
 
@@ -189,11 +176,12 @@ public:
 
 #pragma region RHIImage Interface
 
-    virtual void Transition(const TransitionRequest &request) = 0;
+    // records the barriers TrackTransition returns into `command_context`
+    void Transition(RHICommandContext &command_context, const TransitionRequest &request);
 
-    virtual void Upload(const uint8_t *data) = 0;
+    virtual void Upload(RHICommandContext &command_context, const uint8_t *data) = 0;
 
-    virtual void UploadFaces(std::array<const uint8_t *, 6> data) = 0;
+    virtual void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) = 0;
 
 #pragma endregion
 
@@ -313,8 +301,6 @@ public:
 
 protected:
     Attribute attributes_;
-
-    RHIResourceRef<RHISampler> sampler_;
 
     std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
 

@@ -12,6 +12,7 @@ from render_test_support import (  # noqa: E402
     SUPPORTED_FRAMEWORKS,
     compare_images,
     find_screenshot,
+    get_captures_dir,
     install_dependencies,
 )
 from static_render_reference import (  # noqa: E402
@@ -36,12 +37,8 @@ def main():
 
     try:
         screenshot = find_screenshot(args.framework)
-        # later cases wipe top-level screenshots; a named copy in a subdirectory
-        # survives into the CI artifacts
-        captures_dir = os.path.join(os.path.dirname(screenshot), "captures")
-        os.makedirs(captures_dir, exist_ok=True)
         shutil.copy(screenshot, os.path.join(
-            captures_dir, f"{args.scene}_{args.pipeline}_capture.png"))
+            get_captures_dir(args.framework), f"{args.scene}_{args.pipeline}_capture.png"))
         print("Downloading ground truth...", flush=True)
         ground_truth = download_ground_truth(
             args.framework, args.scene, args.pipeline)

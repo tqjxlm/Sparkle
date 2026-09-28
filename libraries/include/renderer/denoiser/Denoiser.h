@@ -55,14 +55,14 @@ public:
     [[nodiscard]] virtual bool IsReady() const = 0;
     [[nodiscard]] virtual bool NeedsInputs() const = 0;
     [[nodiscard]] virtual const char *GetName() const = 0;
-    // the image the latest AddTo leaves for display
+    // the image the latest AddTo leaves for display, unless it returned the accumulator
     [[nodiscard]] virtual RHIResourceRef<RHIImage> GetOutput() const = 0;
 
     virtual void UpdateFrameData(const DenoiserFrameData &frame) = 0;
 
     // adds the frame's denoising to `graph` as one External pass that reads `inputs` and writes the provider's
-    // persistent images, and returns the texture it leaves for display. a provider whose encode fails in that pass
-    // stops being ready.
+    // persistent images, and returns the texture it leaves for display. a provider that cannot encode the frame adds
+    // no pass, returns `inputs.accumulated_radiance` and stops being ready.
     [[nodiscard]] virtual RGTexture AddTo(RenderGraph &graph, const DenoiserInputs &inputs) = 0;
 };
 } // namespace sparkle

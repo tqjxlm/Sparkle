@@ -41,7 +41,7 @@ public:
 
     // Consume a self-describing payload: the fp16 master or a family transcode. Render
     // thread only. Returns false when the payload does not match this pass's resource layout.
-    bool ApplyArtifact(const std::vector<char> &payload);
+    bool ApplyArtifact(RHICommandContext &command_context, const std::vector<char> &payload);
 
     // Receives the compact payload after GPU generation. Persistence belongs to the
     // derived-resource coordinator or cook job, never to the GPU pass.
@@ -80,7 +80,7 @@ private:
 
     // builds the resident image from an artifact payload: native when the device samples the
     // payload's format, an fp16 decode otherwise. null on a bad payload
-    RHIResourceRef<RHIImage> MakeIblResource(const std::vector<char> &payload);
+    RHIResourceRef<RHIImage> MakeIblResource(RHICommandContext &command_context, const std::vector<char> &payload);
 
     bool is_ready_ = false;
     bool cleared_ = false;

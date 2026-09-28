@@ -11,7 +11,8 @@ class DirectionalLightingPass : public ScreenQuadPass
 {
 public:
     // draws into a color attachment of `output_format` at slot 0
-    DirectionalLightingPass(RHIContext *ctx, PixelFormat output_format) : ScreenQuadPass(ctx, "Lighting", output_format)
+    DirectionalLightingPass(RHIContext *ctx, PixelFormat output_format)
+        : ScreenQuadPass(ctx, "Lighting", output_format, InputFilter::Nearest)
     {
     }
 

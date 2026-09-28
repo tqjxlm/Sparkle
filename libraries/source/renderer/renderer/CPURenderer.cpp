@@ -7,7 +7,6 @@
 #include "core/math/Sampler.h"
 #include "core/task/TaskManager.h"
 #include "renderer/graph/RenderGraph.h"
-#include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/PrimitiveRenderProxy.h"
@@ -29,17 +28,6 @@ CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
 
 CPURenderer::~CPURenderer() = default;
 
-// the uploaded image and the screen are sampled bilinearly, which upsampling needs
-static RGTextureDesc GetImageDesc(PixelFormat format, RGSizeClass size_class)
-{
-    return {.format = format,
-            .size_class = size_class,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                        .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Linear}};
-}
-
 bool CPURenderer::IsReadyForAutoScreenshot() const
 {
     return Renderer::IsReadyForAutoScreenshot() &&
@@ -58,12 +46,8 @@ void CPURenderer::InitRenderResources()
                                         .is_dynamic = true},
                                        "RayTracingOutputBuffer");
 
-    InitPostChain(GetImageDesc(output_image_.GetFormat(), RGSizeClass::Output));
-
-    if (resolution_.NeedUpsample())
-    {
-        upsample_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Upsample", screen_desc_.format);
-    }
+    InitPostChain(output_image_.GetFormat(),
+                  resolution_.NeedUpsample() ? PostChain::ScreenPass::Upsample : PostChain::ScreenPass::None);
 
     gbuffer_.Resize(resolution_.scene.x(), resolution_.scene.y());
     ping_pong_buffer_.resize(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
@@ -74,13 +58,9 @@ void CPURenderer::InitRenderResources()
     actual_sample_per_pixel_ = sub_pixel_count_ * sub_pixel_count_;
 }
 
-void CPURenderer::Update()
+RGTexture CPURenderer::BuildGraph(RenderGraph &graph)
 {
-}
-
-void CPURenderer::Render()
-{
-    PROFILE_SCOPE("CPURenderer::Render");
+    PROFILE_SCOPE("CPURenderer::BuildGraph");
 
     // re-fetch every frame: a loaded scene may bring its own main camera and replace the proxy
     camera_ = scene_render_proxy_->GetCamera();
@@ -113,9 +93,11 @@ void CPURenderer::Render()
 
     image_buffer_->Upload(rhi_, output_image_.GetRawData());
 
-    RenderGraph graph(graph_texture_pool_, render_config_);
+    dispatched_sample_count_ += actual_sample_per_pixel_;
+    camera_->AccumulateSample(actual_sample_per_pixel_);
+
     const auto scene_color =
-        graph.CreateTexture("SceneColor", GetImageDesc(output_image_.GetFormat(), RGSizeClass::Scene));
+        graph.CreateTexture("SceneColor", {.format = output_image_.GetFormat(), .size_class = RGSizeClass::Scene});
     const auto host_scene_color = graph.Import("HostSceneColor", image_buffer_);
 
     graph.AddCopyPass("Upload", [scene_color, host_scene_color](RGBuilder &builder) {
@@ -127,12 +109,7 @@ void CPURenderer::Render()
         };
     });
 
-    AddPostChain(graph, scene_color, upsample_pass_.get());
-
-    ExecuteGraph(graph);
-
-    dispatched_sample_count_ += actual_sample_per_pixel_;
-    camera_->AccumulateSample(actual_sample_per_pixel_);
+    return scene_color;
 }
 
 namespace

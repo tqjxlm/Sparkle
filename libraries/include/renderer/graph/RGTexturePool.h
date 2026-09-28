@@ -18,16 +18,6 @@ class RGTexturePool
 public:
     static constexpr uint64_t UnusedGraphsBeforeRelease = 8;
 
-    struct Key
-    {
-        PixelFormat format;
-        uint32_t width;
-        uint32_t height;
-        RHISampler::SamplerAttribute sampler;
-        // a pooled image serves any request whose usages it covers
-        RHIImage::ImageUsage usages;
-    };
-
     struct Stats
     {
         uint64_t num_created = 0;
@@ -51,6 +41,15 @@ public:
 
 private:
     friend class RenderGraph;
+
+    struct Key
+    {
+        PixelFormat format;
+        uint32_t width;
+        uint32_t height;
+        // a pooled image serves any request whose usages it covers
+        RHIImage::ImageUsage usages;
+    };
 
     void BeginGraph();
 

@@ -348,7 +348,6 @@ public:
         ASSERT(attributes_.format != PixelFormat::Count);
 
         CreateImage();
-        CreateSampler();
     }
 
     VulkanImage(const Attribute &attribute, VkFormat format_override, VkImage image, const std::string &name)
@@ -356,17 +355,13 @@ public:
           vulkan_attributes_(VulkanImageAttribute(attribute, format_override)), image_(image)
     {
         attributes_.format = VkFormatToPixelFormat(format_override);
-
-        CreateSampler();
     }
 
     ~VulkanImage() override;
 
-    void Transition(const TransitionRequest &request) override;
+    void Upload(RHICommandContext &command_context, const uint8_t *data) override;
 
-    void Upload(const uint8_t *data) override;
-
-    void UploadFaces(std::array<const uint8_t *, 6> data) override;
+    void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) override;
 
     void CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const;
 
@@ -406,8 +401,6 @@ public:
 
 private:
     void CreateImage();
-
-    void CreateSampler();
 
     bool external_ = false;
     VulkanImageAttribute vulkan_attributes_;

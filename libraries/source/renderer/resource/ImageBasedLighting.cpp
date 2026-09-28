@@ -26,8 +26,9 @@ namespace
 // resolve, keeping every context on the shipped encoding the ground truths reflect), then
 // the fp16 master, then cook the master on a full miss
 template <class Pass, class... Args>
-std::unique_ptr<Pass> CreatePass(const RenderConfig &config, bool allow_gpu_cook, const CookArtifactKey &master_key,
-                                 const CookArtifactKey &transcode_key, std::function<void()> on_ready, Args &&...args)
+std::unique_ptr<Pass> CreatePass(RHICommandContext &command_context, const RenderConfig &config, bool allow_gpu_cook,
+                                 const CookArtifactKey &master_key, const CookArtifactKey &transcode_key,
+                                 std::function<void()> on_ready, Args &&...args)
 {
     auto pass = std::make_unique<Pass>(std::forward<Args>(args)...);
 
@@ -37,7 +38,8 @@ std::unique_ptr<Pass> CreatePass(const RenderConfig &config, bool allow_gpu_cook
         {
             continue;
         }
-        if (auto payload = CookArtifactStore::Load(*key); !payload.empty() && pass->ApplyArtifact(payload))
+        if (auto payload = CookArtifactStore::Load(*key);
+            !payload.empty() && pass->ApplyArtifact(command_context, payload))
         {
             return pass;
         }
@@ -116,11 +118,15 @@ void ImageBasedLighting::InitRenderResources(RHIContext *ctx, const RenderConfig
                                             env_map_cpu_->GetContentHash(), job.GetVersion());
     };
 
-    ibl_brdf_pass_ = CreatePass<IBLBrdfPass>(config, allow_gpu_cook, MakeCookArtifactKey(*brdf_job), {}, on_ready, ctx);
-    ibl_diffuse_pass_ = CreatePass<IBLDiffusePass>(config, allow_gpu_cook, MakeCookArtifactKey(*diffuse_job),
-                                                   transcode_key(*diffuse_job), on_ready, ctx, env_map_);
-    ibl_specular_pass_ = CreatePass<IBLSpecularPass>(config, allow_gpu_cook, MakeCookArtifactKey(*specular_job),
-                                                     transcode_key(*specular_job), on_ready, ctx, env_map_);
+    auto &command_context = *ctx->GetCommandContext();
+    ibl_brdf_pass_ = CreatePass<IBLBrdfPass>(command_context, config, allow_gpu_cook, MakeCookArtifactKey(*brdf_job),
+                                             {}, on_ready, ctx);
+    ibl_diffuse_pass_ =
+        CreatePass<IBLDiffusePass>(command_context, config, allow_gpu_cook, MakeCookArtifactKey(*diffuse_job),
+                                   transcode_key(*diffuse_job), on_ready, ctx, env_map_);
+    ibl_specular_pass_ =
+        CreatePass<IBLSpecularPass>(command_context, config, allow_gpu_cook, MakeCookArtifactKey(*specular_job),
+                                    transcode_key(*specular_job), on_ready, ctx, env_map_);
 
     if (!allow_gpu_cook)
     {
@@ -153,7 +159,12 @@ void ImageBasedLighting::RequestCpuCook(std::unique_ptr<CookJob> brdf_job, std::
                     return;
                 }
 
-                if (pass->ApplyArtifact(payload))
+                // render thread tasks run before the frame opens its command buffer
+                auto &command_context = rhi_->BeginCommandBuffer();
+                const bool applied = pass->ApplyArtifact(command_context, payload);
+                rhi_->SubmitCommandBuffer();
+
+                if (applied)
                 {
                     render_resource_change_event_.Trigger();
                 }

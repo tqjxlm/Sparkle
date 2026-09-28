@@ -141,6 +141,7 @@ void AppFramework::DrawUi()
                                                   render_config_.IsRaterizationMode());
                      }},
                 {.icon = ICON_FA_CAMERA, .draw = [this]() { render_framework_->DrawUi(); }},
+                {.icon = ICON_FA_DIAGRAM_PROJECT, .draw = [this]() { render_framework_->DrawGraphUi(); }},
                 {.icon = ICON_FA_GEAR, .draw = [=]() { ConfigManager::DrawUi(configs); }}};
             DrawVerticalIconTabs(tabs, current_tab);
 

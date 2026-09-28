@@ -29,8 +29,6 @@ public:
         return RenderConfig::Pipeline::Gpu;
     }
 
-    void Render() override;
-
     void InitRenderResources() override;
 
     [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
@@ -48,6 +46,8 @@ private:
     };
 
     void Update() override;
+
+    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
 
     void InitSceneRenderResources();
 
@@ -78,7 +78,6 @@ private:
     RHIResourceRef<RHIImage> scene_texture_;
     std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
 
-    std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
     // what tone mapping displayed last: the accumulator or a denoiser's output
     RHIResourceRef<RHIImage> displayed_image_;
 

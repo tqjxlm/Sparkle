@@ -5,7 +5,6 @@
 #include "io/Image.h"
 #include "renderer/resource/GBuffer.h"
 #include "rhi/RHIBuffer.h"
-#include "rhi/RHIImage.h"
 
 namespace sparkle
 {
@@ -20,17 +19,19 @@ public:
         return RenderConfig::Pipeline::Cpu;
     }
 
-    void Render() override;
-
     void InitRenderResources() override;
 
-    void Update() override;
+    void Update() override
+    {
+    }
 
     [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
 
     ~CPURenderer() override;
 
 private:
+    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
+
     void RenderPixel(unsigned i, unsigned j, Scalar pixel_width, Scalar pixel_height, const SceneRenderProxy &scene,
                      const RenderConfig &config, const Vector2UInt &debug_point);
 
@@ -43,9 +44,6 @@ private:
     CameraRenderProxy *camera_;
 
     RHIResourceRef<RHIBuffer> image_buffer_;
-
-    // fills the screen from the uploaded image when sub-resolution rendering makes them differ
-    std::unique_ptr<class ScreenQuadPass> upsample_pass_;
 
     Image2D output_image_;
 

@@ -55,15 +55,13 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
-    bool SupportsPixelLocalRead() override;
-
-    bool SupportsUnifiedImageLayouts() override;
-
     bool SupportsPassTimestamps() override;
 
     bool HasPhysicalGpu() override;
 
     bool SupportsSampledFormat(PixelFormat format) override;
+
+    bool SupportsLinearFiltering(PixelFormat format) override;
 
     [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const override;
 
@@ -71,10 +69,7 @@ public:
 
     [[nodiscard]] uint32_t GetMinBufferOffsetAlignment() const override;
 
-    void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
-
-    RHICommandContext *GetCommandContext() override;
 
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
@@ -109,6 +104,10 @@ protected:
     void EndFrameInternal() override;
 
     void CleanupInternal() override;
+
+    RHICommandContext *GetCommandContextInternal() override;
+
+    RHICommandContext &BeginCommandBufferInternal() override;
 
     RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute, const std::string &name) override;
 
