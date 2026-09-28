@@ -42,6 +42,17 @@ static std::string ToString(unsigned base_mip, unsigned mip_count, unsigned base
     return subresources;
 }
 
+// the indices of the first and last live pass using the resource, and the union of its usages
+static void DumpUses(nlohmann::json &dumped, const RGLifetime &lifetime, std::string usage)
+{
+    if (lifetime.first)
+    {
+        dumped["first_use"] = *lifetime.first;
+        dumped["last_use"] = lifetime.last;
+        dumped["usage"] = std::move(usage);
+    }
+}
+
 nlohmann::json RenderGraph::Dump() const
 {
     auto passes = nlohmann::json::array();
@@ -130,19 +141,11 @@ nlohmann::json RenderGraph::Dump() const
         passes.push_back(std::move(dumped));
     }
 
-    const auto dump_uses = [this](nlohmann::json &dumped, const RGLifetime &lifetime, std::string usage) {
-        if (lifetime.first)
-        {
-            dumped["first_use"] = passes_[*lifetime.first].name;
-            dumped["last_use"] = passes_[lifetime.last].name;
-            dumped["usage"] = std::move(usage);
-        }
-    };
-
     auto resources = nlohmann::json::array();
     for (const auto &texture : textures_)
     {
-        nlohmann::json dumped{{"name", texture.name}, {"kind", texture.imported ? "Imported" : "Transient"}};
+        nlohmann::json dumped{
+            {"name", texture.name}, {"type", "Texture"}, {"kind", texture.imported ? "Imported" : "Transient"}};
         if (!texture.imported)
         {
             dumped["format"] = Enum2Str(texture.desc.format);
@@ -153,7 +156,7 @@ nlohmann::json RenderGraph::Dump() const
                 dumped["height"] = texture.height;
             }
         }
-        dump_uses(dumped, texture.lifetime, JoinFlags(texture.usages));
+        DumpUses(dumped, texture.lifetime, JoinFlags(texture.usages));
         if (texture.physical)
         {
             dumped["physical"] = *texture.physical;
@@ -164,8 +167,11 @@ nlohmann::json RenderGraph::Dump() const
     // buffers and acceleration structures are imports; their usage is the union of their accesses
     for (const auto &buffer : buffers_)
     {
-        nlohmann::json dumped{{"name", buffer.name}, {"kind", "Imported"}};
-        dump_uses(dumped, buffer.lifetime, ToString(buffer.accesses));
+        const bool acceleration_structure = std::holds_alternative<RHIResourceRef<RHITLAS>>(buffer.resource);
+        nlohmann::json dumped{{"name", buffer.name},
+                              {"type", acceleration_structure ? "AccelerationStructure" : "Buffer"},
+                              {"kind", "Imported"}};
+        DumpUses(dumped, buffer.lifetime, ToString(buffer.accesses));
         resources.push_back(std::move(dumped));
     }
 

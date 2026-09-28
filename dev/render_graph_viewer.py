@@ -1,7 +1,7 @@
 """Render a render graph dump as one self-contained static HTML page.
 
 The page is a pass x resource grid: one row per pass in execution order, one
-column per resource (textures, then buffers and acceleration structures). A
+column per resource (texture, buffer or acceleration structure) in dump order. A
 cell shows the pass's access to the resource and details it on hover: accesses,
 attachment load/store with reasons, barriers with layouts. Shaded cells span
 each resource's lifetime, from its first to its last use.
@@ -74,8 +74,8 @@ def cell(graph_pass, name, uses):
     return f'<td class="{classes}" title="{tooltip}">{label}</td>'
 
 
-def resource_header(resource):
-    details = [resource["name"], resource["kind"]]
+def resource_header(resource, passes):
+    details = [resource["name"], f"{resource['kind']} {resource['type']}"]
     if "format" in resource:
         size = f" {resource['width']}x{resource['height']}" if "width" in resource else ""
         details.append(f"{resource['format']} {resource['size_class']}{size}")
@@ -84,7 +84,8 @@ def resource_header(resource):
     elif resource["kind"] == "Transient":
         details.append("no image")
     if "first_use" in resource:
-        details += [f"used {resource['first_use']}..{resource['last_use']}", f"usage {resource['usage']}"]
+        first, last = passes[resource["first_use"]]["name"], passes[resource["last_use"]]["name"]
+        details += [f"used {first}..{last}", f"usage {resource['usage']}"]
     css = "resource imported" if resource["kind"] == "Imported" else "resource"
     tooltip = html.escape("\n".join(details))
     return f'<th class="{css}" title="{tooltip}"><span>{html.escape(resource["name"])}</span></th>'
@@ -100,15 +101,6 @@ def uses_by_resource(graph_pass):
     return uses
 
 
-def lifetimes(passes, resources):
-    """Maps each used resource to the pass indices of its first and last use."""
-    indices = {}
-    for index, graph_pass in enumerate(passes):
-        indices.setdefault(graph_pass["name"], []).append(index)
-    return {resource["name"]: (indices[resource["first_use"]][0], indices[resource["last_use"]][-1])
-            for resource in resources if "first_use" in resource}
-
-
 def render_html(dump, title):
     passes, resources = dump["passes"], dump["resources"]
     timed = any("gpu_ms" in graph_pass for graph_pass in passes)
@@ -121,8 +113,7 @@ def render_html(dump, title):
         summary += f", {sum(graph_pass.get('gpu_ms', 0) for graph_pass in passes):.3f} GPU ms"
 
     header = '<th class="pass">Pass</th><th>Kind</th>' + ("<th>GPU ms</th>" if timed else "")
-    header += "".join(resource_header(resource) for resource in resources)
-    spans = lifetimes(passes, resources)
+    header += "".join(resource_header(resource, passes) for resource in resources)
     rows = []
     for index, graph_pass in enumerate(passes):
         uses = uses_by_resource(graph_pass)
@@ -132,7 +123,7 @@ def render_html(dump, title):
             row += f"<td>{graph_pass['gpu_ms']:.3f}</td>" if "gpu_ms" in graph_pass else "<td></td>"
         for resource in resources:
             name = resource["name"]
-            first, last = spans.get(name, (-1, -1))
+            first, last = resource.get("first_use", -1), resource.get("last_use", -1)
             if name in uses:
                 row += cell(graph_pass, name, uses[name])
             else:

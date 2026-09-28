@@ -302,6 +302,12 @@ private:
                     "B: physical 0",
                 },
                 "buffer round trip");
+
+            const auto resources = graph.Dump().at("resources");
+            const auto &staging_dump = resources.at(2);
+            Expect(resources.at(0).at("type") == "Texture" && staging_dump.at("type") == "Buffer" &&
+                       staging_dump.at("first_use") == 1 && staging_dump.at("last_use") == 2,
+                   "the dump names each resource's type and the passes that first and last use it by index");
         }
 
         Expect(staging->GetTracked().GetTrackedAccess() == RHIResourceAccess{.access = RHIAccess::CopySrc},

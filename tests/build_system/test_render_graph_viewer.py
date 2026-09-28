@@ -47,13 +47,13 @@ DUMP = {
         },
     ],
     "resources": [
-        {"name": "ShadowMap", "kind": "Transient", "format": "D32", "size_class": "Absolute", "width": 1024,
-         "height": 1024, "first_use": "Shadow", "last_use": "Trace", "usage": "DepthStencilAttachment|Texture",
+        {"name": "ShadowMap", "type": "Texture", "kind": "Transient", "format": "D32", "size_class": "Absolute",
+         "width": 1024, "height": 1024, "first_use": 0, "last_use": 2, "usage": "Texture|DepthStencilAttachment",
          "physical": 0},
-        {"name": "Debug<1>", "kind": "Transient", "format": "RGBAFloat16", "size_class": "Scene"},
-        {"name": "Counter", "kind": "Imported", "first_use": "Trace", "last_use": "Trace",
+        {"name": "Debug<1>", "type": "Texture", "kind": "Transient", "format": "RGBAFloat16", "size_class": "Scene"},
+        {"name": "Counter", "type": "Buffer", "kind": "Imported", "first_use": 2, "last_use": 2,
          "usage": "StorageRead|StorageWrite(Compute)"},
-        {"name": "TLAS", "kind": "Imported", "first_use": "Trace", "last_use": "Trace",
+        {"name": "TLAS", "type": "AccelerationStructure", "kind": "Imported", "first_use": 2, "last_use": 2,
          "usage": "AccelerationStructureRead(Compute)"},
     ],
 }
@@ -94,6 +94,29 @@ class RenderGraphViewerTest(unittest.TestCase):
         self.assertIn('<td class="w" title="Debug&lt;View&gt; / Debug&lt;1&gt;\naccess ColorWrite">W</td>'
                       '<td></td><td></td>', culled)
         self.assertIn('</td><td class="life"></td><td class="w"', culled)
+
+    def test_lifetime_follows_pass_indices_when_pass_names_repeat(self):
+        clear = {"name": "Clear", "kind": "Raster", "culled": False, "accesses": [], "barriers": [],
+                 "attachments": []}
+        write = dict(clear, accesses=[{"resource": "Map", "access": "ColorWrite"}])
+        read = dict(clear, name="Read", accesses=[{"resource": "Map", "access": "Sampled(Pixel)"}])
+        page = render_graph_viewer.render_html(
+            {"passes": [clear, write, read], "resources": [
+                {"name": "Map", "type": "Texture", "kind": "Imported", "first_use": 1, "last_use": 2,
+                 "usage": "Texture|ColorAttachment"}]}, "fixture")
+
+        first, second, third = rows(page)
+        self.assertTrue(first.endswith("<td></td>"))
+        self.assertIn('<td class="w"', second)
+        self.assertIn('<td class="r"', third)
+        self.assertIn('title="Map\nImported Texture\nused Clear..Read\nusage Texture|ColorAttachment"', page)
+
+    def test_resource_headers_name_their_type(self):
+        page = render_graph_viewer.render_html(DUMP, "fixture")
+
+        self.assertIn('title="Counter\nImported Buffer\nused Trace..Trace\n', page)
+        self.assertIn('title="TLAS\nImported AccelerationStructure\nused Trace..Trace\n', page)
+        self.assertIn('title="Debug&lt;1&gt;\nTransient Texture\nRGBAFloat16 Scene\nno image"', page)
 
     def test_buffer_cells_show_read_write_and_memory_barriers(self):
         trace = rows(render_graph_viewer.render_html(DUMP, "fixture"))[2]

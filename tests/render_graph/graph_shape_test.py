@@ -52,6 +52,7 @@ def project(dump):
                          f" {attachment['load']} ({attachment['load_reason']})"
                          f" / {attachment['store']} ({attachment['store_reason']})")
 
+    passes = dump["passes"]
     for resource in dump["resources"]:
         line = f"{resource['name']}: {resource['kind']}"
         if resource["kind"] == "Transient":
@@ -60,7 +61,8 @@ def project(dump):
                 line += f" {resource['width']}x{resource['height']}"
             line += f", physical {resource['physical']}" if "physical" in resource else ", no image"
         if "first_use" in resource:
-            line += f", {resource['first_use']}..{resource['last_use']}, {resource['usage']}"
+            first, last = passes[resource["first_use"]]["name"], passes[resource["last_use"]]["name"]
+            line += f", {first}..{last}, {resource['usage']}"
         lines.append(line)
     return lines
 
