@@ -222,11 +222,6 @@ void RGBuilder::Sampled(RGTextureRange texture, RHIShaderStageMask stages)
     DeclareShaderAccess(texture, RHIAccess::Sampled, stages, RHIImageLayout::Read);
 }
 
-void RGBuilder::StorageRead(RGTextureRange texture, RHIShaderStageMask stages)
-{
-    DeclareShaderAccess(texture, RHIAccess::StorageRead, stages, RHIImageLayout::StorageWrite);
-}
-
 void RGBuilder::StorageWrite(RGTextureRange texture, RHIShaderStageMask stages)
 {
     DeclareShaderAccess(texture, RHIAccess::StorageWrite, stages, RHIImageLayout::StorageWrite);

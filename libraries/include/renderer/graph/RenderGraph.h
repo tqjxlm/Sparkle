@@ -176,8 +176,6 @@ public:
 
     void Sampled(RGTextureRange texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
 
-    void StorageRead(RGTextureRange texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
-
     void StorageWrite(RGTextureRange texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
 
     void StorageReadWrite(RGTextureRange texture, RHIShaderStageMask stages = RHIShaderStageMask::None);
@@ -211,14 +209,6 @@ public:
         }
         BindPlaceholder(placeholder, ViewBinding(binding));
         BindPlaceholder(placeholder, SamplerBinding(sampler_binding));
-    }
-
-    template <class Table>
-    void StorageRead(RGTextureRange texture, RGStorageBinding<Table> binding,
-                     RHIShaderStageMask stages = RHIShaderStageMask::None)
-    {
-        StorageRead(texture, stages);
-        Bind(binding);
     }
 
     template <class Table>
@@ -374,11 +364,6 @@ public:
     void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
     {
         command_context_.DrawMesh(pipeline_state, draw_args);
-    }
-
-    [[nodiscard]] const RHIAttachmentSignature &GetAttachmentSignature() const
-    {
-        return command_context_.GetAttachmentSignature();
     }
 
     using RGPassContext::GetNativeContext;
