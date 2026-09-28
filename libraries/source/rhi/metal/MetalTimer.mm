@@ -113,7 +113,15 @@ void MetalTimer::End(RHICommandContext &command_context)
 {
     ASSERT_EQUAL(status_, Status::Measuring);
 
+    status_ = Status::WaitingForResult;
+
     id<MTLCommandBuffer> command_buffer = static_cast<MetalCommandContext &>(command_context).GetCommandBuffer();
+    if (command_buffer == resolving_command_buffer_)
+    {
+        return;
+    }
+    resolving_command_buffer_ = command_buffer;
+
     id<MTLCounterSampleBuffer> buffer = counter_sample_buffer_;
     const NSUInteger sample_count = sample_count_;
     std::atomic<float> *time_slot = &resolved_time_ms_;
@@ -136,8 +144,6 @@ void MetalTimer::End(RHICommandContext &command_context)
       }
       *resolved = true;
     }];
-
-    status_ = Status::WaitingForResult;
 }
 
 void MetalTimer::TryGetResult()

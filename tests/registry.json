@@ -223,7 +223,7 @@
     {
         "name": "pass_timestamps",
         "test_case": "pass_timestamps",
-        "description": "Opt-in rendering GPU timestamps report a time once their frame slot returns, and nothing without device support."
+        "description": "Opt-in rendering GPU timestamps report a time once their frame slot returns, a pass recorded twice reporting its last run, and nothing without device support."
     },
     {
         "name": "render_graph_compile",

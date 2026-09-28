@@ -37,6 +37,9 @@ private:
     static constexpr NSUInteger MaxSampleCount = 4;
 
     id<MTLCounterSampleBuffer> counter_sample_buffer_ = nil;
+    // the command buffer whose completion resolves the samples. every run in it writes the same samples, so they hold
+    // its last run and one resolve serves them all
+    id<MTLCommandBuffer> resolving_command_buffer_ = nil;
     // samples of the attached pass: a start and an end per stage
     NSUInteger sample_count_ = 0;
     // the samples of the last resolve, which a stage that does not run leaves in the buffer

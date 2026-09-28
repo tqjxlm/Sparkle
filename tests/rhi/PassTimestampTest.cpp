@@ -9,9 +9,10 @@
 
 namespace sparkle
 {
-// records a clear timed by one pass twice and one timed by an untimed pass once per frame until the timed pass's frame
-// slot comes back with a GPU time, which may be 0 on devices that cannot resolve it. a device without pass timestamps
-// must report no time at all.
+// records a clear timed by one pass twice, one timed by another pass once and one by an untimed pass per frame until
+// the timed passes' frame slot comes back with their GPU times. the pass recorded twice reports its last run, so it
+// measures 0 only on a device that also measures 0 for the pass recorded once. a device without pass timestamps must
+// report no time at all.
 class PassTimestampTest : public TestCase
 {
 public:
@@ -31,7 +32,7 @@ public:
 
         auto *rhi = app.GetRHI();
         TaskManager::RunInRenderThread([this, rhi] {
-            if (!timed_pass_)
+            if (!twice_timed_pass_)
             {
                 CreatePasses(rhi);
             }
@@ -63,7 +64,8 @@ private:
         image_ = rhi->CreateImage(image_attribute, "PassTimestampTestImage");
 
         untimed_pass_ = rhi->CreateRenderPass("PassTimestampTestUntimedPass", false);
-        timed_pass_ = rhi->CreateRenderPass("PassTimestampTestTimedPass", true);
+        twice_timed_pass_ = rhi->CreateRenderPass("PassTimestampTestTwiceTimedPass", true);
+        once_timed_pass_ = rhi->CreateRenderPass("PassTimestampTestOnceTimedPass", true);
 
         supported_ = rhi->SupportsPassTimestamps();
         Log(Info, "{}: pass timestamps supported: {}", GetName(), supported_);
@@ -79,7 +81,7 @@ private:
         rhi->BeginCommandBuffer();
         auto *command_context = rhi->GetCommandContext();
         // the second run of the timed pass must not read the timer its first run just began
-        for (const auto &pass : {timed_pass_, timed_pass_, untimed_pass_})
+        for (const auto &pass : {twice_timed_pass_, twice_timed_pass_, once_timed_pass_, untimed_pass_})
         {
             const auto barriers = image_->TrackTransition({.target_layout = RHIImageLayout::ColorOutput,
                                                            .after_stage = RHIPipelineStage::ColorOutput,
@@ -92,17 +94,20 @@ private:
 
         // beginning a pass reads the time its slot measured in an earlier frame
         const auto frame_index = rhi->GetFrameIndex();
-        const float timed_ms = timed_pass_->GetExecutionTime(frame_index);
+        const float twice_ms = twice_timed_pass_->GetExecutionTime(frame_index);
+        const float once_ms = once_timed_pass_->GetExecutionTime(frame_index);
         Expect(untimed_pass_->GetExecutionTime(frame_index) < 0.f, "an untimed render pass reports no time");
         if (!supported_)
         {
-            Expect(timed_ms < 0.f, "a timed render pass reports no time without pass timestamps");
+            Expect(twice_ms < 0.f && once_ms < 0.f, "a timed render pass reports no time without pass timestamps");
         }
 
         recordings_++;
-        if (supported_ && timed_ms >= 0.f)
+        if (supported_ && twice_ms >= 0.f && once_ms >= 0.f)
         {
-            Log(Info, "{}: timed render pass took {:.6f} ms", GetName(), timed_ms);
+            Log(Info, "{}: timed render pass took {:.6f} ms recorded twice, {:.6f} ms recorded once", GetName(),
+                twice_ms, once_ms);
+            Expect(twice_ms > 0.f || once_ms == 0.f, "a render pass recorded twice reports the time of its last run");
             Finish();
         }
         else if (recordings_ == MaxRecordings)
@@ -114,7 +119,8 @@ private:
 
     void Finish()
     {
-        timed_pass_ = nullptr;
+        twice_timed_pass_ = nullptr;
+        once_timed_pass_ = nullptr;
         untimed_pass_ = nullptr;
         image_ = nullptr;
         done_.store(true, std::memory_order_release);
@@ -132,7 +138,8 @@ private:
     }
 
     RHIResourceRef<RHIImage> image_;
-    RHIResourceRef<RHIPass> timed_pass_;
+    RHIResourceRef<RHIPass> twice_timed_pass_;
+    RHIResourceRef<RHIPass> once_timed_pass_;
     RHIResourceRef<RHIPass> untimed_pass_;
     bool supported_ = false;
     unsigned recordings_ = 0;
