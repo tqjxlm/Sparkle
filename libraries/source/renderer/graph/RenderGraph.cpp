@@ -300,7 +300,7 @@ void RGBuilder::AccelerationStructureRead(RGAccelerationStructure acceleration_s
 
 RHIResourceRef<RHITLAS> RGBuilder::GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const
 {
-    return graph_.buffers_[acceleration_structure.index].acceleration_structure;
+    return std::get<RHIResourceRef<RHITLAS>>(graph_.buffers_[acceleration_structure.index].resource);
 }
 
 void RGBuilder::BindLastBufferAccess(RHIMemberBinding binding)
@@ -366,13 +366,13 @@ RHIImage *RGPassContext::GetImage(RGTexture texture) const
 RHIBuffer *RGPassContext::GetBuffer(RGBuffer buffer) const
 {
     CheckDeclared(buffer.index);
-    return graph_.buffers_[buffer.index].buffer.get();
+    return std::get<RHIResourceRef<RHIBuffer>>(graph_.buffers_[buffer.index].resource).get();
 }
 
 RHITLAS *RGPassContext::GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const
 {
     CheckDeclared(acceleration_structure.index);
-    return graph_.buffers_[acceleration_structure.index].acceleration_structure.get();
+    return std::get<RHIResourceRef<RHITLAS>>(graph_.buffers_[acceleration_structure.index].resource).get();
 }
 
 void RGPassContext::CheckDeclared(uint32_t buffer) const
@@ -453,21 +453,18 @@ RGTexture RenderGraph::Import(std::string name, const RHIResourceRef<RHIImage> &
 RGBuffer RenderGraph::Import(std::string name, const RHIResourceRef<RHIBuffer> &buffer)
 {
     RGCheck(buffer, "import {} is not a buffer", name);
-    return {.index = ImportBuffer({.name = std::move(name), .buffer = buffer, .acceleration_structure = nullptr})};
+    return {.index = ImportBuffer({.name = std::move(name), .resource = buffer})};
 }
 
 RGAccelerationStructure RenderGraph::Import(std::string name, const RHIResourceRef<RHITLAS> &acceleration_structure)
 {
     RGCheck(acceleration_structure, "import {} is not an acceleration structure", name);
-    return {.index = ImportBuffer(
-                {.name = std::move(name), .buffer = nullptr, .acceleration_structure = acceleration_structure})};
+    return {.index = ImportBuffer({.name = std::move(name), .resource = acceleration_structure})};
 }
 
 uint32_t RenderGraph::ImportBuffer(Buffer buffer)
 {
-    const auto found = std::ranges::find_if(buffers_, [&buffer](const Buffer &imported) {
-        return imported.buffer == buffer.buffer && imported.acceleration_structure == buffer.acceleration_structure;
-    });
+    const auto found = std::ranges::find(buffers_, buffer.Get(), &Buffer::Get);
     if (found != buffers_.end())
     {
         return static_cast<uint32_t>(found - buffers_.begin());
@@ -699,9 +696,10 @@ void RenderGraph::ResolveBuffers()
         }
     }
 
-    for (const auto &buffer : buffers_ | std::views::filter([](const Buffer &b) { return b.buffer != nullptr; }))
+    for (const auto &buffer : buffers_)
     {
-        RGCheck(!(GetBufferUsage(buffer.accesses.access) & ~buffer.buffer->GetUsage()),
+        const auto *imported = std::get_if<RHIResourceRef<RHIBuffer>>(&buffer.resource);
+        RGCheck(imported == nullptr || !(GetBufferUsage(buffer.accesses.access) & ~(*imported)->GetUsage()),
                 "import {} lacks the usages its accesses need", buffer.name);
     }
 }
@@ -1121,9 +1119,7 @@ void RenderGraph::CheckBindingDeclared(const Pass &pass, const RHIShaderResource
     }
 
     const auto *resource = binding.GetResource();
-    const auto buffer = std::ranges::find_if(buffers_, [resource](const Buffer &imported) {
-        return imported.buffer.get() == resource || imported.acceleration_structure.get() == resource;
-    });
+    const auto buffer = std::ranges::find(buffers_, resource, &Buffer::Get);
     if (buffer != buffers_.end())
     {
         const auto index = static_cast<uint32_t>(buffer - buffers_.begin());

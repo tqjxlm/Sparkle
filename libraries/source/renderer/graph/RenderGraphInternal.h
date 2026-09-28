@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace sparkle
@@ -91,17 +92,21 @@ struct RenderGraph::Texture
 struct RenderGraph::Buffer
 {
     std::string name;
-    RHIResourceRef<RHIBuffer> buffer;
-    RHIResourceRef<RHITLAS> acceleration_structure;
+    std::variant<RHIResourceRef<RHIBuffer>, RHIResourceRef<RHITLAS>> resource;
 
     // compiled
     std::optional<uint32_t> first_pass = std::nullopt;
     uint32_t last_pass = 0;
     RHIResourceAccess accesses{};
 
+    [[nodiscard]] RHIResource *Get() const
+    {
+        return std::visit([](const auto &imported) -> RHIResource * { return imported.get(); }, resource);
+    }
+
     [[nodiscard]] RHITrackedAccess &GetTracked() const
     {
-        return buffer ? buffer->GetTracked() : acceleration_structure->GetTracked();
+        return std::visit([](const auto &imported) -> RHITrackedAccess & { return imported->GetTracked(); }, resource);
     }
 };
 } // namespace sparkle
