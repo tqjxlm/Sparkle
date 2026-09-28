@@ -76,12 +76,6 @@ public:
         return bindings_applied_[index];
     }
 
-    // whether a pipeline drew or dispatched since the bindings were set
-    [[nodiscard]] bool DrewOrDispatched() const
-    {
-        return !pipelines_.empty();
-    }
-
     // the pipelines drawn or dispatched since the bindings were set, once per run of consecutive draws or dispatches
     [[nodiscard]] const std::vector<const RHIPipelineState *> &GetPipelines() const
     {

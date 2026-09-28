@@ -102,8 +102,6 @@ public:
         return attribute_.usages;
     }
 
-    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
-
     [[nodiscard]] size_t GetOffset(unsigned frame_index) const
     {
         if (IsDynamic())
@@ -161,6 +159,8 @@ public:
     }
 
 protected:
+    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
+
     Attribute attribute_;
 
     // when IsDynamic(), RHIBuffer does not contain real resource. dynamic_allocation points to the real resource

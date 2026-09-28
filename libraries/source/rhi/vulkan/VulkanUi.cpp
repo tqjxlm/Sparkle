@@ -5,7 +5,7 @@
 #include "VulkanCommon.h"
 #include "VulkanContext.h"
 #include "VulkanImage.h"
-#include "VulkanRenderPass.h"
+#include "VulkanPipelineState.h"
 #include "VulkanSwapChain.h"
 
 #include <imgui_impl_vulkan.h>

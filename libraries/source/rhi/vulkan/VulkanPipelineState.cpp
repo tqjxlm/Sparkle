@@ -6,7 +6,6 @@
 #include "VulkanCommon.h"
 #include "VulkanContext.h"
 #include "VulkanDescriptorSetManager.h"
-#include "VulkanRenderPass.h"
 #include "VulkanShader.h"
 
 namespace sparkle

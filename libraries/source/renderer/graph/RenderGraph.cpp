@@ -1023,7 +1023,7 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
 // empty scene) bound nothing to check.
 void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const
 {
-    if (!command_context.DrewOrDispatched())
+    if (command_context.GetPipelines().empty())
     {
         return;
     }
