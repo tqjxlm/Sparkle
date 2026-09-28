@@ -107,6 +107,7 @@ Phase 1 findings:
 * The readback's staging buffer is created when the pass is added (`RenderGraph::GetFormat`/`GetSize`) and imported, which resolves the execute-time creation noted above.
 * Texture accesses may cover a mip or a single subresource (`RGTexture::Mip`, `Subresource`); planning keeps a state per subresource and emits one barrier per uniform run of mips within a layer. Store inference looks for the next overlapping access.
 * The IBL cook records as graph passes: Forward and Deferred start their graphs with `ImageBasedLighting::AddCookPasses`, `IblCookAccelerator` runs one step per frame in a graph of its own. The first step clears each subresource of the cooking map in its own Raster pass (30 for specular); folding the clear into the first dispatch would change the cooked output. Cook dispatches are now ordered against each other across frames.
+* Only the Forward and Deferred graphs cook the IBL; `SkyRenderProxy::Update` no longer cooks it in every pipeline. The GPU and CPU pipelines never sample the IBL, so under them no map cooks and none is persisted through the artifact callback; the first Forward or Deferred frame cooks it.
 * The back buffer is an image (`RHIContext::GetBackBuffer`): Vulkan's headless image or the swap chain image acquired for the frame, Metal's back buffer color. RHI tests render through `BeginRendering` over an `RHIRenderingInfo` with barriers from `RHIImage::TrackTransition`; `render_target_pool` went with the pool.
 * `RHIColorAttachment::resolve_image` is gone until MSAA returns through `ResolveTo` (D20). The GPU renderer's accumulator is a plain image, so it no longer survives renderer recreation; the first frame clears it.
 * `RHIImage::Transition` stays: NRD, MetalFX, IBL `Finalize`, uploads, readback and `EndFrame`'s present transition still use it.
@@ -145,7 +146,7 @@ Phase 2 findings:
 
 ## Workflow
 
-Each step: an implementer agent makes the change and raises questions or design improvements instead of guessing; the orchestrating session reviews the diff against the design and this plan; findings are fixed before the commit. Nothing is built or run locally: each step is pushed to the `render-graph` branch and its PR, and CI (builds on every platform, tidy, screenshot tests) is the validation.
+Each step: an implementer agent makes the change and raises questions or design improvements instead of guessing; the orchestrating session reviews the diff against the design and this plan; findings are fixed before the commit. Before each push, the local pre-checks run in order: `dev/check_format.py`, `build.py --framework glfw --config Release --clangd`, `dev/check_tidy.py`. Tests run only in CI (builds on every platform, tidy, screenshot tests), which runs on the PR.
 
 ## Findings
 

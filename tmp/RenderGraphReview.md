@@ -2,7 +2,25 @@
 
 Full review of branch `render-graph` (PR #100, draft) against `main` (merge-base b8b0274), covering Phases 0–2 as recorded in [RenderGraphProgress.md](RenderGraphProgress.md). Findings are action items; each has an ID, severity, location, the defect, and the proposed action. Verification: **C** = confirmed by tracing code, **P** = plausible, not traced end to end.
 
-Status: complete. Nothing has been fixed yet.
+Status: review complete; fixes in progress. A finding marked **Done** is fixed in the commit that marks it; one marked **Closed** needs no change, for the reason given.
+
+## Owner decisions
+
+* **A4: no split.** PR #100 stays one PR.
+* **Working notes stay.** `tmp/` stays committed on the branch while the work is in progress; the owner removes it at the end.
+* **A1: consumers own samplers everywhere.** Samplers leave `RGTextureDesc` and the pool key (the graph), and leave `RHIImage` too (the RHI): every pass, material and bindless user supplies the sampler it samples with. The screen pass holds main's single upsample policy.
+* **R6, R12: after the fixes.** The `PostChain` component with a template-method `Render()` and the shared raster-renderer base come after the correctness and trim work. Until then the design records the deviation.
+* **A3: CI, with local pre-checks.** Before each push: `dev/check_format.py`, a glfw Release build with `--clangd`, and `dev/check_tidy.py`. Tests run in CI only.
+* **M6/V7: remove** `SupportsPixelLocalRead`/`SupportsUnifiedImageLayouts` and the extensions they enable, until Phase 3 has a user.
+* **R3: accepted.** The GPU and CPU pipelines do not cook the IBL; record it as a deviation.
+* **T13: tests throw.** Under test, `RGCheck` throws instead of aborting; a `render_graph_errors` case catches one mistake per error class and compares the message.
+* **T9: document now, remove later.** Correct docs/Denoiser.md and add a TODO entry to drop the SPIR-V 1.5 → 1.4 rewrite at the next NRD recook.
+* **T19: keep** the 0.1 threshold: the 64 spp cases gate agreement with converged ground truth, not regressions.
+* **G9, G10: record the gaps in the design as:**
+  * deferred to Phase 3/4: transient mips, layers and cube; buffer accesses beyond copies; Copy blit, clear and mip generation; indirect dispatch; reader look-ahead folding; `GENERAL` collapse; the missing dump fields other than the resource type;
+  * dropped until a user exists: `graph.Extract`, viewer mip/layer/channel selection, mandatory bindings, the `pool_reuse` kill switch;
+  * implemented now: the dump resource-type field and the `full_barriers` kill switch.
+* **A2: rename** to `DontCare`, no decision needed.
 
 ## 0. Answers to the review questions (summary)
 
@@ -24,8 +42,8 @@ Status: complete. Nothing has been fixed yet.
 
 * **A1 [high, C] Sampler policy moved back to producers, a design a previous review rejected.** Behavior is unchanged (the renderer review traced it to equal main); the problem is where the policy lives. `RGTextureDesc::sampler` (`RenderGraph.h:131`) and `RGBuilder`'s sampler binding bind the sampler the *image* carries, so the upsample policy moved from `ToneMappingPass::GetInputSampler` (main) into `Renderer::GetSceneColorDesc` (`Renderer.cpp:210`), `CPURenderer.cpp:31` `GetImageDesc`, and per-image samplers in `GPURenderer.cpp:87` and `NrdDenoiser.cpp:143`. The sub-resolution review had settled on a single consumer-side policy because producer-baked samplers triplicated it and caused Repeat-wrap edge fringes. The sampler is also part of the transient pool key (`RGTexturePool.h:25`, `RenderGraph.cpp:628`), which blocks aliasing and cross-pipeline reuse between textures that differ only in how a consumer samples them. Action: samplers are not graph resources and need no synchronization. Remove `sampler` from `RGTextureDesc` and the pool key; let the consumer supply the sampler (an `RHISampler` argument on the sampler-binding overload, or the pass binds its own sampler as it binds UBOs); restore one upsample policy in the screen pass (including the `RGBAFloat` no-linear-filter exception).
 * **A2 [med, C] `RHILoadOp::None` / `RHIStoreOp::None` mean "don't care".** `RHIRenderingInfo.h:13-24`. Vulkan's `LOAD_OP_NONE`/`STORE_OP_NONE` mean "leave memory untouched", and design §6.5 plans `StoreOp::None` → `STORE_OP_NONE` for read-only depth in Phase 3. With the current naming, that lowering change would silently turn every "no later reader" attachment (`RenderGraph.cpp:915`) into `STORE_OP_NONE`. Action: rename to `DontCare` now; add a distinct `None` only when Phase 3 needs it.
-* **A3 [high] Workflow: nothing is built or run locally.** RenderGraphProgress.md:148 says so, which contradicts the standing local-gates rule (check_format → check_tidy → full run_tests before push). The one local physical-GPU run (M5 Max) is what found the Metal skipped-encoder timer bug, and CI cannot exercise Metal timing, NRD or MetalFX at all. Action: every step builds and runs the local gates on macOS (macos + glfw/MoltenVK) before pushing; CI covers the platforms that can't run locally (Windows, Linux lavapipe, Android emulator). Update the Workflow section.
-* **A4 [med] PR shape.** PR #100 is ~11K insertions and 5.7K deletions; `0ca0123` alone ("Phase 0+1") touches 133 files, +4.9K/−3.5K. Action: split into reviewable PRs merged in order: (1) Phase 0 RHI (`cc35c0e`..`8c98057`, independently valuable: sync2, dynamic rendering, sync-validation gate, several real hazard fixes); (2) graph core + tests; (3) renderer ports; (4) Phase 2 visibility. Split `0ca0123` back into its step commits (1.2–1.11) if the history still allows it.
+* **Done.** **A3 [high] Workflow: nothing is built or run locally.** RenderGraphProgress.md:148 says so, which contradicts the standing local-gates rule (check_format → check_tidy → full run_tests before push). The one local physical-GPU run (M5 Max) is what found the Metal skipped-encoder timer bug, and CI cannot exercise Metal timing, NRD or MetalFX at all. Action: every step builds and runs the local gates on macOS (macos + glfw/MoltenVK) before pushing; CI covers the platforms that can't run locally (Windows, Linux lavapipe, Android emulator). Update the Workflow section.
+* **Closed (owner: no split).** **A4 [med] PR shape.** PR #100 is ~11K insertions and 5.7K deletions; `0ca0123` alone ("Phase 0+1") touches 133 files, +4.9K/−3.5K. Action: split into reviewable PRs merged in order: (1) Phase 0 RHI (`cc35c0e`..`8c98057`, independently valuable: sync2, dynamic rendering, sync-validation gate, several real hazard fixes); (2) graph core + tests; (3) renderer ports; (4) Phase 2 visibility. Split `0ca0123` back into its step commits (1.2–1.11) if the history still allows it.
 * **A5 [low] Stale design header.** `RenderGraphDesign.md:3` says "Nothing here is implemented", but Phases 0–2 are. Action: state which phases are implemented and point to the progress log for deviations.
 * **A6 [low, C] Binding type spelled three times.** `std::function<RHIMemberBinding(RHIContext *, RHIImage &, const RGSubresources &)>` appears at `RenderGraph.h:296` (as `RGBuilder::ImageBinding`), `:540` and `:572`. Action: one alias shared by `RGBuilder` and `RenderGraph`.
 * **A7 [info] Size is within target.** The core is 2,241 physical lines, but about 1,276 once blanks, comments and brace-only lines are excluded; that is inside the design's 1,000–1,500. Not over-engineered: the per-mip runs, reason strings, placeholders and binding validation all have users. Action: the dead API (G11) and DRY merges (G15–G19) trim roughly another 150 lines.
@@ -224,7 +242,7 @@ Behavior:
 
 * **R1 [low, P] Screenshot request can hang.** A screenshot "with UI" requested on a frame where the UI is hidden never completes: the readback is added only inside `if (render_ui && ui_pass_)` (`Renderer.cpp:314-319`). `screenshot_saving_` stays set, and Save stays disabled until another request replaces it. Main fell back to a readback without UI (except CPU). Action: fall back to the pre-UI readback when the UI does not draw.
 * **R2 [low, P] MetalFX may show stale output.** Same finding as M2.
-* **R3 [low, C] GPU/CPU pipelines no longer cook the IBL.** The GPU IBL cook now runs only inside Forward/Deferred graphs; `SkyRenderProxy::Update` is gone. So under the GPU/CPU pipelines the IBL never cooks, and its artifact callback no longer persists the cooked map. Those pipelines don't use the IBL, but this isn't recorded. Action: record it in the progress log, or decide that a map cooked in any pipeline should persist.
+* **Done.** **R3 [low, C] GPU/CPU pipelines no longer cook the IBL.** The GPU IBL cook now runs only inside Forward/Deferred graphs; `SkyRenderProxy::Update` is gone. So under the GPU/CPU pipelines the IBL never cooks, and its artifact callback no longer persists the cooked map. Those pipelines don't use the IBL, but this isn't recorded. Action: record it in the progress log, or decide that a map cooked in any pipeline should persist.
 * **R4 [low, P] Null dereference at startup.** The graph-panel render-thread task dereferences `renderer_` without the null guard `NotifySceneLoaded` has (`RenderFramework.cpp:493, 567-568`). Opening the tab before the renderer exists crashes. Action: guard it.
 * **R5 [info, C] Cook task unregisters a frame later.** `ibl_cook_pending_` is checked before this frame's `AddCookPasses` (`ForwardRenderer.cpp:46-60`), so the async task unregisters one frame later than on main. Harmless.
 
@@ -324,7 +342,7 @@ Coverage of the compiler is better than expected. `render_graph_compile` asserts
 * **T16 [med] Golden churn is undocumented.** First-barrier sources depend on the previous frame's graph, pool order, scene content and `shadow_map_resolution`. That is acceptable for a shape gate. Action: document what churns the goldens and the update workflow (T5).
 * **T17 [med, P] GPU golden depends on timing.** `render_graph_dump_accumulating` dumps "as soon as the scene is loaded" and assumes that frame has neither `ClearAccumulator` nor `BuildTLAS`. Action: dump after N traced frames, or on an explicit predicate (accumulating, spp ≥ 1, nothing pending).
 * **T18 [med, C] Shape cases break under a scene override.** The six `*_graph_shape` registry cases carry `scene_args`, but the goldens are TestScene-specific, so `run_tests.py --scene X` fails all of them. Action: drop `scene_args` from those cases.
-* **T19 [med] 64 spp FLIP gates are loose.** `cpu_render_static_64spp` and `gpu_render_static_64spp` use `--flip_threshold 0.1`, 5× the default. The deferred-shadow defect (FLIP 0.0665) would have passed. The output is deterministic per platform. Action: pin a per-backend 64 spp reference with a tight threshold, or calibrate just above the measured value.
+* **Closed (owner: keep 0.1).** **T19 [med] 64 spp FLIP gates are loose.** `cpu_render_static_64spp` and `gpu_render_static_64spp` use `--flip_threshold 0.1`, 5× the default. The deferred-shadow defect (FLIP 0.0665) would have passed. The output is deterministic per platform. Action: pin a per-backend 64 spp reference with a tight threshold, or calibrate just above the measured value.
 * **T20 [low] Viewer page collision.** `graph_shape_test.py:86` names the page after `--golden`, so `deferred_graph_view_fallback` overwrites `deferred_graph_shape`'s page. Action: add a `--page` argument, or name the page per case.
 * **T21 [low] Typo in `--golden` is a traceback.** Action: validate in `tests/build_system/test_registry.py`.
 * **T22 [low] Sync gate can silently test the fallback.** `gpu_sync_validation` passes on a device that falls back to forward. Action: assert the `effective pipeline: Gpu` marker.
@@ -339,7 +357,7 @@ Coverage of the compiler is better than expected. `render_graph_compile` asserts
 
 ## 8. Suggested order of action
 
-1. **Decisions for the owner:** A1 (samplers owned by the consumer), A3 (local gates), A4 (PR split), R6 (`PostChain` component + template-method `Render()`), R12 (shared raster-renderer base).
+1. **Decisions for the owner:** settled, see [Owner decisions](#owner-decisions).
 2. **Correctness fixes:**
    * M1 (Metal timer) plus a test that rejects 0 ms.
    * G1 (one discard rule), R1 (screenshot fallback), R4 (null guard), M2/R2 (MetalFX fallback).
