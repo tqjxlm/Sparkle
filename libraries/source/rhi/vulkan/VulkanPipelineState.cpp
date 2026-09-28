@@ -364,7 +364,7 @@ void VulkanForwardPipelineState::BindBuffers(VulkanCommandContext &command_conte
             offsets.push_back(0);
         }
 
-        command_context.BindVertexBuffers(buffers.data(), offsets.data(), static_cast<uint32_t>(buffers.size()));
+        command_context.BindVertexBuffers(buffers, offsets);
     }
 
     if (index_buffer_)

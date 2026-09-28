@@ -482,8 +482,7 @@ void VulkanNrdBackend::RunDispatches(RHICommandContext &command_context, const D
         vkUpdateDescriptorSets(context->GetDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
         vulkan_context.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pso);
-        vulkan_context.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline_layout, 0,
-                                          descriptor_sets.data(), static_cast<uint32_t>(descriptor_sets.size()));
+        vulkan_context.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline_layout, 0, descriptor_sets);
         vkCmdDispatch(command_buffer, dispatch.grid_width, dispatch.grid_height, 1);
     }
 }

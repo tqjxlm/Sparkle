@@ -106,7 +106,7 @@ public:
         return compressed_image_barriers_need_sync1_;
     }
 
-    // of the universal queue; 0 when it cannot write timestamps
+    // of the graphics queue; 0 when it cannot write timestamps
     [[nodiscard]] uint32_t GetTimestampValidBits() const
     {
         return timestamp_valid_bits_;
@@ -236,7 +236,7 @@ private:
 
     VulkanRHI *rhi_;
 
-    class OneShotCommandBufferScope *temporary_command_buffer_ = nullptr;
+    std::optional<OneShotCommandBufferScope> temporary_command_buffer_;
 
     std::queue<OneShotCommandBufferScope::CommandBufferResources> pending_command_buffer_resources_;
 };

@@ -429,9 +429,7 @@ bool VulkanContext::BeginFrame()
 
     while (true)
     {
-        // a failed acquire leaves its semaphore unsignaled, so only a successful one moves on to the next semaphore;
-        // advancing on failures would let repeated failed frames cycle onto a semaphore an in-flight frame still waits
-        // on
+        // only a successful acquire signals its semaphore, so only it moves on to the next one
         VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
 
         const auto acquire_result = swap_chain_->AcquireImage(acquire_semaphore);
@@ -693,13 +691,12 @@ void VulkanContext::BeginCommandBuffer()
         return;
     }
 
-    ASSERT_F(temporary_command_buffer_ == nullptr,
-             "A temporary command buffer is active, should not begin another one");
+    ASSERT_F(!temporary_command_buffer_, "A temporary command buffer is active, should not begin another one");
 
     // resources released in this scope land in the current frame slot's deferred-deletion
     // bucket, which empties at the next BeginFrame regardless of this scope's own fence;
     // block that frame on the fence so the deletions stay safe
-    temporary_command_buffer_ = new OneShotCommandBufferScope(true);
+    temporary_command_buffer_.emplace(true);
     command_context_ = &temporary_command_buffer_->GetCommandContext();
 }
 
@@ -710,11 +707,10 @@ void VulkanContext::SubmitCommandBuffer()
         return;
     }
 
-    ASSERT_F(temporary_command_buffer_ != nullptr, "No active command buffer to submit");
+    ASSERT_F(temporary_command_buffer_, "No active command buffer to submit");
 
     command_context_ = nullptr;
-    delete temporary_command_buffer_;
-    temporary_command_buffer_ = nullptr;
+    temporary_command_buffer_.reset();
 }
 
 void VulkanContext::SetupMemoryAllocator()

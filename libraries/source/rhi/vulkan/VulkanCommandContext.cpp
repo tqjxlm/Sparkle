@@ -10,6 +10,8 @@
 
 namespace sparkle
 {
+// a barrier's source access mask only makes writes available; a read leaves nothing to flush, and the stage masks
+// already order it before the destination
 constexpr VkAccessFlags2 WriteAccessFlags = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
@@ -88,10 +90,15 @@ static void SetVulkanAccessScopes(VkBarrier &vk_barrier, const RHIResourceAccess
     vk_barrier.dstAccessMask = dst.access;
 }
 
+// a sync1 stage or access bit has the value of its sync2 counterpart; only the sync2 bits above 32 need translating
 static VkPipelineStageFlags GetSync1Stages(VkPipelineStageFlags2 stages, VkPipelineStageFlags none_stage)
 {
+    constexpr VkPipelineStageFlags2 VertexInputStages =
+        VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT;
+    ASSERT_F((stages & ~VertexInputStages) >> 32 == 0, "sync2 stages {:#x} have no sync1 equivalent", stages);
+
     auto sync1_stages = static_cast<VkPipelineStageFlags>(stages);
-    if (stages & (VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT))
+    if (stages & VertexInputStages)
     {
         sync1_stages |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
     }
@@ -100,6 +107,10 @@ static VkPipelineStageFlags GetSync1Stages(VkPipelineStageFlags2 stages, VkPipel
 
 static VkAccessFlags GetSync1Access(VkAccessFlags2 access)
 {
+    constexpr VkAccessFlags2 ShaderAccess = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    ASSERT_F((access & ~ShaderAccess) >> 32 == 0, "sync2 accesses {:#x} have no sync1 equivalent", access);
+
     auto sync1_access = static_cast<VkAccessFlags>(access);
     if (access & (VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT))
     {
