@@ -80,6 +80,8 @@ struct RenderGraph::Pass
     std::string cull_reason;
     RHIRenderingInfo rendering_info{};
     std::vector<RHIMemberBinding> bindings;
+    // for each binding, the name of the graph resource it binds; none for a placeholder
+    std::vector<std::optional<std::string>> bound_resources;
 
     // executed: the GPU time in ms its timer reports for this frame's slot, -1 when unknown
     float gpu_ms = -1.f;

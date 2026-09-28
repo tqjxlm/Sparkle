@@ -530,7 +530,8 @@ uint32_t RenderGraph::NewPass(std::string name, RGPassKind kind, RHIResourceRef<
                        .placeholders = {},
                        .record = {},
                        .cull_reason = {},
-                       .bindings = {}});
+                       .bindings = {},
+                       .bound_resources = {}});
     return static_cast<uint32_t>(passes_.size() - 1);
 }
 
@@ -723,19 +724,22 @@ void RenderGraph::ResolveBindings()
     {
         for (const auto &access : pass.accesses)
         {
+            const auto &texture = textures_[access.texture.index];
             for (const auto &binding : access.bindings)
             {
-                pass.bindings.push_back(
-                    binding(pool_.rhi_, *textures_[access.texture.index].image, access.subresources));
+                pass.bindings.push_back(binding(pool_.rhi_, *texture.image, access.subresources));
+                pass.bound_resources.emplace_back(texture.name);
             }
         }
         for (const auto &access : pass.buffer_accesses)
         {
             std::ranges::copy(access.bindings, std::back_inserter(pass.bindings));
+            pass.bound_resources.resize(pass.bindings.size(), buffers_[access.buffer].name);
         }
         for (const auto &[image, binding] : pass.placeholders)
         {
             pass.bindings.push_back(binding(pool_.rhi_, *image, GetAllSubresources(*image)));
+            pass.bound_resources.emplace_back(std::nullopt);
         }
     }
 }
@@ -1057,29 +1061,20 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
 }
 
 // a declared binding that no pipeline the pass drew or dispatched has would bind nothing. a pass that drew nothing (an
-// empty scene) bound nothing to check.
-void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const
+// empty scene) bound nothing to check. placeholders stand in for missing inputs and are not checked.
+void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context)
 {
     if (command_context.GetPipelines().empty())
     {
         return;
     }
 
-    size_t index = 0;
-    const auto check = [&pass, &command_context, &index](size_t count, const std::string &resource) {
-        for (const auto end = index + count; index < end; index++)
-        {
-            RGCheck(command_context.IsBindingApplied(index),
-                    "pass {} binds {} to a resource table no pipeline it drew or dispatched has", pass.name, resource);
-        }
-    };
-    for (const auto &access : pass.accesses)
+    for (size_t index = 0; index < pass.bindings.size(); index++)
     {
-        check(access.bindings.size(), textures_[access.texture.index].name);
-    }
-    for (const auto &access : pass.buffer_accesses)
-    {
-        check(access.bindings.size(), buffers_[access.buffer].name);
+        const auto &resource = pass.bound_resources[index];
+        RGCheck(!resource || command_context.IsBindingApplied(index),
+                "pass {} binds {} to a resource table no pipeline it drew or dispatched has", pass.name,
+                resource.value_or(""));
     }
 }
 

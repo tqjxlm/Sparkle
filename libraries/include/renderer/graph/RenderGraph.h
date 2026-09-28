@@ -551,7 +551,7 @@ private:
 
     void CheckDeclaredStates(const Pass &pass) const;
 
-    void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const;
+    static void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context);
 
     void CheckBoundResourcesDeclared(const Pass &pass, const RHICommandContext &command_context) const;
 
