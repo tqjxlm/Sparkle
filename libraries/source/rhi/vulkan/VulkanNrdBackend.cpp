@@ -328,40 +328,28 @@ void VulkanNrdBackend::AllocateResources(uint32_t width, uint32_t height, const 
         transient_count, sampler_count, constant_buffer_size, width, height);
 }
 
-void VulkanNrdBackend::InitializePoolLayouts(VkCommandBuffer command_buffer)
+void VulkanNrdBackend::InitializePoolLayouts(VulkanCommandContext &command_context)
 {
+    const RHIResourceAccess dispatch_access{.access =
+                                                RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::StorageWrite,
+                                            .stages = RHIShaderStageMask::Compute};
     std::vector<VkImageMemoryBarrier2> barriers;
     barriers.reserve(permanent_pool_.size() + transient_pool_.size());
     for (const auto *pool : {&permanent_pool_, &transient_pool_})
     {
         for (const auto &image : *pool)
         {
-            VkImageMemoryBarrier2 barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image = image.image;
-            barrier.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                                        .baseMipLevel = 0,
-                                        .levelCount = 1,
-                                        .baseArrayLayer = 0,
-                                        .layerCount = 1};
-            barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
-            barrier.srcAccessMask = VK_ACCESS_2_NONE;
-            barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-            barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-                                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-            barriers.push_back(barrier);
+            barriers.push_back(VulkanCommandContext::GetVkImageBarrier(image.image,
+                                                                       {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                                        .baseMipLevel = 0,
+                                                                        .levelCount = 1,
+                                                                        .baseArrayLayer = 0,
+                                                                        .layerCount = 1},
+                                                                       {}, dispatch_access, RHIImageLayout::Undefined,
+                                                                       RHIImageLayout::General));
         }
     }
-
-    VkDependencyInfo dependency_info{};
-    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependency_info.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
-    dependency_info.pImageMemoryBarriers = barriers.data();
-    vkCmdPipelineBarrier2(command_buffer, &dependency_info);
+    command_context.RecordBarriers(barriers, {});
 
     pool_layouts_initialized_ = true;
 }
@@ -374,7 +362,7 @@ void VulkanNrdBackend::RunDispatches(RHICommandContext &command_context, const D
 
     if (!pool_layouts_initialized_)
     {
-        InitializePoolLayouts(command_buffer);
+        InitializePoolLayouts(vulkan_context);
     }
 
     VkDescriptorPool descriptor_pool = descriptor_pools_[rhi->GetFrameIndex()];
@@ -391,7 +379,7 @@ void VulkanNrdBackend::RunDispatches(RHICommandContext &command_context, const D
                 .from = {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute},
                 .to = {.access = RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::StorageWrite,
                        .stages = RHIShaderStageMask::Compute}};
-            vulkan_context.Barrier({}, std::span(&barrier, 1));
+            vulkan_context.Barrier(barrier);
         }
 
         std::vector<VkDescriptorSet> descriptor_sets(pipeline.set_layouts.size());

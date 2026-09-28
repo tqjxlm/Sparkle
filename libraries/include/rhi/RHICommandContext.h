@@ -85,6 +85,11 @@ public:
     // records one batch of barriers outside any render pass. Metal tracks hazards itself and records nothing.
     void Barrier(std::span<const RHIImageBarrier> image_barriers, std::span<const RHIMemoryBarrier> memory_barriers);
 
+    void Barrier(const RHIMemoryBarrier &memory_barrier)
+    {
+        Barrier({}, std::span(&memory_barrier, 1));
+    }
+
     // resources every pipeline drawn or dispatched through the context binds, into each of its resource tables that
     // has the binding's member, until the bindings are set again. the render graph sets the bindings a pass declared
     // while it records the pass; the span must outlive that time.

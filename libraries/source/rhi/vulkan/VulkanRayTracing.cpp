@@ -88,7 +88,7 @@ void VulkanBLAS::Build()
         // a rebuild reuses the scratch buffer an earlier build submit wrote (a barrier's first scope spans submits)
         const RHIResourceAccess build{.access = RHIAccess::AccelerationStructureBuild};
         const RHIMemoryBarrier before_build{.from = build, .to = build};
-        command_context.Barrier({}, std::span(&before_build, 1));
+        command_context.Barrier(before_build);
 
         vkCmdBuildAccelerationStructuresKHR(command_context.GetCommandBuffer(), 1, &build_info, ranges);
     }

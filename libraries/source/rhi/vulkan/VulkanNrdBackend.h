@@ -60,7 +60,7 @@ private:
 
     static PoolImage CreatePoolImage(const PoolTexture &desc, uint32_t width, uint32_t height, uint32_t index);
     static void DestroyPoolImage(PoolImage &pool_image);
-    void InitializePoolLayouts(VkCommandBuffer command_buffer);
+    void InitializePoolLayouts(VulkanCommandContext &command_context);
 
     std::vector<NrdPipeline> pipelines_;
     std::vector<PoolImage> permanent_pool_;

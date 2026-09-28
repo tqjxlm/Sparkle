@@ -171,6 +171,10 @@ private:
     void SetupDebugMessenger();
     void SetupMemoryAllocator();
 
+    void BeginFrameCommandBuffer(unsigned frame_index);
+    VkCommandBuffer EndFrameCommandBuffer();
+    void ReleaseFinishedCommandBufferResources();
+
     [[nodiscard]] VkPresentModeKHR ChooseSwapPresentMode(
         const std::vector<VkPresentModeKHR> &availablePresentModes) const;
     [[nodiscard]] VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) const;

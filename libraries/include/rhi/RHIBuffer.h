@@ -159,7 +159,9 @@ public:
     }
 
 protected:
-    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
+    // barriers before and after `access`, against every access the usages allow: for a write whose earlier accesses and
+    // later consumers are unknown
+    [[nodiscard]] std::pair<RHIMemoryBarrier, RHIMemoryBarrier> GetUsageBarriers(const RHIResourceAccess &access) const;
 
     Attribute attribute_;
 
@@ -169,6 +171,8 @@ protected:
     uint8_t *mapped_address_ = nullptr;
 
 private:
+    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
+
     RHITrackedAccess tracked_;
 };
 

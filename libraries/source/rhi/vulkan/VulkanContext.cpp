@@ -415,15 +415,7 @@ bool VulkanContext::BeginFrame()
         CHECK_VK_ERROR(vkWaitForFences(device_, 1, &queue_finish_fences_[frame_index], VK_TRUE, UINT64_MAX));
         CHECK_VK_ERROR(vkResetFences(device_, 1, &queue_finish_fences_[frame_index]));
 
-        VkCommandBufferBeginInfo begin_info{};
-        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags = 0;
-        begin_info.pInheritanceInfo = nullptr;
-
-        CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
-
-        frame_command_context_.Begin(command_buffers_[frame_index]);
-        command_context_ = &frame_command_context_;
+        BeginFrameCommandBuffer(frame_index);
         return true;
     }
 
@@ -485,6 +477,12 @@ bool VulkanContext::BeginFrame()
     }
     queue_finish_fences_for_image_[image_index] = queue_finish_fences_[frame_index];
 
+    BeginFrameCommandBuffer(frame_index);
+    return true;
+}
+
+void VulkanContext::BeginFrameCommandBuffer(unsigned frame_index)
+{
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = 0;
@@ -494,7 +492,23 @@ bool VulkanContext::BeginFrame()
 
     frame_command_context_.Begin(command_buffers_[frame_index]);
     command_context_ = &frame_command_context_;
-    return true;
+}
+
+VkCommandBuffer VulkanContext::EndFrameCommandBuffer()
+{
+    VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
+    frame_command_context_.End();
+    command_context_ = nullptr;
+    CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
+    return command_buffer;
+}
+
+void VulkanContext::ReleaseFinishedCommandBufferResources()
+{
+    while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
+    {
+        pending_command_buffer_resources_.pop();
+    }
 }
 
 VkResult VulkanContext::EndFrame()
@@ -503,10 +517,7 @@ VkResult VulkanContext::EndFrame()
 
     if (rhi_->IsHeadless())
     {
-        VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
-        frame_command_context_.End();
-        command_context_ = nullptr;
-        CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
+        VkCommandBuffer command_buffer = EndFrameCommandBuffer();
 
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -515,10 +526,7 @@ VkResult VulkanContext::EndFrame()
 
         CHECK_VK_ERROR(vkQueueSubmit(graphics_queue_, 1, &submit_info, queue_finish_fences_[frame_index]));
 
-        while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
-        {
-            pending_command_buffer_resources_.pop();
-        }
+        ReleaseFinishedCommandBufferResources();
 
         return VK_SUCCESS;
     }
@@ -530,10 +538,7 @@ VkResult VulkanContext::EndFrame()
                                    .after_stage = RHIPipelineStage::ColorOutput,
                                    .before_stage = RHIPipelineStage::Bottom});
 
-    VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
-    frame_command_context_.End();
-    command_context_ = nullptr;
-    CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
+    VkCommandBuffer command_buffer = EndFrameCommandBuffer();
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -572,10 +577,7 @@ VkResult VulkanContext::EndFrame()
 
     const VkResult result = vkQueuePresentKHR(present_queue_, &present_info);
 
-    while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
-    {
-        pending_command_buffer_resources_.pop();
-    }
+    ReleaseFinishedCommandBufferResources();
 
     return result;
 }

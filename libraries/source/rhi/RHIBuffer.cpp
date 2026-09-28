@@ -48,6 +48,12 @@ RHIResourceAccess RHIBuffer::GetUsageAccess() const
     return result;
 }
 
+std::pair<RHIMemoryBarrier, RHIMemoryBarrier> RHIBuffer::GetUsageBarriers(const RHIResourceAccess &access) const
+{
+    const auto usage = GetUsageAccess();
+    return {{.from = usage, .to = access}, {.from = access, .to = usage}};
+}
+
 void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::vector<uint32_t> &indices,
                               uint32_t element_count, uint32_t element_size)
 {
@@ -97,10 +103,9 @@ void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::v
 
     auto *command_context = rhi->GetCommandContext();
 
-    // the dispatch rewrites a buffer that earlier work may still access, and its later consumers are unknown here
-    const RHIResourceAccess update{.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute};
-    const RHIMemoryBarrier before_update{.from = GetUsageAccess(), .to = update};
-    command_context->Barrier({}, std::span(&before_update, 1));
+    const auto [before_update, after_update] =
+        GetUsageBarriers({.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute});
+    command_context->Barrier(before_update);
 
     command_context->BeginComputePass(compute_pass);
 
@@ -108,8 +113,7 @@ void RHIBuffer::PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::v
 
     command_context->EndComputePass(compute_pass);
 
-    const RHIMemoryBarrier after_update{.from = update, .to = GetUsageAccess()};
-    command_context->Barrier({}, std::span(&after_update, 1));
+    command_context->Barrier(after_update);
 }
 
 void RHIDynamicBuffer::Init(RHIContext *rhi, const RHIBuffer::Attribute &attribute)

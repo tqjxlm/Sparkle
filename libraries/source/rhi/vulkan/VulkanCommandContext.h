@@ -132,6 +132,16 @@ public:
         command_state_.Reset();
     }
 
+    // lowers an image barrier as Barrier does, for an image outside RHIImage
+    [[nodiscard]] static VkImageMemoryBarrier2 GetVkImageBarrier(VkImage image, const VkImageSubresourceRange &range,
+                                                                 const RHIResourceAccess &from,
+                                                                 const RHIResourceAccess &to,
+                                                                 RHIImageLayout from_layout, RHIImageLayout to_layout);
+
+    // records lowered barriers as one vkCmdPipelineBarrier2
+    void RecordBarriers(std::span<const VkImageMemoryBarrier2> image_barriers,
+                        std::span<const VkMemoryBarrier2> memory_barriers) const;
+
 protected:
     void DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
     void DispatchComputeInternal(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,

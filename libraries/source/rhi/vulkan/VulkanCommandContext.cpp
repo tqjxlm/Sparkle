@@ -246,6 +246,36 @@ void VulkanCommandContext::End()
     command_buffer_ = VK_NULL_HANDLE;
 }
 
+VkImageMemoryBarrier2 VulkanCommandContext::GetVkImageBarrier(VkImage image, const VkImageSubresourceRange &range,
+                                                              const RHIResourceAccess &from,
+                                                              const RHIResourceAccess &to, RHIImageLayout from_layout,
+                                                              RHIImageLayout to_layout)
+{
+    VkImageMemoryBarrier2 vk_barrier{};
+    vk_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    SetVulkanAccessScopes(vk_barrier, from, to);
+    vk_barrier.oldLayout = GetVulkanImageLayout(from_layout);
+    vk_barrier.newLayout = GetVulkanImageLayout(to_layout);
+    vk_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    vk_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    vk_barrier.image = image;
+    vk_barrier.subresourceRange = range;
+    return vk_barrier;
+}
+
+void VulkanCommandContext::RecordBarriers(std::span<const VkImageMemoryBarrier2> image_barriers,
+                                          std::span<const VkMemoryBarrier2> memory_barriers) const
+{
+    VkDependencyInfo dependency_info{};
+    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency_info.memoryBarrierCount = static_cast<uint32_t>(memory_barriers.size());
+    dependency_info.pMemoryBarriers = memory_barriers.data();
+    dependency_info.imageMemoryBarrierCount = static_cast<uint32_t>(image_barriers.size());
+    dependency_info.pImageMemoryBarriers = image_barriers.data();
+
+    vkCmdPipelineBarrier2(command_buffer_, &dependency_info);
+}
+
 void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> image_barriers,
                                            std::span<const RHIMemoryBarrier> memory_barriers)
 {
@@ -258,23 +288,16 @@ void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> imag
     {
         const auto *image = RHICast<VulkanImage>(barrier.image);
 
-        auto &vk_barrier =
-            (context->CompressedImageBarriersNeedSync1() && IsCompressedFormat(image->GetAttributes().format)
-                 ? compressed_image_barriers
-                 : vk_image_barriers)
-                .emplace_back(VkImageMemoryBarrier2{});
-        vk_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        SetVulkanAccessScopes(vk_barrier, barrier.from, barrier.to);
-        vk_barrier.oldLayout = GetVulkanImageLayout(barrier.from_layout);
-        vk_barrier.newLayout = GetVulkanImageLayout(barrier.to_layout);
-        vk_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        vk_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        vk_barrier.image = image->GetImage();
-        vk_barrier.subresourceRange = {.aspectMask = image->GetAspect(),
-                                       .baseMipLevel = barrier.base_mip,
-                                       .levelCount = barrier.mip_count,
-                                       .baseArrayLayer = barrier.base_array_layer,
-                                       .layerCount = barrier.array_layer_count};
+        (context->CompressedImageBarriersNeedSync1() && IsCompressedFormat(image->GetAttributes().format)
+             ? compressed_image_barriers
+             : vk_image_barriers)
+            .push_back(GetVkImageBarrier(image->GetImage(),
+                                         {.aspectMask = image->GetAspect(),
+                                          .baseMipLevel = barrier.base_mip,
+                                          .levelCount = barrier.mip_count,
+                                          .baseArrayLayer = barrier.base_array_layer,
+                                          .layerCount = barrier.array_layer_count},
+                                         barrier.from, barrier.to, barrier.from_layout, barrier.to_layout));
     }
 
     std::vector<VkMemoryBarrier2> vk_memory_barriers;
@@ -295,14 +318,7 @@ void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> imag
         }
     }
 
-    VkDependencyInfo dependency_info{};
-    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependency_info.memoryBarrierCount = static_cast<uint32_t>(vk_memory_barriers.size());
-    dependency_info.pMemoryBarriers = vk_memory_barriers.data();
-    dependency_info.imageMemoryBarrierCount = static_cast<uint32_t>(vk_image_barriers.size());
-    dependency_info.pImageMemoryBarriers = vk_image_barriers.data();
-
-    vkCmdPipelineBarrier2(command_buffer_, &dependency_info);
+    RecordBarriers(vk_image_barriers, vk_memory_barriers);
 }
 
 void VulkanCommandContext::DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state,
