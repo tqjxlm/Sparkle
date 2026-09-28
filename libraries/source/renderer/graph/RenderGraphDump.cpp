@@ -1,5 +1,7 @@
 #include "renderer/graph/RenderGraph.h"
 
+#include "RenderGraphInternal.h"
+
 #include <nlohmann/json.hpp>
 
 #include <array>

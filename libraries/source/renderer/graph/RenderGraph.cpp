@@ -1,6 +1,7 @@
 #include "renderer/graph/RenderGraph.h"
 
 #include "RGCheck.h"
+#include "RenderGraphInternal.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/graph/RGPassTimers.h"
 #include "renderer/graph/RGTexturePool.h"
@@ -521,6 +522,11 @@ uint32_t RenderGraph::NewPass(std::string name, RGPassKind kind, RHIResourceRef<
                        .cull_reason = {},
                        .bindings = {}});
     return static_cast<uint32_t>(passes_.size() - 1);
+}
+
+void RenderGraph::SetRecord(uint32_t pass, std::function<void(RHICommandContext &)> record)
+{
+    passes_[pass].record = std::move(record);
 }
 
 void RenderGraph::Compile()
