@@ -6,6 +6,7 @@
 
 #include "MetalRHIInternal.h"
 
+#include <array>
 #include <atomic>
 
 namespace sparkle
@@ -32,9 +33,14 @@ public:
     void AttachTo(MTLRenderPassDescriptor *descriptor);
 
 private:
+    // a render pass samples the start and end of its vertex and fragment stages
+    static constexpr NSUInteger MaxSampleCount = 4;
+
     id<MTLCounterSampleBuffer> counter_sample_buffer_ = nil;
     // samples of the attached pass: a start and an end per stage
     NSUInteger sample_count_ = 0;
+    // the samples of the last resolve, which a stage that does not run leaves in the buffer
+    std::array<uint64_t, MaxSampleCount> previous_samples_{};
     std::atomic<bool> resolved_ = false;
     std::atomic<float> resolved_time_ms_ = 0.f;
 };

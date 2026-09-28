@@ -10,9 +10,6 @@
 
 namespace sparkle
 {
-// a render pass samples the start and end of its vertex and fragment stages
-constexpr NSUInteger MaxSampleCount = 4;
-
 static id<MTLCounterSet> FindTimestampCounterSet(id<MTLDevice> device)
 {
     for (id<MTLCounterSet> counter_set in device.counterSets)
@@ -25,23 +22,36 @@ static id<MTLCounterSet> FindTimestampCounterSet(id<MTLDevice> device)
     return nil;
 }
 
-// starts are at even indices and their ends follow them; a stage that did not run has no valid sample
-static float GetElapsedTimeMs(const MTLCounterResultTimestamp *samples, NSUInteger sample_count)
+// starts are at even indices and their ends follow them. a stage that did not run leaves its samples unwritten: zero in
+// a new buffer, or the timestamps of the buffer's previous run. Metal skips a compute encoder that dispatched nothing,
+// so a pass none of whose stages ran did no GPU work.
+static float GetElapsedTimeMs(const MTLCounterResultTimestamp *samples, const uint64_t *previous,
+                              NSUInteger sample_count)
 {
-    auto is_valid = [](uint64_t timestamp) { return timestamp != 0 && timestamp != MTLCounterErrorValue; };
+    auto is_written = [&](NSUInteger i) { return samples[i].timestamp != 0 && samples[i].timestamp != previous[i]; };
+    auto is_error = [&](NSUInteger i) { return samples[i].timestamp == MTLCounterErrorValue; };
 
     uint64_t start = std::numeric_limits<uint64_t>::max();
     uint64_t end = 0;
+    bool failed = false;
     for (NSUInteger i = 0; i + 1 < sample_count; i += 2)
     {
-        if (is_valid(samples[i].timestamp) && is_valid(samples[i + 1].timestamp))
+        if (is_error(i) || is_error(i + 1))
+        {
+            failed = true;
+        }
+        else if (is_written(i) && is_written(i + 1))
         {
             start = std::min(start, samples[i].timestamp);
             end = std::max(end, samples[i + 1].timestamp);
         }
     }
 
-    return start <= end ? static_cast<float>(end - start) / 1000000.0f : -1.f;
+    if (start <= end)
+    {
+        return static_cast<float>(end - start) / 1000000.0f;
+    }
+    return failed ? -1.f : 0.f;
 }
 
 MetalTimer::MetalTimer(const std::string &name) : RHITimer(name)
@@ -108,10 +118,22 @@ void MetalTimer::End(RHICommandContext &command_context)
     const NSUInteger sample_count = sample_count_;
     std::atomic<float> *time_slot = &resolved_time_ms_;
     std::atomic<bool> *resolved = &resolved_;
+    uint64_t *previous = previous_samples_.data();
     [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
       NSData *data = [buffer resolveCounterRange:NSMakeRange(0, sample_count)];
-      *time_slot =
-          data ? GetElapsedTimeMs(static_cast<const MTLCounterResultTimestamp *>(data.bytes), sample_count) : -1.f;
+      if (data)
+      {
+          const auto *samples = static_cast<const MTLCounterResultTimestamp *>(data.bytes);
+          *time_slot = GetElapsedTimeMs(samples, previous, sample_count);
+          for (NSUInteger i = 0; i < sample_count; i++)
+          {
+              previous[i] = samples[i].timestamp;
+          }
+      }
+      else
+      {
+          *time_slot = -1.f;
+      }
       *resolved = true;
     }];
 
