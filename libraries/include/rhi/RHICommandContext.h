@@ -120,7 +120,11 @@ public:
                          Vector3UInt thread_per_group);
 
     // transfers are recorded outside any pass: Vulkan forbids them inside a render pass, and Metal cannot open a
-    // blit encoder while a render or compute encoder is open
+    // blit encoder while a render or compute encoder is open. the caller orders them against other work (the graph
+    // through the accesses a pass declares), except for two barriers they record themselves: CopyBuffer waits for and
+    // is waited on by every access the destination's usages allow, and CopyImageToBuffer makes the copied data visible
+    // to the host. CopyBufferToImage and CopyImageToBuffer need the image in the TransferDst and TransferSrc layouts;
+    // BlitImage reads and writes the images in their tracked layouts.
     void CopyBuffer(const RHIBuffer *src, const RHIBuffer *dst);
 
     void CopyBufferToImage(const RHIBuffer *src, const RHIImage *dst);
