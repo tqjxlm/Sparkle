@@ -607,8 +607,7 @@ void RenderGraph::ResolveTextures()
             auto &texture = textures_[access.texture.index];
             if (passes_[pass_index].live)
             {
-                texture.first_pass = texture.first_pass.value_or(pass_index);
-                texture.last_pass = pass_index;
+                texture.lifetime.Extend(pass_index);
                 texture.usages = texture.usages | GetImageUsage(access.access.access);
             }
         }
@@ -629,7 +628,7 @@ void RenderGraph::ResolveTextures()
         for (const auto &access : passes_[pass_index].accesses)
         {
             auto &texture = textures_[access.texture.index];
-            if (texture.imported || texture.first_pass != pass_index || texture.physical)
+            if (texture.imported || texture.lifetime.first != pass_index || texture.physical)
             {
                 continue;
             }
@@ -643,13 +642,13 @@ void RenderGraph::ResolveTextures()
             if (found == physicals.end())
             {
                 texture.physical = static_cast<uint32_t>(physicals.size());
-                physicals.push_back({.first = &texture, .usages = texture.usages, .last_pass = texture.last_pass});
+                physicals.push_back({.first = &texture, .usages = texture.usages, .last_pass = texture.lifetime.last});
             }
             else
             {
                 texture.physical = static_cast<uint32_t>(found - physicals.begin());
                 found->usages = found->usages | texture.usages;
-                found->last_pass = texture.last_pass;
+                found->last_pass = texture.lifetime.last;
             }
         }
     }
@@ -690,8 +689,7 @@ void RenderGraph::ResolveBuffers()
         for (const auto &access : passes_[pass_index].buffer_accesses)
         {
             auto &buffer = buffers_[access.buffer];
-            buffer.first_pass = buffer.first_pass.value_or(pass_index);
-            buffer.last_pass = pass_index;
+            buffer.lifetime.Extend(pass_index);
             buffer.accesses = buffer.accesses | access.access;
         }
     }

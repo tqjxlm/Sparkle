@@ -193,6 +193,15 @@ nlohmann::json RenderGraph::Dump() const
         passes.push_back(std::move(dumped));
     }
 
+    const auto dump_uses = [this](nlohmann::json &dumped, const RGLifetime &lifetime, std::string usage) {
+        if (lifetime.first)
+        {
+            dumped["first_use"] = passes_[*lifetime.first].name;
+            dumped["last_use"] = passes_[lifetime.last].name;
+            dumped["usage"] = std::move(usage);
+        }
+    };
+
     auto resources = nlohmann::json::array();
     for (const auto &texture : textures_)
     {
@@ -207,12 +216,7 @@ nlohmann::json RenderGraph::Dump() const
                 dumped["height"] = texture.height;
             }
         }
-        if (texture.first_pass)
-        {
-            dumped["first_use"] = passes_[*texture.first_pass].name;
-            dumped["last_use"] = passes_[texture.last_pass].name;
-            dumped["usage"] = ToString(texture.usages);
-        }
+        dump_uses(dumped, texture.lifetime, ToString(texture.usages));
         if (texture.physical)
         {
             dumped["physical"] = *texture.physical;
@@ -224,12 +228,7 @@ nlohmann::json RenderGraph::Dump() const
     for (const auto &buffer : buffers_)
     {
         nlohmann::json dumped{{"name", buffer.name}, {"kind", "Imported"}};
-        if (buffer.first_pass)
-        {
-            dumped["first_use"] = passes_[*buffer.first_pass].name;
-            dumped["last_use"] = passes_[buffer.last_pass].name;
-            dumped["usage"] = ToString(buffer.accesses);
-        }
+        dump_uses(dumped, buffer.lifetime, ToString(buffer.accesses));
         resources.push_back(std::move(dumped));
     }
 

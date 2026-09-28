@@ -11,6 +11,19 @@
 
 namespace sparkle
 {
+// the live passes that use a resource, from the first to the last
+struct RGLifetime
+{
+    std::optional<uint32_t> first = std::nullopt;
+    uint32_t last = 0;
+
+    void Extend(uint32_t pass)
+    {
+        first = first.value_or(pass);
+        last = pass;
+    }
+};
+
 struct RenderGraph::Access
 {
     RGTexture texture;
@@ -82,8 +95,7 @@ struct RenderGraph::Texture
     uint8_t mips = 1;
     uint8_t layers = 1;
     RHIImage::ImageUsage usages = RHIImage::ImageUsage::Undefined;
-    std::optional<uint32_t> first_pass = std::nullopt;
-    uint32_t last_pass = 0;
+    RGLifetime lifetime{};
     // the transient's index among the images the pool backs this graph with
     std::optional<uint32_t> physical = std::nullopt;
 };
@@ -95,8 +107,7 @@ struct RenderGraph::Buffer
     std::variant<RHIResourceRef<RHIBuffer>, RHIResourceRef<RHITLAS>> resource;
 
     // compiled
-    std::optional<uint32_t> first_pass = std::nullopt;
-    uint32_t last_pass = 0;
+    RGLifetime lifetime{};
     RHIResourceAccess accesses{};
 
     [[nodiscard]] RHIResource *Get() const
