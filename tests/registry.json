@@ -237,6 +237,11 @@
         "app_args": ["--validation", "true", "--validate_sync", "true"]
     },
     {
+        "name": "render_graph_errors",
+        "test_case": "render_graph_errors",
+        "description": "One mistake per render graph error, with errors thrown instead of aborting: declarations, imports, compile-time checks, and recording checks including bindings no pipeline has and graph resources a pipeline holds that the pass did not declare. Each must fail with its expected message."
+    },
+    {
         "name": "render_graph_pass_timing",
         "test_case": "render_graph_pass_timing",
         "description": "Render graph raster and compute passes dump their GPU time once their frame slot returns, and none without device support."

@@ -24,6 +24,7 @@ vulkan_image_subresources,x,,x,,,x
 pass_timestamps,,x,x,,,x
 render_graph_compile,,x,,,,
 render_graph_sync_validation,,,,,,x
+render_graph_errors,,x,,,,x
 render_graph_pass_timing,,x,x,,,x
 cpu_graph_shape,,x,,,,x
 gpu_graph_shape,,,,,,x
