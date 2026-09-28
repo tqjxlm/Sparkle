@@ -28,7 +28,7 @@ public:
     // starts a frame drawn into the open rendering of `info`, whose extent is the display size
     virtual void BeginFrame(const RHIRenderingInfo &info) = 0;
 
-    virtual void Render(RHICommandContext *command_context) = 0;
+    virtual void Render(RHICommandContext &command_context) = 0;
 
     virtual void Init() = 0;
 

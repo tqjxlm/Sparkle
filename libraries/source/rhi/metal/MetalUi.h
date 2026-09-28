@@ -15,7 +15,7 @@ public:
 
     ~MetalUiHandler() override;
 
-    void Render(RHICommandContext *command_context) override;
+    void Render(RHICommandContext &command_context) override;
 
     void BeginFrame(const RHIRenderingInfo &info) override;
 
