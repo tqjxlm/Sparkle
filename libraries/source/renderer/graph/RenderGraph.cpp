@@ -403,7 +403,8 @@ RHICommandContext &RGPassContext::GetNativeContext() const
 }
 
 RenderGraph::RenderGraph(RGTexturePool &pool, const RenderConfig &config)
-    : pool_(pool), resolution_(config.GetResolution()), cull_(config.render_graph_cull)
+    : pool_(pool), resolution_(config.GetResolution()), cull_(config.render_graph_cull),
+      full_barriers_(config.render_graph_full_barriers)
 {
 }
 
@@ -980,17 +981,20 @@ void RenderGraph::BuildRenderingInfos()
 }
 
 // the graph writes each pass's planned state through to the tracked state before recording the pass, so foreign code
-// and the next frame start from it
+// and the next frame start from it. with full barriers, each pass also waits for every access of the earlier passes.
 void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *timers)
 {
     RGCheck(compiled_ && !executed_, "the graph executes once, after compiling");
     executed_ = true;
 
+    RHIResourceAccess earlier_accesses{};
     for (auto &pass : passes_ | std::views::filter(&Pass::live))
     {
+        RHIResourceAccess pass_accesses{};
         std::vector<RHIImageBarrier> barriers;
         for (const auto &access : pass.accesses)
         {
+            pass_accesses = pass_accesses | access.access;
             barriers.insert(barriers.end(), access.barriers.begin(), access.barriers.end());
             auto *image = textures_[access.texture.index].image;
             auto state = access.states.begin();
@@ -1001,12 +1005,18 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
         std::vector<RHIMemoryBarrier> memory_barriers;
         for (const auto &access : pass.buffer_accesses)
         {
+            pass_accesses = pass_accesses | access.access;
             if (access.barrier)
             {
                 memory_barriers.push_back(*access.barrier);
             }
             buffers_[access.buffer].GetTracked().SetTrackedAccess(access.state);
         }
+        if (full_barriers_ && earlier_accesses.access != RHIAccess::None && pass_accesses.access != RHIAccess::None)
+        {
+            memory_barriers.push_back({.from = earlier_accesses, .to = pass_accesses});
+        }
+        earlier_accesses = earlier_accesses | pass_accesses;
 
         command_context.SetBindings(pass.bindings);
         RHIPass *timed_pass = nullptr;

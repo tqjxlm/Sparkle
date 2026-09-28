@@ -48,6 +48,7 @@ public:
         config.image_height = 32;
         config.render_scale = 0.5f;
         config.render_graph_cull = true;
+        config.render_graph_full_barriers = false;
 
         task_pending_.store(true, std::memory_order_release);
         const bool last = step_ + 1 == Steps.size();
@@ -318,6 +319,14 @@ private:
         Expect(pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 255 && pixel[3] == 255,
                "the texture copied through the buffer is read back");
         readback->UnLock();
+    }
+
+    // the round trip with full barriers, which add a memory barrier before every pass but change no plan
+    void FullBarriers(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto full_barriers = config;
+        full_barriers.render_graph_full_barriers = true;
+        BufferRoundTrip(rhi, full_barriers);
     }
 
     // a screen quad pipeline created from an attachment signature, with nothing bound to sample, draws a cleared
@@ -790,18 +799,13 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 12> Steps{
-        &RenderGraphCompileTest::ClearSampleReadback,
-        &RenderGraphCompileTest::DeclaredBinding,
-        &RenderGraphCompileTest::BufferRoundTrip,
-        &RenderGraphCompileTest::Subresources,
-        &RenderGraphCompileTest::CulledBranch,
-        &RenderGraphCompileTest::IntraFrameReuse,
-        &RenderGraphCompileTest::ImportedSeeding,
-        &RenderGraphCompileTest::LoadStore,
-        &RenderGraphCompileTest::FullyOverwritesReadWrite,
-        &RenderGraphCompileTest::NextFrameReuse,
-        &RenderGraphCompileTest::NextFrameReuse,
+    static constexpr std::array<Step, 13> Steps{
+        &RenderGraphCompileTest::ClearSampleReadback, &RenderGraphCompileTest::DeclaredBinding,
+        &RenderGraphCompileTest::BufferRoundTrip,     &RenderGraphCompileTest::FullBarriers,
+        &RenderGraphCompileTest::Subresources,        &RenderGraphCompileTest::CulledBranch,
+        &RenderGraphCompileTest::IntraFrameReuse,     &RenderGraphCompileTest::ImportedSeeding,
+        &RenderGraphCompileTest::LoadStore,           &RenderGraphCompileTest::FullyOverwritesReadWrite,
+        &RenderGraphCompileTest::NextFrameReuse,      &RenderGraphCompileTest::NextFrameReuse,
         &RenderGraphCompileTest::ReleaseUnused,
     };
 

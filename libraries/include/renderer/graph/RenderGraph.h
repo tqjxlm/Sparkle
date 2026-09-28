@@ -560,6 +560,7 @@ private:
     RGTexturePool &pool_;
     RenderResolution resolution_;
     bool cull_;
+    bool full_barriers_;
     std::vector<Pass> passes_;
     std::vector<Texture> textures_;
     std::vector<Buffer> buffers_;
