@@ -156,7 +156,7 @@ Correctness:
 * **Done** (swap chain images start with a `Present` access, so their first use chains to the acquire as well). **V2 [low, P] Barriers from `Present` don't wait for the acquire.** `RHIAccess::Present` has no stage mapping (`VulkanCommandContext.cpp:42-74`), so a barrier from Present gets `srcStage = NONE` and doesn't chain to the acquire wait. Only the graph works around it (`RenderGraph.cpp:850-856` adds the attachment's own access). Action: map a Present *source* to `COLOR_ATTACHMENT_OUTPUT` in the RHI and drop the graph special case.
 * **V3 [low, P] Mid-frame submit nulls the frame context.** `SubmitCommandBuffer` while the frame context is active sets `command_context_ = nullptr` (`VulkanContext.cpp:719-733`). This pre-exists, and no caller does it today. Action: assert it.
 * **V4 [low, P] Recompiles keep stale pipelines.** The per-signature PSO cache is never invalidated (`VulkanPipelineState.cpp:383-391`): a second `Compile()` after changing blend/depth keeps the old pipelines and leaks the old layout. No caller recompiles. Action: clear the cache in `Compile()`, or assert single compile.
-* **V5 [low, P] Pass state is not asserted.** `DrawMesh`/`DispatchCompute` don't assert an open rendering/compute pass (`RHICommandContext.cpp:85-101`). `BeginVulkanRendering` doesn't check attachments are in their attachment layouts (`VulkanRenderPass.cpp:16-72`), though RHICommandContext.h:30 states that contract. Action: add both asserts in common code.
+* **Done.** **V5 [low, P] Pass state is not asserted.** `DrawMesh`/`DispatchCompute` don't assert an open rendering/compute pass (`RHICommandContext.cpp:85-101`). `BeginVulkanRendering` doesn't check attachments are in their attachment layouts (`VulkanRenderPass.cpp:16-72`), though RHICommandContext.h:30 states that contract. Action: add both asserts in common code.
 * **V6 [low, C, pre-existing] TLAS instance-buffer bugs.** `VulkanRayTracing.cpp:144-152`:
   * `RecreateBuffer` rounds the size up to a power of two, and `UploadImmediate` then copies `attribute_.size` bytes from `instances`, reading past the end of the vector.
   * `VulkanTLAS::Update` writes the host-visible instance buffer while the previous frame's refit may still read it.
@@ -166,7 +166,7 @@ Correctness:
 Surgical / dead code:
 
 * **Done.** **V7 [med, C] Unused capabilities enable real extensions.** `SupportsPixelLocalRead`/`SupportsUnifiedImageLayouts` have no callers (`RHI.h:118-122`), yet `VulkanContext.cpp:945-968, 1025-1046` enable `dynamic_rendering_local_read` and `unified_image_layouts` on every device that has them, which is driver risk for no benefit. Action: remove until Phase 3 (with M6).
-* **V8 [low, C] Leftover declarations.**
+* **Done** (`TransientAttachment` stays: Metal uses it; the `VulkanRHI.h` reorder no longer exists). **V8 [low, C] Leftover declarations.**
   * `RHIPipelineStage::DrawIndirect/VertexInput/VertexShader/EarlyZ/LateZ` are referenced only by the legacy translation switch, and `TransitionRequest::discard` only by tests (`RHIImage.h:18-31`).
   * `ImageUsage::TransientAttachment` has no Vulkan user left (`RHIImage.h:117`).
   * The `msaa` config and `VulkanContext::msaa_samples_` are write-only (`RHIConfig.cpp:22`, `VulkanContext.cpp:792`).
@@ -183,25 +183,25 @@ API scope:
   * `RHIImage::ReadToMemory`, `IBLPass::Finalize`.
 
   The legacy `Transition` virtual is the main reason `GetCommandContext()` survives. Action: `Transition` and uploads take a context; then `RHIContext::GetCommandContext()` can shrink to frame setup.
-* **V10 [low] Members that could be private or go.**
+* **Done** (`VulkanRenderPass.{h,cpp}` folded away). **V10 [low] Members that could be private or go.**
   * `RHIPipelineState::ApplyBinding` (one caller) → private + friend.
   * `RHIBuffer::GetUsageAccess` → protected.
   * `RHICommandContext::DrewOrDispatched` is `!GetPipelines().empty()` with one caller → drop.
   * `BeginVulkanRendering` → static in `VulkanCommandContext.cpp`.
   * `GetVkPipelineRenderingCreateInfo` → next to the PSO code.
   * `VulkanRenderPass.{h,cpp}` no longer holds a render pass → rename or fold.
-* **Partly done** (`RunDispatches` takes a reference; `RHIUiHandler::Render` remains). **V11 [low] Pointer vs reference contexts.** `RHIUiHandler::Render(RHICommandContext *)` and `RHINrdBackend::RunDispatches(RHICommandContext *, …)` take pointers, while timers and `RecordBuild` take references. Action: references everywhere.
-* **V12 [low] Copy and External passes get no debug label**, because `BeginDebugLabel` is protected. That misses the "labels always on" goal for `BuildTLAS`, `Upload` and `Readback`. Action: let the graph label every pass.
-* **V13 [low] Compute passes take barriers differently from raster passes.** `BeginRendering` takes the barrier batch, but compute calls `Barrier` after `BeginComputePass` (`RenderGraph.cpp:999-1000`). Action: `BeginComputePass(pass, barriers)`.
+* **Done.** **V11 [low] Pointer vs reference contexts.** `RHIUiHandler::Render(RHICommandContext *)` and `RHINrdBackend::RunDispatches(RHICommandContext *, …)` take pointers, while timers and `RecordBuild` take references. Action: references everywhere.
+* **Done** (Metal's label is still a no-op outside encoders). **V12 [low] Copy and External passes get no debug label**, because `BeginDebugLabel` is protected. That misses the "labels always on" goal for `BuildTLAS`, `Upload` and `Readback`. Action: let the graph label every pass.
+* **Done.** **V13 [low] Compute passes take barriers differently from raster passes.** `BeginRendering` takes the barrier batch, but compute calls `Barrier` after `BeginComputePass` (`RenderGraph.cpp:999-1000`). Action: `BeginComputePass(pass, barriers)`.
 
 Reuse:
 
-* **V14 [low]**
+* **Done.** **V14 [low]**
   * The conservative "usage → X → usage" buffer barrier pair is written twice (`VulkanBuffer.cpp:90-100`, `RHIBuffer.cpp:100-112`).
   * `Barrier({}, std::span(&b, 1))` appears 7 times: add a single-barrier overload.
   * `VulkanNrdBackend.cpp:333-366` hand-builds `VkImageMemoryBarrier2`/`VkDependencyInfo`: share the `BarrierInternal` helper.
   * Headless and windowed frame begin/end are duplicated (`VulkanContext.cpp:429-438/504-510`, `518-521/538-541`).
-* **V15 [low] Copy synchronization is inconsistent and undocumented.**
+* **Done** (documented the current rule; "copies record nothing" needs a HostRead graph access first). **V15 [low] Copy synchronization is inconsistent and undocumented.**
   * `CopyBuffer` self-synchronizes with usage barriers.
   * `CopyImageToBuffer` adds only HostRead.
   * `CopyBufferToImage`/`BlitImage` add none.
@@ -211,11 +211,11 @@ Reuse:
 
 Modern C++ / comments:
 
-* **V16 [low] Modern C++.**
+* **Done.** **V16 [low] Modern C++.**
   * Pointer+count parameters → `std::span` (`VulkanCommandContext.h:48,117`).
   * `GetSync1Stages` narrows silently: assert on unhandled high bits (`VulkanCommandContext.cpp:92`).
   * The one-shot scope's raw `new`/`delete` → `std::optional` (`VulkanContext.cpp:712`, pre-existing).
-* **V17 [low] Comments.**
+* **Done.** **V17 [low] Comments.**
   * The acquire comment argues a counterfactual (`VulkanContext.cpp:452-454`); one line suffices.
   * `VulkanRenderPass.h:43` repeats `RHIRenderingInfo.h:29`.
   * "universal queue" should say graphics queue (`VulkanContext.h:115`).
@@ -253,7 +253,7 @@ Design conformance:
 
 Surgical / dead code:
 
-* **R8 [low, C] Leftovers.**
+* **Done** (`CPURenderer::Update` is inline: the base declares it pure virtual). **R8 [low, C] Leftovers.**
   * Orphan includes: `CPURenderer.h:8` (`rhi/RHIImage.h`), `ForwardRenderer.cpp:10` (`CameraRenderProxy.h`).
   * `CPURenderer::Update` is now an empty out-of-line body (`CPURenderer.cpp:76-78`).
   * `ScreenQuadPass::SampleInput` is virtual only because of `ToneMappingPass`'s table type, and `DirectionalLightingPass` inherits it unused and hides the base `AddTo` (`ScreenQuadPass.h:61`, `DirectionalLightingPass.h:22`). Acceptable; composition would be cleaner.
@@ -297,14 +297,14 @@ Encoder lifetime, descriptor lowering, the per-signature PSO cache, TLAS staging
 * **Done** (the test compares a pass recorded twice with one recorded once: MoltenVK measures 0 for both). **M1 [med, C] A pass timed twice in one command buffer reports 0 ms.** `MetalTimer.mm:112-138`: each `End` adds a completed handler to the same command buffer. Handler 1 computes the time and stores the samples in `previous_samples_`; handler 2 then finds every sample equal to `previous`, treats it as unwritten, and overwrites the result with 0. This breaks RHIPass's "reports its last run" contract and affects `RGPassTimers` passes that share a name. `pass_timestamps` records a pass twice per frame but accepts 0, so it hides the bug. A second handler can also re-set `resolved_` after `TryGetResult` ran (P). Action: register one handler per command buffer (remember the pending buffer); make the test reject 0 on devices that support timestamps.
 * **Done** (`AddTo` checks the inputs and returns the accumulator). **M2 [low, P] MetalFX output can stay unwritten for a frame.** `MetalFxDenoiser.mm:473-506, 538-542`: `AddTo` chooses and imports the displayed output at build time. If `Encode` then fails (`BindInputs` fails, no scaler), it only clears `ready`, and tone mapping samples stale contents. Action: decide feasibility in `AddTo`, or fall back to the accumulator when the encode fails.
 * **Done.** **M3 [low, C] Empty acceleration-structure encoder.** `MetalRayTracing.mm:162-165, 205`: `Build()` opens and ends an encoder even when no BLAS is dirty. Action: open it only when there is BLAS work.
-* **Partly done** (MetalFX now uses its pass context; `MetalRayTracing.mm` and `MetalRHI.mm` remain). **M4 [low, P] Null command context dereferenced.** `MetalRayTracing.mm:162`, `MetalRHI.mm:131`, `MetalFxDenoiser.mm:521` dereference `GetCommandContext()`, which is null outside a command buffer. No current path reaches this, and the old code silently messaged nil. Action: assert, or take the context as a parameter (see M9).
-* **M5 [low, C] Undocumented Metal requirement.** Metal asserts that an attachment signature is set before `Compile` (`MetalPipelineState.mm:355`), while `RHIPIpelineState.h` documents it as optional. Metal also ignores `samples` (no `rasterSampleCount`); this is harmless while the graph is single-sampled. Action: state the requirement in the common header, or make Vulkan require it too.
+* **Done** (asserts where no pass context is available). **M4 [low, P] Null command context dereferenced.** `MetalRayTracing.mm:162`, `MetalRHI.mm:131`, `MetalFxDenoiser.mm:521` dereference `GetCommandContext()`, which is null outside a command buffer. No current path reaches this, and the old code silently messaged nil. Action: assert, or take the context as a parameter (see M9).
+* **Done** (common `Compile` asserts a signature for graphics pipelines). **M5 [low, C] Undocumented Metal requirement.** Metal asserts that an attachment signature is set before `Compile` (`MetalPipelineState.mm:355`), while `RHIPIpelineState.h` documents it as optional. Metal also ignores `samples` (no `rasterSampleCount`); this is harmless while the graph is single-sampled. Action: state the requirement in the common header, or make Vulkan require it too.
 * **Done.** **M6 [low, C] Speculative API.** `SupportsPixelLocalRead` and `SupportsUnifiedImageLayouts` (`MetalRHI.mm:85-89`, `MetalRHI.h:24-27`, and the Vulkan and common counterparts) have no callers. Metal returning false for unified layouts is also semantically backwards. Action: delete until Phase 3 needs them.
 * **Done.** **M7 [low] Backend-only calls are public.** `MetalCommandContext::Begin/End` (`MetalCommandContext.h:29-31`) are called only by `MetalContext`. Action: make them private and friend `MetalContext`.
 * **Done.** **M8 [low] Lazy cache for a constructor-time fact.** The pass-timestamp support flag (`MetalContext.mm:12-19`) is a lazily cached `std::optional<bool>`, although it can be computed once in the constructor. Action: compute it there; the getter becomes const.
 * **Done.** **M9 [low, C] MetalFX reaches for the global context.** `MetalFxDenoiser::Encode` takes `const RGPassContext &` and then calls the global `GetCommandContext()` (`MetalFxDenoiser.h:31`, `.mm:521`). Action: take `RGExternalContext &` and use its `GetCommandContext()`.
-* **M10 [low] Duplicated signature cache.** The find-or-emplace pipeline cache is written twice: `MetalPipelineState.mm:398-414` and `VulkanPipelineState.cpp:218-226`. Action: optional shared helper.
-* **M11 [low] Vague comment.** `MetalImage.h:33`, "the state is still tracked to evolve as on Vulkan". Action: "tracks the state the graph plans from; records nothing".
+* **Closed** (a shared helper saves ~4 lines per backend and needs uncompiled Metal edits). **M10 [low] Duplicated signature cache.** The find-or-emplace pipeline cache is written twice: `MetalPipelineState.mm:398-414` and `VulkanPipelineState.cpp:218-226`. Action: optional shared helper.
+* **Done.** **M11 [low] Vague comment.** `MetalImage.h:33`, "the state is still tracked to evolve as on Vulkan". Action: "tracks the state the graph plans from; records nothing".
 
 ## 6. Docs
 
