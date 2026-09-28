@@ -1008,11 +1008,11 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
         case RGPassKind::External:
             command_context.Barrier(barriers, memory_barriers);
             pass.record(command_context);
-            CheckExternalContract(pass);
             break;
         default:
             UnImplemented(pass.kind);
         }
+        CheckDeclaredStates(pass);
         CheckBindingsApplied(pass, command_context);
         CheckBoundResourcesDeclared(pass, command_context);
         command_context.SetBindings({});
@@ -1123,7 +1123,8 @@ void RenderGraph::CheckBindingDeclared(const Pass &pass, const RHIShaderResource
     }
 }
 
-void RenderGraph::CheckExternalContract(const Pass &pass) const
+// a pass that transitions a declared image behind the graph's back would desync the plan from the tracked state
+void RenderGraph::CheckDeclaredStates(const Pass &pass) const
 {
     for (const auto &access : pass.accesses)
     {
@@ -1132,8 +1133,8 @@ void RenderGraph::CheckExternalContract(const Pass &pass) const
         ForEachSubresource(access.subresources, [&pass, &texture, &planned](unsigned mip, unsigned layer) {
             const auto state = texture.image->GetState(mip, layer);
             RGCheck(state.layout == planned->layout && planned->access.Contains(state.access),
-                    "external pass {} left {} in layout {} with accesses beyond its declaration", pass.name,
-                    texture.name, Enum2Str(state.layout));
+                    "pass {} left {} in layout {} with accesses beyond its declaration", pass.name, texture.name,
+                    Enum2Str(state.layout));
             planned++;
         });
     }

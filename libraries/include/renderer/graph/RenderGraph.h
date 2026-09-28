@@ -660,7 +660,7 @@ private:
 
     void InferStoreOps();
 
-    void CheckExternalContract(const Pass &pass) const;
+    void CheckDeclaredStates(const Pass &pass) const;
 
     void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const;
 
