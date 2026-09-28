@@ -565,6 +565,11 @@ void RenderFramework::DrawUi()
 void RenderFramework::DrawGraphUi()
 {
     TaskManager::RunInRenderThread([this]() {
+        if (!renderer_)
+        {
+            return;
+        }
+
         renderer_->RequestGraphDump([this](const nlohmann::json &dump) {
             auto published = std::make_shared<const nlohmann::json>(dump);
             std::scoped_lock<std::mutex> lock(graph_dump_mutex_);
