@@ -62,6 +62,12 @@ class RayTracingComputeShader : public RHIShaderInfo
     };
 };
 
+static constexpr RHISampler::SamplerAttribute MaterialTextureSampler{
+    .address_mode = RHISampler::SamplerAddressMode::Repeat,
+    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
     : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool),
@@ -84,10 +90,6 @@ void GPURenderer::InitRenderResources()
     scene_texture_ = rhi_->CreateImage(
         {
             .format = PixelFormat::RGBAFloat,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
             .width = resolution_.scene.x(),
             .height = resolution_.scene.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
@@ -101,9 +103,7 @@ void GPURenderer::InitRenderResources()
 
     InitSceneRenderResources();
 
-    InitPostChain(ToneMappedScreenDesc);
-
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, screen_desc_.format);
+    InitPostChain(ToneMappingPass::ScreenFormat, PostChain::ScreenPass::ToneMapping);
     displayed_image_ = scene_texture_;
 
     performance_history_.resize(rhi_->GetMaxFramesInFlight());
@@ -114,13 +114,12 @@ void GPURenderer::InitRenderResources()
     compute_pass_ = rhi_->CreateComputePass("GPURendererComputePass", true);
 }
 
-void GPURenderer::Render()
+RGTexture GPURenderer::BuildGraph(RenderGraph &graph)
 {
-    PROFILE_SCOPE("GPURenderer::Render");
+    PROFILE_SCOPE("GPURenderer::BuildGraph");
 
     auto *camera = scene_render_proxy_->GetCamera();
 
-    RenderGraph graph(graph_texture_pool_, render_config_);
     const auto accumulator = graph.Import("Accumulator", scene_texture_);
     const auto tlas = graph.Import("TLAS", tlas_);
 
@@ -187,7 +186,7 @@ void GPURenderer::Render()
         if (gbuffer_write_this_frame_ && denoiser_inputs)
         {
             tone_mapping_input = frame_denoiser_->AddTo(graph, *denoiser_inputs);
-            displayed_image_ = frame_denoiser_->GetOutput();
+            displayed_image_ = tone_mapping_input == accumulator ? scene_texture_ : frame_denoiser_->GetOutput();
         }
         else
         {
@@ -200,9 +199,7 @@ void GPURenderer::Render()
         tone_mapping_input = graph.Import("DenoiserOutput", displayed_image_);
     }
 
-    AddPostChain(graph, tone_mapping_input, tone_mapping_pass_.get());
-
-    ExecuteGraph(graph);
+    return tone_mapping_input;
 }
 
 GPURenderer::~GPURenderer() = default;
@@ -255,21 +252,15 @@ void GPURenderer::Update()
             auto sky_map = sky_light->GetSkyMap();
 
             cs_resources->skyMap().BindResource(sky_map->GetDefaultView(rhi_));
-            cs_resources->skyMapSampler().BindResource(sky_map->GetSampler());
         }
         else
         {
             auto dummy_texture = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
                 .format = PixelFormat::RGBAFloat16,
-                .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
                 .usages = RHIImage::ImageUsage::Texture,
                 .type = RHIImage::ImageType::Image2DCube,
             });
             cs_resources->skyMap().BindResource(dummy_texture->GetDefaultView(rhi_));
-            cs_resources->skyMapSampler().BindResource(dummy_texture->GetSampler());
         }
     }
 
@@ -430,8 +421,6 @@ void GPURenderer::Update()
     }
     uniform_buffer_->Upload(rhi_, &ubo);
 
-    tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
     spp_logger_.Tick();
 
     Logger::LogToScreen("Accumulation", fmt::format("Accumulated samples: {}", camera->GetCumulatedSampleCount()));
@@ -476,29 +465,16 @@ void GPURenderer::InitSceneRenderResources()
     // the dummies the tracer binds until the path trace pass declares allocated inputs
     BindDenoiserInputs();
 
-    auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::R8G8B8A8Srgb,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-        .usages = RHIImage::ImageUsage::Texture,
-    });
-
     auto dummy_texture_cube = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
         .usages = RHIImage::ImageUsage::Texture,
         .type = RHIImage::ImageType::Image2DCube,
     });
 
     cs_resources->skyMap().BindResource(dummy_texture_cube->GetDefaultView(rhi_));
-    cs_resources->skyMapSampler().BindResource(dummy_texture_cube->GetSampler());
+    cs_resources->skyMapSampler().BindResource(rhi_->GetSampler(SkyRenderProxy::SkyMapSampler));
 
-    cs_resources->materialTextureSampler().BindResource(dummy_texture_2d->GetSampler());
+    cs_resources->materialTextureSampler().BindResource(rhi_->GetSampler(MaterialTextureSampler));
 
     BindBindlessResources();
 }

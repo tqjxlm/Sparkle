@@ -2,7 +2,6 @@
     "bounce": 4,
     "max_spp": 2048,
     "pipeline": "forward",
-    "msaa": 1,
     "progress": true,
     "rhi": "vulkan",
     "scene": "",

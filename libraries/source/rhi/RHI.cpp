@@ -125,16 +125,9 @@ RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const s
     attribute.height = upload_image->GetHeight();
     attribute.mip_levels = static_cast<uint8_t>(upload_image->GetMipCount());
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
-    // the raster passes bind one sampler for a whole material, so the LOD range must
-    // not derive from any single image's mip count
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                         .max_lod = RHISampler::SamplerAttribute::UnclampedLod};
 
     auto rhi_image = CreateImage(attribute, name);
-    rhi_image->Upload(upload_image->GetRawData());
+    rhi_image->Upload(*GetCommandContext(), upload_image->GetRawData());
 
     return rhi_image;
 }
@@ -169,10 +162,6 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
     attribute.height = image->GetHeight();
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
     attribute.type = RHIImage::ImageType::Image2DCube;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
 
     auto rhi_image = CreateImage(attribute, name);
 
@@ -181,7 +170,7 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
     {
         data[i] = upload_faces[i]->GetRawData();
     }
-    rhi_image->UploadFaces(data);
+    rhi_image->UploadFaces(*GetCommandContext(), data);
 
     return rhi_image;
 }
@@ -260,6 +249,18 @@ void RHIContext::EndFrame()
     frame_index_ = (frame_index_ + 1) % max_frames_in_flight_;
 
     total_frame_++;
+}
+
+RHICommandContext &RHIContext::BeginCommandBuffer()
+{
+    ASSERT_F(!frame_active_, "BeginCommandBuffer inside a frame; record through the frame's context");
+    return BeginCommandBufferInternal();
+}
+
+RHICommandContext *RHIContext::GetCommandContext()
+{
+    ASSERT_F(!executing_graph_, "a graph pass records through its pass context, not RHIContext::GetCommandContext");
+    return GetCommandContextInternal();
 }
 
 void RHIContext::RecreateBuffer(RHIBuffer::Attribute attribute, const std::string &name,
@@ -440,7 +441,8 @@ RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute
     // a dummy never gets per-use transitions, so it rests in the one layout that satisfies all
     // bindings it can appear in: General when it can be bound as storage, Read otherwise
     const bool has_uav_usage = attribute.usages & RHIImage::ImageUsage::UAV;
-    texture->Transition({.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
+    texture->Transition(*GetCommandContext(),
+                        {.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
                          .after_stage = RHIPipelineStage::Top,
                          .before_stage = RHIPipelineStage::Bottom});
     dummy_textures_.emplace(hash, texture);

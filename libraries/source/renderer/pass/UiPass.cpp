@@ -20,7 +20,7 @@ void UiPass::AddTo(RenderGraph &graph, RGTexture screen) const
         return [this](RGRasterContext &context) {
             auto &command_context = context.GetNativeContext();
             ui_handler_->BeginFrame(command_context.GetRenderingInfo());
-            ui_handler_->Render(&command_context);
+            ui_handler_->Render(command_context);
         };
     });
 }

@@ -19,6 +19,11 @@ RHIPass::RHIPass(RHIContext *rhi, bool need_timestamp, const std::string &name)
     }
 }
 
+float RHIPass::GetExecutionTime() const
+{
+    return GetExecutionTime(rhi_->GetFrameIndex());
+}
+
 RHITimer *RHIPass::SelectTimer()
 {
     if (timers_.empty())

@@ -79,6 +79,18 @@ TestCase::Result TestCase::Tick(AppFramework &app)
     return result;
 }
 
+void TestCase::Expect(bool condition, const std::string &what)
+{
+    if (condition)
+    {
+        Log(Info, "{}: OK - {}", GetName(), what);
+        return;
+    }
+
+    Log(Error, "{}: FAILED - {}", GetName(), what);
+    failed_.store(true, std::memory_order_release);
+}
+
 void TestCase::EnforceConfig(const std::string &config_name, bool value) const
 {
     EnforceTestConfig(*this, config_name, value);

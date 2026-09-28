@@ -115,12 +115,6 @@ public:
     virtual void InitRenderResources() = 0;
     virtual bool SupportsHardwareRayTracing() = 0;
 
-    // draws in a render pass can read color attachments written earlier in the same pass at the same pixel
-    virtual bool SupportsPixelLocalRead() = 0;
-
-    // the general image layout performs as well as the specialized ones for every access
-    virtual bool SupportsUnifiedImageLayouts() = 0;
-
     // GPU timestamps can measure render and compute passes (see RHIPass)
     virtual bool SupportsPassTimestamps() = 0;
 
@@ -131,6 +125,9 @@ public:
     // whether the device can sample the format with linear filtering. block-compressed
     // textures fall back to a CPU decode and an uncompressed upload when unsupported
     virtual bool SupportsSampledFormat(PixelFormat format) = 0;
+
+    // whether a sampler with linear filtering may sample an image of the format
+    virtual bool SupportsLinearFiltering(PixelFormat format) = 0;
 
     // errors the API validation layer has reported so far; nullopt when no validation layer is active
     [[nodiscard]] virtual std::optional<unsigned> GetValidationErrorCount() const
@@ -149,13 +146,39 @@ public:
         return 64;
     }
 
-    // records outside a frame: BeginCommandBuffer opens a one-shot command buffer, SubmitCommandBuffer submits it
-    virtual void BeginCommandBuffer() = 0;
+    // records outside a frame: BeginCommandBuffer opens a one-shot command buffer and returns the context recording it,
+    // SubmitCommandBuffer submits it
+    RHICommandContext &BeginCommandBuffer();
     virtual void SubmitCommandBuffer() = 0;
+
+    // while it lives, a render graph executes and GetCommandContext asserts
+    class GraphExecutionScope
+    {
+    public:
+        explicit GraphExecutionScope(RHIContext &rhi) : rhi_(rhi)
+        {
+            rhi_.executing_graph_ = true;
+        }
+
+        ~GraphExecutionScope()
+        {
+            rhi_.executing_graph_ = false;
+        }
+
+        GraphExecutionScope(const GraphExecutionScope &) = delete;
+        GraphExecutionScope &operator=(const GraphExecutionScope &) = delete;
+
+    private:
+        RHIContext &rhi_;
+    };
 
     // the context recording the open command buffer (the frame's, or the one BeginCommandBuffer opened); null when
     // none is open. a backend may reuse one context object across command buffers.
-    virtual RHICommandContext *GetCommandContext() = 0;
+    // graph passes never call it: they record through their pass context, and it asserts while a graph executes. it
+    // serves frame setup handing the frame's context to the graph, and resource creation and updates issued outside
+    // the graph (texture uploads and initial layouts, RHIBuffer::Upload and PartialUpdate), which record before the
+    // graph in the frame, or in a BeginCommandBuffer scope.
+    RHICommandContext *GetCommandContext();
 
     virtual void WaitForDeviceIdle() = 0;
 
@@ -287,6 +310,8 @@ protected:
     [[nodiscard]] virtual bool BeginFrameInternal() = 0;
     virtual void EndFrameInternal() = 0;
     virtual void CleanupInternal() = 0;
+    virtual RHICommandContext *GetCommandContextInternal() = 0;
+    virtual RHICommandContext &BeginCommandBufferInternal() = 0;
     virtual RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute,
                                                      const std::string &name) = 0;
     virtual RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) = 0;
@@ -327,6 +352,7 @@ private:
     unsigned frame_index_ = 0;
     bool frame_active_ = false;
     bool is_deleting_deferred_resources_ = false;
+    bool executing_graph_ = false;
 
     struct DeferredDeletion
     {

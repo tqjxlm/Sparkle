@@ -175,16 +175,6 @@ bool VulkanRHI::SupportsHardwareRayTracing()
     return context->SupportsHardwareRayTracing();
 }
 
-bool VulkanRHI::SupportsPixelLocalRead()
-{
-    return context->SupportsDynamicRenderingLocalRead();
-}
-
-bool VulkanRHI::SupportsUnifiedImageLayouts()
-{
-    return context->SupportsUnifiedImageLayouts();
-}
-
 bool VulkanRHI::SupportsPassTimestamps()
 {
     return context->GetTimestampValidBits() > 0;
@@ -207,6 +197,13 @@ bool VulkanRHI::HasPhysicalGpu()
     return properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU;
 }
 
+static VkFormatFeatureFlags GetOptimalTilingFeatures(PixelFormat format)
+{
+    VkFormatProperties properties;
+    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
+    return properties.optimalTilingFeatures;
+}
+
 bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
 {
     if (format == PixelFormat::ASTC4x4HDR && !context->SupportsAstcHdr())
@@ -227,13 +224,15 @@ bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
         }
     }
 
-    VkFormatProperties properties;
-    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
-
     constexpr VkFormatFeatureFlags Required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
                                               VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
                                               VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-    return (properties.optimalTilingFeatures & Required) == Required;
+    return (GetOptimalTilingFeatures(format) & Required) == Required;
+}
+
+bool VulkanRHI::SupportsLinearFiltering(PixelFormat format)
+{
+    return (GetOptimalTilingFeatures(format) & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
 }
 
 uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const
@@ -297,10 +296,6 @@ void VulkanRHI::CreateBackBuffer()
         attribute.mip_levels = 1;
         attribute.msaa_samples = 1;
         attribute.usages = RHIImage::ImageUsage::ColorAttachment;
-        attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 
         headless_back_buffer_ = CreateImage(attribute, "HeadlessBackBuffer");
     }
@@ -330,17 +325,18 @@ RHIResourceRef<RHIBuffer> VulkanRHI::CreateBuffer(const RHIBuffer::Attribute &at
     return CreateResource<VulkanBuffer>(attribute, name);
 }
 
-void VulkanRHI::BeginCommandBuffer()
+RHICommandContext &VulkanRHI::BeginCommandBufferInternal()
 {
     context->BeginCommandBuffer();
-};
+    return *context->GetCommandContext();
+}
 
 void VulkanRHI::SubmitCommandBuffer()
 {
     context->SubmitCommandBuffer();
 }
 
-RHICommandContext *VulkanRHI::GetCommandContext()
+RHICommandContext *VulkanRHI::GetCommandContextInternal()
 {
     return context->GetCommandContext();
 }

@@ -18,6 +18,9 @@ class VulkanDescriptorSetManager;
 class VulkanContext
 {
 public:
+    // the stage at which a frame's submit waits for its acquired swap chain image
+    static constexpr VkPipelineStageFlags2 AcquireWaitStage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
     explicit VulkanContext(VulkanRHI *rhi);
 
     ~VulkanContext();
@@ -98,22 +101,12 @@ public:
         return supports_astc_hdr_;
     }
 
-    [[nodiscard]] bool SupportsDynamicRenderingLocalRead() const
-    {
-        return supports_dynamic_rendering_local_read_;
-    }
-
-    [[nodiscard]] bool SupportsUnifiedImageLayouts() const
-    {
-        return supports_unified_image_layouts_;
-    }
-
     [[nodiscard]] bool CompressedImageBarriersNeedSync1() const
     {
         return compressed_image_barriers_need_sync1_;
     }
 
-    // of the universal queue; 0 when it cannot write timestamps
+    // of the graphics queue; 0 when it cannot write timestamps
     [[nodiscard]] uint32_t GetTimestampValidBits() const
     {
         return timestamp_valid_bits_;
@@ -178,14 +171,13 @@ private:
     void SetupDebugMessenger();
     void SetupMemoryAllocator();
 
+    void BeginFrameCommandBuffer(unsigned frame_index);
+    VkCommandBuffer EndFrameCommandBuffer();
+    void ReleaseFinishedCommandBufferResources();
+
     [[nodiscard]] VkPresentModeKHR ChooseSwapPresentMode(
         const std::vector<VkPresentModeKHR> &availablePresentModes) const;
     [[nodiscard]] VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) const;
-    uint32_t GetMaxUsableSampleCount();
-
-    void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
-
-    void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
 
     const std::vector<const char *> validation_layers_ = {"VK_LAYER_KHRONOS_validation"};
     std::vector<const char *> instance_extensions_ = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
@@ -225,9 +217,6 @@ private:
 
     std::unique_ptr<VulkanDescriptorSetManager> descriptor_set_manager_;
 
-    // config
-    uint32_t msaa_samples_;
-
     uint32_t min_buffer_offset_alignment_ = 64;
 
     bool supports_subgroup_quad_ops_ = false;
@@ -242,14 +231,12 @@ private:
 
     bool enable_ray_tracing_ = false;
     bool supports_astc_hdr_ = false;
-    bool supports_dynamic_rendering_local_read_ = false;
-    bool supports_unified_image_layouts_ = false;
     bool compressed_image_barriers_need_sync1_ = false;
     uint32_t timestamp_valid_bits_ = 0;
 
     VulkanRHI *rhi_;
 
-    class OneShotCommandBufferScope *temporary_command_buffer_ = nullptr;
+    std::optional<OneShotCommandBufferScope> temporary_command_buffer_;
 
     std::queue<OneShotCommandBufferScope::CommandBufferResources> pending_command_buffer_resources_;
 };

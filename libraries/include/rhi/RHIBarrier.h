@@ -24,7 +24,7 @@ enum class RHIImageLayout : uint8_t
 };
 
 // each access implies its pipeline stages, except shader accesses whose stages come from RHIShaderStageMask
-enum class RHIAccess : uint16_t
+enum class RHIAccess : uint32_t
 {
     None = 0,
     ColorWrite = 1u << 0,
@@ -45,6 +45,8 @@ enum class RHIAccess : uint16_t
     AccelerationStructureRead = 1u << 13,
     Present = 1u << 14,
     HostRead = 1u << 15,
+    // every access of every command
+    Any = 1u << 16,
 };
 
 RegisterEnumAsFlag(RHIAccess);
@@ -81,7 +83,7 @@ struct RHIResourceAccess
     [[nodiscard]] bool HasWrite() const
     {
         return access & (RHIAccess::ColorWrite | RHIAccess::DepthWrite | RHIAccess::StorageWrite | RHIAccess::CopyDst |
-                         RHIAccess::AccelerationStructureBuild);
+                         RHIAccess::AccelerationStructureBuild | RHIAccess::Any);
     }
 };
 
@@ -95,20 +97,37 @@ struct RHIImageState
     bool operator==(const RHIImageState &) const = default;
 };
 
-// the transition rule for one subresource: `target` is the next access and the layout it needs. returns nullopt when it
-// is a read already covered by the tracked reads in the same layout; otherwise it needs a barrier from `state`, and the
-// result is the state after it. a read in the same layout widens the tracked reads, so later writes also wait for them.
-[[nodiscard]] inline std::optional<RHIImageState> TransitionImageState(const RHIImageState &state,
-                                                                       const RHIImageState &target)
+// the transition rule without layouts: `target` is the next access. returns nullopt when it is a read already covered
+// by the tracked reads in `state`; otherwise it needs a barrier from `state`, and the result is the tracked access
+// after it. a read after reads widens the tracked reads, so later writes also wait for them.
+[[nodiscard]] inline std::optional<RHIResourceAccess> TransitionAccess(const RHIResourceAccess &state,
+                                                                       const RHIResourceAccess &target)
 {
-    const bool read_after_read = state.layout == target.layout && !state.access.HasWrite() && !target.access.HasWrite();
-    if (read_after_read && state.access.Contains(target.access))
+    const bool read_after_read = !state.HasWrite() && !target.HasWrite();
+    if (read_after_read && state.Contains(target))
     {
         return std::nullopt;
     }
 
-    return RHIImageState{.layout = target.layout,
-                         .access = read_after_read ? state.access | target.access : target.access};
+    return read_after_read ? state | target : target;
+}
+
+// the transition rule for one subresource: `target` is the next access and the layout it needs. in the same layout it
+// is the access rule; a layout change always needs a barrier from `state`, after which only `target` is tracked.
+[[nodiscard]] inline std::optional<RHIImageState> TransitionImageState(const RHIImageState &state,
+                                                                       const RHIImageState &target)
+{
+    if (state.layout != target.layout)
+    {
+        return target;
+    }
+
+    const auto access = TransitionAccess(state.access, target.access);
+    if (!access)
+    {
+        return std::nullopt;
+    }
+    return RHIImageState{.layout = target.layout, .access = *access};
 }
 
 // an Undefined from_layout discards the contents

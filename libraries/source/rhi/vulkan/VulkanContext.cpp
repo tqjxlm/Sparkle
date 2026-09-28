@@ -131,18 +131,6 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     return all_extension_good;
 }
 
-[[maybe_unused]] static bool DeviceHasExtension(VkPhysicalDevice device, const char *extension_name)
-{
-    uint32_t extension_count = 0;
-    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
-    std::vector<VkExtensionProperties> extensions(extension_count);
-    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, extensions.data());
-
-    return std::ranges::any_of(extensions, [extension_name](const auto &extension) {
-        return strcmp(extension.extensionName, extension_name) == 0;
-    });
-}
-
 template <class T> static T QueryDeviceFeatures(VkPhysicalDevice device, VkStructureType type)
 {
     T features{};
@@ -332,12 +320,7 @@ void VulkanContext::Cleanup()
 
 void VulkanContext::ReleaseRenderResources()
 {
-    // surface loss releases the resources instead of ending a recorded frame
-    if (command_context_ == &frame_command_context_)
-    {
-        frame_command_context_.End();
-        command_context_ = nullptr;
-    }
+    ASSERT_F(command_context_ != &frame_command_context_, "render resources are released inside a frame");
 
     if (!command_buffers_.empty())
     {
@@ -427,15 +410,7 @@ bool VulkanContext::BeginFrame()
         CHECK_VK_ERROR(vkWaitForFences(device_, 1, &queue_finish_fences_[frame_index], VK_TRUE, UINT64_MAX));
         CHECK_VK_ERROR(vkResetFences(device_, 1, &queue_finish_fences_[frame_index]));
 
-        VkCommandBufferBeginInfo begin_info{};
-        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags = 0;
-        begin_info.pInheritanceInfo = nullptr;
-
-        CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
-
-        frame_command_context_.Begin(command_buffers_[frame_index]);
-        command_context_ = &frame_command_context_;
+        BeginFrameCommandBuffer(frame_index);
         return true;
     }
 
@@ -449,9 +424,7 @@ bool VulkanContext::BeginFrame()
 
     while (true)
     {
-        // a failed acquire leaves its semaphore unsignaled, so only a successful one moves on to the next semaphore;
-        // advancing on failures would let repeated failed frames cycle onto a semaphore an in-flight frame still waits
-        // on
+        // only a successful acquire signals its semaphore, so only it moves on to the next one
         VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
 
         const auto acquire_result = swap_chain_->AcquireImage(acquire_semaphore);
@@ -497,6 +470,12 @@ bool VulkanContext::BeginFrame()
     }
     queue_finish_fences_for_image_[image_index] = queue_finish_fences_[frame_index];
 
+    BeginFrameCommandBuffer(frame_index);
+    return true;
+}
+
+void VulkanContext::BeginFrameCommandBuffer(unsigned frame_index)
+{
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = 0;
@@ -506,7 +485,23 @@ bool VulkanContext::BeginFrame()
 
     frame_command_context_.Begin(command_buffers_[frame_index]);
     command_context_ = &frame_command_context_;
-    return true;
+}
+
+VkCommandBuffer VulkanContext::EndFrameCommandBuffer()
+{
+    VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
+    frame_command_context_.End();
+    command_context_ = nullptr;
+    CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
+    return command_buffer;
+}
+
+void VulkanContext::ReleaseFinishedCommandBufferResources()
+{
+    while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
+    {
+        pending_command_buffer_resources_.pop();
+    }
 }
 
 VkResult VulkanContext::EndFrame()
@@ -515,10 +510,7 @@ VkResult VulkanContext::EndFrame()
 
     if (rhi_->IsHeadless())
     {
-        VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
-        frame_command_context_.End();
-        command_context_ = nullptr;
-        CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
+        VkCommandBuffer command_buffer = EndFrameCommandBuffer();
 
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -527,10 +519,7 @@ VkResult VulkanContext::EndFrame()
 
         CHECK_VK_ERROR(vkQueueSubmit(graphics_queue_, 1, &submit_info, queue_finish_fences_[frame_index]));
 
-        while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
-        {
-            pending_command_buffer_resources_.pop();
-        }
+        ReleaseFinishedCommandBufferResources();
 
         return VK_SUCCESS;
     }
@@ -538,14 +527,11 @@ VkResult VulkanContext::EndFrame()
     auto image_index = swap_chain_->GetCurrentImageIndex();
     auto back_buffer_color = swap_chain_->GetImage(image_index);
 
-    back_buffer_color->Transition({.target_layout = RHIImageLayout::Present,
-                                   .after_stage = RHIPipelineStage::ColorOutput,
-                                   .before_stage = RHIPipelineStage::Bottom});
+    back_buffer_color->Transition(frame_command_context_, {.target_layout = RHIImageLayout::Present,
+                                                           .after_stage = RHIPipelineStage::ColorOutput,
+                                                           .before_stage = RHIPipelineStage::Bottom});
 
-    VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
-    frame_command_context_.End();
-    command_context_ = nullptr;
-    CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
+    VkCommandBuffer command_buffer = EndFrameCommandBuffer();
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -553,7 +539,7 @@ VkResult VulkanContext::EndFrame()
     // Color output should wait for the swap chain image to be ready
     // Commands before that are free to fire
     VkSemaphore wait_semaphores[] = {acquire_semaphores_in_use_[frame_index]};
-    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkPipelineStageFlags wait_stages[] = {static_cast<VkPipelineStageFlags>(AcquireWaitStage)};
     submit_info.waitSemaphoreCount = 1;
     submit_info.pWaitSemaphores = wait_semaphores;
     submit_info.pWaitDstStageMask = wait_stages;
@@ -584,10 +570,7 @@ VkResult VulkanContext::EndFrame()
 
     const VkResult result = vkQueuePresentKHR(present_queue_, &present_info);
 
-    while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
-    {
-        pending_command_buffer_resources_.pop();
-    }
+    ReleaseFinishedCommandBufferResources();
 
     return result;
 }
@@ -703,13 +686,12 @@ void VulkanContext::BeginCommandBuffer()
         return;
     }
 
-    ASSERT_F(temporary_command_buffer_ == nullptr,
-             "A temporary command buffer is active, should not begin another one");
+    ASSERT_F(!temporary_command_buffer_, "A temporary command buffer is active, should not begin another one");
 
     // resources released in this scope land in the current frame slot's deferred-deletion
     // bucket, which empties at the next BeginFrame regardless of this scope's own fence;
     // block that frame on the fence so the deletions stay safe
-    temporary_command_buffer_ = new OneShotCommandBufferScope(true);
+    temporary_command_buffer_.emplace(true);
     command_context_ = &temporary_command_buffer_->GetCommandContext();
 }
 
@@ -720,11 +702,10 @@ void VulkanContext::SubmitCommandBuffer()
         return;
     }
 
-    ASSERT_F(temporary_command_buffer_ != nullptr, "No active command buffer to submit");
+    ASSERT_F(temporary_command_buffer_, "No active command buffer to submit");
 
     command_context_ = nullptr;
-    delete temporary_command_buffer_;
-    temporary_command_buffer_ = nullptr;
+    temporary_command_buffer_.reset();
 }
 
 void VulkanContext::SetupMemoryAllocator()
@@ -786,14 +767,6 @@ bool VulkanContext::PickPhysicalDevice()
             QuerySubgroupQuadSupport();
             QueryTimestampSupport();
             QueryOptionalDeviceFeatures();
-
-            auto max_msaa_count = GetMaxUsableSampleCount();
-
-            msaa_samples_ = std::min(rhi_->GetConfig().msaa_samples, max_msaa_count);
-            if (msaa_samples_ > 1)
-            {
-                Log(Info, "MSAA enabled: {}", msaa_samples_);
-            }
 
             break;
         }
@@ -941,30 +914,6 @@ void VulkanContext::QueryOptionalDeviceFeatures()
     supports_astc_hdr_ = QueryDeviceFeatures<VkPhysicalDeviceVulkan13Features>(
                              physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
                              .textureCompressionASTC_HDR == VK_TRUE;
-
-#ifdef VK_KHR_dynamic_rendering_local_read
-    supports_dynamic_rendering_local_read_ =
-        DeviceHasExtension(physical_device_, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) &&
-        QueryDeviceFeatures<VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR>(
-            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR)
-                .dynamicRenderingLocalRead == VK_TRUE;
-    if (supports_dynamic_rendering_local_read_)
-    {
-        device_extensions_.push_back(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
-    }
-#endif
-
-#ifdef VK_KHR_unified_image_layouts
-    supports_unified_image_layouts_ =
-        DeviceHasExtension(physical_device_, VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME) &&
-        QueryDeviceFeatures<VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR>(
-            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR)
-                .unifiedImageLayouts == VK_TRUE;
-    if (supports_unified_image_layouts_)
-    {
-        device_extensions_.push_back(VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
-    }
-#endif
 }
 
 bool VulkanContext::CreateLogicalDevice()
@@ -1024,27 +973,6 @@ bool VulkanContext::CreateLogicalDevice()
     enabled_vulkan13_features.textureCompressionASTC_HDR = supports_astc_hdr_ ? VK_TRUE : VK_FALSE;
     ChainVkStructurePtr(create_info, enabled_vulkan13_features);
 
-#ifdef VK_KHR_dynamic_rendering_local_read
-    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR enabled_local_read_features{};
-    if (supports_dynamic_rendering_local_read_)
-    {
-        enabled_local_read_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR;
-        enabled_local_read_features.dynamicRenderingLocalRead = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_local_read_features);
-    }
-#endif
-
-#ifdef VK_KHR_unified_image_layouts
-    VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR enabled_unified_image_layouts_features{};
-    if (supports_unified_image_layouts_)
-    {
-        enabled_unified_image_layouts_features.sType =
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR;
-        enabled_unified_image_layouts_features.unifiedImageLayouts = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_unified_image_layouts_features);
-    }
-#endif
-
     if (rhi_->SupportsHardwareRayTracing())
     {
         enabled_buffer_device_addres_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
@@ -1097,41 +1025,6 @@ void VulkanContext::CreateCommandPool()
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     CHECK_VK_ERROR(vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_));
-}
-
-uint32_t VulkanContext::GetMaxUsableSampleCount()
-{
-    VkPhysicalDeviceProperties physical_device_properties;
-    vkGetPhysicalDeviceProperties(physical_device_, &physical_device_properties);
-
-    VkSampleCountFlags const counts = physical_device_properties.limits.framebufferColorSampleCounts &
-                                      physical_device_properties.limits.framebufferDepthSampleCounts;
-    if (counts & VK_SAMPLE_COUNT_64_BIT)
-    {
-        return 64;
-    }
-    if (counts & VK_SAMPLE_COUNT_32_BIT)
-    {
-        return 32;
-    }
-    if (counts & VK_SAMPLE_COUNT_16_BIT)
-    {
-        return 16;
-    }
-    if (counts & VK_SAMPLE_COUNT_8_BIT)
-    {
-        return 8;
-    }
-    if (counts & VK_SAMPLE_COUNT_4_BIT)
-    {
-        return 4;
-    }
-    if (counts & VK_SAMPLE_COUNT_2_BIT)
-    {
-        return 2;
-    }
-
-    return 1;
 }
 
 // extensions of the loader, the driver and the implicit layers

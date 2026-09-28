@@ -26,6 +26,9 @@ public:
         return execution_time_ms_[frame_index];
     }
 
+    // GetExecutionTime of the frame being recorded
+    [[nodiscard]] float GetExecutionTime() const;
+
 protected:
     // the timer measuring the open compute pass, null when the pass is not timed
     [[nodiscard]] RHITimer *GetActiveTimer() const

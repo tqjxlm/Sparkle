@@ -1,11 +1,10 @@
 #pragma once
 
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/resource/ImageBasedLighting.h"
 
 namespace sparkle
 {
-class ImageBasedLighting;
-
 // the shadow map and IBL maps the forward base pass and deferred lighting sample. a missing one is an invalid texture:
 // there is no directional light, or the IBL map is not ready.
 struct LightingInputs
@@ -24,14 +23,25 @@ struct LightingInputs
     {
         const auto placeholder_2d = GetPlaceholder(rhi, RHIImage::ImageType::Image2D);
         const auto placeholder_cube = GetPlaceholder(rhi, RHIImage::ImageType::Image2DCube);
-        builder.SampledOrPlaceholder(shadow_map, placeholder_2d, &Table::shadow_map, &Table::shadow_map_sampler);
-        builder.SampledOrPlaceholder(ibl_brdf, placeholder_2d, &Table::ibl_brdf, &Table::ibl_brdf_sampler);
-        builder.SampledOrPlaceholder(ibl_diffuse, placeholder_cube, &Table::ibl_diffuse, &Table::ibl_diffuse_sampler);
-        builder.SampledOrPlaceholder(ibl_specular, placeholder_cube, &Table::ibl_specular,
-                                     &Table::ibl_specular_sampler);
+        builder.SampledOrPlaceholder(shadow_map, placeholder_2d, &Table::shadow_map, &Table::shadow_map_sampler,
+                                     ShadowMapSampler);
+        builder.SampledOrPlaceholder(ibl_brdf, placeholder_2d, &Table::ibl_brdf, &Table::ibl_brdf_sampler,
+                                     ImageBasedLighting::MapSampler);
+        builder.SampledOrPlaceholder(ibl_diffuse, placeholder_cube, &Table::ibl_diffuse, &Table::ibl_diffuse_sampler,
+                                     ImageBasedLighting::MapSampler);
+        builder.SampledOrPlaceholder(ibl_specular, placeholder_cube, &Table::ibl_specular, &Table::ibl_specular_sampler,
+                                     ImageBasedLighting::MapSampler);
     }
 
 private:
+    // outside the shadow map reads as the far plane, so it is lit
+    static constexpr RHISampler::SamplerAttribute ShadowMapSampler{
+        .address_mode = RHISampler::SamplerAddressMode::ClampToBorder,
+        .border_color = RHISampler::BorderColor::FloatOpaqueWhite,
+        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
     [[nodiscard]] static RHIResourceRef<RHIImage> GetPlaceholder(RHIContext *rhi, RHIImage::ImageType type);
 };
 } // namespace sparkle

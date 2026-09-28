@@ -5,6 +5,7 @@
 #include "rhi/VulkanRHI.h"
 
 #include "VulkanDescriptorSet.h"
+#include "VulkanImage.h"
 
 namespace sparkle
 {
@@ -108,6 +109,32 @@ inline VkCompareOp GetDepthCompareOp(const RHIPipelineState::DepthState &depth_s
     default:
         UnImplemented(depth_state.test_state);
     }
+}
+
+// color_formats backs the returned struct and must outlive it
+inline VkPipelineRenderingCreateInfo GetVkPipelineRenderingCreateInfo(
+    const RHIAttachmentSignature &signature, std::array<VkFormat, MaxNumColorAttachments> &color_formats)
+{
+    auto get_format = [](PixelFormat format) {
+        return format == PixelFormat::Count ? VK_FORMAT_UNDEFINED : GetVkPixelFormat(format);
+    };
+
+    uint32_t color_attachment_count = 0;
+    for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
+    {
+        color_formats[slot] = get_format(signature.color_formats[slot]);
+        if (color_formats[slot] != VK_FORMAT_UNDEFINED)
+        {
+            color_attachment_count = slot + 1;
+        }
+    }
+
+    VkPipelineRenderingCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    create_info.colorAttachmentCount = color_attachment_count;
+    create_info.pColorAttachmentFormats = color_formats.data();
+    create_info.depthAttachmentFormat = get_format(signature.depth_format);
+    return create_info;
 }
 
 class VulkanPipelineState : public RHIPipelineState

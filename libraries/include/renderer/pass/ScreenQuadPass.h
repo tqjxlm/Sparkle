@@ -38,11 +38,24 @@ public:
         Vector2 uv;
     };
 
-    // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at slot 0.
-    // `to_back_buffer` applies the window's pre-rotation.
-    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, bool to_back_buffer = false);
+    // how AddTo samples its input, always with edge clamping
+    enum class InputFilter : uint8_t
+    {
+        Nearest,
+        // bilinear when the input's size differs from the output's and the device filters the input's format
+        // linearly, otherwise nearest
+        Bilinear,
+        // as Bilinear, but nearest also when the output's size is an integer multiple of the input's in both axes
+        NearestAtIntegerScale,
+    };
 
-    // adds a Raster pass drawing `input`, sampled with the sampler its image carries, over all of `output`
+    // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at slot 0.
+    // `to_back_buffer` applies the window's pre-rotation, and the filter compares the output's size along the rotated
+    // axes.
+    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, InputFilter input_filter,
+                   bool to_back_buffer = false);
+
+    // adds a Raster pass drawing `input`, sampled as the pass's InputFilter chooses, over all of `output`
     void AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const;
 
     void InitRenderResources(const RenderConfig &config) override;
@@ -50,6 +63,12 @@ public:
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
 protected:
+    static constexpr RHISampler::SamplerAttribute NearestSampler{
+        .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
     virtual void SetupPixelShader();
 
     // binds what the pixel shader reads beyond the graph's bindings
@@ -57,8 +76,8 @@ protected:
     {
     }
 
-    // declares the pass's input, bound to the pixel shader's texture and sampler
-    virtual void SampleInput(RGBuilder &builder, RGTexture input) const;
+    // declares the pass's input, bound to the pixel shader's texture, and binds `sampler` to its sampler
+    virtual void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const;
 
     const static std::array<ScreenVertex, 4> Vertices;
     const static std::array<uint32_t, 6> Indices;
@@ -82,6 +101,7 @@ private:
     void BindVertexShaderResources();
 
     RHIAttachmentSignature signature_;
+    InputFilter input_filter_;
     bool to_back_buffer_ = false;
 };
 } // namespace sparkle

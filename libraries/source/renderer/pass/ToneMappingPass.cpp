@@ -54,9 +54,10 @@ void ToneMappingPass::BindPixelShaderResources()
     ps_resources->ubo().BindResource(ps_ub_);
 }
 
-void ToneMappingPass::SampleInput(RGBuilder &builder, RGTexture input) const
+void ToneMappingPass::SampleInput(RGBuilder &builder, RGTexture input,
+                                  const RHISampler::SamplerAttribute &sampler) const
 {
     using Table = ToneMappingPixelShader::ResourceTable;
-    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler);
+    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler, sampler);
 }
 } // namespace sparkle

@@ -17,7 +17,7 @@ public:
 
     void BeginFrame(const RHIRenderingInfo &info) override;
 
-    void Render(RHICommandContext *command_context) override;
+    void Render(RHICommandContext &command_context) override;
 
     void Init() override;
 

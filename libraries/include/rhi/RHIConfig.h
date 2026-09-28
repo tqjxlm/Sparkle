@@ -15,7 +15,6 @@ struct RHIConfig : public ConfigCollection
 
     ApiPlatform api_platform = ApiPlatform::None;
     bool use_vsync;
-    uint32_t msaa_samples;
     bool enable_validation;
     bool enable_sync_validation;
     bool enable_pre_transform;

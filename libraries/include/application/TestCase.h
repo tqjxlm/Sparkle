@@ -2,6 +2,7 @@
 
 #if ENABLE_TEST_CASES
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -23,10 +24,10 @@ public:
 
     virtual ~TestCase() = default;
 
-    /// Calls OnTick(), increments the frame counter, and enforces the timeout.
+    // Calls OnTick(), increments the frame counter, and enforces the timeout.
     Result Tick(AppFramework &app);
 
-    /// Applies any test-specific config overrides before the rest of app init consumes them.
+    // Applies any test-specific config overrides before the rest of app init consumes them.
     void EnforceConfigs();
 
     [[nodiscard]] const std::string &GetName() const
@@ -41,8 +42,8 @@ protected:
 
     virtual Result OnTick(AppFramework &app) = 0;
 
-    /// Optional per-test timeout in frames. When the app config does not
-    /// provide --test_timeout, Tick() uses this value instead.
+    // Optional per-test timeout in frames. When the app config does not
+    // provide --test_timeout, Tick() uses this value instead.
     [[nodiscard]] virtual uint32_t GetDefaultTimeoutFrames() const
     {
         return 0;
@@ -53,10 +54,18 @@ protected:
     void EnforceConfig(const std::string &config_name, float value) const;
     void EnforceConfig(const std::string &config_name, const std::string &value) const;
 
-    /// Lets `count` more validation errors pass; for tests that provoke them on purpose.
+    // Lets `count` more validation errors pass; for tests that provoke them on purpose.
     void AcceptValidationErrors(unsigned count)
     {
         accepted_validation_errors_ += count;
+    }
+
+    // Logs `what` as passed or failed; a failure is remembered for HasFailed(). Callable from any thread.
+    void Expect(bool condition, const std::string &what);
+
+    [[nodiscard]] bool HasFailed() const
+    {
+        return failed_.load(std::memory_order_acquire);
     }
 
     uint32_t frame_ = 0;
@@ -71,6 +80,7 @@ private:
 
     std::string name_;
     unsigned accepted_validation_errors_ = 0;
+    std::atomic<bool> failed_{false};
 };
 
 class TestCaseRegistry

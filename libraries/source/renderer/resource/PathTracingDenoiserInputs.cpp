@@ -12,10 +12,6 @@ RHIImage::Attribute MakeImageAttributes(PixelFormat format, const Vector2UInt &s
 {
     return {
         .format = format,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
         .width = size.x(),
         .height = size.y(),
         .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,

@@ -28,8 +28,15 @@ const std::array<ScreenQuadPass::ScreenVertex, 4> ScreenQuadPass::Vertices{{
 
 const std::array<uint32_t, 6> ScreenQuadPass::Indices{0, 2, 1, 0, 3, 2};
 
-ScreenQuadPass::ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, bool to_back_buffer)
-    : PipelinePass(ctx), name_(std::move(name)), to_back_buffer_(to_back_buffer)
+static constexpr RHISampler::SamplerAttribute BilinearSampler{
+    .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+    .filtering_method_min = RHISampler::FilteringMethod::Linear,
+    .filtering_method_mag = RHISampler::FilteringMethod::Linear,
+    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
+ScreenQuadPass::ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, InputFilter input_filter,
+                               bool to_back_buffer)
+    : PipelinePass(ctx), name_(std::move(name)), input_filter_(input_filter), to_back_buffer_(to_back_buffer)
 {
     signature_.color_formats[0] = output_format;
 }
@@ -130,20 +137,50 @@ void ScreenQuadPass::BindVertexShaderResources()
     vs_resources->ubo().BindResource(vs_ub_);
 }
 
+// a pre-rotation by a quarter turn lays the input's x axis along the output's y axis
+static bool IsQuarterTurn(NativeView::WindowRotation rotation)
+{
+    return rotation == NativeView::WindowRotation::Landscape ||
+           rotation == NativeView::WindowRotation::ReverseLandscape;
+}
+
+static bool Resamples(ScreenQuadPass::InputFilter filter, const Vector2UInt &input_size, const Vector2UInt &output_size)
+{
+    switch (filter)
+    {
+    case ScreenQuadPass::InputFilter::Nearest:
+        return false;
+    case ScreenQuadPass::InputFilter::Bilinear:
+        return input_size != output_size;
+    case ScreenQuadPass::InputFilter::NearestAtIntegerScale:
+        return output_size.x() % input_size.x() != 0 || output_size.y() % input_size.y() != 0;
+    default:
+        UnImplemented(filter);
+        return false;
+    }
+}
+
 void ScreenQuadPass::AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const
 {
-    graph.AddRasterPass(name_, [this, input, output](RGBuilder &builder) {
-        SampleInput(builder, input);
+    auto output_size = graph.GetSize(output);
+    if (to_back_buffer_ && IsQuarterTurn(rhi_->GetHardwareInterface()->GetWindowOrientation()))
+    {
+        output_size = Vector2UInt(output_size.y(), output_size.x());
+    }
+    const bool bilinear = Resamples(input_filter_, graph.GetSize(input), output_size) &&
+                          rhi_->SupportsLinearFiltering(graph.GetFormat(input));
+    graph.AddRasterPass(name_, [this, input, output, bilinear](RGBuilder &builder) {
+        SampleInput(builder, input, bilinear ? BilinearSampler : NearestSampler);
         builder.ColorWrite(output, 0);
         builder.FullyOverwrites();
         return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
     });
 }
 
-void ScreenQuadPass::SampleInput(RGBuilder &builder, RGTexture input) const
+void ScreenQuadPass::SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const
 {
     using Table = ScreenQuadPixelShader::ResourceTable;
-    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler);
+    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler, sampler);
 }
 
 void ScreenQuadPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)

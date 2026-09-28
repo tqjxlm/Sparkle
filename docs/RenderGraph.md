@@ -1,129 +1,290 @@
 # Render Graph
 
-The render graph ([libraries/include/renderer/graph/RenderGraph.h](../libraries/include/renderer/graph/RenderGraph.h)) records one frame's GPU passes from declared accesses. Passes state what they read and write in textures, buffers and acceleration structures; the graph derives culling, transient images, image layouts, barriers and attachment load/store actions, and can dump every decision it made.
+The render graph ([libraries/include/renderer/graph/RenderGraph.h](../libraries/include/renderer/graph/RenderGraph.h)) records one frame's GPU passes from the accesses they declare to textures, buffers and acceleration structures. From these declarations it derives which passes run, which images back the transient textures, and the image layouts, barriers and attachment load/store actions, and it can dump every decision with its reason. A graph lives for one frame: it is built, compiled, executed and destroyed, and every renderer records its frame through one.
 
-Every renderer records its frame through the graph. The RHI keeps only the lowering primitives: `RHICommandContext::BeginRendering` over an `RHIRenderingInfo` (attachments, load/store and clear values, with the attachments already in their attachment layouts), access-based barriers, and PSOs compiled per attachment signature. RHI tests ([tests/rhi/](../tests/rhi/)) record through these primitives directly.
+The RHI only lowers the graph's plan: `RHICommandContext::BeginRendering` over an `RHIRenderingInfo` (attachments already in their attachment layouts, with load/store actions and clear values), access-based barriers, and pipelines compiled per attachment signature. RHI tests ([tests/rhi/](../tests/rhi/)) record through these primitives directly.
 
-## Building a Graph
+## Adding a Pass to a Renderer
 
-A graph lives for one frame: build it, `Compile()`, `Execute(command_context)`, then destroy it.
+`Renderer::Render(dump)` creates the frame's graph from the texture pool the renderer was given, lets the renderer add its scene passes (`BuildGraph`, which returns the texture they leave the scene in), adds the post chain (see [Renderers](#renderers)), then compiles the graph, executes it with the renderer's pass timers and returns its dump when `dump` is true. A pass class keeps its persistent state (pipelines, shaders, uniform buffers) and adds its pass through an `AddTo(graph, inputs...)` method. The setup lambda declares the pass's accesses on the builder and returns the lambda that records the pass.
 
 ```cpp
-RenderGraph graph(texture_pool, render_config);
-auto scene_color = graph.CreateTexture("SceneColor", {.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Scene});
-auto history = graph.Import("History", history_image);
+RGTexture MyRenderer::BuildGraph(RenderGraph &graph)
+{
+    const auto history = graph.Import("History", history_image_);
+    const auto scene_color = graph.CreateTexture("SceneColor", SceneColorDesc);
 
-graph.AddRasterPass("Lighting", [&](RGBuilder &b) {
-    b.Sampled(history, &LightingPixelShader::ResourceTable::history);
-    b.ColorWrite(scene_color, 0, Vector4(0, 0, 0, 1));
-    return [this](RGRasterContext &ctx) { ctx.DrawMesh(pso_, draw_args_); };
-});
+    graph.AddRasterPass("Lighting", [this, history, scene_color](RGBuilder &builder) {
+        using Table = LightingPixelShader::ResourceTable;
+        builder.Sampled(history, &Table::history, &Table::historySampler, HistorySampler);
+        builder.ColorWrite(scene_color, 0, Vector4(0, 0, 0, 1));
+        return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
+    });
 
-graph.Compile();
-graph.Execute(*rhi->GetCommandContext());
+    return scene_color;
+}
 ```
 
-* **Textures.** `CreateTexture` makes a transient: single-sampled, one mip, with a size class resolved from `RenderResolution` (`Scene`, `Output`, or `Absolute` with an explicit size). Its image usage is the union of its declared accesses. `Import` brings in a persistent image (history, swap chain, IBL maps); importing an image again returns the texture, and name, of its first import, so passes that sample the same image need not coordinate.
-* **Subresources.** A texture access covers every mip and array layer, or the ones `texture.Mip(mip)` (a mip of every layer) or `texture.Subresource(mip, layer)` select, e.g. the face of a cube map a clear writes. An attachment is one subresource; a pass may declare disjoint subresources of one texture.
-* **Buffers and acceleration structures.** `Import` also brings in a persistent buffer (`RGBuffer`: staging and host buffers) or top-level acceleration structure (`RGAccelerationStructure`); importing one again returns its first import. Every buffer and acceleration structure is an import.
-* **Handles.** `RGTexture`, `RGBuffer` and `RGAccelerationStructure` are plain indices. Passes run in declaration order, and every access depends on the last write before it in that order, so handles need no versions.
-* **Accesses.** Textures: `ColorWrite(slot, clear)`, `DepthWrite(clear)`, `DepthTest`, `Sampled`, `StorageRead`, `StorageWrite`, `StorageReadWrite`, `CopySrc`, `CopyDst`. Buffers: `CopySrc`, `CopyDst`. Acceleration structures: `AccelerationStructureBuild` (a build or refit) and `AccelerationStructureRead` (ray queries). Shader accesses take an optional stage mask; the default is the pass kind's stage (raster: pixel, compute: compute, external: all). A pass declares each texture, buffer and acceleration structure once. `FullyOverwrites()` states that the pass writes every texel, which discards previous contents; `SideEffect()` keeps a pass whose outputs nothing reads; `NativeAccess()` lets a Raster pass record foreign commands (ImGui) through the raw command context, inside the rendering the graph begins over its attachments.
-* **Bindings.** A shader access (`Sampled`, `StorageRead`, `StorageWrite`, `StorageReadWrite`) may name the binding member of a shader's `ResourceTable` that reads the texture, e.g. `&ToneMappingPixelShader::ResourceTable::screenTexture` (a `Texture2D` member for `Sampled`, a `StorageImage2D` member for storage accesses). While the pass records, every pipeline drawn or dispatched through the command context binds a view of the texture there (a sampled access's default view of the whole image; a storage access's view of its single mip, with a cube's layers as a 2D array), in each of its resource tables of that type, so each input is written once and serves every pipeline of the pass that uses the table. A `Sampled` access may also name a `Sampler` member, e.g. `&ToneMappingPixelShader::ResourceTable::screenTextureSampler`, which binds the sampler the texture's image carries (`RGTextureDesc::sampler` for transients), so a pass holds no sampler state for its inputs. An input that may be missing is declared with `SampledOrPlaceholder`: an invalid texture binds the given placeholder image, which is outside the graph, and its sampler instead, so no pipeline keeps an image an earlier graph bound. `AccelerationStructureRead` may name an `AccelerationStructure` member, which binds the acceleration structure there. Every binding must reach at least one pipeline the pass draws or dispatches, unless the pass draws nothing (an empty scene). Views are created at compile. Uniform buffers and other resources outside the graph stay bound by the pass.
-* **Pass kinds.** Each kind's execute function receives a context that exposes only what the kind may record:
+Outside a renderer, as in the tests, the owner of a graph calls `Compile()` and `Execute(command_context)` itself, and destroys each graph before its texture pool.
 
-| Kind | Context records | The graph around it |
+## Reference
+
+### Resources
+
+* `CreateTexture(name, desc)` makes a transient texture: single-sampled, one mip, one layer, sized by its size class (`Scene`, `Output`, or `Absolute` with an explicit width and height), which resolves against `RenderResolution` when the texture is created.
+* A transient's image usage is the union of the accesses live passes declare on it.
+* `Import(name, image)` brings in a persistent single-sampled image (history, the back buffer, IBL maps). Importing an image again returns the texture, and name, of its first import, so passes that sample the same image need not coordinate.
+* `Import(name, buffer)` and `Import(name, tlas)` bring in a persistent buffer (`RGBuffer`: staging and host buffers) or top-level acceleration structure (`RGAccelerationStructure`); importing one again returns its first import. Every buffer and acceleration structure is an import.
+* `ReadOnHost(buffer)` marks a buffer the host reads once the graph's commands complete, such as a readback staging buffer.
+* A texture access covers every mip and array layer, or the ones `texture.Mip(mip)` (one mip of every layer) or `texture.Subresource(mip, layer)` select, e.g. the face of a cube map a clear writes. A pass may declare disjoint subresources of one texture.
+* `RGTexture`, `RGBuffer` and `RGAccelerationStructure` are plain indices. Passes run in declaration order and every access depends on the last write before it in that order, so handles need no versions.
+* `FindTexture`, `CanSample2D`, `GetFormat` and `GetSize` answer questions about textures while passes are added; the post chain uses them to find the texture `render_graph_view` names and to size screenshot buffers.
+
+### Accesses
+
+* Textures: `ColorWrite(slot, clear)`, `DepthWrite(clear)`, `DepthTest`, `Sampled`, `StorageWrite`, `StorageReadWrite`, `CopySrc`, `CopyDst`.
+* Buffers: `CopySrc`, `CopyDst`.
+* Acceleration structures: `AccelerationStructureBuild` (a build or refit) and `AccelerationStructureRead` (ray queries).
+* An attachment (`ColorWrite`, `DepthWrite`, `DepthTest`) is one subresource. A color slot is the fragment output location.
+* Shader accesses take an optional stage mask; the default is the pass kind's stage (Raster: pixel, Compute: compute, External: all).
+* A pass declares each texture subresource, buffer and acceleration structure once.
+
+### Pass Flags
+
+* `FullyOverwrites()`: the pass writes every texel of the textures it writes, which discards the previous contents of those it does not also read.
+* `SideEffect()`: the pass runs even when nothing reads its outputs.
+* `NativeAccess()`: a Raster pass records foreign commands (ImGui) through the raw command context (`GetNativeContext()`), inside the rendering the graph begins over its attachments. The foreign code resets the backend state it records around.
+
+### Bindings
+
+* A shader access may name the binding member of a shader's `ResourceTable` that reads the resource, e.g. `&ToneMappingPixelShader::ResourceTable::screenTexture`: a `Texture2D` member for `Sampled`, a `StorageImage2D` member for the storage accesses, an `AccelerationStructure` member for `AccelerationStructureRead`.
+* While the pass records, every pipeline drawn or dispatched through the command context binds the resource there, in each of its resource tables that has the member, so each input is declared once and serves every pipeline of the pass that uses the table.
+* A sampled binding binds the image's default view of every subresource. A storage binding binds a view of its access's single mip, with a cube's layers as a 2D array. Views are created at compile.
+* A `Sampled` access may also name a `Sampler` member and the attributes of the sampler the pass samples with, e.g. `&ToneMappingPixelShader::ResourceTable::screenTextureSampler`; the graph binds that sampler from `RHIContext::GetSampler`'s cache. Images carry no sampler: the pass that samples a texture decides how.
+* Samplers that several passes share live on the class that owns the sampled resource: `SkyRenderProxy::SkyMapSampler` for the sky map (the sky box, the IBL cooks and the GPU path tracer) and `ImageBasedLighting::MapSampler` for the IBL maps.
+* `SampledOrPlaceholder` declares an input that may be missing: an invalid texture binds the given placeholder image, which is outside the graph, with the given sampler, so no pipeline keeps an image an earlier graph bound.
+* Every binding must reach at least one pipeline the pass draws or dispatches, unless the pass draws or dispatches nothing (an empty scene).
+* Uniform buffers and other resources outside the graph stay bound by the pass itself.
+* A pipeline keeps what earlier passes and frames bound, so a Raster or Compute pass must declare every graph resource bound in the pipelines it draws or dispatches, whoever bound it.
+
+### Pass Kinds
+
+Each kind's record function receives a context that exposes only what the kind may record:
+
+| Kind | Added with | Context records | The graph around it |
+| --- | --- | --- | --- |
+| Raster | `AddRasterPass` | draws; with `NativeAccess()`, anything the open rendering allows | begins and ends rendering over the declared attachments; the opening barriers sit inside the pass's debug label and timer |
+| Compute | `AddComputePass`, with an `RHIComputePass` | dispatches | brackets the pass with the given `RHIComputePass`, whose label and timer cover the barriers |
+| Copy | `AddCopyPass` | copies between images and buffers; acceleration structure builds (`BuildAccelerationStructure` records the build or refit staged on the structure) | records the barriers before it, inside the pass's debug label |
+| External | `AddExternalPass` | anything, through the raw `RHICommandContext` | records the barriers before it, inside the pass's debug label |
+
+* `context.GetImage(texture)` returns the image behind a texture the pass declared. A Copy pass reaches buffers and acceleration structures only through its copy and build commands.
+* Copies record no barrier of their own: the graph orders them through the declared accesses, and makes the data of a buffer the host reads visible to it.
+* Every pass must leave each declared image in its declared layout, with no pending access beyond the declared one; the graph checks this after the pass records.
+* A pass records only through its context, also when it transitions or uploads an image (`RHIImage::Transition` and `Upload` take the command context). `RHIContext::GetCommandContext()` is for code outside graph passes and asserts while a graph executes.
+* Foreign code in an External pass that still calls `RHIImage::Transition` sees the state the graph planned, because the graph writes it to the image before the pass runs.
+
+## What the Compiler Decides
+
+`Compile()` validates the declarations and plans the frame without recording anything. The [dump](#dump-format) shows every decision; culling and load/store carry their reasons in the dump's `cull_reason`, `load_reason` and `store_reason` fields.
+
+* **Culling.** Walking backwards, a pass lives if it has a side effect, writes an import (every buffer and acceleration structure is one), or writes contents a later live pass uses. A read uses the contents earlier passes left. A write that does not clear, in a pass that does not fully overwrite, passes them on only when a later live pass uses its result. A culled pass stays in the dump, with a `cull_reason` naming its unread outputs.
+* **Aliasing.** Transients whose lifetimes (first to last live pass) do not overlap share one image when format and pixel size match, assigned in order of first use, so a graph of the same shape maps each transient to the same image every frame. The dump's `physical` names each transient's image, and `first_use` and `last_use` its lifetime.
+* **Pooling.** Images come from an `RGTexturePool`, which the owner of the graphs keeps across frames. The pool serves one graph at a time and hands the same images to the next graph immediately; images unused for `RGTexturePool::UnusedGraphsBeforeRelease` graphs go through deferred deletion. A pooled image keeps the debug name of the transient it was created for; the dump's `physical` tells which transients it backs.
+* **Barriers.** Planning starts from each physical image's tracked `RHIImageState` per subresource, for imports and transients alike, and the dump lists each pass's barriers with their layouts and accesses:
+  * Each access moves its subresources into its layout and access with one barrier per run of mips in one state, spanning every layer when each mip's layers share a state, otherwise within each layer.
+  * A pooled image reused from the previous frame waits for that frame's last access.
+  * A swap chain image's tracked access is `Present` from its creation and after each frame, so its first barrier waits for its acquire: on Vulkan a barrier from `Present` starts at the stage where the frame's submit waits for the acquired image.
+  * A write discards the contents (`Undefined` source layout) when it clears, fully overwrites without reading, or writes a transient no earlier pass wrote.
+  * Depth tests synchronize as depth writes, because the attachment's store op writes the depth image.
+  * Buffers and acceleration structures synchronize through memory barriers by the same rule without layouts, starting from their tracked access (`RHITrackedAccess`).
+  * A build also waits for earlier builds, which covers the BLAS it reads (built before the frame) and the scratch memory it reuses.
+  * Right after its last live pass, a buffer the host reads moves to `HostRead` through a barrier from its last access (the pass's `barriers_after` in the dump), unless it has none: waiting for the device does not make device writes visible to the host. A buffer no live pass uses gets no barrier and keeps its tracked access.
+  * Barriers are batched per pass. On Metal the batches record nothing, but the plan and the tracked states are the same.
+* **Load/store.** Per raster attachment, the load op is `Clear` if the access clears, `DontCare` if the pass fully overwrites it or it is a transient with no earlier writer, otherwise `Load`. The store op is `Store` if the next live pass touching the subresource uses its contents or the texture is imported, otherwise `DontCare`.
+
+`Execute()` records each live pass: it writes the planned states through to the trackers of the images, buffers and acceleration structures, so foreign code and the next frame start from them, then records the pass's barrier batch and the pass. After the pass it records the barriers to `HostRead` of the buffers whose last live pass it is.
+
+## Errors
+
+Declaration and recording errors log their message and abort in every build, including Release, where `ASSERT` compiles out. Under test, an `RGErrorsThrow` ([RGError.h](../libraries/include/renderer/graph/RGError.h)) makes the errors on its thread throw `RGError` with the message instead. The checks:
+
+* an invalid handle, or subresources the texture does not have;
+* an access the pass kind may not declare, or a texture subresource, buffer or acceleration structure declared twice by one pass;
+* two attachments in one slot, a color slot out of range, or an attachment covering more than one subresource;
+* `NativeAccess()` on a pass that is not a Raster pass;
+* a transient without a format or size, or an import that is missing or multisampled;
+* a Raster pass without attachments, or a Compute pass without an `RHIComputePass`;
+* a transient read before any pass writes it;
+* an import lacking the usages its accesses need;
+* attachments of one pass that differ in size;
+* a sampled binding of less than every subresource, or a storage binding of more than one mip;
+* compiling twice, or executing before compiling or twice;
+* compiling a graph while another compiled graph of the same texture pool is alive: a texture pool serves one graph at a time;
+* a pass that reaches a texture, buffer or acceleration structure it did not declare through its context, or records raw commands without `NativeAccess()`;
+* a pass that leaves a declared image in another layout, or with accesses beyond its declaration pending;
+* a binding that no pipeline its pass drew or dispatched has, in a pass that drew or dispatched;
+* a graph resource bound in a pipeline a Raster or Compute pass drew or dispatched, which the pass did not declare with the access of that binding: a `Texture2D` needs `Sampled` and a `StorageImage2D` a storage access, each covering the subresources of the bound view; an `AccelerationStructure` needs `AccelerationStructureRead`; a graph buffer may not be bound at all. The check reads the resource tables when the pass ends, skipping bindless arrays.
+
+## Debugging
+
+### Knobs
+
+| cvar | default | Effect |
 | --- | --- | --- |
-| Raster | draws; with `NativeAccess()`, anything the open rendering allows through `GetNativeContext()`, and the foreign code resets the backend state it records around | begins and ends rendering over the declared attachments; the opening barriers sit inside the pass's debug label |
-| Compute | dispatches | brackets it with the given `RHIComputePass`, whose label and timer cover the barriers |
-| Copy | copies between images and buffers; acceleration structure builds (`BuildAccelerationStructure` records the build or refit staged on the structure) | records the barriers before it |
-| External | anything, through the raw `RHICommandContext` | records the barriers before it, then checks the contract below |
+| `render_graph_view` | *(empty)* | Shows a graph texture in place of the frame (see [Viewing a Texture](#viewing-a-texture)); also set from the render graph page. |
+| `render_graph_cull` | `true` | Set to `false` to keep every pass, including those whose outputs no live pass uses. |
+| `render_graph_full_barriers` | `false` | Before every live pass, records one memory barrier from all commands and memory accesses to all commands and memory accesses, on top of the planned barriers. Vulkan only: Metal records nothing. A synchronization bug that disappears with it lies in a planned barrier. The planned barriers are unchanged, and the dump marks each pass that records the full barrier with `full_barrier: true`. |
+| `validate_sync` | `false` | Vulkan synchronization validation, which reports hazards that no planned barrier orders; needs `validation` (see [Test.md](Test.md#validation-layer)). |
 
-`ctx.GetImage(texture)`, `ctx.GetBuffer(buffer)` and `ctx.GetAccelerationStructure(acceleration_structure)` return the resource behind a handle the pass declared. An External pass must leave every declared image in its declared layout, with no pending access beyond the declared one; foreign code that still calls `RHIImage::Transition` sees the state the graph planned, because the graph writes it to the image before the pass runs.
+### Viewing a Texture
 
-## Compilation
+* `render_graph_view` names a graph texture to show in place of the frame, on every renderer.
+* The post chain looks it up (`RenderGraph::FindTexture`) among the textures the frame's passes created or imported before the post chain. The `GraphView` pass then samples its final contents into Screen instead of the screen pass, so culling removes every pass that only fed the scene.
+* The texture must be one a pass added then can sample through a 2D binding (`RenderGraph::CanSample2D`: a single-layer import with texture usage, or a transient an earlier pass writes), of a format a float texture samples (`SamplesAsFloat` in [PostChain.cpp](../libraries/source/renderer/pass/PostChain.cpp)). Otherwise the frame shows as usual, with a warning logged once per change of the value.
+* `GraphView` shows the values it samples (an sRGB texture decoded) as colors in Screen's format, which clips them, stretched over the output.
+* For example, `IblBrdf` shows the BRDF map of a ready IBL, and `SceneDepth` on Deferred shows the depth `GBuffer` writes, with only `GBuffer`, `GraphView` and `Present` left live.
 
-`Compile()` records nothing. Declaration errors abort in every build, including Release: an invalid or doubly declared handle, an access the pass kind may not declare, two attachments in one slot, a raster pass without attachments, a transient read before any pass writes it, attachments of different sizes, an import lacking the usages its accesses need, a broken External contract, and a binding that no pipeline its pass drew or dispatched has, in a pass that drew or dispatched.
+### The Render Graph Page
 
-* **Culling.** Walking backwards, a pass lives if it has a side effect, writes an import (every buffer and acceleration structure is one), or writes contents a later live pass uses. A write uses the previous contents unless it clears or its pass fully overwrites. Culled passes are dumped with their unread outputs. `render_graph_cull` (default `true`) turns culling off.
-* **Transients.** Transients whose lifetimes (first to last live pass) do not overlap share one image when format, extent and sampler match, in order of first use, so a graph of the same shape maps each transient to the same image every frame. Images come from an `RGTexturePool`, which the owner of the graph keeps across frames. The pool serves one graph at a time and hands the same images to the next graph immediately; images unused for `RGTexturePool::UnusedGraphsBeforeRelease` graphs go through deferred deletion.
-* **Barriers.** Planning starts from each physical image's tracked `RHIImageState` per subresource, for imports and transients alike, and applies `TransitionImageState` per access: one barrier when the access's subresources share a state, otherwise one per run of mips in one state within a layer. A pooled image reused from the previous frame therefore waits for that frame's last access, and a swap chain image's first attachment write chains to the acquire wait because attachment writes add their own access to the barrier source. A write discards the contents (`Undefined` source layout) when it clears, fully overwrites, or writes a transient no earlier pass wrote. Barriers are batched per pass. Depth tests synchronize as depth writes, because the attachment store op writes the depth image. Buffers and acceleration structures synchronize through memory barriers by the same rule without layouts, starting from their tracked access (`RHITrackedAccess`); a build also waits for earlier builds, which covers the BLAS it reads (built before the frame) and the scratch memory it reuses. On Metal the batches record nothing, but the plan and the tracked states are the same.
-* **Load/store.** Per raster attachment: `Clear` if declared, `DontCare` if fully overwritten or a transient with no earlier writer, otherwise `Load`. `Store` if the next live pass touching the subresource uses its contents or the texture is imported, otherwise `DontCare`. Each choice carries its reason.
+* The control panel's render graph page (the diagram icon) shows the live graph of the renderer's frame.
+* The renderer dumps its graph every frame while the page is open, and not at all while it is closed.
+* The page reads only the dump: passes in execution order with their kind and `gpu_ms` or, greyed, their cull reason; resources with their kind (a transient's format and size class) and their first and last use.
+* Selecting a texture sets `render_graph_view` to its name, and `Frame` clears it. The page states which texture the frame shows (the one the `GraphView` pass samples), so selecting a texture that cannot be viewed shows the frame.
+* `Save Graph Dump` writes the next graph to `screenshots/<scene>_<pipeline>_<time>.json` under the [external storage path](Run.md#external-storage-paths).
 
-`Execute()` records each live pass: it writes the planned states through to the images', buffers' and acceleration structures' trackers, so foreign code and the next frame start from them, then records the barrier batch and the pass.
+### Getting a Dump
+
+* `RenderFramework::RequestGraphDump(name)` writes the next graph the renderer executes to `screenshots/<name>.json`; the page's `Save Graph Dump` and the test cases use it.
+* `RenderFramework` keeps the pending requests, the page's included, on the render thread and serves all of them from one dump of the next graph `Renderer::Render` executes, so a request outlives a renderer recreation.
+* From the command line, the `render_graph_dump` test case writes the graph of the first frame that is ready for a screenshot to `screenshots/render_graph.json` under the [external storage path](Run.md#external-storage-paths) and exits; any other cvars select the frame:
+
+```bash
+python3 run.py --framework glfw --test_case render_graph_dump --headless true --pipeline deferred
+python3 dev/render_graph_viewer.py <external-storage-path>/screenshots/render_graph.json
+```
+
+### Dump Format
+
+`Dump()` returns the compiled graph as JSON:
+
+* `passes`, in declaration order: each pass's `kind`, `culled` and `cull_reason`, `full_barrier` under `render_graph_full_barriers`, `gpu_ms` once executed with a timer that has a result, `accesses`, `barriers` (images with layouts, buffers and acceleration structures without) and `attachments` (slot, load and store with their reasons), and `barriers_after`, the barriers recorded after a pass that records any (to `HostRead`, for buffers the host reads). Each entry names its subresources unless it covers every one.
+* `resources`, textures first, then buffers and acceleration structures: each resource's `type` (`Texture`, `Buffer` or `AccelerationStructure`) and `kind` (`Transient` or `Imported`); a transient's `format`, `size_class` (with the pixel size of an `Absolute` one) and `physical` image; the indices of the first and last live passes that use it with its `usage`, which for a buffer or acceleration structure is the union of its accesses.
+* The dump names size classes instead of pixel sizes, so a steady frame dumps the same passes, accesses, barriers and attachments at any resolution and on either backend. The `physical` assignment is the exception: transients of one format but different size classes share an image when their sizes resolve equal, e.g. `Scene` and `Output` at `render_scale` 1.
+
+### Viewer
+
+* `python3 dev/render_graph_viewer.py <dump.json> [-o <page.html>]` renders a dump as one self-contained static HTML page (next to the dump by default), using only the Python standard library.
+* The page is a pass × resource grid: one row per pass in execution order, culled passes greyed with their reason, and one column per resource in dump order.
+* A cell shows the pass's access (`R`, `W`, `RW`; `C` or `D` for a color or depth attachment with its load/store) and marks a barrier before or after the pass; hovering it details accesses, subresources, attachment reasons and barriers with layouts. Shaded cells span each resource's lifetime.
+* A header counts passes, barriers and transient resources, and a `GPU ms` column appears when the dump has timings.
+
+### Pass Timing
+
+* `Execute(command_context, timers)` times Raster passes through an `RGPassTimers`, which holds one timed `RHIPass` per pass name; without one they are untimed. `Renderer::ExecuteGraph` passes the renderer's timers.
+* A time arrives `max_frames_in_flight` frames after its pass records (see [RHIPass.h](../libraries/include/rhi/RHIPass.h)) while a graph lives one frame, so the owner of the graphs keeps the timers across frames. A pass's `gpu_ms` is the time its timer measured when the pass last ran in the current frame slot, at least `max_frames_in_flight` frames before the dumped frame.
+* Passes sharing a name share a timer and report its last run.
+* Compute passes report the time of their `RHIComputePass`, which measures only when created timed.
+* Copy and External passes are untimed: a Metal timer covers one encoder, while a Copy pass opens one per copy, and foreign code times its own work (NRD, MetalFX).
+* Timing needs `RHIContext::SupportsPassTimestamps()`.
 
 ## Renderers
 
-A renderer builds one graph per frame from the `RenderFramework`'s texture pool, which outlives renderer recreation so a pipeline switch reuses the images both pipelines' graphs need (`pipeline_switch_pool` checks it), and hands it to `Renderer::ExecuteGraph`, which compiles it, writes its dump when one is requested, and records it. Every renderer ends its frame with `Renderer::AddPostChain(graph, scene, screen_pass)`, whose passes are Raster passes unless stated:
+Each renderer builds one graph per frame from the `RenderFramework`'s texture pool, which outlives renderer recreation, so a pipeline switch reuses the images both pipelines' graphs need. The goldens in [tests/render_graph/golden/](../tests/render_graph/golden/) list the passes, accesses, barriers, attachments and resources of a typical frame of each renderer (see [Tests](#tests)); the [viewer](#viewer) renders a dump of any frame.
 
-| Pass | Declares |
-| --- | --- |
-| the screen pass (`ToneMapping`, `OutputImage` or `Upsample`), when given | `Sampled` scene, `ColorWrite` Screen (fully overwritten) |
-| `Readback` (screenshot without UI) | Copy pass: `CopySrc` Screen, `CopyDst` ScreenshotBuffer, a staging buffer created with the pass (its size comes from `RenderGraph::GetFormat` and `GetSize`) and saved once the frame completes |
-| `Ui` (UI shown, not headless) | `ColorWrite` Screen, `NativeAccess()` for ImGui |
-| `Readback` (screenshot with UI) | as above |
-| `Present` | `Sampled` Screen, `ColorWrite` BackBuffer (fully overwritten), the image `RHIContext::GetBackBuffer()` returns: a windowed Vulkan device's acquired swap chain image, otherwise one image whose Metal texture is the frame's drawable when windowed |
+Every frame ends with the post chain (`PostChain`, [PostChain.h](../libraries/include/renderer/pass/PostChain.h)), added after the scene passes, which leave the scene in `scene`:
 
-Screen is a transient at output resolution whose format and sampler the renderer chooses once (`Renderer::InitPostChain`): `B8G8R8A8Srgb` with nearest sampling for the renderers that tone map on the GPU, the CPU renderer's `RGBAFloat16` with bilinear sampling otherwise. Without a screen pass, `scene` is the screen. The screen passes and `Present` are `ScreenQuadPass`es built from their output format; each samples its input with the sampler the input's image carries, and `Present` applies the window's pre-rotation. `Ui` draws into the rendering the graph begins over Screen, and the ImGui backend compiles its pipelines for Screen's format (`RHIUiHandler::Setup` takes an attachment signature).
+* **Screen pass.** It draws `scene` into Screen, a transient at output resolution. The renderer chooses it and Screen's format once (`Renderer::InitPostChain`):
+  * `ToneMapping` into `B8G8R8A8Srgb` for the renderers that tone map on the GPU;
+  * `Upsample` into `RGBAFloat16` for the CPU renderer when `render_scale` < 1;
+  * none for the CPU renderer otherwise, and `scene` is the screen.
+  * `GraphView` replaces the screen pass while `render_graph_view` shows a texture.
+* **Readback.** A Copy pass copies the screen into a staging buffer the host reads when a screenshot is pending.
+  * It runs before `Ui` for a screenshot without UI and after it for one with UI.
+  * A screenshot with UI gets the screen without UI when `Ui` does not draw.
+  * The buffer is created with the pass (its size comes from `RenderGraph::GetFormat` and `GetSize`), imported, and saved once the frame completes.
+* **Ui.** When UI is shown and the app is not headless, it draws ImGui into the rendering the graph begins over Screen, through `NativeAccess()`.
+  * The ImGui backend compiles its pipelines for Screen's format (`RHIUiHandler::Setup` takes an attachment signature).
+* **Present.** It draws the screen into BackBuffer, the image `RHIContext::GetBackBuffer()` returns.
+  * On a windowed Vulkan device, BackBuffer is the acquired swap chain image.
+  * Otherwise it is one image, whose Metal texture is the frame's drawable when windowed.
+  * It applies the window's pre-rotation.
 
-The CPU renderer runs on the graph. Each frame:
+The screen passes and `Present` are `ScreenQuadPass`es built from their output format and the filter they sample their input with (`ScreenQuadPass::InputFilter`):
 
-| Pass | Kind | Declares |
-| --- | --- | --- |
-| `Upload` | Copy | `CopySrc` HostSceneColor, the host buffer the path tracer filled; `CopyDst` SceneColor (fully overwritten) |
-| `Upsample` (`render_scale` < 1), `Readback`, `Ui`, `Present` | | the post chain; without upsampling SceneColor is the screen |
+* They always sample edge-clamped.
+* `ToneMapping`, `Upsample` and `GraphView` sample bilinearly when the input's size differs from the output's and the device filters the input's format linearly, otherwise nearest.
+* Linear filtering of 32-bit float and depth formats is optional on both backends (`RHIContext::SupportsLinearFiltering`).
+* `Present` samples nearest when BackBuffer's size, along the rotated axes, is an integer multiple of Screen's in both axes (1:1 included), otherwise as the other screen passes.
 
-SceneColor is a transient at scene resolution, already tone-mapped on the CPU, sampled bilinearly so the upsampling filters.
+The renderers:
 
-The GPU renderer runs on the graph. The accumulator, the TLAS, the path-tracing denoiser inputs (once a denoiser has needed them) and the denoiser's output (and NRD's output history) are imports. Each frame:
-
-| Pass | Kind | Declares |
-| --- | --- | --- |
-| `ClearAccumulator` (camera moved or scene changed) | Raster | `ColorWrite` Accumulator, cleared to zero; no draws |
-| `BuildTLAS` (primitives changed) | Copy | `AccelerationStructureBuild` TLAS |
-| `PathTrace` (accumulating) | Compute | `AccelerationStructureRead` TLAS; `StorageReadWrite` Accumulator; `StorageWrite` of the six denoiser inputs once allocated, because the tracer binds them as storage images on every dispatch (dummies until then); each declaration binds its image to the tracer |
-| `Nrd` (NRD encodes) | External | `Sampled` (compute) of the six inputs and Accumulator; `StorageWrite` NrdOutput, `StorageReadWrite` NrdOutputHistory |
-| `MetalFx` (MetalFX encodes) | External | `Sampled` (compute) of the four auxiliary inputs and Accumulator; `StorageWrite` of the displayed image: MetalFxOutput (the scaler's output) before the handoff starts, MetalFxResolvedOutput after |
-| `ToneMapping`, `Readback`, `Ui`, `Present` | | the post chain from the displayed texture |
-
-`GPURenderer::Update` stages the primitive changes on the TLAS: `RHITLAS::Build` and `Update` build dirty BLAS in their own submits (Metal compacts them, committing the frame's command buffer and waiting), write the instances and allocate the structure, and `BuildTLAS` records the staged build or refit. `PathTrace` runs on the renderer's timed `RHIComputePass`, which dynamic spp reads back. The displayed texture is the provider's output when it encodes this frame, the Accumulator when a frame traces without denoising, and otherwise whatever tone mapping displayed last (a converged or paused frame keeps the last denoised output, imported as DenoiserOutput). A denoiser's pass keeps its internal textures private: NRD's pool and `IN_*`/`OUT_*` textures and MetalFX's prepared textures (and its scaler output while it resolves) keep their own transitions, and every image the pass declares ends in its declared state.
-
-The Forward renderer runs on the graph. The directional shadow map, scene color and scene depth are transients; the IBL maps and the sky map are imports. Each frame:
-
-| Pass | Kind | Declares |
-| --- | --- | --- |
-| `DirectionalShadow` (directional light) | Raster | `DepthWrite` ShadowMap (`shadow_map_resolution` squared), cleared |
-| `BasePass` | Raster | `Sampled` ShadowMap and each ready IBL map (IblBrdf, IblDiffuse, IblSpecular); `ColorWrite` SceneColor and `DepthWrite` SceneDepth, both cleared |
-| `SkyBox` (sky map) | Raster | `Sampled` of the sky map it draws (an IBL map in the IBL map output modes); `ColorWrite` SceneColor, `DepthTest` SceneDepth |
-| `ToneMapping`, `Readback`, `Ui`, `Present` | | the post chain from SceneColor; the `IBLBrdfTexture` output mode draws the BRDF map in `OutputImage` instead of `ToneMapping`, and the scene passes are culled |
-
-Tone mapping upsamples when `render_scale` < 1, so the graph has the same passes at any scale; the scene color then carries a bilinear, edge-clamped sampler (`Renderer::GetSceneColorDesc`). The renderer passes each pass its inputs every frame: the shadow map and IBL maps as `LightingInputs`, where a missing one (no directional light, a map still cooking) samples a placeholder, and the sky box's map and the output image as the output mode selects them (`Renderer::GetSkyBoxMap`, `GetOutputImage`). IBL maps are imported only once ready. While a map cooks on the GPU, `ImageBasedLighting::AddCookPasses` starts the frame's graph with one cook step per map still cooking:
-
-| Pass | Kind | Declares |
-| --- | --- | --- |
-| `ClearIblBrdfCook`, `ClearIblDiffuseCook`, `ClearIblSpecularCook` (first step, once per subresource) | Raster | `ColorWrite` of one mip of one layer of the map being cooked, cleared; no draws |
-| `CookIblBrdf`, `CookIblDiffuse` | Compute | `StorageReadWrite` IblBrdfCook or IblDiffuseCook (all six faces as a 2D array), bound to the cook shader |
-| `CookIblSpecular` | Compute | `StorageReadWrite` of the mip of IblSpecularCook being cooked |
-
-The cooking maps are other images than the maps the scene passes sample. A finished map leaves its cook with every subresource in one tracked state, and its readback (`IBLPass::Finalize`) records in its own command buffer once the frame completes. `IblCookAccelerator` drives a pass to completion in frames of its own, each a graph holding one cook step.
-
-The Deferred renderer runs on the graph with the same shadow, IBL maps, sky box and post chain as Forward; the packed GBuffer is a transient too. Each frame:
-
-| Pass | Kind | Declares |
-| --- | --- | --- |
-| `DirectionalShadow` (directional light) | Raster | as in Forward |
-| `GBuffer` | Raster | `ColorWrite` GBufferPacked and `DepthWrite` SceneDepth, both cleared |
-| `Lighting` | Raster | `Sampled` of GBufferPacked, SceneDepth, ShadowMap and each ready IBL map; `ColorWrite` SceneColor (fully overwritten) |
-| `SkyBox` (sky map) | Raster | as in Forward: `Sampled` sky map, `ColorWrite` SceneColor, `DepthTest` SceneDepth |
-| `ToneMapping`, `Readback`, `Ui`, `Present` | | as in Forward |
-
-Lighting reconstructs world positions from the scene depth it samples, and the sky box then depth-tests against it, so the graph moves SceneDepth from the depth attachment layout to `Read` and back within the frame.
-
-## Dump
-
-`Dump()` returns the compiled graph as JSON: passes (kind, culled with reason, accesses, barriers with layouts and accesses, attachments with load/store and reasons, each naming its subresources unless it covers every one) and resources (kind, format, size class, first and last use, usage, physical image). Buffers and acceleration structures follow the textures; their barriers have no layouts, and their usage is the union of their accesses. It names size classes instead of pixel sizes, so a graph dumps the same at any resolution and on either backend.
+* **CPU.**
+  * The path tracer tone maps on the host into a host buffer, imported as HostSceneColor.
+  * The `Upload` Copy pass copies it into the SceneColor transient at scene resolution.
+  * SceneColor is the screen at `render_scale` 1; `Upsample` draws it into the screen when `render_scale` < 1.
+* **GPU.**
+  * The accumulator, the TLAS, the denoiser inputs (once a denoiser has needed them) and the denoiser outputs are imports.
+  * `ClearAccumulator` (a Raster pass with no draws) clears the accumulator when the camera moved or the scene changed.
+  * `BuildTLAS` (Copy) records the build or refit `GPURenderer::Update` staged on the TLAS.
+  * `PathTrace` (Compute) traces while accumulating, on the renderer's timed `RHIComputePass`, which dynamic spp reads back.
+  * `PathTrace` declares the six denoiser inputs as storage writes once they are allocated, because the tracer binds them on every dispatch.
+  * A denoiser adds one External pass (see [Denoiser.md](Denoiser.md)).
+  * Tone mapping displays the provider's output when it encodes the frame.
+  * It displays the accumulator when a frame traces without denoising or the provider cannot encode it.
+  * Otherwise it displays whatever it displayed last: a converged or paused frame keeps the last denoised output, imported as DenoiserOutput.
+* **Forward.**
+  * `DirectionalShadow` renders the ShadowMap transient (`shadow_map_resolution` squared) when the scene has a directional light.
+  * `BasePass` writes the SceneColor and SceneDepth transients.
+  * `SkyBox` draws the sky map over them while depth-testing.
+  * The IBL maps and the sky map are imports; an IBL map is imported only once ready.
+  * `BasePass` samples the shadow map and IBL maps as `LightingInputs`, where a missing one (no directional light, a map still cooking) samples a placeholder.
+  * `SkyBox` samples the map the output mode selects, with the sampler it is read with (`GetSkyBoxMap` in [RasterRenderer.cpp](../libraries/source/renderer/renderer/RasterRenderer.cpp)).
+  * Tone mapping upsamples when `render_scale` < 1, so the graph has the same passes at any scale.
+* **Deferred.**
+  * Forward and Deferred derive from `RasterRenderer`, which adds everything but the passes that draw the scene (`AddScenePasses`), so Deferred has the same shadow, IBL maps, sky box and post chain.
+  * `GBuffer` writes the GBufferPacked and SceneDepth transients, and `Lighting` samples them into SceneColor.
+  * `Lighting` reconstructs world positions from the scene depth it samples, and the sky box then depth-tests against it, so the graph moves SceneDepth from the depth attachment layout to `Read` and back within the frame.
+* **IBL cook.**
+  * While an IBL map cooks on the GPU, `ImageBasedLighting::AddCookPasses` starts the Forward or Deferred graph with one cook step per map still cooking.
+  * The first step clears each subresource of the map being cooked in its own Raster pass (`ClearIblBrdfCook`, `ClearIblDiffuseCook`, `ClearIblSpecularCook`).
+  * `CookIblBrdf`, `CookIblDiffuse` (all six faces as a 2D array) and `CookIblSpecular` (the mip being cooked) are Compute passes that read and write the cooking map as storage.
+  * The diffuse and specular cooks also sample the sky map.
+  * The cooking maps are other images than the maps the scene passes sample.
+  * A finished map leaves its cook with every subresource in one tracked state.
+  * `IblCookAccelerator` drives a pass to completion in frames of its own, each a graph holding one cook step.
 
 ## Tests
 
-`render_graph_compile` builds synthetic graphs, compares their dump summaries against expected plans, executes them and reads results back, including a screen quad whose pipeline was created from an attachment signature with nothing bound and draws the texture and sampler its pass declared, a texture copied through a buffer whose memory barrier orders the copies, and accesses to subresources of a cube map with the barriers and store actions they plan per subresource. `render_graph_sync_validation` runs it under Vulkan synchronization validation (see [Test.md](Test.md#validation-layer)).
+* `render_graph_compile` builds synthetic graphs, compares their dump summaries against expected plans (culling, image sharing within and across frames, per-subresource barriers and mip runs, load/store with reasons, buffer and acceleration-structure barriers, full barriers, bindings and placeholders), executes them and reads the results back ([RenderGraphCompileTest.cpp](../tests/render_graph/RenderGraphCompileTest.cpp)). `render_graph_sync_validation` runs it under Vulkan synchronization validation (see [Test.md](Test.md#validation-layer)).
+* `render_graph_errors` makes one mistake per error with errors thrown, and expects each error's message.
+* `render_graph_pass_timing` executes a graph of a Compute and a Raster pass every frame with pass timers kept across frames, and expects both passes to dump a `gpu_ms` once their frame slot returns, or none on a device without pass timestamps.
+* `pipeline_switch_pool` switches pipelines at runtime and requires each new renderer to reuse an image the previous one left in the texture pool.
+* [tests/build_system/test_render_graph_viewer.py](../tests/build_system/test_render_graph_viewer.py) unit-tests the viewer and the golden projection.
 
-Each renderer on the graph has a golden graph shape in [tests/render_graph/golden/](../tests/render_graph/golden/) (`<pipeline>.txt`), checked by a `<pipeline>_graph_shape` registry case. The `render_graph_dump` test case waits until the scene is ready for a screenshot and asks the renderer (`RenderFramework::RequestGraphDump`) to write the next graph it executes to `screenshots/render_graph.json`, which the device runners pull like screenshots. [tests/render_graph/graph_shape_test.py](../tests/render_graph/graph_shape_test.py) projects the dump to one line per pass, access, barrier, attachment and resource and prints a unified diff against the golden; `--update` rewrites the golden from the dump. A converged GPU frame traces nothing, so `gpu_graph_shape` runs `render_graph_dump_accumulating`, which asks for the dump as soon as the scene is loaded, while the accumulator still converges; the golden is a frame without a denoiser, clear or screenshot, and needs ray query support (lavapipe has it). The forward and deferred goldens are frames with a directional light, a sky map and ready IBL maps. Tests run headless, so the goldens show no `Ui` pass, and the back buffer's first barrier has no present access to wait for.
+### Golden Graph Shapes
+
+* Each renderer has a golden graph shape in [tests/render_graph/golden/](../tests/render_graph/golden/) (`<pipeline>.txt`), checked by a `<pipeline>_graph_shape` registry case. `deferred_graph_view_shape` checks a deferred frame viewing SceneDepth against `deferred_view.txt`, and `deferred_graph_view_fallback` one naming the integer GBufferPacked against `deferred.txt`.
+* The shape cases run the `render_graph_dump` test case, which waits until the scene is ready for a screenshot and asks the renderer (`RenderFramework::RequestGraphDump`) to write the next graph it executes to `screenshots/render_graph.json`, which the device runners pull like screenshots.
+* A converged GPU frame traces nothing, so `gpu_graph_shape` runs `render_graph_dump_accumulating`, which dumps frames once the scene is loaded until one traces onto samples the accumulator already holds with no TLAS build (a live `PathTrace`, no `ClearAccumulator` or `BuildTLAS`), so the frame does not depend on when loading finished. Its golden is a frame without a denoiser, clear or screenshot, and needs ray query support (lavapipe has it).
+* [tests/render_graph/graph_shape_test.py](../tests/render_graph/graph_shape_test.py) projects the dump to one line per pass, access, barrier, attachment and resource, leaving out GPU times, and prints a unified diff against the golden.
+* It also renders the dump through the viewer to `screenshots/captures/render_graph_<case>.html` (its `--page`) and fails the case if that raises. CI uploads the pages with the test screenshots (the `test-screenshots-<framework>-<os>` artifact).
+* The goldens are frames of the default TestScene, so the shape cases ignore the suite's `--scene`. The forward and deferred goldens are frames with a directional light, a sky map and ready IBL maps.
+* Tests run headless, so the goldens show no `Ui` pass, and the back buffer's first barrier has no `Present` access to wait for.
+
+### Updating a Golden
+
+A change that alters a graph on purpose updates its golden in two steps: run the shape case, whose compare step fails with the diff and leaves the dump in the screenshots folder, then rewrite the golden from that dump with the case's `--golden` name. `dev/run_tests.py` passes unknown arguments to the app, not to the evaluator, so `--update` goes to `graph_shape_test.py` directly. Each shape case overwrites the same dump, so update one golden per run.
+
+A golden is a shape gate, not a pure function of the renderer's code. Besides a change to the passes or their declarations, these change it:
+
+* the previous frame's graph: a transient's or import's first barrier starts from the access the previous frame left in the image's tracked state;
+* the pool's order: a transient gets the first free matching image in the order the pool created them, so earlier graphs (another pipeline's, an IBL cook frame's) decide which image it gets and which earlier access its first barrier waits for;
+* the scene: a directional light, a sky map and ready IBL maps add passes and imports;
+* `shadow_map_resolution`: the ShadowMap's pixel size is in the golden;
+* the resolution: transients whose sizes resolve equal may share an image, which changes `physical`.
+
+```bash
+python3 dev/run_tests.py --framework glfw --config Release --case deferred_graph_shape
+python3 tests/render_graph/graph_shape_test.py --framework glfw --golden deferred --update
+```

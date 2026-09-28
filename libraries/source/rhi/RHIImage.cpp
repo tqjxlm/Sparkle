@@ -11,17 +11,8 @@ static RHIResourceAccess GetLegacySourceAccess(RHIPipelineStage stage)
     case RHIPipelineStage::Top:
     case RHIPipelineStage::Bottom:
         return {};
-    case RHIPipelineStage::DrawIndirect:
-        return {.access = RHIAccess::IndirectArgs};
-    case RHIPipelineStage::VertexInput:
-        return {.access = RHIAccess::VertexInput};
-    case RHIPipelineStage::VertexShader:
-        return {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Vertex};
     case RHIPipelineStage::PixelShader:
         return {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Pixel};
-    case RHIPipelineStage::EarlyZ:
-    case RHIPipelineStage::LateZ:
-        return {.access = RHIAccess::DepthWrite};
     case RHIPipelineStage::ColorOutput:
         return {.access = RHIAccess::ColorWrite};
     case RHIPipelineStage::ComputeShader:
@@ -41,8 +32,6 @@ static RHIShaderStageMask GetLegacyShaderStages(RHIPipelineStage stage)
     case RHIPipelineStage::Top:
     case RHIPipelineStage::Bottom:
         return RHIShaderStageMask::All;
-    case RHIPipelineStage::VertexShader:
-        return RHIShaderStageMask::Vertex;
     case RHIPipelineStage::PixelShader:
         return RHIShaderStageMask::Pixel;
     case RHIPipelineStage::ComputeShader:
@@ -119,7 +108,7 @@ std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &
                                     .array_layer_count = 1,
                                     .from = state.access | legacy_source,
                                     .to = target,
-                                    .from_layout = request.discard ? RHIImageLayout::Undefined : state.layout,
+                                    .from_layout = state.layout,
                                     .to_layout = request.target_layout});
 
                 SetState(*next, range_start, range_end - range_start, array_layer, 1);
@@ -130,6 +119,11 @@ std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &
     }
 
     return barriers;
+}
+
+void RHIImage::Transition(RHICommandContext &command_context, const TransitionRequest &request)
+{
+    command_context.Barrier(TrackTransition(request), {});
 }
 
 std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
@@ -143,15 +137,16 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
                            .is_dynamic = false},
                           "ImageReadBackStagingBuffer");
 
-    rhi->BeginCommandBuffer();
-
-    Transition({.target_layout = RHIImageLayout::TransferSrc,
-                .after_stage = RHIPipelineStage::Bottom,
-                .before_stage = RHIPipelineStage::Transfer});
-    rhi->GetCommandContext()->CopyImageToBuffer(this, staging_buffer.get());
-    Transition({.target_layout = RHIImageLayout::Read,
-                .after_stage = RHIPipelineStage::Transfer,
-                .before_stage = RHIPipelineStage::PixelShader});
+    auto &command_context = rhi->BeginCommandBuffer();
+    Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                 .after_stage = RHIPipelineStage::Bottom,
+                                 .before_stage = RHIPipelineStage::Transfer});
+    command_context.CopyImageToBuffer(this, staging_buffer.get());
+    // waiting for the device does not make its writes visible to the host
+    command_context.Barrier({.from = {.access = RHIAccess::CopyDst}, .to = {.access = RHIAccess::HostRead}});
+    Transition(command_context, {.target_layout = RHIImageLayout::Read,
+                                 .after_stage = RHIPipelineStage::Transfer,
+                                 .before_stage = RHIPipelineStage::PixelShader});
 
     rhi->SubmitCommandBuffer();
 
@@ -171,11 +166,6 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 
 RHIImage::RHIImage(const Attribute &attributes, const std::string &name) : RHIResource(name), attributes_(attributes)
 {
-    if (attributes_.usages & ImageUsage::Texture)
-    {
-        ASSERT(attributes_.sampler.address_mode != RHISampler::SamplerAddressMode::Count);
-    }
-
     subresource_states_.assign(attributes_.mip_levels * GetArrayLayerCount(),
                                {.layout = attributes_.initial_layout, .access = {}});
 }

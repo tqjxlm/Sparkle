@@ -1,6 +1,7 @@
 #include "renderer/pass/IBLDiffusePass.h"
 
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
@@ -65,12 +66,6 @@ RHIResourceRef<RHIImage> IBLDiffusePass::CreateIBLMap(bool for_cooking, bool all
 
     output_attribute.type = RHIImage::ImageType::Image2DCube;
 
-    output_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                                .enable_anisotropy = false};
-
     return rhi_->CreateImage(output_attribute, env_map_->GetName() + "_diffuse");
 }
 
@@ -93,16 +88,15 @@ void IBLDiffusePass::InitRenderResources(const RenderConfig &)
 
     auto *shader_resource = pipeline_state_->GetShaderResource<IBLDiffuseMapComputeShader>();
     shader_resource->ubo().BindResource(cs_ub_);
-    shader_resource->env_map().BindResource(env_map_->GetDefaultView(rhi_));
-    shader_resource->env_map_sampler().BindResource(env_map_->GetSampler());
 
-    compute_pass_ = rhi_->CreateComputePass("IBLDiffuseComputePass", false);
+    compute_pass_ = rhi_->CreateComputePass("IBLDiffuseComputePass", true);
 }
 
 void IBLDiffusePass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)
 {
     ASSERT(!IsReady());
 
+    const auto env_map = graph.Import("SkyMap", env_map_);
     const auto map = ImportCookingMap(graph, "IblDiffuseCook");
 
     const auto remaining_samples = target_sample_count_ - sample_count_;
@@ -117,8 +111,10 @@ void IBLDiffusePass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)
     };
     cs_ub_->Upload(rhi_, &ubo);
 
-    graph.AddComputePass("CookIblDiffuse", compute_pass_, [this, map](RGBuilder &builder) {
-        builder.StorageReadWrite(map, &IBLDiffuseMapComputeShader::ResourceTable::out_cube_map);
+    graph.AddComputePass("CookIblDiffuse", compute_pass_, [this, env_map, map](RGBuilder &builder) {
+        using Table = IBLDiffuseMapComputeShader::ResourceTable;
+        builder.Sampled(env_map, &Table::env_map, &Table::env_map_sampler, SkyRenderProxy::SkyMapSampler);
+        builder.StorageReadWrite(map, &Table::out_cube_map);
         return [this, threads = Vector3UInt(ibl_image_->GetWidth(), ibl_image_->GetHeight(), 6u)](
                    RGComputeContext &context) { context.DispatchCompute(pipeline_state_, threads, {16u, 16u, 1u}); };
     });

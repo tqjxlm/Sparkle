@@ -345,7 +345,9 @@ public:
     {
     }
 
-    // binds the resource when `table` is of the member's table type and returns true, and ignores other tables
+    // binds the resource when `table` is of the member's table type and returns true, and ignores other tables. each
+    // call costs a std::function call and a dynamic_cast, and the command context calls it for every set binding and
+    // every table of the pipeline at each draw and dispatch.
     bool BindTo(RHIShaderResourceTable &table) const
     {
         return bind_(table);

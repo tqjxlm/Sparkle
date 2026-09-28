@@ -3,7 +3,8 @@
 The render_graph_dump test case writes the dump; this evaluator projects it to
 one line per pass, access, barrier, attachment and resource, and diffs that
 against tests/render_graph/golden/<pipeline>.txt. --update rewrites the golden
-from the dump instead.
+from the dump instead. Either way it renders the dump as a page through
+dev/render_graph_viewer.py to captures/render_graph_<page>.html.
 """
 
 import argparse
@@ -15,16 +16,13 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "rendering"))
-from render_test_support import SUPPORTED_FRAMEWORKS, get_screenshot_dir  # noqa: E402
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
+from render_test_support import SUPPORTED_FRAMEWORKS, get_captures_dir, get_screenshot_dir  # noqa: E402
+from render_graph_viewer import (describe_access, describe_attachment, describe_barrier,  # noqa: E402
+                                 describe_barrier_after, render_html)
 
 GOLDEN_DIR = os.path.join(SCRIPT_DIR, "golden")
 DUMP_NAME = "render_graph.json"
-
-
-def resource_of(entry):
-    """The resource an entry names, with its subresources unless it covers every one."""
-    subresources = entry.get("subresources")
-    return f"{entry['resource']}[{subresources}]" if subresources else entry["resource"]
 
 
 def project(dump):
@@ -36,19 +34,12 @@ def project(dump):
             continue
 
         lines.append(f"{name}: {graph_pass['kind']}")
-        for access in graph_pass["accesses"]:
-            clear = " clear" if access.get("clear") else ""
-            lines.append(
-                f"  access {resource_of(access)} {access['access']}{clear}")
-        for barrier in graph_pass["barriers"]:
-            # memory barriers have no layouts
-            layouts = f" {barrier['from_layout']}->{barrier['to_layout']}" if "from_layout" in barrier else ""
-            lines.append(f"  barrier {resource_of(barrier)}{layouts} [{barrier['from']} -> {barrier['to']}]")
-        for attachment in graph_pass["attachments"]:
-            lines.append(f"  attachment {resource_of(attachment)} slot {attachment['slot']}:"
-                         f" {attachment['load']} ({attachment['load_reason']})"
-                         f" / {attachment['store']} ({attachment['store_reason']})")
+        lines += [f"  {describe_access(access)}" for access in graph_pass["accesses"]]
+        lines += [f"  {describe_barrier(barrier)}" for barrier in graph_pass["barriers"]]
+        lines += [f"  {describe_attachment(attachment)}" for attachment in graph_pass["attachments"]]
+        lines += [f"  {describe_barrier_after(barrier)}" for barrier in graph_pass.get("barriers_after", [])]
 
+    passes = dump["passes"]
     for resource in dump["resources"]:
         line = f"{resource['name']}: {resource['kind']}"
         if resource["kind"] == "Transient":
@@ -57,7 +48,8 @@ def project(dump):
                 line += f" {resource['width']}x{resource['height']}"
             line += f", physical {resource['physical']}" if "physical" in resource else ", no image"
         if "first_use" in resource:
-            line += f", {resource['first_use']}..{resource['last_use']}, {resource['usage']}"
+            first, last = passes[resource["first_use"]]["name"], passes[resource["last_use"]]["name"]
+            line += f", {first}..{last}, {resource['usage']}"
         lines.append(line)
     return lines
 
@@ -68,6 +60,8 @@ def main():
                         choices=SUPPORTED_FRAMEWORKS)
     parser.add_argument("--golden", required=True,
                         help="golden name under tests/render_graph/golden, e.g. cpu")
+    parser.add_argument("--page",
+                        help="page name, e.g. the registry case; defaults to the golden name")
     parser.add_argument("--update", action="store_true",
                         help="rewrite the golden from the dump")
     args = parser.parse_args()
@@ -78,7 +72,15 @@ def main():
         return 1
 
     with open(dump_path, encoding="utf-8") as dump_file:
-        actual = project(json.load(dump_file))
+        dump = json.load(dump_file)
+
+    page = args.page or args.golden
+    page_path = os.path.join(get_captures_dir(args.framework), f"render_graph_{page}.html")
+    with open(page_path, "w", encoding="utf-8") as page_file:
+        page_file.write(render_html(dump, page))
+    print(f"Rendered {page_path}", flush=True)
+
+    actual = project(dump)
 
     golden_path = os.path.join(GOLDEN_DIR, f"{args.golden}.txt")
     if args.update:

@@ -5,7 +5,7 @@
 #include "VulkanCommon.h"
 #include "VulkanContext.h"
 #include "VulkanImage.h"
-#include "VulkanRenderPass.h"
+#include "VulkanPipelineState.h"
 #include "VulkanSwapChain.h"
 
 #include <imgui_impl_vulkan.h>
@@ -81,7 +81,7 @@ void VulkanUiHandler::BeginFrame(const RHIRenderingInfo &info)
     ImGui_ImplVulkan_NewFrame();
 }
 
-void VulkanUiHandler::Render(RHICommandContext *command_context)
+void VulkanUiHandler::Render(RHICommandContext &command_context)
 {
     auto &io = ImGui::GetIO();
 
@@ -93,11 +93,11 @@ void VulkanUiHandler::Render(RHICommandContext *command_context)
         return;
     }
 
-    auto *vulkan_context = static_cast<VulkanCommandContext *>(command_context);
-    ImGui_ImplVulkan_RenderDrawData(draw_data, vulkan_context->GetCommandBuffer());
+    auto &vulkan_context = static_cast<VulkanCommandContext &>(command_context);
+    ImGui_ImplVulkan_RenderDrawData(draw_data, vulkan_context.GetCommandBuffer());
 
     // imgui records its pipeline, buffers, descriptor sets and viewport directly
-    vulkan_context->ResetCommandState();
+    vulkan_context.ResetCommandState();
 }
 
 VulkanUiHandler::~VulkanUiHandler()

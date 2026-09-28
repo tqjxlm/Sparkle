@@ -24,10 +24,10 @@ constexpr float HitDistA = 3.0f;
 constexpr float HitDistB = 0.1f;
 constexpr float HitDistC = 20.0f;
 
-void ToLayout(const RHIResourceRef<RHIImage> &image, RHIImageLayout layout, RHIPipelineStage after,
-              RHIPipelineStage before)
+void ToLayout(RHICommandContext &command_context, const RHIResourceRef<RHIImage> &image, RHIImageLayout layout,
+              RHIPipelineStage after, RHIPipelineStage before)
 {
-    image->Transition({.target_layout = layout, .after_stage = after, .before_stage = before});
+    image->Transition(command_context, {.target_layout = layout, .after_stage = after, .before_stage = before});
 }
 
 void CopyMatrix(float (&dst)[16], const Mat4 &src)
@@ -140,10 +140,6 @@ RHIResourceRef<RHIImage> NrdDenoiser::CreateFullScreenTexture(PixelFormat format
     auto image = rhi_->CreateImage(
         RHIImage::Attribute{
             .format = format,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
             .width = input_size_.x(),
             .height = input_size_.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
@@ -153,7 +149,8 @@ RHIResourceRef<RHIImage> NrdDenoiser::CreateFullScreenTexture(PixelFormat format
         },
         name);
 
-    ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::Top, RHIPipelineStage::ComputeShader);
+    ToLayout(*rhi_->GetCommandContext(), image, RHIImageLayout::Read, RHIPipelineStage::Top,
+             RHIPipelineStage::ComputeShader);
 
     return image;
 }
@@ -370,8 +367,10 @@ RGTexture NrdDenoiser::AddTo(RenderGraph &graph, const DenoiserInputs &inputs)
     return output;
 }
 
-void NrdDenoiser::Encode(const RGPassContext &context, const DenoiserInputs &inputs)
+void NrdDenoiser::Encode(RGExternalContext &context, const DenoiserInputs &inputs)
 {
+    auto &command_context = context.GetCommandContext();
+
     BindInputs(context, inputs);
 
     const auto &attr = output_->GetAttributes();
@@ -418,7 +417,7 @@ void NrdDenoiser::Encode(const RGPassContext &context, const DenoiserInputs &inp
 
     if (run_reblur)
     {
-        RenderReblur(dispatch, group);
+        RenderReblur(command_context, dispatch, group);
     }
 
     // every sampled private texture, not just the ReBLUR outputs: on handoff frames the ReBLUR block (and its
@@ -426,7 +425,8 @@ void NrdDenoiser::Encode(const RGPassContext &context, const DenoiserInputs &inp
     for (const auto &image :
          {out_diff_, out_spec_, validation_, in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     NrdResolveShader::UniformBufferData resolve_ubo{
@@ -440,24 +440,24 @@ void NrdDenoiser::Encode(const RGPassContext &context, const DenoiserInputs &inp
     };
     resolve_ubo_->Upload(rhi_, &resolve_ubo);
 
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginComputePass(resolve_pass_);
-    command_context->DispatchCompute(resolve_pipeline_, dispatch, group);
-    command_context->EndComputePass(resolve_pass_);
+    command_context.BeginComputePass(resolve_pass_);
+    command_context.DispatchCompute(resolve_pipeline_, dispatch, group);
+    command_context.EndComputePass(resolve_pass_);
 
     prev_view_matrix_ = view_matrix_;
     prev_projection_matrix_ = projection_matrix_;
     reset_history_ = false;
 }
 
-void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &group)
+void NrdDenoiser::RenderReblur(RHICommandContext &command_context, const Vector3UInt &dispatch,
+                               const Vector3UInt &group)
 {
     const auto &attr = output_->GetAttributes();
 
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     NrdPackShader::UniformBufferData pack_ubo{
@@ -470,20 +470,20 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
     };
     pack_ubo_->Upload(rhi_, &pack_ubo);
 
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginComputePass(pack_pass_);
-    command_context->DispatchCompute(pack_pipeline_, dispatch, group);
-    command_context->EndComputePass(pack_pass_);
+    command_context.BeginComputePass(pack_pass_);
+    command_context.DispatchCompute(pack_pipeline_, dispatch, group);
+    command_context.EndComputePass(pack_pass_);
 
     // ReBLUR reads the freshly packed inputs and writes the OUT_* textures on its own encoder.
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
     for (const auto &image : {out_diff_, out_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     // NRD assumes D3D clip conventions (+Y up); undo the engine's Vulkan-style Y flip (proj(1,1) < 0)
@@ -625,8 +625,8 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
         };
     }
 
-    command_context->BeginComputePass(reblur_pass_);
+    command_context.BeginComputePass(reblur_pass_);
     backend_->RunDispatches(command_context, seam_dispatches_.data(), dispatch_count);
-    command_context->EndComputePass(reblur_pass_);
+    command_context.EndComputePass(reblur_pass_);
 }
 } // namespace sparkle

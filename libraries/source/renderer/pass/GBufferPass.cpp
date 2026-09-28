@@ -42,7 +42,7 @@ public:
         metallic_roughness_texture().BindResource(material_proxy->GetMetallicRoughnessTexture()->GetDefaultView(rhi));
         emissive_texture().BindResource(material_proxy->GetEmissiveTexture()->GetDefaultView(rhi));
 
-        material_texture_sampler().BindResource(material_proxy->GetBaseColorTexture()->GetSampler());
+        material_texture_sampler().BindResource(rhi->GetSampler(MeshPass::MaterialTextureSampler));
     }
 
     END_SHADER_RESOURCE_TABLE

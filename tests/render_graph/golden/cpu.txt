@@ -8,6 +8,6 @@ Present: Raster
   barrier SceneColor TransferDst->Read [CopyDst -> Sampled(Pixel)]
   barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
   attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
-SceneColor: Transient RGBAFloat16 Scene, physical 0, Upload..Present, Texture|TransferDst
+SceneColor: Transient RGBAFloat16 Scene, physical 0, Upload..Present, TransferDst|Texture
 BackBuffer: Imported, Present..Present, ColorAttachment
 HostSceneColor: Imported, Upload..Upload, CopySrc
