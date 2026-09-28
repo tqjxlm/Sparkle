@@ -670,6 +670,54 @@ private:
             "load/store inference");
     }
 
+    // a pass that fully overwrites one texture discards only that one: another it reads and writes keeps its contents
+    void FullyOverwritesReadWrite(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
+        RGTexturePool pool(rhi);
+        RenderGraph graph(pool, config);
+        constexpr RGTextureDesc Desc{.format = PixelFormat::R32Float, .size_class = RGSizeClass::Scene};
+        const auto history = graph.CreateTexture("History", Desc);
+        const auto radiance = graph.CreateTexture("Radiance", Desc);
+        const auto shown = graph.CreateTexture("Shown", Rgba8Scene);
+        graph.AddComputePass("Seed", compute_pass, [history](RGBuilder &builder) {
+            builder.StorageWrite(history);
+            return [](RGComputeContext &) {};
+        });
+        graph.AddComputePass("Accumulate", compute_pass, [history, radiance](RGBuilder &builder) {
+            builder.StorageReadWrite(history);
+            builder.StorageWrite(radiance);
+            builder.FullyOverwrites();
+            return [](RGComputeContext &) {};
+        });
+        graph.AddRasterPass("Show", [history, radiance, shown](RGBuilder &builder) {
+            builder.Sampled(history);
+            builder.Sampled(radiance);
+            builder.ColorWrite(shown, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+            builder.SideEffect();
+            return [](RGRasterContext &) {};
+        });
+
+        Run(rhi, graph,
+            {
+                "Seed: Compute",
+                "  barrier History Undefined->StorageWrite [None -> StorageWrite(Compute)]",
+                "Accumulate: Compute",
+                "  barrier History StorageWrite->StorageWrite [StorageWrite(Compute) -> "
+                "StorageRead|StorageWrite(Compute)]",
+                "  barrier Radiance Undefined->StorageWrite [None -> StorageWrite(Compute)]",
+                "Show: Raster",
+                "  barrier History StorageWrite->Read [StorageRead|StorageWrite(Compute) -> Sampled(Pixel)]",
+                "  barrier Radiance StorageWrite->Read [StorageWrite(Compute) -> Sampled(Pixel)]",
+                "  barrier Shown Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                "  attachment Shown slot 0: Clear (clear) / DontCare (no later reader)",
+                "History: physical 0",
+                "Radiance: physical 1",
+                "Shown: physical 2",
+            },
+            "fully overwrites with a read-write access");
+    }
+
     // the same graph in two consecutive frames: the second reuses the first's images, and its barriers wait for the
     // accesses the first frame left in their tracked state
     void NextFrameReuse(RHIContext *rhi, const RenderConfig &config)
@@ -736,12 +784,18 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 11> Steps{
-        &RenderGraphCompileTest::ClearSampleReadback, &RenderGraphCompileTest::DeclaredBinding,
-        &RenderGraphCompileTest::BufferRoundTrip,     &RenderGraphCompileTest::Subresources,
-        &RenderGraphCompileTest::CulledBranch,        &RenderGraphCompileTest::IntraFrameReuse,
-        &RenderGraphCompileTest::ImportedSeeding,     &RenderGraphCompileTest::LoadStore,
-        &RenderGraphCompileTest::NextFrameReuse,      &RenderGraphCompileTest::NextFrameReuse,
+    static constexpr std::array<Step, 12> Steps{
+        &RenderGraphCompileTest::ClearSampleReadback,
+        &RenderGraphCompileTest::DeclaredBinding,
+        &RenderGraphCompileTest::BufferRoundTrip,
+        &RenderGraphCompileTest::Subresources,
+        &RenderGraphCompileTest::CulledBranch,
+        &RenderGraphCompileTest::IntraFrameReuse,
+        &RenderGraphCompileTest::ImportedSeeding,
+        &RenderGraphCompileTest::LoadStore,
+        &RenderGraphCompileTest::FullyOverwritesReadWrite,
+        &RenderGraphCompileTest::NextFrameReuse,
+        &RenderGraphCompileTest::NextFrameReuse,
         &RenderGraphCompileTest::ReleaseUnused,
     };
 

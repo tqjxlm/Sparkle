@@ -261,7 +261,8 @@ public:
         BindLastBufferAccess(RHIMemberBinding(binding, GetAccelerationStructure(acceleration_structure)));
     }
 
-    // the pass writes every texel of the textures it writes, so their previous contents are discarded
+    // the pass writes every texel of the textures it writes, so the previous contents of those it does not also read
+    // are discarded
     void FullyOverwrites();
 
     // the pass runs even when nothing reads its outputs

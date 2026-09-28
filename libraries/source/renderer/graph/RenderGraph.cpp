@@ -760,9 +760,8 @@ void RenderGraph::PlanBarriers()
             }
 
             const auto *writer = last_writer[access.texture.index];
-            const bool fully_overwritten = pass.fully_overwrites && access.access.HasWrite();
-            const bool discard = access.clear || fully_overwritten ||
-                                 (access.access.HasWrite() && writer == nullptr && !texture.imported);
+            const bool uses_contents = UsesContents(access.access, access.clear.has_value(), pass.fully_overwrites);
+            const bool discard = !uses_contents || (access.access.HasWrite() && writer == nullptr && !texture.imported);
             PlanAccess(access, discard, image_states);
 
             const bool attachment = access.slot != NoSlot;
@@ -782,7 +781,7 @@ void RenderGraph::PlanBarriers()
                 load_op = RHILoadOp::Clear;
                 access.load_reason = "clear";
             }
-            else if (fully_overwritten)
+            else if (!uses_contents)
             {
                 load_op = RHILoadOp::None;
                 access.load_reason = "fully overwritten";
