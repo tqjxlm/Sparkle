@@ -112,6 +112,10 @@ nlohmann::json RenderGraph::Dump() const
         {
             dumped["cull_reason"] = pass.cull_reason;
         }
+        if (pass.gpu_ms >= 0.f)
+        {
+            dumped["gpu_ms"] = pass.gpu_ms;
+        }
 
         auto accesses = nlohmann::json::array();
         auto barriers = nlohmann::json::array();

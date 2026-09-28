@@ -3,7 +3,8 @@
 The render_graph_dump test case writes the dump; this evaluator projects it to
 one line per pass, access, barrier, attachment and resource, and diffs that
 against tests/render_graph/golden/<pipeline>.txt. --update rewrites the golden
-from the dump instead.
+from the dump instead. Either way it renders the dump as a page through
+dev/render_graph_viewer.py to captures/render_graph_<pipeline>.html.
 """
 
 import argparse
@@ -15,7 +16,9 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "rendering"))
-from render_test_support import SUPPORTED_FRAMEWORKS, get_screenshot_dir  # noqa: E402
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
+from render_test_support import SUPPORTED_FRAMEWORKS, get_captures_dir, get_screenshot_dir  # noqa: E402
+from render_graph_viewer import render_html  # noqa: E402
 
 GOLDEN_DIR = os.path.join(SCRIPT_DIR, "golden")
 DUMP_NAME = "render_graph.json"
@@ -78,7 +81,14 @@ def main():
         return 1
 
     with open(dump_path, encoding="utf-8") as dump_file:
-        actual = project(json.load(dump_file))
+        dump = json.load(dump_file)
+
+    page_path = os.path.join(get_captures_dir(args.framework), f"render_graph_{args.golden}.html")
+    with open(page_path, "w", encoding="utf-8") as page_file:
+        page_file.write(render_html(dump, args.golden))
+    print(f"Rendered {page_path}", flush=True)
+
+    actual = project(dump)
 
     golden_path = os.path.join(GOLDEN_DIR, f"{args.golden}.txt")
     if args.update:

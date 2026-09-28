@@ -102,7 +102,10 @@ void RHICommandContext::DispatchCompute(const RHIResourceRef<RHIPipelineState> &
 
 void RHICommandContext::ApplyBindings(RHIPipelineState &pipeline)
 {
-    drew_or_dispatched_ = true;
+    if (pipelines_.empty() || pipelines_.back() != &pipeline)
+    {
+        pipelines_.push_back(&pipeline);
+    }
     for (auto index = 0u; index < bindings_.size(); index++)
     {
         if (pipeline.ApplyBinding(bindings_[index]))

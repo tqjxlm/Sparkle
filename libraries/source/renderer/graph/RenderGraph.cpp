@@ -2,6 +2,7 @@
 
 #include "RGCheck.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/graph/RGPassTimers.h"
 #include "renderer/graph/RGTexturePool.h"
 
 #include <algorithm>
@@ -107,6 +108,31 @@ static RGSubresources GetAllSubresources(const RHIImage &image)
             .mip_count = image.GetAttributes().mip_levels,
             .base_layer = 0,
             .layer_count = static_cast<uint8_t>(image.GetArrayLayerCount())};
+}
+
+static RGSubresources GetViewedSubresources(const RHIImageView::Attribute &view)
+{
+    return {.base_mip = static_cast<uint8_t>(view.base_mip_level),
+            .mip_count = static_cast<uint8_t>(view.mip_level_count),
+            .base_layer = static_cast<uint8_t>(view.base_array_layer),
+            .layer_count = static_cast<uint8_t>(view.array_layer_count)};
+}
+
+// the accesses a binding of `type` makes to a graph resource. graph buffers are only copied, so no binding may hold
+// one.
+static RHIAccess GetBindingAccess(RHIShaderResourceReflection::ResourceType type)
+{
+    switch (type)
+    {
+    case RHIShaderResourceReflection::ResourceType::Texture2D:
+        return RHIAccess::Sampled;
+    case RHIShaderResourceReflection::ResourceType::StorageImage2D:
+        return RHIAccess::StorageRead | RHIAccess::StorageWrite;
+    case RHIShaderResourceReflection::ResourceType::AccelerationStructure:
+        return RHIAccess::AccelerationStructureRead;
+    default:
+        return RHIAccess::None;
+    }
 }
 
 static bool ReadsContents(const RHIResourceAccess &access)
@@ -438,6 +464,27 @@ uint32_t RenderGraph::ImportBuffer(Buffer buffer)
 
     buffers_.push_back(std::move(buffer));
     return static_cast<uint32_t>(buffers_.size() - 1);
+}
+
+RGTexture RenderGraph::FindTexture(std::string_view name) const
+{
+    const auto found = std::ranges::find(textures_, name, &Texture::name);
+    return found == textures_.end() ? RGTexture{}
+                                    : RGTexture{.index = static_cast<uint32_t>(found - textures_.begin())};
+}
+
+bool RenderGraph::CanSample2D(RGTexture texture) const
+{
+    const auto &found = textures_[texture.index];
+    if (found.imported)
+    {
+        return found.layers == 1 && found.imported->GetAttributes().usages & RHIImage::ImageUsage::Texture;
+    }
+    return std::ranges::any_of(passes_, [texture](const Pass &pass) {
+        return std::ranges::any_of(pass.accesses, [texture](const Access &access) {
+            return access.texture == texture && access.access.HasWrite();
+        });
+    });
 }
 
 PixelFormat RenderGraph::GetFormat(RGTexture texture) const
@@ -911,7 +958,7 @@ void RenderGraph::InferStoreOps()
 
 // the graph writes each pass's planned state through to the tracked state before recording the pass, so foreign code
 // and the next frame start from it
-void RenderGraph::Execute(RHICommandContext &command_context)
+void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *timers)
 {
     RGCheck(compiled_ && !executed_, "the graph executes once, after compiling");
     executed_ = true;
@@ -939,14 +986,17 @@ void RenderGraph::Execute(RHICommandContext &command_context)
         }
 
         command_context.SetBindings(pass.bindings);
+        RHIPass *timed_pass = nullptr;
         switch (pass.kind)
         {
         case RGPassKind::Raster:
-            command_context.BeginRendering(pass.rendering_info, pass.name, nullptr, barriers, memory_barriers);
+            timed_pass = timers ? timers->Get(pass.name) : nullptr;
+            command_context.BeginRendering(pass.rendering_info, pass.name, timed_pass, barriers, memory_barriers);
             pass.record(command_context);
             command_context.EndRendering();
             break;
         case RGPassKind::Compute:
+            timed_pass = pass.compute_pass.get();
             command_context.BeginComputePass(pass.compute_pass);
             command_context.Barrier(barriers, memory_barriers);
             pass.record(command_context);
@@ -965,7 +1015,13 @@ void RenderGraph::Execute(RHICommandContext &command_context)
             UnImplemented(pass.kind);
         }
         CheckBindingsApplied(pass, command_context);
+        CheckBoundResourcesDeclared(pass, command_context);
         command_context.SetBindings({});
+
+        if (timed_pass)
+        {
+            pass.gpu_ms = timed_pass->GetExecutionTime();
+        }
     }
 }
 
@@ -993,6 +1049,78 @@ void RenderGraph::CheckBindingsApplied(const Pass &pass, const RHICommandContext
     for (const auto &access : pass.buffer_accesses)
     {
         check(access.bindings.size(), buffers_[access.buffer].name);
+    }
+}
+
+// a pipeline's resource tables keep what earlier passes and frames bound, so a raster or compute pass must declare
+// every graph resource left bound in a pipeline it drew or dispatched. external passes bind foreign resources.
+void RenderGraph::CheckBoundResourcesDeclared(const Pass &pass, const RHICommandContext &command_context) const
+{
+    if (pass.kind != RGPassKind::Raster && pass.kind != RGPassKind::Compute)
+    {
+        return;
+    }
+
+    for (const auto *pipeline : command_context.GetPipelines())
+    {
+        for (const auto &table : pipeline->GetResourceTables())
+        {
+            if (!table)
+            {
+                continue;
+            }
+            for (const auto *binding : table->GetBindings())
+            {
+                if (binding->GetResource() && !binding->IsBindless())
+                {
+                    CheckBindingDeclared(pass, *binding);
+                }
+            }
+        }
+    }
+}
+
+// the pass must declare a graph resource bound at `binding` with an access the binding makes, over the subresources
+// its view covers
+void RenderGraph::CheckBindingDeclared(const Pass &pass, const RHIShaderResourceBinding &binding) const
+{
+    const auto check = [&pass, &binding](bool declared, const std::string &name) {
+        RGCheck(declared, "pass {} binds {} to {} without declaring the access that binding makes", pass.name, name,
+                binding.GetReflection()->name);
+    };
+    const auto type = binding.GetType();
+    const auto needed = GetBindingAccess(type);
+
+    if (type == RHIShaderResourceReflection::ResourceType::Texture2D ||
+        type == RHIShaderResourceReflection::ResourceType::StorageImage2D)
+    {
+        const auto *view = static_cast<const RHIImageView *>(binding.GetResource());
+        const auto texture = std::ranges::find(textures_, view->GetImage(), &Texture::image);
+        if (texture != textures_.end())
+        {
+            const auto viewed = GetViewedSubresources(view->GetAttribute());
+            check(std::ranges::any_of(pass.accesses,
+                                      [this, view, needed, &viewed](const Access &access) {
+                                          return textures_[access.texture.index].image == view->GetImage() &&
+                                                 access.access.access & needed && access.subresources.Contains(viewed);
+                                      }),
+                  texture->name);
+        }
+        return;
+    }
+
+    const auto *resource = binding.GetResource();
+    const auto buffer = std::ranges::find_if(buffers_, [resource](const Buffer &imported) {
+        return imported.buffer.get() == resource || imported.acceleration_structure.get() == resource;
+    });
+    if (buffer != buffers_.end())
+    {
+        const auto index = static_cast<uint32_t>(buffer - buffers_.begin());
+        check(std::ranges::any_of(pass.buffer_accesses,
+                                  [index, needed](const BufferAccess &access) {
+                                      return access.buffer == index && access.access.access & needed;
+                                  }),
+              buffer->name);
     }
 }
 

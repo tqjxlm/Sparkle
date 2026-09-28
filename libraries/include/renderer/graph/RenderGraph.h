@@ -11,11 +11,13 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace sparkle
 {
+class RGPassTimers;
 class RGTexturePool;
 class RHIContext;
 class RenderGraph;
@@ -58,6 +60,13 @@ struct RGSubresources
     {
         return base_mip < other.base_mip + other.mip_count && other.base_mip < base_mip + mip_count &&
                base_layer < other.base_layer + other.layer_count && other.base_layer < base_layer + layer_count;
+    }
+
+    // for resolved counts
+    [[nodiscard]] bool Contains(const RGSubresources &other) const
+    {
+        return base_mip <= other.base_mip && other.base_mip + other.mip_count <= base_mip + mip_count &&
+               base_layer <= other.base_layer && other.base_layer + other.layer_count <= base_layer + layer_count;
     }
 };
 
@@ -466,6 +475,13 @@ public:
     [[nodiscard]] RGAccelerationStructure Import(std::string name,
                                                  const RHIResourceRef<RHITLAS> &acceleration_structure);
 
+    // the first texture created or imported as `name`, invalid when there is none
+    [[nodiscard]] RGTexture FindTexture(std::string_view name) const;
+
+    // whether a pass added now may sample the texture through a 2D binding: a single-layer import with texture usage,
+    // or a transient an earlier pass writes
+    [[nodiscard]] bool CanSample2D(RGTexture texture) const;
+
     [[nodiscard]] PixelFormat GetFormat(RGTexture texture) const;
 
     // the size in pixels, known once the texture is created or imported
@@ -496,9 +512,11 @@ public:
 
     void Compile();
 
-    void Execute(RHICommandContext &command_context);
+    // raster passes are timed by `timers` when given, compute passes by their RHIComputePass
+    void Execute(RHICommandContext &command_context, RGPassTimers *timers = nullptr);
 
-    // the compiled graph. it names size classes instead of pixel sizes, so it does not depend on the resolution.
+    // the compiled graph, with the GPU time of each executed pass whose timer has a result. it names size classes
+    // instead of pixel sizes, so it does not depend on the resolution.
     [[nodiscard]] nlohmann::json Dump() const;
 
 private:
@@ -563,6 +581,9 @@ private:
         std::string cull_reason;
         RHIRenderingInfo rendering_info{};
         std::vector<RHIMemberBinding> bindings;
+
+        // executed: the GPU time in ms its timer reports for this frame's slot, -1 when unknown
+        float gpu_ms = -1.f;
     };
 
     struct Texture
@@ -641,6 +662,10 @@ private:
     void CheckExternalContract(const Pass &pass) const;
 
     void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const;
+
+    void CheckBoundResourcesDeclared(const Pass &pass, const RHICommandContext &command_context) const;
+
+    void CheckBindingDeclared(const Pass &pass, const RHIShaderResourceBinding &binding) const;
 
     RGTexturePool &pool_;
     RenderResolution resolution_;

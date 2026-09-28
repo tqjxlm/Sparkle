@@ -5,6 +5,8 @@
 #include "core/math/Types.h"
 #include "renderer/RenderConfig.h"
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -82,6 +84,10 @@ public:
     }
 
     void DrawUi();
+
+    // the render graph page: the passes and resources of the frame's graph, the texture render_graph_view shows, and
+    // saving a dump. while it is drawn, the render thread publishes the dump of each graph the renderer executes.
+    void DrawGraphUi();
 
     // called by main thread, run on render thread
     void NotifySceneLoaded();
@@ -173,5 +179,12 @@ private:
 
     // Owned exclusively by the render thread.
     std::shared_ptr<ScreenshotRequest> active_screenshot_;
+
+    // the latest dump the render thread published for the render graph page
+    std::mutex graph_dump_mutex_;
+    std::shared_ptr<const nlohmann::json> graph_dump_;
+
+    // main thread only: the last dump saved from the render graph page
+    std::shared_ptr<ScreenshotRequest> saved_graph_dump_;
 };
 } // namespace sparkle

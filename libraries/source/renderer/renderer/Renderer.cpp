@@ -66,7 +66,7 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
 Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
                    RGTexturePool &graph_texture_pool)
     : rhi_(rhi_context), scene_render_proxy_(scene_render_proxy), resolution_(render_config.GetResolution()),
-      render_config_(render_config), graph_texture_pool_(graph_texture_pool)
+      render_config_(render_config), graph_texture_pool_(graph_texture_pool), graph_pass_timers_(rhi_context)
 {
     Log(Info, "View size [{}, {}]", resolution_.output.x(), resolution_.output.y());
 
@@ -126,6 +126,13 @@ void Renderer::RequestGraphDump(const std::string &name, std::function<void()> o
 
     graph_dump_path_ = (std::filesystem::path("screenshots") / (name + ".json")).string();
     graph_dump_completion_ = std::move(on_complete);
+}
+
+void Renderer::RequestGraphDump(std::function<void(const nlohmann::json &)> on_dump)
+{
+    ASSERT(ThreadManager::IsInRenderThread());
+
+    graph_dump_consumer_ = std::move(on_dump);
 }
 
 std::optional<Renderer::PendingScreenshot> Renderer::TakeScreenshotRequest(bool capture_ui)
@@ -220,15 +227,6 @@ RGTextureDesc Renderer::GetSceneColorDesc() const
     return desc;
 }
 
-RHIResourceRef<RHIImage> Renderer::GetOutputImage(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl)
-{
-    if (ibl && mode == RenderConfig::OutputImage::IBLBrdfTexture)
-    {
-        return ibl->GetBRDFMap();
-    }
-    return nullptr;
-}
-
 RHIResourceRef<RHIImage> Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
                                                 const RHIResourceRef<RHIImage> &sky_map)
 {
@@ -255,10 +253,55 @@ void Renderer::InitPostChain(const RGTextureDesc &screen_desc)
 
     present_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Present",
                                                          rhi_->GetBackBuffer()->GetAttributes().format, true);
+
+    graph_view_pass_ =
+        PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, GraphViewPassName, screen_desc.format);
+}
+
+// a float Texture2D samples the default view of an image of `format`: integer formats need an integer texture, and a
+// depth-stencil view cannot be sampled
+static bool SamplesAsFloat(PixelFormat format)
+{
+    return format != PixelFormat::R32UInt && format != PixelFormat::RGBAUInt32 && format != PixelFormat::D24S8;
+}
+
+RGTexture Renderer::FindGraphView(const RenderGraph &graph)
+{
+    const auto &name = render_config_.render_graph_view;
+    if (name != graph_view_)
+    {
+        graph_view_ = name;
+        graph_view_warned_ = false;
+    }
+
+    if (name.empty())
+    {
+        return {};
+    }
+
+    if (const auto texture = graph.FindTexture(name);
+        texture.IsValid() && graph.CanSample2D(texture) && SamplesAsFloat(graph.GetFormat(texture)))
+    {
+        return texture;
+    }
+
+    if (!graph_view_warned_)
+    {
+        Log(Warn, "render_graph_view {} is not a 2D color texture this frame's graph can sample. showing the frame",
+            name);
+        graph_view_warned_ = true;
+    }
+    return {};
 }
 
 void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQuadPass *screen_pass)
 {
+    if (const auto view = FindGraphView(graph); view.IsValid())
+    {
+        scene = view;
+        screen_pass = graph_view_pass_.get();
+    }
+
     auto screen = scene;
     if (screen_pass)
     {
@@ -284,28 +327,41 @@ void Renderer::ExecuteGraph(RenderGraph &graph)
     ASSERT(ThreadManager::IsInRenderThread());
 
     graph.Compile();
+    graph.Execute(*rhi_->GetCommandContext(), &graph_pass_timers_);
 
-    if (!graph_dump_path_.empty())
+    if (graph_dump_path_.empty() && !graph_dump_consumer_)
     {
-        const auto dump = graph.Dump().dump(4);
-        const auto saved_path =
-            FileManager::GetNativeFileManager()->Write(Path::External(graph_dump_path_), dump.data(), dump.size());
-        if (saved_path.empty())
-        {
-            Log(Error, "Failed to save render graph dump to {}", graph_dump_path_);
-        }
-        else
-        {
-            Log(Info, "Render graph dump saved to {}", graph_dump_path_);
-        }
-
-        graph_dump_path_.clear();
-        if (const auto on_complete = std::exchange(graph_dump_completion_, nullptr))
-        {
-            on_complete();
-        }
+        return;
     }
 
-    graph.Execute(*rhi_->GetCommandContext());
+    const auto dump = graph.Dump();
+
+    if (const auto on_dump = std::exchange(graph_dump_consumer_, nullptr))
+    {
+        on_dump(dump);
+    }
+
+    if (graph_dump_path_.empty())
+    {
+        return;
+    }
+
+    const auto text = dump.dump(4);
+    const auto saved_path =
+        FileManager::GetNativeFileManager()->Write(Path::External(graph_dump_path_), text.data(), text.size());
+    if (saved_path.empty())
+    {
+        Log(Error, "Failed to save render graph dump to {}", graph_dump_path_);
+    }
+    else
+    {
+        Log(Info, "Render graph dump saved to {}", graph_dump_path_);
+    }
+
+    graph_dump_path_.clear();
+    if (const auto on_complete = std::exchange(graph_dump_completion_, nullptr))
+    {
+        on_complete();
+    }
 }
 } // namespace sparkle

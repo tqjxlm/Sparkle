@@ -35,8 +35,6 @@ private:
 
     // convert scene_color to the screen
     std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
-    // shows an output mode's image on the screen in place of the tone-mapped scene
-    std::unique_ptr<class ScreenQuadPass> debug_output_pass_;
 
     class ImageBasedLighting *ibl_ = nullptr;
 

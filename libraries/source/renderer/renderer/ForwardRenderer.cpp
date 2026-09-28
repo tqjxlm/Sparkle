@@ -5,7 +5,6 @@
 #include "renderer/pass/DepthPass.h"
 #include "renderer/pass/ForwardMeshPass.h"
 #include "renderer/pass/LightingInputs.h"
-#include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/SkyBoxPass.h"
 #include "renderer/pass/ToneMappingPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
@@ -31,9 +30,6 @@ void ForwardRenderer::InitRenderResources()
     InitPostChain(ToneMappedScreenDesc);
 
     tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, screen_desc_.format);
-
-    texture_output_pass_ =
-        PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "OutputImage", screen_desc_.format);
 
     const auto scene_color_format = GetSceneColorDesc().format;
 
@@ -76,14 +72,7 @@ void ForwardRenderer::Render()
         sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map), scene_color, scene_depth);
     }
 
-    if (const auto output_image = GetOutputImage(output_mode, ibl_))
-    {
-        AddPostChain(graph, graph.Import("OutputImage", output_image), texture_output_pass_.get());
-    }
-    else
-    {
-        AddPostChain(graph, scene_color, tone_mapping_pass_.get());
-    }
+    AddPostChain(graph, scene_color, tone_mapping_pass_.get());
 
     ExecuteGraph(graph);
 }

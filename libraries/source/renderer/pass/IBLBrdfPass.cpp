@@ -88,7 +88,7 @@ void IBLBrdfPass::InitRenderResources(const RenderConfig &)
     auto *shader_resource = pipeline_state_->GetShaderResource<IBLBrdfComputeShader>();
     shader_resource->ubo().BindResource(cs_ub_);
 
-    compute_pass_ = rhi_->CreateComputePass("IBLBrdfComputePass", false);
+    compute_pass_ = rhi_->CreateComputePass("IBLBrdfComputePass", true);
 }
 
 void IBLBrdfPass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)

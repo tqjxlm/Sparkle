@@ -47,6 +47,8 @@ static ConfigValue<bool> config_manual_accumulation(
 static ConfigValue<bool> config_render_graph_cull("render_graph_cull",
                                                   "cull render graph passes whose outputs no live pass reads",
                                                   "renderer", true, true);
+static ConfigValue<std::string> config_render_graph_view(
+    "render_graph_view", "render graph texture to show in place of the frame; empty = the frame", "renderer", "", true);
 
 void RenderConfig::Init()
 {
@@ -71,6 +73,7 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
     ConfigCollectionHelper::RegisterConfig(this, config_manual_accumulation, manual_accumulation);
     ConfigCollectionHelper::RegisterConfig(this, config_render_graph_cull, render_graph_cull);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_view, render_graph_view);
 
     AddUiGenerator([this] {
         if (!manual_accumulation)

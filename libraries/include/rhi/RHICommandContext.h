@@ -67,7 +67,7 @@ public:
     {
         bindings_ = bindings;
         bindings_applied_.assign(bindings.size(), false);
-        drew_or_dispatched_ = false;
+        pipelines_.clear();
     }
 
     // whether the binding at `index` of the set bindings bound into a pipeline since they were set
@@ -79,7 +79,13 @@ public:
     // whether a pipeline drew or dispatched since the bindings were set
     [[nodiscard]] bool DrewOrDispatched() const
     {
-        return drew_or_dispatched_;
+        return !pipelines_.empty();
+    }
+
+    // the pipelines drawn or dispatched since the bindings were set, once per run of consecutive draws or dispatches
+    [[nodiscard]] const std::vector<const RHIPipelineState *> &GetPipelines() const
+    {
+        return pipelines_;
     }
 
     // a null pipeline draws nothing
@@ -124,7 +130,7 @@ private:
 
     std::span<const RHIMemberBinding> bindings_;
     std::vector<bool> bindings_applied_;
-    bool drew_or_dispatched_ = false;
+    std::vector<const RHIPipelineState *> pipelines_;
     RHIResourceRef<RHIComputePass> current_compute_pass_;
     bool rendering_ = false;
     std::string rendering_name_;

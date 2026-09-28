@@ -184,6 +184,12 @@ public:
         return applied;
     }
 
+    // one per shader stage, null for the stages the pipeline has no shader for
+    [[nodiscard]] const auto &GetResourceTables() const
+    {
+        return resource_table_;
+    }
+
 protected:
     [[nodiscard]] const RHIShaderResourceTable *GetResourceTable(RHIShaderStage stage) const
     {
