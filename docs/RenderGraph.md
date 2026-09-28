@@ -38,7 +38,7 @@ graph.Execute(*rhi->GetCommandContext());
 | Copy | copies between images and buffers; acceleration structure builds (`BuildAccelerationStructure` records the build or refit staged on the structure) | records the barriers before it, inside the pass's debug label |
 | External | anything, through the raw `RHICommandContext` | records the barriers before it, inside the pass's debug label |
 
-`ctx.GetImage(texture)`, `ctx.GetBuffer(buffer)` and `ctx.GetAccelerationStructure(acceleration_structure)` return the resource behind a handle the pass declared. Every pass must leave each declared image in its declared layout, with no pending access beyond the declared one, which the graph checks after the pass records; foreign code in an External pass that still calls `RHIImage::Transition` sees the state the graph planned, because the graph writes it to the image before the pass runs.
+`ctx.GetImage(texture)` returns the image behind a texture the pass declared; a Copy pass reaches buffers and acceleration structures only through its copy and build commands. Every pass must leave each declared image in its declared layout, with no pending access beyond the declared one, which the graph checks after the pass records; foreign code in an External pass that still calls `RHIImage::Transition` sees the state the graph planned, because the graph writes it to the image before the pass runs.
 
 ## Compilation
 

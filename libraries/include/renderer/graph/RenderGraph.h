@@ -54,20 +54,6 @@ struct RGSubresources
     uint8_t layer_count = All;
 
     bool operator==(const RGSubresources &) const = default;
-
-    // for resolved counts
-    [[nodiscard]] bool Overlaps(const RGSubresources &other) const
-    {
-        return base_mip < other.base_mip + other.mip_count && other.base_mip < base_mip + mip_count &&
-               base_layer < other.base_layer + other.layer_count && other.base_layer < base_layer + layer_count;
-    }
-
-    // for resolved counts
-    [[nodiscard]] bool Contains(const RGSubresources &other) const
-    {
-        return base_mip <= other.base_mip && other.base_mip + other.mip_count <= base_mip + mip_count &&
-               base_layer <= other.base_layer && other.base_layer + other.layer_count <= base_layer + layer_count;
-    }
 };
 
 // subresources of a texture: every one, unless narrowed with RGTexture::Mip or Subresource
@@ -329,16 +315,16 @@ public:
     // the image behind a texture the pass declared
     [[nodiscard]] RHIImage *GetImage(RGTexture texture) const;
 
-    // the buffer behind a buffer the pass declared
-    [[nodiscard]] RHIBuffer *GetBuffer(RGBuffer buffer) const;
-
-    [[nodiscard]] RHITLAS *GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const;
-
 protected:
     RGPassContext(const RenderGraph &graph, uint32_t pass, RHICommandContext &command_context)
         : command_context_(command_context), graph_(graph), pass_(pass)
     {
     }
+
+    // the buffer behind a buffer the pass declared
+    [[nodiscard]] RHIBuffer *GetBuffer(RGBuffer buffer) const;
+
+    [[nodiscard]] RHITLAS *GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const;
 
     // the raw command context of a pass that declared NativeAccess
     [[nodiscard]] RHICommandContext &GetNativeContext() const;
@@ -346,8 +332,6 @@ protected:
     RHICommandContext &command_context_;
 
 private:
-    friend class RenderGraph;
-
     // aborts unless the pass declared the buffer or acceleration structure
     void CheckDeclared(uint32_t buffer) const;
 

@@ -102,6 +102,21 @@ template <typename Function> static void ForEachSubresource(const RGSubresources
     }
 }
 
+// for resolved counts
+static bool Overlaps(const RGSubresources &a, const RGSubresources &b)
+{
+    return a.base_mip < b.base_mip + b.mip_count && b.base_mip < a.base_mip + a.mip_count &&
+           a.base_layer < b.base_layer + b.layer_count && b.base_layer < a.base_layer + a.layer_count;
+}
+
+// for resolved counts
+static bool Contains(const RGSubresources &outer, const RGSubresources &inner)
+{
+    return outer.base_mip <= inner.base_mip && inner.base_mip + inner.mip_count <= outer.base_mip + outer.mip_count &&
+           outer.base_layer <= inner.base_layer &&
+           inner.base_layer + inner.layer_count <= outer.base_layer + outer.layer_count;
+}
+
 static RGSubresources GetAllSubresources(const RHIImage &image)
 {
     return {.base_mip = 0,
@@ -172,7 +187,7 @@ void RGBuilder::Declare(RGTextureRange texture, RHIResourceAccess access, RHIIma
             name);
     for (const auto &declared : pass.accesses)
     {
-        RGCheck(declared.texture != texture.texture || !declared.subresources.Overlaps(subresources),
+        RGCheck(declared.texture != texture.texture || !Overlaps(declared.subresources, subresources),
                 "pass {} declares {} twice", pass.name, name);
         RGCheck(slot == RenderGraph::NoSlot || declared.slot != slot, "pass {} binds two attachments to slot {}",
                 pass.name, slot);
@@ -915,7 +930,7 @@ void RenderGraph::InferStoreOps()
             for (const auto &later : passes_ | std::views::drop(pass_index + 1) | std::views::filter(&Pass::live))
             {
                 const auto next = std::ranges::find_if(later.accesses, [&access](const Access &a) {
-                    return a.texture == access.texture && a.subresources.Overlaps(access.subresources);
+                    return a.texture == access.texture && Overlaps(a.subresources, access.subresources);
                 });
                 if (next == later.accesses.end())
                 {
@@ -1092,7 +1107,7 @@ void RenderGraph::CheckBindingDeclared(const Pass &pass, const RHIShaderResource
             check(std::ranges::any_of(pass.accesses,
                                       [this, view, needed, &viewed](const Access &access) {
                                           return textures_[access.texture.index].image == view->GetImage() &&
-                                                 access.access.access & needed && access.subresources.Contains(viewed);
+                                                 access.access.access & needed && Contains(access.subresources, viewed);
                                       }),
                   texture->name);
         }
