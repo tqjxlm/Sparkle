@@ -85,8 +85,7 @@ private:
         {
             const auto barriers = image_->TrackTransition({.target_layout = RHIImageLayout::ColorOutput,
                                                            .after_stage = RHIPipelineStage::ColorOutput,
-                                                           .before_stage = RHIPipelineStage::Bottom,
-                                                           .discard = true});
+                                                           .before_stage = RHIPipelineStage::Bottom});
             command_context->BeginRendering(info, pass->GetName(), pass.get(), barriers);
             command_context->EndRendering();
         }

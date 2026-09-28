@@ -174,11 +174,6 @@ private:
     [[nodiscard]] VkPresentModeKHR ChooseSwapPresentMode(
         const std::vector<VkPresentModeKHR> &availablePresentModes) const;
     [[nodiscard]] VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) const;
-    uint32_t GetMaxUsableSampleCount();
-
-    void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
-
-    void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
 
     const std::vector<const char *> validation_layers_ = {"VK_LAYER_KHRONOS_validation"};
     std::vector<const char *> instance_extensions_ = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
@@ -217,9 +212,6 @@ private:
     VulkanCommandContext *command_context_ = nullptr;
 
     std::unique_ptr<VulkanDescriptorSetManager> descriptor_set_manager_;
-
-    // config
-    uint32_t msaa_samples_;
 
     uint32_t min_buffer_offset_alignment_ = 64;
 

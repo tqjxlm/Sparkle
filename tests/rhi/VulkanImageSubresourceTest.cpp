@@ -50,8 +50,7 @@ public:
                                                           .base_mip = TargetMip,
                                                           .mip_count = 1,
                                                           .base_array_layer = TargetLayer,
-                                                          .array_layer_count = 1,
-                                                          .discard = true});
+                                                          .array_layer_count = 1});
             command_context->BeginRendering(info, "VulkanImageSubresourceTestPass", nullptr, barriers);
             command_context->EndRendering();
 

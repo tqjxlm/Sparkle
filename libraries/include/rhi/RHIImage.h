@@ -18,12 +18,7 @@ namespace sparkle
 enum class RHIPipelineStage : uint8_t
 {
     Top,
-    DrawIndirect,
-    VertexInput,
-    VertexShader,
     PixelShader,
-    EarlyZ,
-    LateZ,
     ColorOutput,
     ComputeShader,
     Transfer,
@@ -165,8 +160,6 @@ public:
         unsigned mip_count = 0;
         unsigned base_array_layer = 0;
         unsigned array_layer_count = 0;
-        // the transition leaves the previous contents undefined
-        bool discard = false;
     };
 
     RHIImage(const Attribute &attributes, const std::string &name);

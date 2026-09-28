@@ -775,14 +775,6 @@ bool VulkanContext::PickPhysicalDevice()
             QueryTimestampSupport();
             QueryOptionalDeviceFeatures();
 
-            auto max_msaa_count = GetMaxUsableSampleCount();
-
-            msaa_samples_ = std::min(rhi_->GetConfig().msaa_samples, max_msaa_count);
-            if (msaa_samples_ > 1)
-            {
-                Log(Info, "MSAA enabled: {}", msaa_samples_);
-            }
-
             break;
         }
     }
@@ -1040,41 +1032,6 @@ void VulkanContext::CreateCommandPool()
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     CHECK_VK_ERROR(vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_));
-}
-
-uint32_t VulkanContext::GetMaxUsableSampleCount()
-{
-    VkPhysicalDeviceProperties physical_device_properties;
-    vkGetPhysicalDeviceProperties(physical_device_, &physical_device_properties);
-
-    VkSampleCountFlags const counts = physical_device_properties.limits.framebufferColorSampleCounts &
-                                      physical_device_properties.limits.framebufferDepthSampleCounts;
-    if (counts & VK_SAMPLE_COUNT_64_BIT)
-    {
-        return 64;
-    }
-    if (counts & VK_SAMPLE_COUNT_32_BIT)
-    {
-        return 32;
-    }
-    if (counts & VK_SAMPLE_COUNT_16_BIT)
-    {
-        return 16;
-    }
-    if (counts & VK_SAMPLE_COUNT_8_BIT)
-    {
-        return 8;
-    }
-    if (counts & VK_SAMPLE_COUNT_4_BIT)
-    {
-        return 4;
-    }
-    if (counts & VK_SAMPLE_COUNT_2_BIT)
-    {
-        return 2;
-    }
-
-    return 1;
 }
 
 // extensions of the loader, the driver and the implicit layers

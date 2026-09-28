@@ -11,17 +11,8 @@ static RHIResourceAccess GetLegacySourceAccess(RHIPipelineStage stage)
     case RHIPipelineStage::Top:
     case RHIPipelineStage::Bottom:
         return {};
-    case RHIPipelineStage::DrawIndirect:
-        return {.access = RHIAccess::IndirectArgs};
-    case RHIPipelineStage::VertexInput:
-        return {.access = RHIAccess::VertexInput};
-    case RHIPipelineStage::VertexShader:
-        return {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Vertex};
     case RHIPipelineStage::PixelShader:
         return {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Pixel};
-    case RHIPipelineStage::EarlyZ:
-    case RHIPipelineStage::LateZ:
-        return {.access = RHIAccess::DepthWrite};
     case RHIPipelineStage::ColorOutput:
         return {.access = RHIAccess::ColorWrite};
     case RHIPipelineStage::ComputeShader:
@@ -41,8 +32,6 @@ static RHIShaderStageMask GetLegacyShaderStages(RHIPipelineStage stage)
     case RHIPipelineStage::Top:
     case RHIPipelineStage::Bottom:
         return RHIShaderStageMask::All;
-    case RHIPipelineStage::VertexShader:
-        return RHIShaderStageMask::Vertex;
     case RHIPipelineStage::PixelShader:
         return RHIShaderStageMask::Pixel;
     case RHIPipelineStage::ComputeShader:
@@ -119,7 +108,7 @@ std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &
                                     .array_layer_count = 1,
                                     .from = state.access | legacy_source,
                                     .to = target,
-                                    .from_layout = request.discard ? RHIImageLayout::Undefined : state.layout,
+                                    .from_layout = state.layout,
                                     .to_layout = request.target_layout});
 
                 SetState(*next, range_start, range_end - range_start, array_layer, 1);
