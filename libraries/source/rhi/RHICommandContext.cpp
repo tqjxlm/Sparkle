@@ -46,12 +46,17 @@ void RHICommandContext::EndRendering()
     }
 }
 
-void RHICommandContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass)
+void RHICommandContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass,
+                                         std::span<const RHIImageBarrier> barriers,
+                                         std::span<const RHIMemoryBarrier> memory_barriers)
 {
     ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
     ASSERT_F(!rendering_, "Previous render pass not ended {}", rendering_name_);
 
     pass->BeginTimer(*this);
+    BeginDebugLabel(pass->GetName());
+
+    Barrier(barriers, memory_barriers);
 
     current_compute_pass_ = pass;
 
@@ -66,6 +71,7 @@ void RHICommandContext::EndComputePass(const RHIResourceRef<RHIComputePass> &pas
 
     EndComputePassInternal(pass);
 
+    EndDebugLabel();
     pass->EndTimer(*this);
 }
 

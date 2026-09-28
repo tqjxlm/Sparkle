@@ -367,16 +367,6 @@ void VulkanCommandContext::EndRenderingInternal()
     vkCmdEndRendering(command_buffer_);
 }
 
-void VulkanCommandContext::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    BeginDebugLabel(pass->GetName());
-}
-
-void VulkanCommandContext::EndComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/)
-{
-    EndDebugLabel();
-}
-
 void VulkanCommandContext::BeginDebugLabel(const std::string &name) const
 {
     if (context->SupportsDebugUtils())

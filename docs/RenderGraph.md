@@ -35,8 +35,8 @@ graph.Execute(*rhi->GetCommandContext());
 | --- | --- | --- |
 | Raster | draws; with `NativeAccess()`, anything the open rendering allows through `GetNativeContext()`, and the foreign code resets the backend state it records around | begins and ends rendering over the declared attachments; the opening barriers sit inside the pass's debug label and timer |
 | Compute | dispatches | brackets it with the given `RHIComputePass`, whose label and timer cover the barriers |
-| Copy | copies between images and buffers; acceleration structure builds (`BuildAccelerationStructure` records the build or refit staged on the structure) | records the barriers before it |
-| External | anything, through the raw `RHICommandContext` | records the barriers before it |
+| Copy | copies between images and buffers; acceleration structure builds (`BuildAccelerationStructure` records the build or refit staged on the structure) | records the barriers before it, inside the pass's debug label |
+| External | anything, through the raw `RHICommandContext` | records the barriers before it, inside the pass's debug label |
 
 `ctx.GetImage(texture)`, `ctx.GetBuffer(buffer)` and `ctx.GetAccelerationStructure(acceleration_structure)` return the resource behind a handle the pass declared. Every pass must leave each declared image in its declared layout, with no pending access beyond the declared one, which the graph checks after the pass records; foreign code in an External pass that still calls `RHIImage::Transition` sees the state the graph planned, because the graph writes it to the image before the pass runs.
 

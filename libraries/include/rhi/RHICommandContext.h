@@ -20,6 +20,28 @@ class RHIBuffer;
 class RHICommandContext
 {
 public:
+    // labels the commands recorded while it lives, where the backend labels commands
+    class DebugLabelScope
+    {
+    public:
+        DebugLabelScope(const RHICommandContext &command_context, const std::string &name)
+            : command_context_(command_context)
+        {
+            command_context_.BeginDebugLabel(name);
+        }
+
+        ~DebugLabelScope()
+        {
+            command_context_.EndDebugLabel();
+        }
+
+        DebugLabelScope(const DebugLabelScope &) = delete;
+        DebugLabelScope &operator=(const DebugLabelScope &) = delete;
+
+    private:
+        const RHICommandContext &command_context_;
+    };
+
     RHICommandContext() = default;
 
     virtual ~RHICommandContext() = default;
@@ -48,7 +70,10 @@ public:
         return attachment_signature_;
     }
 
-    void BeginComputePass(const RHIResourceRef<RHIComputePass> &pass);
+    // begins a compute pass. the only barriers it records are `barriers` and `memory_barriers`, before the pass; the
+    // pass's debug label and timer bracket both.
+    void BeginComputePass(const RHIResourceRef<RHIComputePass> &pass, std::span<const RHIImageBarrier> barriers = {},
+                          std::span<const RHIMemoryBarrier> memory_barriers = {});
 
     void EndComputePass(const RHIResourceRef<RHIComputePass> &pass);
 

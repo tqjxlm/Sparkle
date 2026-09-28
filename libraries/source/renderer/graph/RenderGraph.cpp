@@ -994,16 +994,17 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
             break;
         case RGPassKind::Compute:
             timed_pass = pass.compute_pass.get();
-            command_context.BeginComputePass(pass.compute_pass);
-            command_context.Barrier(barriers, memory_barriers);
+            command_context.BeginComputePass(pass.compute_pass, barriers, memory_barriers);
             pass.record(command_context);
             command_context.EndComputePass(pass.compute_pass);
             break;
         case RGPassKind::Copy:
-        case RGPassKind::External:
+        case RGPassKind::External: {
+            const RHICommandContext::DebugLabelScope label(command_context, pass.name);
             command_context.Barrier(barriers, memory_barriers);
             pass.record(command_context);
             break;
+        }
         default:
             UnImplemented(pass.kind);
         }

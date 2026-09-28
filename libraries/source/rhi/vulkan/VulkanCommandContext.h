@@ -146,8 +146,15 @@ protected:
     void EndDebugLabel() const override;
     void BeginRenderingInternal(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer) override;
     void EndRenderingInternal() override;
-    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
+
+    // a Vulkan compute pass is only its label and timer, which the common code records
+    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/) override
+    {
+    }
+
+    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/) override
+    {
+    }
 
 private:
     struct CommandState
