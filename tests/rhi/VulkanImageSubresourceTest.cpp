@@ -23,7 +23,7 @@ public:
 
         if (started_)
         {
-            return failed_.load(std::memory_order_acquire) ? Result::Fail : Result::Pass;
+            return HasFailed() ? Result::Fail : Result::Pass;
         }
 
         started_ = true;
@@ -42,24 +42,22 @@ public:
             info.width = image->GetWidth(TargetMip);
             info.height = image->GetHeight(TargetMip);
 
-            rhi->BeginCommandBuffer();
-            auto *command_context = rhi->GetCommandContext();
+            auto &command_context = rhi->BeginCommandBuffer();
             const auto barriers = image->TrackTransition({.target_layout = RHIImageLayout::ColorOutput,
                                                           .after_stage = RHIPipelineStage::ColorOutput,
                                                           .before_stage = RHIPipelineStage::Bottom,
                                                           .base_mip = TargetMip,
                                                           .mip_count = 1,
                                                           .base_array_layer = TargetLayer,
-                                                          .array_layer_count = 1,
-                                                          .discard = true});
-            command_context->BeginRendering(info, "VulkanImageSubresourceTestPass", nullptr, barriers);
-            command_context->EndRendering();
+                                                          .array_layer_count = 1});
+            command_context.BeginRendering(info, "VulkanImageSubresourceTestPass", nullptr, barriers);
+            command_context.EndRendering();
 
             VerifyRenderPassLayout(image.get());
 
-            image->Transition({.target_layout = RHIImageLayout::TransferSrc,
-                               .after_stage = RHIPipelineStage::ColorOutput,
-                               .before_stage = RHIPipelineStage::Transfer});
+            image->Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                                .after_stage = RHIPipelineStage::ColorOutput,
+                                                .before_stage = RHIPipelineStage::Transfer});
             VerifyUniformLayout(image.get(), RHIImageLayout::TransferSrc);
             rhi->SubmitCommandBuffer();
 
@@ -88,12 +86,6 @@ private:
         attribute.height = 4;
         attribute.usages =
             RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransferSrc | RHIImage::ImageUsage::Texture;
-        attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest,
-                             .max_lod = 1,
-                             .enable_anisotropy = false};
         attribute.mip_levels = 2;
         attribute.type = RHIImage::ImageType::Image2DCube;
         return attribute;
@@ -146,22 +138,8 @@ private:
         Expect(pixels_match, "readback preserves the selected mip and cube-face clear");
     }
 
-    void Expect(bool condition, const std::string &what)
-    {
-        if (condition)
-        {
-            Log(Info, "{}: OK - {}", GetName(), what);
-        }
-        else
-        {
-            Log(Error, "{}: FAILED - {}", GetName(), what);
-            failed_.store(true, std::memory_order_release);
-        }
-    }
-
     bool started_ = false;
     std::atomic<bool> task_pending_{false};
-    std::atomic<bool> failed_{false};
 };
 
 static TestCaseRegistrar<VulkanImageSubresourceTest> image_subresource_test_registrar("vulkan_image_subresources");

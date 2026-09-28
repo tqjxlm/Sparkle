@@ -6,15 +6,16 @@
 #include "VulkanContext.h"
 #include "VulkanImage.h"
 #include "VulkanPipelineState.h"
-#include "VulkanRenderPass.h"
 #include "core/math/Utilities.h"
 
 namespace sparkle
 {
-constexpr VkAccessFlags2 WriteAccessFlags = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-                                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-                                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
-                                            VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+// a barrier's source access mask only makes writes available; a read leaves nothing to flush, and the stage masks
+// already order it before the destination
+constexpr VkAccessFlags2 WriteAccessFlags =
+    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
+    VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_MEMORY_WRITE_BIT;
 
 struct VulkanAccessScope
 {
@@ -72,6 +73,8 @@ static VulkanAccessScope GetVulkanAccessScope(const RHIResourceAccess &rhi_acces
             VK_ACCESS_2_SHADER_READ_BIT);
     add(RHIAccess::AccelerationStructureRead, shader_stages, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
     add(RHIAccess::HostRead, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+    add(RHIAccess::Any, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
 
     return scope;
 }
@@ -81,16 +84,23 @@ static void SetVulkanAccessScopes(VkBarrier &vk_barrier, const RHIResourceAccess
 {
     const auto src = GetVulkanAccessScope(from);
     const auto dst = GetVulkanAccessScope(to);
-    vk_barrier.srcStageMask = src.stages;
+    // presentation has no stage of its own: a barrier from it starts at the acquire wait, so it chains to that wait
+    vk_barrier.srcStageMask =
+        from.access & RHIAccess::Present ? src.stages | VulkanContext::AcquireWaitStage : src.stages;
     vk_barrier.srcAccessMask = src.access & WriteAccessFlags;
     vk_barrier.dstStageMask = dst.stages;
     vk_barrier.dstAccessMask = dst.access;
 }
 
+// a sync1 stage or access bit has the value of its sync2 counterpart; only the sync2 bits above 32 need translating
 static VkPipelineStageFlags GetSync1Stages(VkPipelineStageFlags2 stages, VkPipelineStageFlags none_stage)
 {
+    constexpr VkPipelineStageFlags2 VertexInputStages =
+        VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT;
+    ASSERT_F((stages & ~VertexInputStages) >> 32 == 0, "sync2 stages {:#x} have no sync1 equivalent", stages);
+
     auto sync1_stages = static_cast<VkPipelineStageFlags>(stages);
-    if (stages & (VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT))
+    if (stages & VertexInputStages)
     {
         sync1_stages |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
     }
@@ -99,6 +109,10 @@ static VkPipelineStageFlags GetSync1Stages(VkPipelineStageFlags2 stages, VkPipel
 
 static VkAccessFlags GetSync1Access(VkAccessFlags2 access)
 {
+    constexpr VkAccessFlags2 ShaderAccess = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    ASSERT_F((access & ~ShaderAccess) >> 32 == 0, "sync2 accesses {:#x} have no sync1 equivalent", access);
+
     auto sync1_access = static_cast<VkAccessFlags>(access);
     if (access & (VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT))
     {
@@ -137,6 +151,99 @@ static void RecordSync1ImageBarriers(VkCommandBuffer command_buffer, std::span<c
                          static_cast<uint32_t>(sync1_barriers.size()), sync1_barriers.data());
 }
 
+static VkAttachmentLoadOp GetAttachmentLoadOp(RHILoadOp op)
+{
+    switch (op)
+    {
+    case RHILoadOp::DontCare:
+        return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    case RHILoadOp::Load:
+        return VK_ATTACHMENT_LOAD_OP_LOAD;
+    case RHILoadOp::Clear:
+        return VK_ATTACHMENT_LOAD_OP_CLEAR;
+    default:
+        UnImplemented(op);
+    }
+}
+
+static VkAttachmentStoreOp GetAttachmentStoreOp(RHIStoreOp op)
+{
+    switch (op)
+    {
+    case RHIStoreOp::DontCare:
+        return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    case RHIStoreOp::Store:
+        return VK_ATTACHMENT_STORE_OP_STORE;
+    default:
+        UnImplemented(op);
+    }
+}
+
+static VkImageView GetAttachmentView(RHIImage *image, unsigned mip_level, unsigned array_layer)
+{
+    const auto view = image->GetView(context->GetRHI(), {.base_mip_level = mip_level, .base_array_layer = array_layer});
+    return RHICast<VulkanImageView>(view)->GetView();
+}
+
+// lowers an RHIRenderingInfo to vkCmdBeginRendering and sets the viewport and scissor to its extent
+static void BeginVulkanRendering(VulkanCommandContext &command_context, const RHIRenderingInfo &info)
+{
+    std::array<VkRenderingAttachmentInfo, MaxNumColorAttachments> color_infos{};
+    uint32_t color_attachment_count = 0;
+    for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
+    {
+        const auto &attachment = info.color_attachments[slot];
+        auto &color_info = color_infos[slot];
+        color_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        if (!attachment.image)
+        {
+            continue;
+        }
+
+        color_attachment_count = slot + 1;
+
+        color_info.imageView = GetAttachmentView(attachment.image, attachment.mip_level, attachment.array_layer);
+        color_info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_info.loadOp = GetAttachmentLoadOp(attachment.load_op);
+        color_info.storeOp = GetAttachmentStoreOp(attachment.store_op);
+        color_info.clearValue.color = {{attachment.clear_color.x(), attachment.clear_color.y(),
+                                        attachment.clear_color.z(), attachment.clear_color.w()}};
+    }
+
+    const auto &depth_attachment = info.depth_attachment;
+    VkRenderingAttachmentInfo depth_info{};
+    depth_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    if (depth_attachment.image)
+    {
+        depth_info.imageView =
+            GetAttachmentView(depth_attachment.image, depth_attachment.mip_level, depth_attachment.array_layer);
+        depth_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth_info.loadOp = GetAttachmentLoadOp(depth_attachment.load_op);
+        depth_info.storeOp = GetAttachmentStoreOp(depth_attachment.store_op);
+        depth_info.clearValue.depthStencil = {.depth = depth_attachment.clear_depth, .stencil = 0};
+    }
+
+    const VkRect2D render_area{.offset = {.x = 0, .y = 0}, .extent = {.width = info.width, .height = info.height}};
+
+    VkRenderingInfo rendering_info{};
+    rendering_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering_info.renderArea = render_area;
+    rendering_info.layerCount = 1;
+    rendering_info.colorAttachmentCount = color_attachment_count;
+    rendering_info.pColorAttachments = color_infos.data();
+    rendering_info.pDepthAttachment = depth_attachment.image ? &depth_info : nullptr;
+
+    vkCmdBeginRendering(command_context.GetCommandBuffer(), &rendering_info);
+
+    const VkViewport viewport{.x = 0.0f,
+                              .y = 0.0f,
+                              .width = static_cast<float>(info.width),
+                              .height = static_cast<float>(info.height),
+                              .minDepth = 0.0f,
+                              .maxDepth = 1.0f};
+    command_context.SetViewportAndScissor(viewport, render_area);
+}
+
 void VulkanCommandContext::Begin(VkCommandBuffer command_buffer)
 {
     ASSERT(!command_buffer_);
@@ -152,6 +259,36 @@ void VulkanCommandContext::End()
     command_buffer_ = VK_NULL_HANDLE;
 }
 
+VkImageMemoryBarrier2 VulkanCommandContext::GetVkImageBarrier(VkImage image, const VkImageSubresourceRange &range,
+                                                              const RHIResourceAccess &from,
+                                                              const RHIResourceAccess &to, RHIImageLayout from_layout,
+                                                              RHIImageLayout to_layout)
+{
+    VkImageMemoryBarrier2 vk_barrier{};
+    vk_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    SetVulkanAccessScopes(vk_barrier, from, to);
+    vk_barrier.oldLayout = GetVulkanImageLayout(from_layout);
+    vk_barrier.newLayout = GetVulkanImageLayout(to_layout);
+    vk_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    vk_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    vk_barrier.image = image;
+    vk_barrier.subresourceRange = range;
+    return vk_barrier;
+}
+
+void VulkanCommandContext::RecordBarriers(std::span<const VkImageMemoryBarrier2> image_barriers,
+                                          std::span<const VkMemoryBarrier2> memory_barriers) const
+{
+    VkDependencyInfo dependency_info{};
+    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency_info.memoryBarrierCount = static_cast<uint32_t>(memory_barriers.size());
+    dependency_info.pMemoryBarriers = memory_barriers.data();
+    dependency_info.imageMemoryBarrierCount = static_cast<uint32_t>(image_barriers.size());
+    dependency_info.pImageMemoryBarriers = image_barriers.data();
+
+    vkCmdPipelineBarrier2(command_buffer_, &dependency_info);
+}
+
 void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> image_barriers,
                                            std::span<const RHIMemoryBarrier> memory_barriers)
 {
@@ -164,23 +301,16 @@ void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> imag
     {
         const auto *image = RHICast<VulkanImage>(barrier.image);
 
-        auto &vk_barrier =
-            (context->CompressedImageBarriersNeedSync1() && IsCompressedFormat(image->GetAttributes().format)
-                 ? compressed_image_barriers
-                 : vk_image_barriers)
-                .emplace_back(VkImageMemoryBarrier2{});
-        vk_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        SetVulkanAccessScopes(vk_barrier, barrier.from, barrier.to);
-        vk_barrier.oldLayout = GetVulkanImageLayout(barrier.from_layout);
-        vk_barrier.newLayout = GetVulkanImageLayout(barrier.to_layout);
-        vk_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        vk_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        vk_barrier.image = image->GetImage();
-        vk_barrier.subresourceRange = {.aspectMask = image->GetAspect(),
-                                       .baseMipLevel = barrier.base_mip,
-                                       .levelCount = barrier.mip_count,
-                                       .baseArrayLayer = barrier.base_array_layer,
-                                       .layerCount = barrier.array_layer_count};
+        (context->CompressedImageBarriersNeedSync1() && IsCompressedFormat(image->GetAttributes().format)
+             ? compressed_image_barriers
+             : vk_image_barriers)
+            .push_back(GetVkImageBarrier(image->GetImage(),
+                                         {.aspectMask = image->GetAspect(),
+                                          .baseMipLevel = barrier.base_mip,
+                                          .levelCount = barrier.mip_count,
+                                          .baseArrayLayer = barrier.base_array_layer,
+                                          .layerCount = barrier.array_layer_count},
+                                         barrier.from, barrier.to, barrier.from_layout, barrier.to_layout));
     }
 
     std::vector<VkMemoryBarrier2> vk_memory_barriers;
@@ -201,14 +331,7 @@ void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> imag
         }
     }
 
-    VkDependencyInfo dependency_info{};
-    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependency_info.memoryBarrierCount = static_cast<uint32_t>(vk_memory_barriers.size());
-    dependency_info.pMemoryBarriers = vk_memory_barriers.data();
-    dependency_info.imageMemoryBarrierCount = static_cast<uint32_t>(vk_image_barriers.size());
-    dependency_info.pImageMemoryBarriers = vk_image_barriers.data();
-
-    vkCmdPipelineBarrier2(command_buffer_, &dependency_info);
+    RecordBarriers(vk_image_barriers, vk_memory_barriers);
 }
 
 void VulkanCommandContext::DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state,
@@ -271,16 +394,6 @@ void VulkanCommandContext::BeginRenderingInternal(const RHIRenderingInfo &info, 
 void VulkanCommandContext::EndRenderingInternal()
 {
     vkCmdEndRendering(command_buffer_);
-}
-
-void VulkanCommandContext::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    BeginDebugLabel(pass->GetName());
-}
-
-void VulkanCommandContext::EndComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/)
-{
-    EndDebugLabel();
 }
 
 void VulkanCommandContext::BeginDebugLabel(const std::string &name) const

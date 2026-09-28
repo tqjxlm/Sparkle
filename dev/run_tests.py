@@ -126,18 +126,10 @@ def test_steps(cases, framework, config, software, scene,
 
 
 def log_pattern(framework):
-    if framework == "glfw":
-        return os.path.join(REPO, "build_system", "glfw", "output", "build",
-                            "generated", "logs", "*.log")
-    if framework == "macos":
-        return os.path.expanduser("~/Documents/sparkle/logs/*.log")
-    if framework == "android":
-        return os.path.join(REPO, "build_system", "android", "output", "device",
-                            "logs", "*.log")
-    if framework == "ios":
-        return os.path.join(REPO, "build_system", "ios", "output", "device",
-                            "logs", "*.log")
-    raise ValueError(f"Unsupported framework: {framework}")
+    sys.path.insert(0, os.path.join(REPO, "tests", "rendering"))
+    from render_test_support import get_logs_dir
+
+    return os.path.join(get_logs_dir(framework), "*.log")
 
 
 def snapshot_logs(framework):

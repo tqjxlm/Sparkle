@@ -112,11 +112,12 @@ void SkyBoxPass::InitRenderResources(const RenderConfig & /*config*/)
     pipeline_state_->GetShaderResource<SkyBoxVertexShader>()->view().BindResource(vs_ub_);
 }
 
-void SkyBoxPass::AddTo(RenderGraph &graph, RGTexture sky_map, RGTexture scene_color, RGTexture scene_depth) const
+void SkyBoxPass::AddTo(RenderGraph &graph, RGTexture sky_map, const RHISampler::SamplerAttribute &sky_map_sampler,
+                       RGTexture scene_color, RGTexture scene_depth) const
 {
-    graph.AddRasterPass("SkyBox", [this, sky_map, scene_color, scene_depth](RGBuilder &builder) {
+    graph.AddRasterPass("SkyBox", [this, sky_map, sky_map_sampler, scene_color, scene_depth](RGBuilder &builder) {
         using Table = SkyBoxPixelShader::ResourceTable;
-        builder.Sampled(sky_map, &Table::sky_map, &Table::sky_map_sampler);
+        builder.Sampled(sky_map, &Table::sky_map, &Table::sky_map_sampler, sky_map_sampler);
         builder.ColorWrite(scene_color, 0);
         builder.DepthTest(scene_depth);
         return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };

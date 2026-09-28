@@ -102,7 +102,8 @@ void DirectionalLightingPass::AddTo(RenderGraph &graph, const LightingInputs &li
     graph.AddRasterPass(name_, [this, lighting, gbuffer, scene_depth, scene_color](RGBuilder &builder) {
         using Table = DirectionalLightingPassPixelShader::ResourceTable;
         builder.Sampled(gbuffer, &Table::gbuffer_texture);
-        builder.Sampled(scene_depth, &Table::depth_texture, &Table::depth_sampler);
+        // the depth is sampled at the texel centres of a target of its own size
+        builder.Sampled(scene_depth, &Table::depth_texture, &Table::depth_sampler, NearestSampler);
         lighting.Sample<Table>(builder, rhi_);
         builder.ColorWrite(scene_color, 0);
         builder.FullyOverwrites();

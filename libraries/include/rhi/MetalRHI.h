@@ -21,26 +21,18 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
-    bool SupportsPixelLocalRead() override;
-
-    bool SupportsUnifiedImageLayouts() override
-    {
-        return false;
-    }
-
     bool SupportsPassTimestamps() override;
 
     bool SupportsSampledFormat(PixelFormat format) override;
+
+    bool SupportsLinearFiltering(PixelFormat format) override;
 
     bool HasPhysicalGpu() override
     {
         return true;
     }
 
-    void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
-
-    RHICommandContext *GetCommandContext() override;
 
     bool RecreateSurface() override;
     void RecreateSwapChain() override;
@@ -73,6 +65,10 @@ protected:
     void EndFrameInternal() override;
 
     void CleanupInternal() override;
+
+    RHICommandContext *GetCommandContextInternal() override;
+
+    RHICommandContext &BeginCommandBufferInternal() override;
 
     RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
 };

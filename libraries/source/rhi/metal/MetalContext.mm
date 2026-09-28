@@ -9,15 +9,6 @@ namespace sparkle
 {
 constexpr unsigned HeadlessFramesInFlight = 2;
 
-bool MetalContext::SupportsPassTimestamps()
-{
-    if (!supports_pass_timestamps_.has_value())
-    {
-        supports_pass_timestamps_ = MetalTimer::IsSupported(device_);
-    }
-    return *supports_pass_timestamps_;
-}
-
 void MetalContext::SwapBuffer()
 {
     ASSERT(!headless_);
@@ -35,11 +26,7 @@ void MetalContext::CreateBackBuffer()
     attribute.mip_levels = 1;
     attribute.msaa_samples = 1;
     attribute.format = PixelFormat::B8G8R8A8Srgb;
-    attribute.usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
+    attribute.usages = RHIImage::ImageUsage::ColorAttachment;
     attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
 
     // a windowed back buffer takes each frame's drawable texture (SwapBuffer); a headless one owns a texture, so passes
@@ -51,15 +38,15 @@ void MetalContext::CreateBackBuffer()
 
 MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
                            uint32_t headless_height)
-    : view_(mtk_view), rhi_(context), headless_(is_headless), headless_width_(headless_width),
-      headless_height_(headless_height)
+    : device_(is_headless ? MTLCreateSystemDefaultDevice() : mtk_view.device),
+      supports_pass_timestamps_(MetalTimer::IsSupported(device_)), view_(mtk_view), rhi_(context),
+      headless_(is_headless), headless_width_(headless_width), headless_height_(headless_height)
 {
     if (headless_)
     {
         ASSERT_F(headless_width_ > 0 && headless_height_ > 0, "Invalid headless render size [{}, {}]", headless_width_,
                  headless_height_);
 
-        device_ = MTLCreateSystemDefaultDevice();
         if (!device_)
         {
             return;
@@ -71,7 +58,6 @@ MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headl
         return;
     }
 
-    device_ = view_.device;
     command_queue_ = [device_ newCommandQueue];
     current_drawable_ = [view_ currentDrawable];
 

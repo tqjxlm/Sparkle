@@ -4,6 +4,7 @@
 #include "renderer/RenderResolution.h"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace sparkle
@@ -25,7 +26,6 @@ struct RenderConfig : public ConfigCollection
     enum class OutputImage : uint8_t
     {
         SceneColor,
-        IBLBrdfTexture,
         IBLDiffuseMap,
         IBLSpecularMap,
     };
@@ -81,6 +81,8 @@ struct RenderConfig : public ConfigCollection
 
     Pipeline pipeline;
     OutputImage output_image;
+    // the render graph texture shown in place of the frame, empty for the frame
+    std::string render_graph_view;
     DebugMode debug_mode;
     uint32_t sample_per_pixel;
     uint32_t max_sample_per_pixel;
@@ -102,6 +104,7 @@ struct RenderConfig : public ConfigCollection
     bool clear_screenshots;
     bool manual_accumulation;
     bool render_graph_cull;
+    bool render_graph_full_barriers;
     float target_framerate;
     float gpu_time_budget_ratio;
     float render_scale;

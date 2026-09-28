@@ -19,8 +19,7 @@ RHIImage *RGTexturePool::Acquire(const Key &key, const std::string &name)
     const auto found = std::ranges::find_if(entries_, [this, &key](const Entry &entry) {
         const auto &attributes = entry.image->GetAttributes();
         return entry.last_graph != graph_ && attributes.format == key.format && attributes.width == key.width &&
-               attributes.height == key.height && attributes.sampler == key.sampler &&
-               !(key.usages & ~attributes.usages);
+               attributes.height == key.height && !(key.usages & ~attributes.usages);
     });
     if (found != entries_.end())
     {
@@ -29,9 +28,8 @@ RHIImage *RGTexturePool::Acquire(const Key &key, const std::string &name)
         return found->image.get();
     }
 
-    auto image = rhi_->CreateImage(
-        {.format = key.format, .sampler = key.sampler, .width = key.width, .height = key.height, .usages = key.usages},
-        name);
+    auto image =
+        rhi_->CreateImage({.format = key.format, .width = key.width, .height = key.height, .usages = key.usages}, name);
     stats_.num_created++;
     return entries_.emplace_back(Entry{.image = std::move(image), .last_graph = graph_}).image.get();
 }

@@ -81,6 +81,6 @@ public:
     // Record the frame's NRD dispatch sequence into the caller's active compute pass (bracket with
     // RHICommandContext::Begin/EndComputePass): the pass's serial encoder implicitly barriers between
     // dispatches, and pass-level GPU timing covers the whole block.
-    virtual void RunDispatches(RHICommandContext *command_context, const Dispatch *dispatches, uint32_t count) = 0;
+    virtual void RunDispatches(RHICommandContext &command_context, const Dispatch *dispatches, uint32_t count) = 0;
 };
 } // namespace sparkle

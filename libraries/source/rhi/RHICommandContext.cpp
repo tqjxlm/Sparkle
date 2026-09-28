@@ -4,6 +4,14 @@
 
 namespace sparkle
 {
+static void AssertAttachmentLayout([[maybe_unused]] const std::string &pass_name, const RHIImage *image,
+                                   unsigned mip_level, unsigned array_layer, RHIImageLayout layout)
+{
+    ASSERT_F(image->GetCurrentLayout(mip_level, array_layer) == layout,
+             "render pass {} begins with attachment {} (mip {}, layer {}) outside its attachment layout", pass_name,
+             image->GetName(), mip_level, array_layer);
+}
+
 void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHIPass *timed_pass,
                                        std::span<const RHIImageBarrier> barriers,
                                        std::span<const RHIMemoryBarrier> memory_barriers)
@@ -19,6 +27,20 @@ void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::
     BeginDebugLabel(name);
 
     Barrier(barriers, memory_barriers);
+
+    for (const auto &attachment : info.color_attachments)
+    {
+        if (attachment.image)
+        {
+            AssertAttachmentLayout(name, attachment.image, attachment.mip_level, attachment.array_layer,
+                                   RHIImageLayout::ColorOutput);
+        }
+    }
+    if (const auto &depth = info.depth_attachment; depth.image)
+    {
+        AssertAttachmentLayout(name, depth.image, depth.mip_level, depth.array_layer,
+                               RHIImageLayout::DepthStencilOutput);
+    }
 
     rendering_info_ = info;
     attachment_signature_ = info.GetSignature();
@@ -46,12 +68,17 @@ void RHICommandContext::EndRendering()
     }
 }
 
-void RHICommandContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass)
+void RHICommandContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass,
+                                         std::span<const RHIImageBarrier> barriers,
+                                         std::span<const RHIMemoryBarrier> memory_barriers)
 {
     ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
     ASSERT_F(!rendering_, "Previous render pass not ended {}", rendering_name_);
 
     pass->BeginTimer(*this);
+    BeginDebugLabel(pass->GetName());
+
+    Barrier(barriers, memory_barriers);
 
     current_compute_pass_ = pass;
 
@@ -66,6 +93,7 @@ void RHICommandContext::EndComputePass(const RHIResourceRef<RHIComputePass> &pas
 
     EndComputePassInternal(pass);
 
+    EndDebugLabel();
     pass->EndTimer(*this);
 }
 
@@ -84,6 +112,8 @@ void RHICommandContext::Barrier(std::span<const RHIImageBarrier> image_barriers,
 
 void RHICommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
 {
+    ASSERT_F(rendering_, "DrawMesh outside a render pass");
+
     if (!pipeline_state)
     {
         return;
@@ -96,13 +126,18 @@ void RHICommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipelin
 void RHICommandContext::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
                                         Vector3UInt thread_per_group)
 {
+    ASSERT_F(current_compute_pass_ != nullptr, "DispatchCompute outside a compute pass");
+
     ApplyBindings(*pipeline);
     DispatchComputeInternal(pipeline, total_threads, thread_per_group);
 }
 
 void RHICommandContext::ApplyBindings(RHIPipelineState &pipeline)
 {
-    drew_or_dispatched_ = true;
+    if (pipelines_.empty() || pipelines_.back() != &pipeline)
+    {
+        pipelines_.push_back(&pipeline);
+    }
     for (auto index = 0u; index < bindings_.size(); index++)
     {
         if (pipeline.ApplyBinding(bindings_[index]))

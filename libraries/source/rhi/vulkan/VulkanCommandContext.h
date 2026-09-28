@@ -45,26 +45,25 @@ public:
         }
     }
 
-    void BindVertexBuffers(const VkBuffer *buffers, const VkDeviceSize *offsets, uint32_t count)
+    void BindVertexBuffers(std::span<const VkBuffer> buffers, std::span<const VkDeviceSize> offsets)
     {
+        ASSERT_EQUAL(buffers.size(), offsets.size());
+        const auto count = static_cast<uint32_t>(buffers.size());
         if (count > CommandState::MaxTrackedVertexBuffers)
         {
             command_state_.vertex_buffers.Reset();
-            vkCmdBindVertexBuffers(command_buffer_, 0, count, buffers, offsets);
+            vkCmdBindVertexBuffers(command_buffer_, 0, count, buffers.data(), offsets.data());
             return;
         }
 
         CommandState::VertexBufferKey key{};
         key.count = count;
-        for (uint32_t i = 0; i < count; i++)
-        {
-            key.buffers[i] = buffers[i];
-            key.offsets[i] = offsets[i];
-        }
+        std::ranges::copy(buffers, key.buffers.begin());
+        std::ranges::copy(offsets, key.offsets.begin());
 
         if (command_state_.vertex_buffers.Update(key))
         {
-            vkCmdBindVertexBuffers(command_buffer_, 0, count, buffers, offsets);
+            vkCmdBindVertexBuffers(command_buffer_, 0, count, buffers.data(), offsets.data());
         }
     }
 
@@ -82,8 +81,9 @@ public:
     }
 
     void BindDescriptorSet(VkPipelineBindPoint bind_point, VkPipelineLayout layout, uint32_t set_id,
-                           VkDescriptorSet set, const uint32_t *dynamic_offsets, uint32_t offset_count)
+                           VkDescriptorSet set, std::span<const uint32_t> dynamic_offsets)
     {
+        const auto offset_count = static_cast<uint32_t>(dynamic_offsets.size());
         auto &slots =
             bind_point == VK_PIPELINE_BIND_POINT_COMPUTE ? command_state_.compute_sets : command_state_.graphics_sets;
         if (set_id >= CommandState::MaxTrackedSets || offset_count > CommandState::MaxTrackedOffsets)
@@ -93,7 +93,7 @@ public:
                 slots[set_id].Reset();
             }
             vkCmdBindDescriptorSets(command_buffer_, bind_point, layout, set_id, 1, &set, offset_count,
-                                    dynamic_offsets);
+                                    dynamic_offsets.data());
             return;
         }
 
@@ -101,22 +101,20 @@ public:
         key.set = set;
         key.layout = layout;
         key.offset_count = offset_count;
-        for (uint32_t i = 0; i < offset_count; i++)
-        {
-            key.dynamic_offsets[i] = dynamic_offsets[i];
-        }
+        std::ranges::copy(dynamic_offsets, key.dynamic_offsets.begin());
 
         if (slots[set_id].Update(key))
         {
             vkCmdBindDescriptorSets(command_buffer_, bind_point, layout, set_id, 1, &set, offset_count,
-                                    dynamic_offsets);
+                                    dynamic_offsets.data());
         }
     }
 
     // multi-set raw path (e.g. NRD): records unconditionally and invalidates the touched slots
     void BindDescriptorSets(VkPipelineBindPoint bind_point, VkPipelineLayout layout, uint32_t first_set,
-                            const VkDescriptorSet *sets, uint32_t count)
+                            std::span<const VkDescriptorSet> sets)
     {
+        const auto count = static_cast<uint32_t>(sets.size());
         auto &slots =
             bind_point == VK_PIPELINE_BIND_POINT_COMPUTE ? command_state_.compute_sets : command_state_.graphics_sets;
         for (uint32_t i = first_set; i < first_set + count && i < CommandState::MaxTrackedSets; i++)
@@ -124,13 +122,23 @@ public:
             slots[i].Reset();
         }
 
-        vkCmdBindDescriptorSets(command_buffer_, bind_point, layout, first_set, count, sets, 0, nullptr);
+        vkCmdBindDescriptorSets(command_buffer_, bind_point, layout, first_set, count, sets.data(), 0, nullptr);
     }
 
     void ResetCommandState()
     {
         command_state_.Reset();
     }
+
+    // lowers an image barrier as Barrier does, for an image outside RHIImage
+    [[nodiscard]] static VkImageMemoryBarrier2 GetVkImageBarrier(VkImage image, const VkImageSubresourceRange &range,
+                                                                 const RHIResourceAccess &from,
+                                                                 const RHIResourceAccess &to,
+                                                                 RHIImageLayout from_layout, RHIImageLayout to_layout);
+
+    // records lowered barriers as one vkCmdPipelineBarrier2
+    void RecordBarriers(std::span<const VkImageMemoryBarrier2> image_barriers,
+                        std::span<const VkMemoryBarrier2> memory_barriers) const;
 
 protected:
     void DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
@@ -146,8 +154,15 @@ protected:
     void EndDebugLabel() const override;
     void BeginRenderingInternal(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer) override;
     void EndRenderingInternal() override;
-    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
+
+    // a Vulkan compute pass is only its label and timer, which the common code records
+    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/) override
+    {
+    }
+
+    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> & /*pass*/) override
+    {
+    }
 
 private:
     struct CommandState

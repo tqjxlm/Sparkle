@@ -20,8 +20,10 @@ public:
 
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
-    // adds a Raster pass drawing the cube map `sky_map` into `scene_color` where `scene_depth` is at the far plane
-    void AddTo(RenderGraph &graph, RGTexture sky_map, RGTexture scene_color, RGTexture scene_depth) const;
+    // adds a Raster pass drawing the cube map `sky_map`, sampled with `sky_map_sampler`, into `scene_color` where
+    // `scene_depth` is at the far plane
+    void AddTo(RenderGraph &graph, RGTexture sky_map, const RHISampler::SamplerAttribute &sky_map_sampler,
+               RGTexture scene_color, RGTexture scene_depth) const;
 
 private:
     RHIAttachmentSignature signature_;

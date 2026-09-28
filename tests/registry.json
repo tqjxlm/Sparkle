@@ -112,9 +112,13 @@
     {
         "name": "gpu_sync_validation",
         "test_case": "screenshot",
-        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward.",
+        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward, which the evaluator rejects.",
         "app_args": ["--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
-        "scene_args": ["--scene", "{scene}"]
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/rendering/effective_pipeline_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "Gpu"]
+        }
     },
     {
         "name": "cpu_sync_validation",
@@ -223,12 +227,12 @@
     {
         "name": "pass_timestamps",
         "test_case": "pass_timestamps",
-        "description": "Opt-in rendering GPU timestamps report a time once their frame slot returns, and nothing without device support."
+        "description": "Opt-in rendering GPU timestamps report a time once their frame slot returns, a pass recorded twice reporting its last run, and nothing without device support."
     },
     {
         "name": "render_graph_compile",
         "test_case": "render_graph_compile",
-        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, barriers seeded from tracked state, load/store inference, the dump and draws binding their declared textures, then executed and read back."
+        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, barriers seeded from tracked state, load/store inference, mip runs, acceleration structure builds, the dump, draws binding their declared textures or a placeholder and native recording, then executed and read back."
     },
     {
         "name": "render_graph_sync_validation",
@@ -237,14 +241,23 @@
         "app_args": ["--validation", "true", "--validate_sync", "true"]
     },
     {
+        "name": "render_graph_errors",
+        "test_case": "render_graph_errors",
+        "description": "One mistake per render graph error, with errors thrown instead of aborting: declarations, imports, compile-time checks, and recording checks including bindings no pipeline has and graph resources a pipeline holds that the pass did not declare. Each must fail with its expected message."
+    },
+    {
+        "name": "render_graph_pass_timing",
+        "test_case": "render_graph_pass_timing",
+        "description": "Render graph raster and compute passes dump their GPU time once their frame slot returns, and none without device support."
+    },
+    {
         "name": "cpu_graph_shape",
         "test_case": "render_graph_dump",
         "description": "The cpu pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "cpu"]
+            "args": ["--framework", "{framework}", "--golden", "cpu", "--page", "cpu_graph_shape"]
         }
     },
     {
@@ -252,10 +265,9 @@
         "test_case": "render_graph_dump_accumulating",
         "description": "The gpu pipeline's render graph of a frame that traces samples into the accumulator (passes, accesses, barriers, load/store, resources), compared against its golden graph shape. Needs ray query support; without it the pipeline falls back to forward, whose graph differs from the golden.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "gpu"]
+            "args": ["--framework", "{framework}", "--golden", "gpu", "--page", "gpu_graph_shape"]
         }
     },
     {
@@ -263,10 +275,9 @@
         "test_case": "render_graph_dump",
         "description": "The forward pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "forward"]
+            "args": ["--framework", "{framework}", "--golden", "forward", "--page", "forward_graph_shape"]
         }
     },
     {
@@ -274,10 +285,29 @@
         "test_case": "render_graph_dump",
         "description": "The deferred pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "deferred"]
+            "args": ["--framework", "{framework}", "--golden", "deferred", "--page", "deferred_graph_shape"]
+        }
+    },
+    {
+        "name": "deferred_graph_view_shape",
+        "test_case": "render_graph_dump",
+        "description": "The deferred pipeline's render graph while render_graph_view shows the scene depth: the depth is drawn into the screen in place of tone mapping, and the passes that only fed the scene color are culled.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "SceneDepth"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "deferred_view", "--page", "deferred_graph_view_shape"]
+        }
+    },
+    {
+        "name": "deferred_graph_view_fallback",
+        "test_case": "render_graph_dump",
+        "description": "render_graph_view naming a texture the post chain cannot sample (the integer GBufferPacked) falls back to the normal frame: the deferred golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "GBufferPacked"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "deferred", "--page", "deferred_graph_view_fallback"]
         }
     },
     {

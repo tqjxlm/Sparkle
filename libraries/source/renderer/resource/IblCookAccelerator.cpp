@@ -63,7 +63,7 @@ CookJobResult DrivePassToCompletion(RHIContext *rhi, std::unique_ptr<IBLPass> pa
         {
             return CookJobResult::Failure();
         }
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         pass->AddTo(graph, SamplesPerDispatch);
         graph.Compile();
         graph.Execute(*rhi->GetCommandContext());

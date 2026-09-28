@@ -16,8 +16,7 @@ static MTLTextureUsage GetMetalTextureUsage(RHIImage::ImageUsage usage)
 {
     NSUInteger metal_usage = MTLTextureUsageUnknown;
 
-    if (usage & RHIImage::ImageUsage::ColorAttachment || usage & RHIImage::ImageUsage::DepthStencilAttachment ||
-        usage & RHIImage::ImageUsage::TransientAttachment)
+    if (usage & RHIImage::ImageUsage::ColorAttachment || usage & RHIImage::ImageUsage::DepthStencilAttachment)
     {
         metal_usage |= MTLTextureUsageRenderTarget;
     }
@@ -164,16 +163,12 @@ MetalImage::MetalImage(const Attribute &attributes, const std::string &name) : R
     SetDebugInfo(texture_, GetName());
 
     ASSERT_F(texture_, "Failed to created texture {}", name);
-
-    CreateSamplerIfNeeded();
 }
 
 MetalImage::MetalImage(const Attribute &attributes, id<MTLTexture> texture, const std::string &name)
     : RHIImage(attributes, name)
 {
     texture_ = texture;
-
-    CreateSamplerIfNeeded();
 }
 
 // private textures cannot use replaceRegion; stage the payload in a shared buffer and
@@ -219,7 +214,7 @@ void MetalImage::UploadStaged(const uint8_t *data)
     }
 }
 
-void MetalImage::Upload(const uint8_t *data)
+void MetalImage::Upload(RHICommandContext & /*command_context*/, const uint8_t *data)
 {
     if (texture_.storageMode == MTLStorageModePrivate)
     {
@@ -251,7 +246,7 @@ void MetalImage::Upload(const uint8_t *data)
     }
 }
 
-void MetalImage::UploadFaces(std::array<const uint8_t *, 6> data)
+void MetalImage::UploadFaces(RHICommandContext & /*command_context*/, std::array<const uint8_t *, 6> data)
 {
     ASSERT(attributes_.type == RHIImage::ImageType::Image2DCube);
 
@@ -357,14 +352,6 @@ void MetalImage::BlitToImage(id<MTLCommandBuffer> command_buffer, const RHIImage
                                  destinationTexture:dest_view];
             }
         }
-    }
-}
-
-void MetalImage::CreateSamplerIfNeeded()
-{
-    if (attributes_.usages & RHIImage::ImageUsage::Texture)
-    {
-        sampler_ = context->GetRHI()->GetSampler(attributes_.sampler);
     }
 }
 
