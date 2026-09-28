@@ -115,12 +115,6 @@ public:
     virtual void InitRenderResources() = 0;
     virtual bool SupportsHardwareRayTracing() = 0;
 
-    // draws in a render pass can read color attachments written earlier in the same pass at the same pixel
-    virtual bool SupportsPixelLocalRead() = 0;
-
-    // the general image layout performs as well as the specialized ones for every access
-    virtual bool SupportsUnifiedImageLayouts() = 0;
-
     // GPU timestamps can measure render and compute passes (see RHIPass)
     virtual bool SupportsPassTimestamps() = 0;
 

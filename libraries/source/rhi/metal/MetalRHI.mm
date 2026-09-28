@@ -82,12 +82,6 @@ bool MetalRHI::SupportsHardwareRayTracing()
     return context->GetDevice().supportsRaytracing;
 }
 
-bool MetalRHI::SupportsPixelLocalRead()
-{
-    // framebuffer fetch (programmable blending) exists on Apple-family GPUs only
-    return [context->GetDevice() supportsFamily:MTLGPUFamilyApple2];
-}
-
 bool MetalRHI::SupportsPassTimestamps()
 {
     return context->SupportsPassTimestamps();

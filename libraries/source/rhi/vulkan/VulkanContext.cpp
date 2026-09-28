@@ -131,18 +131,6 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     return all_extension_good;
 }
 
-[[maybe_unused]] static bool DeviceHasExtension(VkPhysicalDevice device, const char *extension_name)
-{
-    uint32_t extension_count = 0;
-    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
-    std::vector<VkExtensionProperties> extensions(extension_count);
-    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, extensions.data());
-
-    return std::ranges::any_of(extensions, [extension_name](const auto &extension) {
-        return strcmp(extension.extensionName, extension_name) == 0;
-    });
-}
-
 template <class T> static T QueryDeviceFeatures(VkPhysicalDevice device, VkStructureType type)
 {
     T features{};
@@ -941,30 +929,6 @@ void VulkanContext::QueryOptionalDeviceFeatures()
     supports_astc_hdr_ = QueryDeviceFeatures<VkPhysicalDeviceVulkan13Features>(
                              physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
                              .textureCompressionASTC_HDR == VK_TRUE;
-
-#ifdef VK_KHR_dynamic_rendering_local_read
-    supports_dynamic_rendering_local_read_ =
-        DeviceHasExtension(physical_device_, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) &&
-        QueryDeviceFeatures<VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR>(
-            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR)
-                .dynamicRenderingLocalRead == VK_TRUE;
-    if (supports_dynamic_rendering_local_read_)
-    {
-        device_extensions_.push_back(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
-    }
-#endif
-
-#ifdef VK_KHR_unified_image_layouts
-    supports_unified_image_layouts_ =
-        DeviceHasExtension(physical_device_, VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME) &&
-        QueryDeviceFeatures<VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR>(
-            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR)
-                .unifiedImageLayouts == VK_TRUE;
-    if (supports_unified_image_layouts_)
-    {
-        device_extensions_.push_back(VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
-    }
-#endif
 }
 
 bool VulkanContext::CreateLogicalDevice()
@@ -1023,27 +987,6 @@ bool VulkanContext::CreateLogicalDevice()
     enabled_vulkan13_features.synchronization2 = VK_TRUE;
     enabled_vulkan13_features.textureCompressionASTC_HDR = supports_astc_hdr_ ? VK_TRUE : VK_FALSE;
     ChainVkStructurePtr(create_info, enabled_vulkan13_features);
-
-#ifdef VK_KHR_dynamic_rendering_local_read
-    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR enabled_local_read_features{};
-    if (supports_dynamic_rendering_local_read_)
-    {
-        enabled_local_read_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR;
-        enabled_local_read_features.dynamicRenderingLocalRead = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_local_read_features);
-    }
-#endif
-
-#ifdef VK_KHR_unified_image_layouts
-    VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR enabled_unified_image_layouts_features{};
-    if (supports_unified_image_layouts_)
-    {
-        enabled_unified_image_layouts_features.sType =
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR;
-        enabled_unified_image_layouts_features.unifiedImageLayouts = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_unified_image_layouts_features);
-    }
-#endif
 
     if (rhi_->SupportsHardwareRayTracing())
     {

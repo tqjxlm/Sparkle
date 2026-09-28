@@ -4,7 +4,7 @@ Working log for [RenderGraphDesign.md](RenderGraphDesign.md). Records the plan p
 
 ## Decisions
 
-* Vulkan 1.3 core is the minimum (dynamic rendering + synchronization2 required). `VK_KHR_dynamic_rendering_local_read` and `VK_KHR_unified_image_layouts` are optional capabilities.
+* Vulkan 1.3 core is the minimum (dynamic rendering + synchronization2 required). `VK_KHR_dynamic_rendering_local_read` and `VK_KHR_unified_image_layouts` stay disabled, with no RHI query, until Phase 3 has a user for them.
 * Metal is changed alongside Vulkan in each step; Metal correctness is gated by the macOS CI jobs (no local Metal build).
 * Phase 0 is implemented in full.
 * Deviations carried into Phase 1: `RHIAttachmentSignature` has no per-slot write mask (§7.1), and `StoreOp::None` still lowers to `DONT_CARE` rather than `STORE_OP_NONE` (§6.5); both belong with load/store inference and pass merging in Phase 1.
@@ -151,8 +151,8 @@ Each step: an implementer agent makes the change and raises questions or design 
 ## Findings
 
 * Device features are chained onto `VkDeviceCreateInfo` with `ChainVkStructurePtr` (`VulkanCommon.h`). Ray tracing uses the individual 1.2 structs (`BufferDeviceAddress`, `DescriptorIndexing`), so a `VkPhysicalDeviceVulkan12Features` must never be added to the chain (VUID-VkDeviceCreateInfo-pNext-02830); likewise `VkPhysicalDeviceVulkan13Features` now carries `textureCompressionASTC_HDR`, so no standalone 1.3-promoted feature struct (dynamic rendering, sync2, ASTC HDR, ...) may be chained next to it (VUID-VkDeviceCreateInfo-pNext-06532). `dynamicRendering` and `synchronization2` are mandatory in 1.3, so the API version check is the only device requirement.
-* Optional capabilities: `VulkanContext::QueryOptionalDeviceFeatures()` sets `supports_*` flags and pushes the extension names before device creation; `CreateLogicalDevice()` chains the matching feature structs. Both optional extensions are compiled under `#ifdef VK_KHR_...` because the Android build uses the NDK's Vulkan headers, whose version is not pinned to the SDK's 1.4.350.
-* RHI queries: `RHIContext::SupportsPixelLocalRead()` (Vulkan: `VK_KHR_dynamic_rendering_local_read`; Metal: `MTLGPUFamilyApple2`) and `RHIContext::SupportsUnifiedImageLayouts()` (Metal: false).
+* Optional features: `VulkanContext::QueryOptionalDeviceFeatures()` sets `supports_*` flags (and pushes an optional extension's name) before device creation; `CreateLogicalDevice()` chains the matching feature structs. An optional extension must be compiled under `#ifdef VK_KHR_...` because the Android build uses the NDK's Vulkan headers, whose version is not pinned to the SDK's 1.4.350.
+* Pixel-local read (Vulkan: `VK_KHR_dynamic_rendering_local_read`; Metal: framebuffer fetch on `MTLGPUFamilyApple2`) and unified image layouts are neither enabled nor queried: enabling an extension nothing uses is driver risk for no benefit. Phase 3 adds both with their first user.
 * volk loads core 1.3 entry points (`vkCmdBeginRendering`, `vkCmdPipelineBarrier2`) in `volkLoadDevice` unconditionally; nothing else needs loading. ImGui's Vulkan backend defaults `ApiVersion` to the header version, so `VulkanUiHandler` sets it to 1.3.
 * The ray tracing extension list still enables 1.2-promoted extensions: buffer device address (tied to `SetupMemoryAllocator` leaving `VmaAllocatorCreateInfo::vulkanApiVersion` at 1.0), and descriptor indexing, spirv_1_4 and float controls (left over from the 1.1 instance). Dropping them is a separate cleanup. `VK_KHR_shader_non_semantic_info` and `VK_KHR_format_feature_flags2` were removed because they are core in 1.3.
 * `CheckDeviceExtensionSupport` also runs on the static `ray_tracing_extensions` list, which it mutates (portability subset), and `PickPhysicalDevice` appends that list to `device_extensions_` per candidate device before the suitability check, so duplicate names are possible on multi-GPU hosts or on MoltenVK (recorded in `docs/TODO.md`).

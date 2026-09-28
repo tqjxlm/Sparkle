@@ -55,10 +55,6 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
-    bool SupportsPixelLocalRead() override;
-
-    bool SupportsUnifiedImageLayouts() override;
-
     bool SupportsPassTimestamps() override;
 
     bool HasPhysicalGpu() override;

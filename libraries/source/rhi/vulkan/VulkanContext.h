@@ -98,16 +98,6 @@ public:
         return supports_astc_hdr_;
     }
 
-    [[nodiscard]] bool SupportsDynamicRenderingLocalRead() const
-    {
-        return supports_dynamic_rendering_local_read_;
-    }
-
-    [[nodiscard]] bool SupportsUnifiedImageLayouts() const
-    {
-        return supports_unified_image_layouts_;
-    }
-
     [[nodiscard]] bool CompressedImageBarriersNeedSync1() const
     {
         return compressed_image_barriers_need_sync1_;
@@ -242,8 +232,6 @@ private:
 
     bool enable_ray_tracing_ = false;
     bool supports_astc_hdr_ = false;
-    bool supports_dynamic_rendering_local_read_ = false;
-    bool supports_unified_image_layouts_ = false;
     bool compressed_image_barriers_need_sync1_ = false;
     uint32_t timestamp_valid_bits_ = 0;
 

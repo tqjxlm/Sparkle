@@ -21,13 +21,6 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
-    bool SupportsPixelLocalRead() override;
-
-    bool SupportsUnifiedImageLayouts() override
-    {
-        return false;
-    }
-
     bool SupportsPassTimestamps() override;
 
     bool SupportsSampledFormat(PixelFormat format) override;
