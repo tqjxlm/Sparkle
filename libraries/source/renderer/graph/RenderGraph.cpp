@@ -39,8 +39,14 @@ static bool KindAllows(RGPassKind kind, RHIAccess access)
     }
 }
 
-static RHIShaderStageMask GetDefaultStages(RGPassKind kind)
+// the given stages, or the pass kind's when none are given
+static RHIShaderStageMask ResolveStages(RGPassKind kind, RHIShaderStageMask stages)
 {
+    if (stages != RHIShaderStageMask::None)
+    {
+        return stages;
+    }
+
     switch (kind)
     {
     case RGPassKind::Raster:
@@ -162,6 +168,21 @@ static bool UsesContents(const RHIResourceAccess &access, bool clear, bool fully
     return ReadsContents(access) || !(clear || (fully_overwrites && access.HasWrite()));
 }
 
+// whether one of `accesses` names `resource` through `member`
+template <typename Accesses, typename Resource, typename Member>
+static bool Declares(const Accesses &accesses, const Resource &resource, Member member)
+{
+    return std::ranges::find(accesses, resource, member) != std::ranges::end(accesses);
+}
+
+// aborts unless a pass of `kind` may declare `access` to `name` and has not declared it yet
+static void CheckDeclarable(RGPassKind kind, const std::string &pass, const std::string &name, RHIAccess access,
+                            bool declared)
+{
+    RGCheck(KindAllows(kind, access), "a {} pass cannot declare this access to {}", Enum2Str(kind), name);
+    RGCheck(!declared, "pass {} declares {} twice", pass, name);
+}
+
 void RGBuilder::Declare(RGTextureRange texture, RHIResourceAccess access, RHIImageLayout layout, uint8_t slot,
                         std::optional<Vector4> clear)
 {
@@ -184,15 +205,12 @@ void RGBuilder::Declare(RGTextureRange texture, RHIResourceAccess access, RHIIma
     RGCheck(slot == RenderGraph::NoSlot || (subresources.mip_count == 1 && subresources.layer_count == 1),
             "pass {} attaches more than one subresource of {}", pass.name, name);
 
-    RGCheck(KindAllows(pass.kind, access.access), "a {} pass cannot declare this access to {}", Enum2Str(pass.kind),
-            name);
-    for (const auto &declared : pass.accesses)
-    {
-        RGCheck(declared.texture != texture.texture || !Overlaps(declared.subresources, subresources),
-                "pass {} declares {} twice", pass.name, name);
-        RGCheck(slot == RenderGraph::NoSlot || declared.slot != slot, "pass {} binds two attachments to slot {}",
-                pass.name, slot);
-    }
+    CheckDeclarable(pass.kind, pass.name, name, access.access,
+                    std::ranges::any_of(pass.accesses, [&texture, &subresources](const RenderGraph::Access &declared) {
+                        return declared.texture == texture.texture && Overlaps(declared.subresources, subresources);
+                    }));
+    RGCheck(slot == RenderGraph::NoSlot || !Declares(pass.accesses, slot, &RenderGraph::Access::slot),
+            "pass {} binds two attachments to slot {}", pass.name, slot);
 
     pass.accesses.push_back({.texture = texture.texture,
                              .subresources = subresources,
@@ -211,8 +229,8 @@ void RGBuilder::DeclareShaderAccess(RGTextureRange texture, RHIAccess access, RH
                                     RHIImageLayout layout)
 {
     const auto kind = graph_.passes_[pass_].kind;
-    Declare(texture, {.access = access, .stages = stages == RHIShaderStageMask::None ? GetDefaultStages(kind) : stages},
-            layout, RenderGraph::NoSlot, std::nullopt);
+    Declare(texture, {.access = access, .stages = ResolveStages(kind, stages)}, layout, RenderGraph::NoSlot,
+            std::nullopt);
 }
 
 void RGBuilder::ColorWrite(RGTextureRange texture, uint8_t slot, std::optional<Vector4> clear)
@@ -265,12 +283,8 @@ void RGBuilder::DeclareBuffer(uint32_t buffer, RHIResourceAccess access)
     RGCheck(buffer < graph_.buffers_.size(), "pass {} declares an invalid buffer", pass.name);
 
     const auto &name = graph_.buffers_[buffer].name;
-    RGCheck(KindAllows(pass.kind, access.access), "a {} pass cannot declare this access to {}", Enum2Str(pass.kind),
-            name);
-    RGCheck(
-        std::ranges::none_of(pass.buffer_accesses,
-                             [buffer](const RenderGraph::BufferAccess &declared) { return declared.buffer == buffer; }),
-        "pass {} declares {} twice", pass.name, name);
+    CheckDeclarable(pass.kind, pass.name, name, access.access,
+                    Declares(pass.buffer_accesses, buffer, &RenderGraph::BufferAccess::buffer));
 
     pass.buffer_accesses.push_back({.buffer = buffer, .access = access, .bindings = {}});
 }
@@ -294,8 +308,7 @@ void RGBuilder::AccelerationStructureRead(RGAccelerationStructure acceleration_s
 {
     const auto kind = graph_.passes_[pass_].kind;
     DeclareBuffer(acceleration_structure.index,
-                  {.access = RHIAccess::AccelerationStructureRead,
-                   .stages = stages == RHIShaderStageMask::None ? GetDefaultStages(kind) : stages});
+                  {.access = RHIAccess::AccelerationStructureRead, .stages = ResolveStages(kind, stages)});
 }
 
 RHIResourceRef<RHITLAS> RGBuilder::GetAccelerationStructure(RGAccelerationStructure acceleration_structure) const
@@ -358,7 +371,7 @@ void RGBuilder::NativeAccess()
 RHIImage *RGPassContext::GetImage(RGTexture texture) const
 {
     const auto &pass = graph_.passes_[pass_];
-    RGCheck(std::ranges::any_of(pass.accesses, [texture](const auto &access) { return access.texture == texture; }),
+    RGCheck(Declares(pass.accesses, texture, &RenderGraph::Access::texture),
             "pass {} uses a texture it did not declare", pass.name);
     return graph_.textures_[texture.index].image;
 }
@@ -378,8 +391,7 @@ RHITLAS *RGPassContext::GetAccelerationStructure(RGAccelerationStructure acceler
 void RGPassContext::CheckDeclared(uint32_t buffer) const
 {
     const auto &pass = graph_.passes_[pass_];
-    RGCheck(std::ranges::any_of(pass.buffer_accesses,
-                                [buffer](const RenderGraph::BufferAccess &access) { return access.buffer == buffer; }),
+    RGCheck(Declares(pass.buffer_accesses, buffer, &RenderGraph::BufferAccess::buffer),
             "pass {} uses a buffer it did not declare", pass.name);
 }
 
