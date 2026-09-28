@@ -122,7 +122,9 @@ void MetalRHI::EndFrameInternal()
     if (GetConfig().measure_gpu_time)
     {
         auto frame_index = GetFrameIndex();
-        [context->GetCommandContext()->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
+        auto *command_context = context->GetCommandContext();
+        ASSERT_F(command_context, "the frame ends outside its command buffer");
+        [command_context->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
           frame_stats_[frame_index].elapsed_time_ms = (command_buffer.GPUEndTime - command_buffer.GPUStartTime) * 1e3f;
         }];
     }

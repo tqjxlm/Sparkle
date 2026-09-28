@@ -160,6 +160,7 @@ void MetalTLAS::Build()
         static_cast<MTLAccelerationStructureUserIDInstanceDescriptor *>(blas_descriptor_buffer_->Lock());
 
     auto *command_context = context->GetCommandContext();
+    ASSERT_F(command_context, "TLAS {} builds outside a command buffer", GetName());
     command_context->AssertOutsidePass("BLAS build");
     auto command_buffer = command_context->GetCommandBuffer();
 
