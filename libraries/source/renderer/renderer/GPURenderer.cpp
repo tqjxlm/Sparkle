@@ -187,7 +187,7 @@ void GPURenderer::Render()
         if (gbuffer_write_this_frame_ && denoiser_inputs)
         {
             tone_mapping_input = frame_denoiser_->AddTo(graph, *denoiser_inputs);
-            displayed_image_ = frame_denoiser_->GetOutput();
+            displayed_image_ = tone_mapping_input == accumulator ? scene_texture_ : frame_denoiser_->GetOutput();
         }
         else
         {

@@ -238,18 +238,12 @@ struct MetalFxDenoiser::Impl
         return DenoiserHandoff(frame.maximum_samples);
     }
 
-    bool BindInputs(const RGPassContext &pass_context, const DenoiserInputs &inputs)
+    [[nodiscard]] bool ValidInputs(const RenderGraph &graph, const DenoiserInputs &inputs) const
     {
-        auto *accumulated_radiance = pass_context.GetImage(inputs.accumulated_radiance);
-        auto *normal_view_depth = pass_context.GetImage(inputs.normal_view_depth);
-        auto *albedo_object_id = pass_context.GetImage(inputs.albedo_object_id);
-        auto *motion_hit_metallic = pass_context.GetImage(inputs.motion_hit_metallic);
-        auto *specular_albedo_roughness = pass_context.GetImage(inputs.specular_albedo_roughness);
-
-        const auto valid_input = [this](const RHIImage *image, PixelFormat format, const char *name) {
-            const auto attributes = image->GetAttributes();
-            if (attributes.width == desc.input_size.x() && attributes.height == desc.input_size.y() &&
-                (format == PixelFormat::Count || attributes.format == format))
+        const auto valid_input = [this, &graph](RGTexture texture, PixelFormat format, const char *name) {
+            const auto size = graph.GetSize(texture);
+            if (size.x() == desc.input_size.x() && size.y() == desc.input_size.y() &&
+                (format == PixelFormat::Count || graph.GetFormat(texture) == format))
             {
                 return true;
             }
@@ -257,22 +251,25 @@ struct MetalFxDenoiser::Impl
             Log(Error, "MetalFX: {} does not match the denoiser input descriptor", name);
             return false;
         };
-        if (!valid_input(accumulated_radiance, PixelFormat::Count, "accumulated radiance") ||
-            !valid_input(normal_view_depth, PixelFormat::RGBAFloat, "normal and depth") ||
-            !valid_input(albedo_object_id, PixelFormat::RGBAFloat, "albedo and object ID") ||
-            !valid_input(motion_hit_metallic, PixelFormat::RGBAFloat16, "motion and hit state") ||
-            !valid_input(specular_albedo_roughness, PixelFormat::RGBAFloat16, "specular albedo and roughness"))
-        {
-            return false;
-        }
+        return valid_input(inputs.accumulated_radiance, PixelFormat::Count, "accumulated radiance") &&
+               valid_input(inputs.normal_view_depth, PixelFormat::RGBAFloat, "normal and depth") &&
+               valid_input(inputs.albedo_object_id, PixelFormat::RGBAFloat, "albedo and object ID") &&
+               valid_input(inputs.motion_hit_metallic, PixelFormat::RGBAFloat16, "motion and hit state") &&
+               valid_input(inputs.specular_albedo_roughness, PixelFormat::RGBAFloat16, "specular albedo and roughness");
+    }
+
+    void BindInputs(const RGPassContext &pass_context, const DenoiserInputs &inputs)
+    {
+        const auto view = [this, &pass_context](RGTexture texture) {
+            return pass_context.GetImage(texture)->GetDefaultView(rhi);
+        };
 
         auto *resources = prepare_pipeline->GetShaderResource<MetalFxPrepareShader>();
-        resources->sceneRadiance().BindResource(accumulated_radiance->GetDefaultView(rhi), true);
-        resources->normalViewDepth().BindResource(normal_view_depth->GetDefaultView(rhi), true);
-        resources->albedoObjectId().BindResource(albedo_object_id->GetDefaultView(rhi), true);
-        resources->motionHitMetallic().BindResource(motion_hit_metallic->GetDefaultView(rhi), true);
-        resources->specularAlbedoRoughness().BindResource(specular_albedo_roughness->GetDefaultView(rhi), true);
-        return true;
+        resources->sceneRadiance().BindResource(view(inputs.accumulated_radiance), true);
+        resources->normalViewDepth().BindResource(view(inputs.normal_view_depth), true);
+        resources->albedoObjectId().BindResource(view(inputs.albedo_object_id), true);
+        resources->motionHitMetallic().BindResource(view(inputs.motion_hit_metallic), true);
+        resources->specularAlbedoRoughness().BindResource(view(inputs.specular_albedo_roughness), true);
     }
 
     RHIContext *rhi;
@@ -475,6 +472,13 @@ RGTexture MetalFxDenoiser::AddTo(RenderGraph &graph, const DenoiserInputs &input
 {
     ASSERT(NeedsInputs());
 
+    // the frame shows the accumulator, and the renderer selects another provider next frame
+    if (!impl_->ValidInputs(graph, inputs))
+    {
+        impl_->ready = false;
+        return inputs.accumulated_radiance;
+    }
+
     // the displayed image is the scaler output until the handoff starts, then its resolve into the accumulator
     const float handoff_weight = impl_->GetHandoff().ComputeWeight(static_cast<float>(impl_->frame.accumulated_samples),
                                                                    impl_->frame.final_frame);
@@ -499,11 +503,7 @@ RGTexture MetalFxDenoiser::AddTo(RenderGraph &graph, const DenoiserInputs &input
 void MetalFxDenoiser::Encode(RGExternalContext &pass_context, const DenoiserInputs &inputs,
                              [[maybe_unused]] float handoff_weight)
 {
-    if (!impl_->BindInputs(pass_context, inputs))
-    {
-        impl_->ready = false;
-        return;
-    }
+    impl_->BindInputs(pass_context, inputs);
 
     const auto &size = impl_->desc.input_size;
     MetalFxPrepareShader::UniformBufferData ubo{
@@ -535,12 +535,9 @@ void MetalFxDenoiser::Encode(RGExternalContext &pass_context, const DenoiserInpu
 #if SPARKLE_HAS_METALFX_DENOISED
     if (@available(macOS 26.0, iOS 26.0, *))
     {
+        // a ready denoiser has a scaler
         id<MTLFXTemporalDenoisedScaler> scaler = impl_->scaler;
-        if (!scaler)
-        {
-            impl_->ready = false;
-            return;
-        }
+        ASSERT(scaler != nil);
 
         // CPU-writing a shared texture races frames in flight that still read it: only rewrite on change
         const float exposure_value = std::max(impl_->frame.exposure, 0.f);
