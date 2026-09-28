@@ -62,7 +62,7 @@ A renderer builds one graph per frame from the `RenderFramework`'s texture pool,
 | the screen pass (`ToneMapping` or `Upsample`), when given, or `GraphView` showing a graph texture | `Sampled` scene or the viewed texture, `ColorWrite` Screen (fully overwritten) |
 | `Readback` (screenshot without UI) | Copy pass: `CopySrc` Screen, `CopyDst` ScreenshotBuffer, a staging buffer created with the pass (its size comes from `RenderGraph::GetFormat` and `GetSize`) and saved once the frame completes |
 | `Ui` (UI shown, not headless) | `ColorWrite` Screen, `NativeAccess()` for ImGui |
-| `Readback` (screenshot with UI) | as above |
+| `Readback` (screenshot with UI) | as above; without `Ui` it reads Screen without the UI |
 | `Present` | `Sampled` Screen, `ColorWrite` BackBuffer (fully overwritten), the image `RHIContext::GetBackBuffer()` returns: a windowed Vulkan device's acquired swap chain image, otherwise one image whose Metal texture is the frame's drawable when windowed |
 
 Screen is a transient at output resolution whose format and sampler the renderer chooses once (`Renderer::InitPostChain`): `B8G8R8A8Srgb` with nearest sampling for the renderers that tone map on the GPU, the CPU renderer's `RGBAFloat16` with bilinear sampling otherwise. Without a screen pass, `scene` is the screen. The screen passes and `Present` are `ScreenQuadPass`es built from their output format; each samples its input with the sampler the input's image carries, and `Present` applies the window's pre-rotation. `Ui` draws into the rendering the graph begins over Screen, and the ImGui backend compiles its pipelines for Screen's format (`RHIUiHandler::Setup` takes an attachment signature).

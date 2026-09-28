@@ -314,9 +314,10 @@ void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQua
     if (render_config_.render_ui && ui_pass_)
     {
         ui_pass_->AddTo(graph, screen);
-
-        AddReadback(graph, screen, true);
     }
+
+    // a screenshot with ui is served without it when the ui does not draw
+    AddReadback(graph, screen, true);
 
     const auto back_buffer = graph.Import("BackBuffer", rhi_->GetBackBuffer());
     present_pass_->AddTo(graph, screen, back_buffer);
