@@ -74,10 +74,6 @@ void CPURenderer::InitRenderResources()
     actual_sample_per_pixel_ = sub_pixel_count_ * sub_pixel_count_;
 }
 
-void CPURenderer::Update()
-{
-}
-
 void CPURenderer::Render()
 {
     PROFILE_SCOPE("CPURenderer::Render");

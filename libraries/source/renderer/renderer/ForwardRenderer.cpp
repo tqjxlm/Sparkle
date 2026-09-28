@@ -7,7 +7,6 @@
 #include "renderer/pass/LightingInputs.h"
 #include "renderer/pass/SkyBoxPass.h"
 #include "renderer/pass/ToneMappingPass.h"
-#include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"

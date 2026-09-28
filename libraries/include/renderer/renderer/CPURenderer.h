@@ -5,7 +5,6 @@
 #include "io/Image.h"
 #include "renderer/resource/GBuffer.h"
 #include "rhi/RHIBuffer.h"
-#include "rhi/RHIImage.h"
 
 namespace sparkle
 {
@@ -24,7 +23,9 @@ public:
 
     void InitRenderResources() override;
 
-    void Update() override;
+    void Update() override
+    {
+    }
 
     [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
 
