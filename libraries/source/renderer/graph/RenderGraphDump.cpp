@@ -2,91 +2,29 @@
 
 #include "RenderGraphInternal.h"
 
+#include <magic_enum/magic_enum_flags.hpp>
 #include <nlohmann/json.hpp>
 
-#include <array>
 #include <format>
 #include <utility>
 
 namespace sparkle
 {
-template <typename Flags, size_t N>
-static std::string JoinFlags(Flags flags, const std::array<std::pair<Flags, const char *>, N> &names)
+// the set flags in bit order, e.g. "Sampled|StorageRead", or "None"
+template <EnumType Flags> static std::string JoinFlags(Flags flags)
 {
-    std::string joined;
-    for (const auto &[flag, name] : names)
-    {
-        if (flags & flag)
-        {
-            joined += (joined.empty() ? "" : "|") + std::string(name);
-        }
-    }
+    auto joined = magic_enum::enum_flags_name(flags);
     return joined.empty() ? "None" : joined;
 }
 
 static std::string ToString(const RHIResourceAccess &access)
 {
-    constexpr std::array<std::pair<RHIAccess, const char *>, 16> AccessNames{{
-        {RHIAccess::ColorWrite, "ColorWrite"},
-        {RHIAccess::DepthWrite, "DepthWrite"},
-        {RHIAccess::DepthTest, "DepthTest"},
-        {RHIAccess::Sampled, "Sampled"},
-        {RHIAccess::StorageRead, "StorageRead"},
-        {RHIAccess::StorageWrite, "StorageWrite"},
-        {RHIAccess::CopySrc, "CopySrc"},
-        {RHIAccess::CopyDst, "CopyDst"},
-        {RHIAccess::Uniform, "Uniform"},
-        {RHIAccess::VertexInput, "VertexInput"},
-        {RHIAccess::IndexInput, "IndexInput"},
-        {RHIAccess::IndirectArgs, "IndirectArgs"},
-        {RHIAccess::AccelerationStructureBuild, "AccelerationStructureBuild"},
-        {RHIAccess::AccelerationStructureRead, "AccelerationStructureRead"},
-        {RHIAccess::Present, "Present"},
-        {RHIAccess::HostRead, "HostRead"},
-    }};
-    constexpr std::array<std::pair<RHIShaderStageMask, const char *>, 3> StageNames{{
-        {RHIShaderStageMask::Vertex, "Vertex"},
-        {RHIShaderStageMask::Pixel, "Pixel"},
-        {RHIShaderStageMask::Compute, "Compute"},
-    }};
-
-    auto name = JoinFlags(access.access, AccessNames);
+    auto name = JoinFlags(access.access);
     if (access.stages != RHIShaderStageMask::None)
     {
-        name += "(" + JoinFlags(access.stages, StageNames) + ")";
+        name += "(" + JoinFlags(access.stages) + ")";
     }
     return name;
-}
-
-static std::string ToString(RHIImage::ImageUsage usages)
-{
-    constexpr std::array<std::pair<RHIImage::ImageUsage, const char *>, 6> UsageNames{{
-        {RHIImage::ImageUsage::ColorAttachment, "ColorAttachment"},
-        {RHIImage::ImageUsage::DepthStencilAttachment, "DepthStencilAttachment"},
-        {RHIImage::ImageUsage::Texture, "Texture"},
-        {RHIImage::ImageUsage::UAV, "UAV"},
-        {RHIImage::ImageUsage::TransferSrc, "TransferSrc"},
-        {RHIImage::ImageUsage::TransferDst, "TransferDst"},
-    }};
-    return JoinFlags(usages, UsageNames);
-}
-
-static const char *ToString(RHILoadOp load_op)
-{
-    switch (load_op)
-    {
-    case RHILoadOp::Load:
-        return "Load";
-    case RHILoadOp::Clear:
-        return "Clear";
-    default:
-        return "DontCare";
-    }
-}
-
-static const char *ToString(RHIStoreOp store_op)
-{
-    return store_op == RHIStoreOp::Store ? "Store" : "DontCare";
 }
 
 // e.g. "mip 1 layer 2" or "mips 0-4"; empty when the subresources cover every mip and layer
@@ -165,9 +103,9 @@ nlohmann::json RenderGraph::Dump() const
             nlohmann::json attachment{
                 {"resource", resource},
                 {"slot", access.slot == DepthSlot ? nlohmann::json("depth") : nlohmann::json(access.slot)},
-                {"load", ToString(access.load_op)},
+                {"load", Enum2Str(access.load_op)},
                 {"load_reason", access.load_reason},
-                {"store", ToString(access.store_op)},
+                {"store", Enum2Str(access.store_op)},
                 {"store_reason", access.store_reason}};
             if (!subresources.empty())
             {
@@ -215,7 +153,7 @@ nlohmann::json RenderGraph::Dump() const
                 dumped["height"] = texture.height;
             }
         }
-        dump_uses(dumped, texture.lifetime, ToString(texture.usages));
+        dump_uses(dumped, texture.lifetime, JoinFlags(texture.usages));
         if (texture.physical)
         {
             dumped["physical"] = *texture.physical;

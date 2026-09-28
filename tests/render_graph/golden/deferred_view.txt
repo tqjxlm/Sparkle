@@ -24,9 +24,9 @@ ShadowMap: Transient D32 Absolute 1024x1024, no image
 IblBrdf: Imported
 IblDiffuse: Imported
 IblSpecular: Imported
-SceneDepth: Transient D32 Scene, physical 1, GBuffer..GraphView, DepthStencilAttachment|Texture
+SceneDepth: Transient D32 Scene, physical 1, GBuffer..GraphView, Texture|DepthStencilAttachment
 GBufferPacked: Transient RGBAUInt32 Scene, physical 0, GBuffer..GBuffer, ColorAttachment
 SceneColor: Transient RGBAFloat16 Scene, no image
 SkyMap: Imported
-Screen: Transient B8G8R8A8Srgb Output, physical 2, GraphView..Present, ColorAttachment|Texture
+Screen: Transient B8G8R8A8Srgb Output, physical 2, GraphView..Present, Texture|ColorAttachment
 BackBuffer: Imported, Present..Present, ColorAttachment

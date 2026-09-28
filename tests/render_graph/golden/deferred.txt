@@ -42,13 +42,13 @@ Present: Raster
   barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
   barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
   attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
-ShadowMap: Transient D32 Absolute 1024x1024, physical 0, DirectionalShadow..Lighting, DepthStencilAttachment|Texture
+ShadowMap: Transient D32 Absolute 1024x1024, physical 0, DirectionalShadow..Lighting, Texture|DepthStencilAttachment
 IblBrdf: Imported, Lighting..Lighting, Texture
 IblDiffuse: Imported, Lighting..Lighting, Texture
 IblSpecular: Imported, Lighting..Lighting, Texture
-SceneDepth: Transient D32 Scene, physical 2, GBuffer..SkyBox, DepthStencilAttachment|Texture
-GBufferPacked: Transient RGBAUInt32 Scene, physical 1, GBuffer..Lighting, ColorAttachment|Texture
-SceneColor: Transient RGBAFloat16 Scene, physical 3, Lighting..ToneMapping, ColorAttachment|Texture
+SceneDepth: Transient D32 Scene, physical 2, GBuffer..SkyBox, Texture|DepthStencilAttachment
+GBufferPacked: Transient RGBAUInt32 Scene, physical 1, GBuffer..Lighting, Texture|ColorAttachment
+SceneColor: Transient RGBAFloat16 Scene, physical 3, Lighting..ToneMapping, Texture|ColorAttachment
 SkyMap: Imported, SkyBox..SkyBox, Texture
-Screen: Transient B8G8R8A8Srgb Output, physical 4, ToneMapping..Present, ColorAttachment|Texture
+Screen: Transient B8G8R8A8Srgb Output, physical 4, ToneMapping..Present, Texture|ColorAttachment
 BackBuffer: Imported, Present..Present, ColorAttachment
