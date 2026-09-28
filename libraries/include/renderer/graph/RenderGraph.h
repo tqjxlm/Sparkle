@@ -546,6 +546,9 @@ private:
 
     void InferStoreOps();
 
+    // the attachments of each live raster pass, with the load and store actions planned for them
+    void BuildRenderingInfos();
+
     void CheckDeclaredStates(const Pass &pass) const;
 
     void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context) const;

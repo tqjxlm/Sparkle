@@ -541,6 +541,7 @@ void RenderGraph::Compile()
     ResolveBindings();
     PlanBarriers();
     InferStoreOps();
+    BuildRenderingInfos();
 }
 
 void RenderGraph::Validate() const
@@ -787,52 +788,24 @@ void RenderGraph::PlanBarriers()
                 continue;
             }
 
-            RHILoadOp load_op = RHILoadOp::Load;
             if (access.clear)
             {
-                load_op = RHILoadOp::Clear;
+                access.load_op = RHILoadOp::Clear;
                 access.load_reason = "clear";
             }
             else if (!uses_contents)
             {
-                load_op = RHILoadOp::DontCare;
+                access.load_op = RHILoadOp::DontCare;
                 access.load_reason = "fully overwritten";
             }
             else if (discard)
             {
-                load_op = RHILoadOp::DontCare;
+                access.load_op = RHILoadOp::DontCare;
                 access.load_reason = "no earlier writer";
             }
             else
             {
                 access.load_reason = writer ? "written by " + writer->name : "imported";
-            }
-
-            const auto mip = access.subresources.base_mip;
-            const auto layer = access.subresources.base_layer;
-            const auto width = std::max(texture.width >> mip, 1u);
-            const auto height = std::max(texture.height >> mip, 1u);
-            auto &info = pass.rendering_info;
-            RGCheck(info.width == 0 || (info.width == width && info.height == height),
-                    "attachments of pass {} differ in size", pass.name);
-            info.width = width;
-            info.height = height;
-            if (access.slot == DepthSlot)
-            {
-                info.depth_attachment = {.image = texture.image,
-                                         .mip_level = mip,
-                                         .array_layer = layer,
-                                         .load_op = load_op,
-                                         .clear_depth = access.clear ? access.clear->x() : 1.f};
-            }
-            else
-            {
-                info.color_attachments[access.slot] = {.image = texture.image,
-                                                       .mip_level = mip,
-                                                       .array_layer = layer,
-                                                       .load_op = load_op,
-                                                       .clear_color =
-                                                           access.clear.value_or(Vector4(0.f, 0.f, 0.f, 1.f))};
             }
         }
     }
@@ -921,11 +894,10 @@ void RenderGraph::InferStoreOps()
 
         for (auto &access : pass.accesses | std::views::filter([](const Access &a) { return a.slot != NoSlot; }))
         {
-            auto store_op = RHIStoreOp::DontCare;
             access.store_reason = "no later reader";
             if (textures_[access.texture.index].imported)
             {
-                store_op = RHIStoreOp::Store;
+                access.store_op = RHIStoreOp::Store;
                 access.store_reason = "imported";
             }
 
@@ -941,25 +913,55 @@ void RenderGraph::InferStoreOps()
 
                 if (UsesContents(next->access, next->clear.has_value(), later.fully_overwrites))
                 {
-                    store_op = RHIStoreOp::Store;
+                    access.store_op = RHIStoreOp::Store;
                     access.store_reason = "read by " + later.name;
                 }
                 else
                 {
-                    store_op = RHIStoreOp::DontCare;
+                    access.store_op = RHIStoreOp::DontCare;
                     access.store_reason = "overwritten by " + later.name;
                 }
                 break;
             }
+        }
+    }
+}
 
-            auto &info = pass.rendering_info;
+void RenderGraph::BuildRenderingInfos()
+{
+    for (auto &pass :
+         passes_ | std::views::filter([](const Pass &pass) { return pass.live && pass.kind == RGPassKind::Raster; }))
+    {
+        auto &info = pass.rendering_info;
+        for (const auto &access : pass.accesses | std::views::filter([](const Access &a) { return a.slot != NoSlot; }))
+        {
+            const auto &texture = textures_[access.texture.index];
+            const auto mip = access.subresources.base_mip;
+            const auto layer = access.subresources.base_layer;
+            const auto width = std::max(texture.width >> mip, 1u);
+            const auto height = std::max(texture.height >> mip, 1u);
+            RGCheck(info.width == 0 || (info.width == width && info.height == height),
+                    "attachments of pass {} differ in size", pass.name);
+            info.width = width;
+            info.height = height;
             if (access.slot == DepthSlot)
             {
-                info.depth_attachment.store_op = store_op;
+                info.depth_attachment = {.image = texture.image,
+                                         .mip_level = mip,
+                                         .array_layer = layer,
+                                         .load_op = access.load_op,
+                                         .store_op = access.store_op,
+                                         .clear_depth = access.clear ? access.clear->x() : 1.f};
             }
             else
             {
-                info.color_attachments[access.slot].store_op = store_op;
+                info.color_attachments[access.slot] = {.image = texture.image,
+                                                       .mip_level = mip,
+                                                       .array_layer = layer,
+                                                       .load_op = access.load_op,
+                                                       .store_op = access.store_op,
+                                                       .clear_color =
+                                                           access.clear.value_or(Vector4(0.f, 0.f, 0.f, 1.f))};
             }
         }
     }

@@ -41,7 +41,10 @@ struct RenderGraph::Access
     std::vector<RHIImageBarrier> barriers;
     // of each subresource after the pass's barriers, mip by mip
     std::vector<RHIImageState> states;
+    // of an attachment of a raster pass
+    RHILoadOp load_op = RHILoadOp::Load;
     std::string load_reason;
+    RHIStoreOp store_op = RHIStoreOp::DontCare;
     std::string store_reason;
 };
 

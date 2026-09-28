@@ -162,14 +162,13 @@ nlohmann::json RenderGraph::Dump() const
                 continue;
             }
 
-            const auto &info = pass.rendering_info;
-            const bool depth = access.slot == DepthSlot;
-            const auto load_op = depth ? info.depth_attachment.load_op : info.color_attachments[access.slot].load_op;
-            const auto store_op = depth ? info.depth_attachment.store_op : info.color_attachments[access.slot].store_op;
             nlohmann::json attachment{
-                {"resource", resource},        {"slot", depth ? nlohmann::json("depth") : nlohmann::json(access.slot)},
-                {"load", ToString(load_op)},   {"load_reason", access.load_reason},
-                {"store", ToString(store_op)}, {"store_reason", access.store_reason}};
+                {"resource", resource},
+                {"slot", access.slot == DepthSlot ? nlohmann::json("depth") : nlohmann::json(access.slot)},
+                {"load", ToString(access.load_op)},
+                {"load_reason", access.load_reason},
+                {"store", ToString(access.store_op)},
+                {"store_reason", access.store_reason}};
             if (!subresources.empty())
             {
                 attachment["subresources"] = subresources;
