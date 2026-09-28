@@ -496,7 +496,7 @@ RGTexture MetalFxDenoiser::AddTo(RenderGraph &graph, const DenoiserInputs &input
     return output;
 }
 
-void MetalFxDenoiser::Encode(const RGPassContext &pass_context, const DenoiserInputs &inputs,
+void MetalFxDenoiser::Encode(RGExternalContext &pass_context, const DenoiserInputs &inputs,
                              [[maybe_unused]] float handoff_weight)
 {
     if (!impl_->BindInputs(pass_context, inputs))
@@ -518,11 +518,11 @@ void MetalFxDenoiser::Encode(const RGPassContext &pass_context, const DenoiserIn
                             .before_stage = RHIPipelineStage::ComputeShader});
     }
 
-    auto *command_context = context->GetCommandContext();
+    auto &command_context = static_cast<MetalCommandContext &>(pass_context.GetCommandContext());
 
-    command_context->BeginComputePass(impl_->prepare_pass);
-    command_context->DispatchCompute(impl_->prepare_pipeline, {size.x(), size.y(), 1u}, {16u, 16u, 1u});
-    command_context->EndComputePass(impl_->prepare_pass);
+    command_context.BeginComputePass(impl_->prepare_pass);
+    command_context.DispatchCompute(impl_->prepare_pipeline, {size.x(), size.y(), 1u}, {16u, 16u, 1u});
+    command_context.EndComputePass(impl_->prepare_pass);
 
     for (const auto &prepared : {impl_->color, impl_->depth, impl_->motion, impl_->diffuse_albedo,
                                  impl_->specular_albedo, impl_->normal, impl_->roughness})
@@ -577,8 +577,8 @@ void MetalFxDenoiser::Encode(const RGPassContext &pass_context, const DenoiserIn
         impl_->timings.Sample({true, run_resolve});
 
         // MetalFX encodes on the command buffer, which needs no encoder open
-        command_context->AssertOutsidePass("MetalFX denoise");
-        id<MTLCommandBuffer> command_buffer = command_context->GetCommandBuffer();
+        command_context.AssertOutsidePass("MetalFX denoise");
+        id<MTLCommandBuffer> command_buffer = command_context.GetCommandBuffer();
         [command_buffer pushDebugGroup:@"MetalFX temporal denoised scaler"];
         [scaler encodeToCommandBuffer:command_buffer];
         [command_buffer popDebugGroup];
@@ -598,10 +598,10 @@ void MetalFxDenoiser::Encode(const RGPassContext &pass_context, const DenoiserIn
             resolve_resources->sceneAccum().BindResource(
                 pass_context.GetImage(inputs.accumulated_radiance)->GetDefaultView(impl_->rhi), true);
 
-            command_context->BeginComputePass(impl_->resolve_pass);
-            command_context->DispatchCompute(impl_->resolve_pipeline, {output_size.x(), output_size.y(), 1u},
-                                             {16u, 16u, 1u});
-            command_context->EndComputePass(impl_->resolve_pass);
+            command_context.BeginComputePass(impl_->resolve_pass);
+            command_context.DispatchCompute(impl_->resolve_pipeline, {output_size.x(), output_size.y(), 1u},
+                                            {16u, 16u, 1u});
+            command_context.EndComputePass(impl_->resolve_pass);
         }
         impl_->reset_history = false;
     }

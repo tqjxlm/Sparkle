@@ -370,8 +370,10 @@ RGTexture NrdDenoiser::AddTo(RenderGraph &graph, const DenoiserInputs &inputs)
     return output;
 }
 
-void NrdDenoiser::Encode(const RGPassContext &context, const DenoiserInputs &inputs)
+void NrdDenoiser::Encode(RGExternalContext &context, const DenoiserInputs &inputs)
 {
+    auto &command_context = context.GetCommandContext();
+
     BindInputs(context, inputs);
 
     const auto &attr = output_->GetAttributes();
@@ -418,7 +420,7 @@ void NrdDenoiser::Encode(const RGPassContext &context, const DenoiserInputs &inp
 
     if (run_reblur)
     {
-        RenderReblur(dispatch, group);
+        RenderReblur(command_context, dispatch, group);
     }
 
     // every sampled private texture, not just the ReBLUR outputs: on handoff frames the ReBLUR block (and its
@@ -440,18 +442,17 @@ void NrdDenoiser::Encode(const RGPassContext &context, const DenoiserInputs &inp
     };
     resolve_ubo_->Upload(rhi_, &resolve_ubo);
 
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginComputePass(resolve_pass_);
-    command_context->DispatchCompute(resolve_pipeline_, dispatch, group);
-    command_context->EndComputePass(resolve_pass_);
+    command_context.BeginComputePass(resolve_pass_);
+    command_context.DispatchCompute(resolve_pipeline_, dispatch, group);
+    command_context.EndComputePass(resolve_pass_);
 
     prev_view_matrix_ = view_matrix_;
     prev_projection_matrix_ = projection_matrix_;
     reset_history_ = false;
 }
 
-void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &group)
+void NrdDenoiser::RenderReblur(RHICommandContext &command_context, const Vector3UInt &dispatch,
+                               const Vector3UInt &group)
 {
     const auto &attr = output_->GetAttributes();
 
@@ -470,11 +471,9 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
     };
     pack_ubo_->Upload(rhi_, &pack_ubo);
 
-    auto *command_context = rhi_->GetCommandContext();
-
-    command_context->BeginComputePass(pack_pass_);
-    command_context->DispatchCompute(pack_pipeline_, dispatch, group);
-    command_context->EndComputePass(pack_pass_);
+    command_context.BeginComputePass(pack_pass_);
+    command_context.DispatchCompute(pack_pipeline_, dispatch, group);
+    command_context.EndComputePass(pack_pass_);
 
     // ReBLUR reads the freshly packed inputs and writes the OUT_* textures on its own encoder.
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
@@ -625,8 +624,8 @@ void NrdDenoiser::RenderReblur(const Vector3UInt &dispatch, const Vector3UInt &g
         };
     }
 
-    command_context->BeginComputePass(reblur_pass_);
+    command_context.BeginComputePass(reblur_pass_);
     backend_->RunDispatches(command_context, seam_dispatches_.data(), dispatch_count);
-    command_context->EndComputePass(reblur_pass_);
+    command_context.EndComputePass(reblur_pass_);
 }
 } // namespace sparkle
