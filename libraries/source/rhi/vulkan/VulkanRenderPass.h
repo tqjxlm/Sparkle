@@ -12,7 +12,7 @@ inline VkAttachmentLoadOp GetAttachmentLoadOp(RHILoadOp op)
 {
     switch (op)
     {
-    case RHILoadOp::None:
+    case RHILoadOp::DontCare:
         return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     case RHILoadOp::Load:
         return VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -27,7 +27,7 @@ inline VkAttachmentStoreOp GetAttachmentStoreOp(RHIStoreOp op)
 {
     switch (op)
     {
-    case RHIStoreOp::None:
+    case RHIStoreOp::DontCare:
         return VK_ATTACHMENT_STORE_OP_DONT_CARE;
     case RHIStoreOp::Store:
         return VK_ATTACHMENT_STORE_OP_STORE;

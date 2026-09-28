@@ -83,8 +83,8 @@ static RHIImage::ImageUsage GetImageUsage(RHIAccess access)
     return usages;
 }
 
-// the store op of a depth attachment writes it even when the pass only tests depth (StoreOp::None lowers to
-// DONT_CARE), so barriers treat depth tests as depth writes
+// the store op of a depth attachment writes it even when the pass only tests depth (DontCare may write), so barriers
+// treat depth tests as depth writes
 static RHIResourceAccess GetSyncAccess(const RHIResourceAccess &access)
 {
     return access.access & RHIAccess::DepthTest ? RHIResourceAccess{.access = RHIAccess::DepthWrite} : access;
@@ -783,12 +783,12 @@ void RenderGraph::PlanBarriers()
             }
             else if (!uses_contents)
             {
-                load_op = RHILoadOp::None;
+                load_op = RHILoadOp::DontCare;
                 access.load_reason = "fully overwritten";
             }
             else if (discard)
             {
-                load_op = RHILoadOp::None;
+                load_op = RHILoadOp::DontCare;
                 access.load_reason = "no earlier writer";
             }
             else
@@ -909,7 +909,7 @@ void RenderGraph::InferStoreOps()
 
         for (auto &access : pass.accesses | std::views::filter([](const Access &a) { return a.slot != NoSlot; }))
         {
-            auto store_op = RHIStoreOp::None;
+            auto store_op = RHIStoreOp::DontCare;
             access.store_reason = "no later reader";
             if (textures_[access.texture.index].imported)
             {
@@ -934,7 +934,7 @@ void RenderGraph::InferStoreOps()
                 }
                 else
                 {
-                    store_op = RHIStoreOp::None;
+                    store_op = RHIStoreOp::DontCare;
                     access.store_reason = "overwritten by " + later.name;
                 }
                 break;

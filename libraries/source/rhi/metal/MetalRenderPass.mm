@@ -14,7 +14,7 @@ static MTLLoadAction GetMetalLoadAction(RHILoadOp op)
         return MTLLoadActionLoad;
     case RHILoadOp::Clear:
         return MTLLoadActionClear;
-    case RHILoadOp::None:
+    case RHILoadOp::DontCare:
         return MTLLoadActionDontCare;
     default:
         UnImplemented(op);
@@ -28,7 +28,7 @@ static MTLStoreAction GetMetalStoreAction(RHIStoreOp op)
     {
     case RHIStoreOp::Store:
         return MTLStoreActionStore;
-    case RHIStoreOp::None:
+    case RHIStoreOp::DontCare:
         return MTLStoreActionDontCare;
     default:
         UnImplemented(op);

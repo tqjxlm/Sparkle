@@ -7,7 +7,7 @@ Working log for [RenderGraphDesign.md](RenderGraphDesign.md). Records the plan p
 * Vulkan 1.3 core is the minimum (dynamic rendering + synchronization2 required). `VK_KHR_dynamic_rendering_local_read` and `VK_KHR_unified_image_layouts` stay disabled, with no RHI query, until Phase 3 has a user for them.
 * Metal is changed alongside Vulkan in each step; Metal correctness is gated by the macOS CI jobs (no local Metal build).
 * Phase 0 is implemented in full.
-* Deviations carried into Phase 1: `RHIAttachmentSignature` has no per-slot write mask (§7.1), and `StoreOp::None` still lowers to `DONT_CARE` rather than `STORE_OP_NONE` (§6.5); both belong with load/store inference and pass merging in Phase 1.
+* Deviations carried into Phase 1: `RHIAttachmentSignature` has no per-slot write mask (§7.1), and no store op lowers to `STORE_OP_NONE` (§6.5; the store op the design calls `None` is `RHIStoreOp::DontCare`); both belong with load/store inference and pass merging in Phase 1.
 
 ## Phase 0: RHI groundwork
 
@@ -55,7 +55,7 @@ Deviations from the design, from reading Phase 0 code:
 * `RHIImageLayout` has no read-only depth layout; `DepthTest` uses the depth attachment layout until a pass samples and tests the same depth.
 * Graph validation and the pass contract (each declared image left in its declared state, checked after every pass) abort in every build, because `ASSERT` compiles out of the Release builds CI runs.
 * Shader variants have no Phase 1 user; they arrive with pixel-local reads in Phase 3.
-* The two Phase 0 deviations (per-slot write mask, `StoreOp::None` lowering) have no user without merging and move to Phase 3.
+* The two Phase 0 deviations (per-slot write mask, no store op lowering to `STORE_OP_NONE`) have no user without merging and move to Phase 3.
 
 Phase 1 findings:
 
@@ -67,7 +67,7 @@ Phase 1 findings:
 
 * Always-on checks: `ASSERT` compiles out of Release, so graph validation and the pass contract use `RGCheck` (`Log(Error)` + `DumpAndAbort()`).
 * `RGTextureDesc` carries a sampler because `RHIImage` owns its sampler; the transient pool keys on (format, extent, sampler) with usage as a superset match. `RGTexturePool` is owned by `RenderFramework` and outlives renderer recreation (as `RHIRenderTargetPool` did, which `pipeline_switch_pool` checks), serves one graph at a time (Compile → graph destruction) and releases images unused for `UnusedGraphsBeforeRelease` graphs.
-* `DepthTest` synchronizes as a depth write while `StoreOp::None` lowers to `DONT_CARE` (the store op writes depth); both change together in Phase 3.
+* `DepthTest` synchronizes as a depth write while its store op is `DontCare` (which writes depth); both change together in Phase 3, when a distinct `RHIStoreOp::None` lowers to `STORE_OP_NONE`.
 * One test case needs two registry entries when it must run under `validate_sync` (Vulkan only) and on Metal (`render_graph_compile`, `render_graph_sync_validation`).
 * Graph raster passes are untimed until Phase 2 (`RHIPass::SelectTimer` is private to the render-pass path); compute passes record their barrier batch inside `BeginComputePass`, so the pass timer covers it.
 * The External contract is strict (declared layout, accesses within the declared ones). Legacy passes wrapped in 1.3–1.6 therefore end in their attachment layouts (final layout = attachment layout) and the graph derives the transition to the next reader.
