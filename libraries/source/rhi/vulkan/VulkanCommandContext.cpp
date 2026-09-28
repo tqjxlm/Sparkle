@@ -81,7 +81,9 @@ static void SetVulkanAccessScopes(VkBarrier &vk_barrier, const RHIResourceAccess
 {
     const auto src = GetVulkanAccessScope(from);
     const auto dst = GetVulkanAccessScope(to);
-    vk_barrier.srcStageMask = src.stages;
+    // presentation has no stage of its own: a barrier from it starts at the acquire wait, so it chains to that wait
+    vk_barrier.srcStageMask =
+        from.access & RHIAccess::Present ? src.stages | VulkanContext::AcquireWaitStage : src.stages;
     vk_barrier.srcAccessMask = src.access & WriteAccessFlags;
     vk_barrier.dstStageMask = dst.stages;
     vk_barrier.dstAccessMask = dst.access;

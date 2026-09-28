@@ -18,6 +18,9 @@ class VulkanDescriptorSetManager;
 class VulkanContext
 {
 public:
+    // the stage at which a frame's submit waits for its acquired swap chain image
+    static constexpr VkPipelineStageFlags2 AcquireWaitStage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
     explicit VulkanContext(VulkanRHI *rhi);
 
     ~VulkanContext();

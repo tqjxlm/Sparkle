@@ -3,7 +3,7 @@ GBuffer: Raster
   access GBufferPacked ColorWrite clear
   access SceneDepth DepthWrite clear
   barrier GBufferPacked Undefined->ColorOutput [ColorWrite -> ColorWrite]
-  barrier SceneDepth Undefined->DepthStencilOutput [DepthWrite|Sampled(Pixel) -> DepthWrite]
+  barrier SceneDepth Undefined->DepthStencilOutput [Sampled(Pixel) -> DepthWrite]
   attachment GBufferPacked slot 0: Clear (clear) / DontCare (no later reader)
   attachment SceneDepth slot depth: Clear (clear) / Store (read by GraphView)
 Lighting: culled (unread outputs: SceneColor)
@@ -12,7 +12,7 @@ GraphView: Raster
   access SceneDepth Sampled(Pixel)
   access Screen ColorWrite
   barrier SceneDepth DepthStencilOutput->Read [DepthWrite -> Sampled(Pixel)]
-  barrier Screen Undefined->ColorOutput [ColorWrite|Sampled(Pixel) -> ColorWrite]
+  barrier Screen Undefined->ColorOutput [Sampled(Pixel) -> ColorWrite]
   attachment Screen slot 0: DontCare (fully overwritten) / Store (read by Present)
 Present: Raster
   access Screen Sampled(Pixel)

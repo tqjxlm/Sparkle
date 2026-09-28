@@ -541,7 +541,7 @@ VkResult VulkanContext::EndFrame()
     // Color output should wait for the swap chain image to be ready
     // Commands before that are free to fire
     VkSemaphore wait_semaphores[] = {acquire_semaphores_in_use_[frame_index]};
-    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkPipelineStageFlags wait_stages[] = {static_cast<VkPipelineStageFlags>(AcquireWaitStage)};
     submit_info.waitSemaphoreCount = 1;
     submit_info.pWaitSemaphores = wait_semaphores;
     submit_info.pWaitDstStageMask = wait_stages;

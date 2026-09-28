@@ -836,7 +836,6 @@ void RenderGraph::PlanAccess(Access &access, bool discard, std::vector<RHIImageS
         return states[mip * layers + layer];
     };
     const RHIImageState target{.layout = access.layout, .access = GetSyncAccess(access.access)};
-    const bool attachment = access.slot != NoSlot;
 
     const auto transition = [&](RGSubresources subresources) {
         const auto state = state_of(subresources.base_mip, subresources.base_layer);
@@ -846,13 +845,12 @@ void RenderGraph::PlanAccess(Access &access, bool discard, std::vector<RHIImageS
             return;
         }
 
-        // an attachment's own access in the source chains a swap chain image's first write to the acquire
         access.barriers.push_back({.image = image,
                                    .base_mip = subresources.base_mip,
                                    .mip_count = subresources.mip_count,
                                    .base_array_layer = subresources.base_layer,
                                    .array_layer_count = subresources.layer_count,
-                                   .from = attachment ? state.access | target.access : state.access,
+                                   .from = state.access,
                                    .to = target.access,
                                    .from_layout = discard ? RHIImageLayout::Undefined : state.layout,
                                    .to_layout = access.layout});

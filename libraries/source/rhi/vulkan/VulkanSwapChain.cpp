@@ -207,6 +207,9 @@ void VulkanSwapChain::Recreate()
 
         swap_chain_images_[i] = context->GetRHI()->CreateResource<VulkanImage>(attribute, color_format_,
                                                                                created_images[i], "SwapchainImage");
+        // the presentation engine holds an image until its acquire, so its first use waits for the acquire too
+        swap_chain_images_[i]->SetState({.layout = RHIImageLayout::Undefined, .access = {.access = RHIAccess::Present}},
+                                        0, 1, 0, 1);
     }
 }
 
