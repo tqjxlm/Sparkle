@@ -26,10 +26,6 @@ public:
         return compute_encoder_;
     }
 
-    void Begin(id<MTLCommandBuffer> command_buffer);
-
-    void End();
-
 protected:
     void DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
     void DispatchComputeInternal(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
@@ -60,6 +56,12 @@ protected:
     void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
 
 private:
+    friend class MetalContext;
+
+    void Begin(id<MTLCommandBuffer> command_buffer);
+
+    void End();
+
     id<MTLCommandBuffer> command_buffer_ = nil;
     id<MTLRenderCommandEncoder> render_encoder_ = nil;
     id<MTLComputeCommandEncoder> compute_encoder_ = nil;
