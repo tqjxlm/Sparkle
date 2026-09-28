@@ -36,6 +36,7 @@ Status: complete. Nothing has been fixed yet.
 ## 2. Graph core
 
 The compiler is correct for every graph the renderers build today. No high-severity defect was found. Verified correct:
+
 * transient lifetimes and aliasing (strict `last_pass < first_pass`; planned states keyed by physical image, so a reusing transient starts with a discard barrier);
 * RAW, WAR and WAW, layout changes, read→read in a new stage, and per-subresource seeding and mip runs;
 * store inference;
@@ -115,6 +116,7 @@ Comments:
 ## 3. RHI and Vulkan
 
 Traced and correct:
+
 * sync2 lowering (write-only source masks, read→read chaining, `TRANSFER` for blits, AS build accesses) and the sync1 android-emulator fallback;
 * the acquire-semaphore ring;
 * deferred descriptor-set release timing;
@@ -204,6 +206,7 @@ Modern C++ / comments:
 ## 4. Renderer port
 
 No high-severity regression. The following match main when traced:
+
 * pass order per renderer (TLAS build and IBL cook moved into the graph without changing their relative order);
 * clears (IBL once per map through `cleared_`);
 * formats; the samplers the images carry (behaviorally identical to main's `GetInputSampler`, though see A1 on where the policy lives);
