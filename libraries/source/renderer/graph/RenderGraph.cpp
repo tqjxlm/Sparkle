@@ -1000,9 +1000,6 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
             command_context.EndComputePass(pass.compute_pass);
             break;
         case RGPassKind::Copy:
-            command_context.Barrier(barriers, memory_barriers);
-            pass.record(command_context);
-            break;
         case RGPassKind::External:
             command_context.Barrier(barriers, memory_barriers);
             pass.record(command_context);
