@@ -582,6 +582,7 @@ void RenderGraph::Validate() const
 // a pass lives when it has a side effect, writes an import, or writes contents a later live pass uses
 void RenderGraph::Cull()
 {
+    // per texture, not per subresource: exact while transients have one subresource; imports keep every writer anyway
     std::vector<bool> needed(textures_.size(), false);
     for (auto &pass : passes_ | std::views::reverse)
     {
@@ -748,7 +749,8 @@ void RenderGraph::ResolveBindings()
 // writes to contents nobody may use again discard them.
 void RenderGraph::PlanBarriers()
 {
-    // per image, the planned state of each subresource, layer by layer within a mip
+    // per physical image, the planned state of each subresource, layer by layer within a mip. transients sharing an
+    // image share its states, so a later one waits for the accesses of the earlier one.
     std::unordered_map<const RHIImage *, std::vector<RHIImageState>> states;
     std::vector<const Pass *> last_writer(textures_.size(), nullptr);
     std::vector<RHIResourceAccess> buffer_states;
