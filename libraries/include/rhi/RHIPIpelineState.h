@@ -90,13 +90,17 @@ public:
 
     void Compile()
     {
+        ASSERT_F(pipeline_type_ != PipelineType::Graphics || attachment_signature_,
+                 "graphics pipeline {} needs an attachment signature before Compile", GetName());
+
         CompileInternal();
         compiled_ = true;
     }
 
     virtual void CompileInternal() = 0;
 
-    // declares the attachments this pipeline draws into, so the pipeline compiles for them up front
+    // declares the attachments a graphics pipeline draws into, which it needs before Compile and compiles for up front.
+    // drawing into attachments of another signature compiles for that one at the first draw.
     void SetAttachmentSignature(const RHIAttachmentSignature &signature)
     {
         attachment_signature_ = signature;
