@@ -49,9 +49,9 @@ public:
     RHICommandContext(const RHICommandContext &) = delete;
     RHICommandContext &operator=(const RHICommandContext &) = delete;
 
-    // begins rendering into attachments already in their attachment layouts. the only barriers it records are
-    // `barriers` and `memory_barriers`, before the rendering; the debug label `name` and, when given, the timer of
-    // `timed_pass` bracket both.
+    // begins rendering into attachments whose tracked layouts are already their attachment layouts. the only barriers
+    // it records are `barriers` and `memory_barriers`, before the rendering; the debug label `name` and, when given,
+    // the timer of `timed_pass` bracket both.
     void BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHIPass *timed_pass = nullptr,
                         std::span<const RHIImageBarrier> barriers = {},
                         std::span<const RHIMemoryBarrier> memory_barriers = {});
@@ -107,9 +107,10 @@ public:
         return pipelines_;
     }
 
-    // a null pipeline draws nothing
+    // draws inside the open rendering. a null pipeline draws nothing.
     void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args);
 
+    // dispatches inside the open compute pass
     void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
                          Vector3UInt thread_per_group);
 
