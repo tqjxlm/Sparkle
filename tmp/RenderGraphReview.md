@@ -193,7 +193,7 @@ Surgical / dead code:
 
 API scope:
 
-* **V9 [med, C] Recording still goes through the global context.** Besides the denoisers (R7):
+* **Done** (image transitions and uploads take the recording context; buffer uploads stay in the frame prologue and use the open context; `RHI.h` documents who may call `GetCommandContext`). **V9 [med, C] Recording still goes through the global context.** Besides the denoisers (R7):
   * `RHIBuffer::Upload`/`PartialUpdate` (`RHIBuffer.cpp:98,294`);
   * `VulkanImage::Upload`/`UploadFaces`/`Transition` (`VulkanImage.cpp:70,101,198`);
   * `RHIImage::ReadToMemory`, `IBLPass::Finalize`.
