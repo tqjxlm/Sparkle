@@ -41,14 +41,8 @@ protected:
     void CopyImageToBufferInternal(const RHIImage *src, const RHIBuffer *dst) override;
     void BlitImageInternal(const RHIImage *src, const RHIImage *dst, RHISampler::FilteringMethod filter) override;
 
-    // render encoders carry the pass label instead
-    void BeginDebugLabel(const std::string & /*name*/) const override
-    {
-    }
-
-    void EndDebugLabel() const override
-    {
-    }
+    void BeginDebugLabel(const std::string &name) const override;
+    void EndDebugLabel() const override;
 
     void BeginRenderingInternal(const RHIRenderingInfo &info, const std::string &name, RHITimer *timer) override;
     void EndRenderingInternal() override;
