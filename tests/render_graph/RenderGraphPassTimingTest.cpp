@@ -76,7 +76,7 @@ private:
     // executes the graph of this frame and returns its dump
     [[nodiscard]] nlohmann::json ExecuteGraph(RHIContext *rhi, const RenderConfig &config)
     {
-        RenderGraph graph(*pool_, config);
+        RenderGraph graph(rhi, *pool_, config);
         const auto radiance = graph.CreateTexture("Radiance", Radiance);
         const auto shown = graph.CreateTexture("Shown", Shown);
         graph.AddComputePass("Trace", compute_pass_, [radiance](RGBuilder &builder) {

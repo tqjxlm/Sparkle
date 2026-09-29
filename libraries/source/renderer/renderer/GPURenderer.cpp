@@ -120,7 +120,7 @@ void GPURenderer::Render()
 
     auto *camera = scene_render_proxy_->GetCamera();
 
-    RenderGraph graph(graph_texture_pool_, render_config_);
+    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
     const auto accumulator = graph.Import("Accumulator", scene_texture_);
     const auto tlas = graph.Import("TLAS", tlas_);
 

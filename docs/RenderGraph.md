@@ -9,7 +9,7 @@ Every renderer records its frame through the graph. The RHI keeps only the lower
 A graph lives for one frame: build it, `Compile()`, `Execute(command_context)`, then destroy it.
 
 ```cpp
-RenderGraph graph(texture_pool, render_config);
+RenderGraph graph(rhi, texture_pool, render_config);
 auto scene_color = graph.CreateTexture("SceneColor", {.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Scene});
 auto history = graph.Import("History", history_image);
 

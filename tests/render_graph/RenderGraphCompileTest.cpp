@@ -249,7 +249,7 @@ private:
 
         RGTexturePool pool(rhi);
         {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", Rgba8Output);
             const auto b = graph.CreateTexture("B", Rgba8Output);
             graph.AddRasterPass("Clear", [a](RGBuilder &builder) {
@@ -322,7 +322,7 @@ private:
 
         RGTexturePool pool(rhi);
         {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", Rgba8Output);
             const auto b = graph.CreateTexture("B", Rgba8Output);
             const auto buffer = graph.Import("Staging", staging);
@@ -396,7 +396,7 @@ private:
 
         RGTexturePool pool(rhi);
         {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", Rgba8Output);
             const auto b = graph.CreateTexture("B", Rgba8Output);
             graph.AddRasterPass("Clear", [a](RGBuilder &builder) {
@@ -579,7 +579,7 @@ private:
         const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
 
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         const auto cube_texture = graph.Import("Cube", cube);
         graph.AddRasterPass("ClearFace", [cube_texture](RGBuilder &builder) {
             builder.ColorWrite(cube_texture.Subresource(1, 2), 0, Vector4(0.f, 0.f, 0.f, 1.f));
@@ -702,7 +702,7 @@ private:
 
         {
             RGTexturePool pool(rhi);
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             build(graph);
             Run(rhi, graph,
                 {
@@ -721,7 +721,7 @@ private:
         auto no_cull = config;
         no_cull.render_graph_cull = false;
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, no_cull);
+        RenderGraph graph(rhi, pool, no_cull);
         build(graph);
         Run(rhi, graph,
             {
@@ -745,7 +745,7 @@ private:
     {
         auto result = CreateImportImage(rhi, config.GetResolution().scene, "RenderGraphTestResult");
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         constexpr RGTextureDesc Desc{.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Scene};
         const auto t1 = graph.CreateTexture("T1", Desc);
         const auto t2 = graph.CreateTexture("T2", Desc);
@@ -800,7 +800,7 @@ private:
     {
         auto history = CreateImportImage(rhi, config.GetResolution().output, "RenderGraphTestHistory");
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         const auto history_texture = graph.Import("History", history);
         Expect(graph.Import("HistoryAgain", history) == history_texture,
                "importing an image again returns its first import");
@@ -855,7 +855,7 @@ private:
     {
         auto output = CreateImportImage(rhi, config.GetResolution().scene, "RenderGraphTestOutput");
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         const auto marker = graph.CreateTexture("MarkerColor", Rgba8Scene);
         const auto color = graph.CreateTexture("Color", Rgba8Scene);
         const auto depth = graph.CreateTexture("Depth", {.format = PixelFormat::D32, .size_class = RGSizeClass::Scene});
@@ -921,7 +921,7 @@ private:
     {
         const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         constexpr RGTextureDesc Desc{.format = PixelFormat::R32Float, .size_class = RGSizeClass::Scene};
         const auto sum = graph.CreateTexture("Sum", Desc);
         const auto radiance = graph.CreateTexture("Radiance", Desc);
@@ -975,7 +975,7 @@ private:
         }
 
         auto &pool = *resources_.reuse_pool;
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         const auto radiance =
             graph.CreateTexture("Radiance", {.format = PixelFormat::R32Float, .size_class = RGSizeClass::Scene});
         const auto shown = graph.CreateTexture("Shown", Rgba8Scene);
@@ -1012,11 +1012,11 @@ private:
                            : "the next frame reuses the previous frame's images");
     }
 
-    void ReleaseUnused(RHIContext * /*rhi*/, const RenderConfig &config)
+    void ReleaseUnused(RHIContext *rhi, const RenderConfig &config)
     {
         auto &pool = *resources_.reuse_pool;
-        const auto run_empty_graph = [&pool, &config] {
-            RenderGraph graph(pool, config);
+        const auto run_empty_graph = [rhi, &pool, &config] {
+            RenderGraph graph(rhi, pool, config);
             graph.Compile();
         };
         for (auto i = 1u; i < RGTexturePool::UnusedGraphsBeforeRelease; i++)

@@ -109,7 +109,7 @@ void CPURenderer::Render()
 
     image_buffer_->Upload(rhi_, output_image_.GetRawData());
 
-    RenderGraph graph(graph_texture_pool_, render_config_);
+    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
     const auto scene_color =
         graph.CreateTexture("SceneColor", GetImageDesc(output_image_.GetFormat(), RGSizeClass::Scene));
     const auto host_scene_color = graph.Import("HostSceneColor", image_buffer_);

@@ -430,7 +430,7 @@ concept RGPassSetup =
 class RenderGraph
 {
 public:
-    RenderGraph(RGTexturePool &pool, const RenderConfig &config);
+    RenderGraph(RHIContext *rhi, RGTexturePool &pool, const RenderConfig &config);
 
     ~RenderGraph();
 
@@ -557,6 +557,7 @@ private:
 
     void CheckBindingDeclared(const Pass &pass, const RHIShaderResourceBinding &binding) const;
 
+    RHIContext *rhi_;
     RGTexturePool &pool_;
     RenderResolution resolution_;
     bool cull_;

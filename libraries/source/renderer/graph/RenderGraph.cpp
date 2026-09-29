@@ -402,8 +402,8 @@ RHICommandContext &RGPassContext::GetNativeContext() const
     return command_context_;
 }
 
-RenderGraph::RenderGraph(RGTexturePool &pool, const RenderConfig &config)
-    : pool_(pool), resolution_(config.GetResolution()), cull_(config.render_graph_cull),
+RenderGraph::RenderGraph(RHIContext *rhi, RGTexturePool &pool, const RenderConfig &config)
+    : rhi_(rhi), pool_(pool), resolution_(config.GetResolution()), cull_(config.render_graph_cull),
       full_barriers_(config.render_graph_full_barriers)
 {
 }
@@ -728,7 +728,7 @@ void RenderGraph::ResolveBindings()
             const auto &texture = textures_[access.texture.index];
             for (const auto &binding : access.bindings)
             {
-                pass.bindings.push_back(binding(pool_.rhi_, *texture.image, access.subresources));
+                pass.bindings.push_back(binding(rhi_, *texture.image, access.subresources));
                 pass.bound_resources.emplace_back(texture.name);
             }
         }
@@ -739,7 +739,7 @@ void RenderGraph::ResolveBindings()
         }
         for (const auto &[image, binding] : pass.placeholders)
         {
-            pass.bindings.push_back(binding(pool_.rhi_, *image, GetAllSubresources(*image)));
+            pass.bindings.push_back(binding(rhi_, *image, GetAllSubresources(*image)));
             pass.bound_resources.emplace_back(std::nullopt);
         }
     }

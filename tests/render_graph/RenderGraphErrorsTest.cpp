@@ -189,39 +189,39 @@ private:
 
         // creating and importing
         ExpectError("Empty has no format or size", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             std::ignore = graph.CreateTexture("Empty", {});
         });
         ExpectError("import NoImage is not a single-sampled image", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             std::ignore = graph.Import("NoImage", RHIResourceRef<RHIImage>());
         });
         ExpectError("import NoBuffer is not a buffer", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             std::ignore = graph.Import("NoBuffer", RHIResourceRef<RHIBuffer>());
         });
         ExpectError("import NoTLAS is not an acceleration structure", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             std::ignore = graph.Import("NoTLAS", RHIResourceRef<RHITLAS>());
         });
 
         // declaring
         ExpectError("pass Invalid declares an invalid texture", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             graph.AddRasterPass("Invalid", [](RGBuilder &builder) {
                 builder.ColorWrite(RGTexture{}, 0);
                 return [](RGRasterContext &) {};
             });
         });
         ExpectError("pass Invalid declares an invalid buffer", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             graph.AddCopyPass("Invalid", [](RGBuilder &builder) {
                 builder.CopySrc(RGBuffer{});
                 return [](RGCopyContext &) {};
             });
         });
         ExpectError("pass Sample declares subresources A does not have", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", OutputDesc);
             graph.AddRasterPass("Sample", [a](RGBuilder &builder) {
                 builder.Sampled(a.Mip(1));
@@ -229,7 +229,7 @@ private:
             });
         });
         ExpectError("pass Attach attaches more than one subresource of Mips", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto texture = graph.Import("Mips", mips);
             graph.AddRasterPass("Attach", [texture](RGBuilder &builder) {
                 builder.ColorWrite(texture, 0);
@@ -237,7 +237,7 @@ private:
             });
         });
         ExpectError("a Compute pass cannot declare this access to A", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", OutputDesc);
             graph.AddComputePass("Compute", nullptr, [a](RGBuilder &builder) {
                 builder.ColorWrite(a, 0);
@@ -245,7 +245,7 @@ private:
             });
         });
         ExpectError("pass Twice declares Target twice", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto texture = graph.Import("Target", target);
             graph.AddRasterPass("Twice", [texture](RGBuilder &builder) {
                 builder.Sampled(texture);
@@ -254,7 +254,7 @@ private:
             });
         });
         ExpectError("pass Slots binds two attachments to slot 0", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", OutputDesc);
             const auto b = graph.CreateTexture("B", OutputDesc);
             graph.AddRasterPass("Slots", [a, b](RGBuilder &builder) {
@@ -264,7 +264,7 @@ private:
             });
         });
         ExpectError(std::format("color slot {} out of range", MaxNumColorAttachments), [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", OutputDesc);
             graph.AddRasterPass("Slot", [a](RGBuilder &builder) {
                 builder.ColorWrite(a, MaxNumColorAttachments);
@@ -272,7 +272,7 @@ private:
             });
         });
         ExpectError("Copy pass Native cannot declare native access", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             graph.AddCopyPass("Native", [](RGBuilder &builder) {
                 builder.NativeAccess();
                 return [](RGCopyContext &) {};
@@ -281,18 +281,18 @@ private:
 
         // compiling
         ExpectError("the graph compiles once", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             graph.Compile();
             graph.Compile();
         });
         ExpectError("a texture pool serves one graph at a time", [&] {
-            RenderGraph first(pool, config);
-            RenderGraph second(pool, config);
+            RenderGraph first(rhi, pool, config);
+            RenderGraph second(rhi, pool, config);
             first.Compile();
             second.Compile();
         });
         ExpectError("raster pass Raster has no attachment", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             graph.AddRasterPass("Raster", [](RGBuilder &builder) {
                 builder.SideEffect();
                 return [](RGRasterContext &) {};
@@ -300,7 +300,7 @@ private:
             graph.Compile();
         });
         ExpectError("compute pass Compute has no compute pass", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             graph.AddComputePass("Compute", nullptr, [](RGBuilder &builder) {
                 builder.SideEffect();
                 return [](RGComputeContext &) {};
@@ -308,7 +308,7 @@ private:
             graph.Compile();
         });
         ExpectError("pass Read reads A before any pass writes it", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", OutputDesc);
             const auto output = graph.Import("Target", target);
             graph.AddRasterPass("Read", [a, output](RGBuilder &builder) {
@@ -319,7 +319,7 @@ private:
             graph.Compile();
         });
         ExpectError("import SampledOnly lacks the usages its accesses need", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto texture = graph.Import("SampledOnly", sampled_only);
             graph.AddRasterPass("Write", [texture](RGBuilder &builder) {
                 builder.ColorWrite(texture, 0);
@@ -328,7 +328,7 @@ private:
             graph.Compile();
         });
         ExpectError("import UploadOnly lacks the usages its accesses need", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto buffer = graph.Import("UploadOnly", upload_only);
             const auto texture = graph.Import("Target", target);
             graph.AddCopyPass("Upload", [buffer, texture](RGBuilder &builder) {
@@ -339,7 +339,7 @@ private:
             graph.Compile();
         });
         ExpectError("attachments of pass Sizes differ in size", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto output = graph.CreateTexture("Output", OutputDesc);
             const auto scene = graph.CreateTexture("Scene", SceneDesc);
             graph.AddRasterPass("Sizes", [output, scene](RGBuilder &builder) {
@@ -351,7 +351,7 @@ private:
             graph.Compile();
         });
         ExpectError("a sampled binding of Mips views every subresource", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto texture = graph.Import("Mips", mips);
             const auto output = graph.Import("Target", target);
             graph.AddRasterPass("Sample", [texture, output](RGBuilder &builder) {
@@ -362,7 +362,7 @@ private:
             graph.Compile();
         });
         ExpectError("a storage binding of Mips views one mip", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto texture = graph.Import("Mips", mips);
             graph.AddExternalPass("Store", [texture](RGBuilder &builder) {
                 builder.StorageWrite(texture, &ErrorTable::storage);
@@ -373,11 +373,11 @@ private:
 
         // executing
         ExpectError("the graph executes once, after compiling", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             graph.Execute(*rhi->GetCommandContext());
         });
         ExpectError("pass Download uses a texture it did not declare", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto undeclared = graph.Import("Target", target);
             const auto buffer = graph.Import("Staging", staging);
             graph.AddCopyPass("Download", [undeclared, buffer](RGBuilder &builder) {
@@ -387,7 +387,7 @@ private:
             Run(rhi, graph);
         });
         ExpectError("pass Upload uses a buffer it did not declare", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto texture = graph.Import("Target", target);
             const auto undeclared = graph.Import("Staging", staging);
             graph.AddCopyPass("Upload", [texture, undeclared](RGBuilder &builder) {
@@ -397,7 +397,7 @@ private:
             Run(rhi, graph);
         });
         ExpectError("pass Transition left Transitioned in layout Read with accesses beyond its declaration", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto texture = graph.Import("Transitioned", transitioned);
             graph.AddExternalPass("Transition", [texture](RGBuilder &builder) {
                 builder.CopyDst(texture);
@@ -411,7 +411,7 @@ private:
             Run(rhi, graph);
         });
         ExpectError("pass Quad binds Extra to a resource table no pipeline it drew or dispatched has", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto input = graph.CreateTexture("Input", OutputDesc);
             const auto extra = graph.Import("Extra", sampled_only);
             const auto output = graph.Import("Target", target);
@@ -420,7 +420,7 @@ private:
             Run(rhi, graph);
         });
         ExpectError("pass Quad binds Input to screenTexture without declaring the access that binding makes", [&] {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto input = graph.CreateTexture("Input", OutputDesc);
             const auto output = graph.Import("Target", target);
             const auto second_output = graph.Import("SecondTarget", second_target);

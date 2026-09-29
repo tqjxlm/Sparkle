@@ -51,7 +51,7 @@ void ForwardRenderer::Render()
         }
     }
 
-    RenderGraph graph(graph_texture_pool_, render_config_);
+    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
 
     if (ibl_)
     {
