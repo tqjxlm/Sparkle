@@ -158,6 +158,12 @@ Declaration and recording errors log their message and abort in every build, inc
 
 * `RenderFramework::RequestGraphDump(name)` writes the next graph the renderer executes to `screenshots/<name>.json`; the page's `Save Graph Dump` and the test cases use it.
 * On the render thread, `Renderer::RequestGraphDump(name, on_complete)` does the same, and `Renderer::RequestGraphDump(on_dump)` hands the next graph's dump to a callback instead.
+* From the command line, the `render_graph_dump` test case writes the graph of the first frame that is ready for a screenshot to `screenshots/render_graph.json` under the [external storage path](Run.md#external-storage-paths) and exits; any other cvars select the frame:
+
+```bash
+python3 run.py --framework glfw --test_case render_graph_dump --headless true --pipeline deferred
+python3 dev/render_graph_viewer.py <external-storage-path>/screenshots/render_graph.json
+```
 
 ### Dump Format
 
@@ -220,3 +226,12 @@ The renderers:
 * It also renders the dump through the viewer to `screenshots/captures/render_graph_<case>.html` (its `--page`) and fails the case if that raises. CI uploads the pages with the test screenshots (the `test-screenshots-<framework>-<os>` artifact).
 * The goldens are frames of the default TestScene, so the shape cases ignore the suite's `--scene`. The forward and deferred goldens are frames with a directional light, a sky map and ready IBL maps.
 * Tests run headless, so the goldens show no `Ui` pass, and the back buffer's first barrier has no `Present` access to wait for.
+
+### Updating a Golden
+
+A change that alters a graph on purpose updates its golden in two steps: run the shape case, whose compare step fails with the diff and leaves the dump in the screenshots folder, then rewrite the golden from that dump with the case's `--golden` name. `dev/run_tests.py` passes unknown arguments to the app, not to the evaluator, so `--update` goes to `graph_shape_test.py` directly. Each shape case overwrites the same dump, so update one golden per run.
+
+```bash
+python3 dev/run_tests.py --framework glfw --config Release --case deferred_graph_shape
+python3 tests/render_graph/graph_shape_test.py --framework glfw --golden deferred --update
+```
