@@ -146,16 +146,17 @@ public:
         return 64;
     }
 
-    // records outside a frame: BeginCommandBuffer opens a one-shot command buffer, SubmitCommandBuffer submits it
-    virtual void BeginCommandBuffer() = 0;
+    // records outside a frame: BeginCommandBuffer opens a one-shot command buffer and returns the context recording it,
+    // SubmitCommandBuffer submits it
+    virtual RHICommandContext &BeginCommandBuffer() = 0;
     virtual void SubmitCommandBuffer() = 0;
 
     // the context recording the open command buffer (the frame's, or the one BeginCommandBuffer opened); null when
     // none is open. a backend may reuse one context object across command buffers.
-    // graph passes never call it: they record through their pass context. it serves the code that opened the command
-    // buffer (frame setup handing the frame's context to the graph, a BeginCommandBuffer scope), and resource creation
-    // and updates issued outside the graph (texture uploads and initial layouts, RHIBuffer::Upload and PartialUpdate),
-    // which record before the graph in the frame, or in a BeginCommandBuffer scope.
+    // graph passes never call it: they record through their pass context. it serves frame setup handing the frame's
+    // context to the graph, and resource creation and updates issued outside the graph (texture uploads and initial
+    // layouts, RHIBuffer::Upload and PartialUpdate), which record before the graph in the frame, or in a
+    // BeginCommandBuffer scope.
     virtual RHICommandContext *GetCommandContext() = 0;
 
     virtual void WaitForDeviceIdle() = 0;

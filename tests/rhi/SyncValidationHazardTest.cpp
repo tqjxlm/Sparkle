@@ -84,8 +84,7 @@ private:
 
         const auto errors_before = rhi->GetValidationErrorCount().value_or(0);
 
-        rhi->BeginCommandBuffer();
-        auto *command_buffer = static_cast<VulkanCommandContext *>(rhi->GetCommandContext())->GetCommandBuffer();
+        auto *command_buffer = static_cast<VulkanCommandContext &>(rhi->BeginCommandBuffer()).GetCommandBuffer();
         const VkBufferCopy region{.srcOffset = 0, .dstOffset = 0, .size = BufferSize};
         for (auto copy = 0; copy < 2; copy++)
         {

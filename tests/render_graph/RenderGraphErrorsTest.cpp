@@ -139,14 +139,14 @@ private:
     static void Run(RHIContext *rhi, RenderGraph &graph)
     {
         graph.Compile();
-        rhi->BeginCommandBuffer();
+        auto &command_context = rhi->BeginCommandBuffer();
         try
         {
-            graph.Execute(*rhi->GetCommandContext());
+            graph.Execute(command_context);
         }
         catch (const RGError &)
         {
-            rhi->GetCommandContext()->SetBindings({});
+            command_context.SetBindings({});
             rhi->SubmitCommandBuffer();
             rhi->WaitForDeviceIdle();
             throw;

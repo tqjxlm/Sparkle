@@ -137,9 +137,7 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
                            .is_dynamic = false},
                           "ImageReadBackStagingBuffer");
 
-    rhi->BeginCommandBuffer();
-
-    auto &command_context = *rhi->GetCommandContext();
+    auto &command_context = rhi->BeginCommandBuffer();
     Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
                                  .after_stage = RHIPipelineStage::Bottom,
                                  .before_stage = RHIPipelineStage::Transfer});

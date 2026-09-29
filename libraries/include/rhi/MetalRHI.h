@@ -32,7 +32,7 @@ public:
         return true;
     }
 
-    void BeginCommandBuffer() override;
+    RHICommandContext &BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 
     RHICommandContext *GetCommandContext() override;

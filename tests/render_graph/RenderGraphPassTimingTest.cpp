@@ -92,8 +92,7 @@ private:
         });
         graph.Compile();
 
-        rhi->BeginCommandBuffer();
-        graph.Execute(*rhi->GetCommandContext(), timers_.get());
+        graph.Execute(rhi->BeginCommandBuffer(), timers_.get());
         rhi->SubmitCommandBuffer();
 
         return graph.Dump();

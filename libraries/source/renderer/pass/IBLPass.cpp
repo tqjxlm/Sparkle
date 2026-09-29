@@ -23,8 +23,7 @@ void IBLPass::Finalize()
     // leaves regions of the readback image unwritten (garbage fp16 texels)
     auto fp16_image = CreateIBLMap(false, true, PixelFormat::RGBAFloat16);
 
-    rhi_->BeginCommandBuffer();
-    auto &command_context = *rhi_->GetCommandContext();
+    auto &command_context = rhi_->BeginCommandBuffer();
 
     cooked_ibl_image->Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
                                                    .after_stage = RHIPipelineStage::ComputeShader,
@@ -83,7 +82,7 @@ void IBLPass::PrepareForCooking()
     ibl_image_ = CreateIBLMap(true, true, PixelFormat::RGBAFloat16);
 }
 
-RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &payload)
+RHIResourceRef<RHIImage> IBLPass::MakeIblResource(RHICommandContext &command_context, const std::vector<char> &payload)
 {
     if (payload.size() < sizeof(TextureCompression::PayloadHeader))
     {
@@ -110,7 +109,7 @@ RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &paylo
         {
             return nullptr;
         }
-        image->Upload(*rhi_->GetCommandContext(), reinterpret_cast<const uint8_t *>(payload.data()) + sizeof(header));
+        image->Upload(command_context, reinterpret_cast<const uint8_t *>(payload.data()) + sizeof(header));
         return image;
     }
 
@@ -120,15 +119,15 @@ RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &paylo
     {
         return nullptr;
     }
-    image->Upload(*rhi_->GetCommandContext(), fp16_bytes.data());
+    image->Upload(command_context, fp16_bytes.data());
     return image;
 }
 
-bool IBLPass::ApplyArtifact(const std::vector<char> &payload)
+bool IBLPass::ApplyArtifact(RHICommandContext &command_context, const std::vector<char> &payload)
 {
     ASSERT(!is_ready_);
 
-    ibl_image_ = MakeIblResource(payload);
+    ibl_image_ = MakeIblResource(command_context, payload);
     if (!ibl_image_)
     {
         return false;

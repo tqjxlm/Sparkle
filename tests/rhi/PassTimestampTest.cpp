@@ -78,16 +78,15 @@ private:
         info.width = image_->GetWidth();
         info.height = image_->GetHeight();
 
-        rhi->BeginCommandBuffer();
-        auto *command_context = rhi->GetCommandContext();
+        auto &command_context = rhi->BeginCommandBuffer();
         // the second run of the timed pass must not read the timer its first run just began
         for (const auto &pass : {twice_timed_pass_, twice_timed_pass_, once_timed_pass_, untimed_pass_})
         {
             const auto barriers = image_->TrackTransition({.target_layout = RHIImageLayout::ColorOutput,
                                                            .after_stage = RHIPipelineStage::ColorOutput,
                                                            .before_stage = RHIPipelineStage::Bottom});
-            command_context->BeginRendering(info, pass->GetName(), pass.get(), barriers);
-            command_context->EndRendering();
+            command_context.BeginRendering(info, pass->GetName(), pass.get(), barriers);
+            command_context.EndRendering();
         }
         rhi->SubmitCommandBuffer();
 

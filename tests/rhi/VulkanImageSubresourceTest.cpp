@@ -42,8 +42,7 @@ public:
             info.width = image->GetWidth(TargetMip);
             info.height = image->GetHeight(TargetMip);
 
-            rhi->BeginCommandBuffer();
-            auto *command_context = rhi->GetCommandContext();
+            auto &command_context = rhi->BeginCommandBuffer();
             const auto barriers = image->TrackTransition({.target_layout = RHIImageLayout::ColorOutput,
                                                           .after_stage = RHIPipelineStage::ColorOutput,
                                                           .before_stage = RHIPipelineStage::Bottom,
@@ -51,14 +50,14 @@ public:
                                                           .mip_count = 1,
                                                           .base_array_layer = TargetLayer,
                                                           .array_layer_count = 1});
-            command_context->BeginRendering(info, "VulkanImageSubresourceTestPass", nullptr, barriers);
-            command_context->EndRendering();
+            command_context.BeginRendering(info, "VulkanImageSubresourceTestPass", nullptr, barriers);
+            command_context.EndRendering();
 
             VerifyRenderPassLayout(image.get());
 
-            image->Transition(*command_context, {.target_layout = RHIImageLayout::TransferSrc,
-                                                 .after_stage = RHIPipelineStage::ColorOutput,
-                                                 .before_stage = RHIPipelineStage::Transfer});
+            image->Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                                .after_stage = RHIPipelineStage::ColorOutput,
+                                                .before_stage = RHIPipelineStage::Transfer});
             VerifyUniformLayout(image.get(), RHIImageLayout::TransferSrc);
             rhi->SubmitCommandBuffer();
 

@@ -157,9 +157,10 @@ void MetalRHI::SubmitCommandBuffer()
     context->SubmitCommandBuffer();
 }
 
-void MetalRHI::BeginCommandBuffer()
+RHICommandContext &MetalRHI::BeginCommandBuffer()
 {
     context->BeginCommandBuffer();
+    return *context->GetCommandContext();
 }
 
 RHICommandContext *MetalRHI::GetCommandContext()

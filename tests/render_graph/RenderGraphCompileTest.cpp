@@ -231,8 +231,7 @@ private:
             failed_.store(true, std::memory_order_release);
         }
 
-        rhi->BeginCommandBuffer();
-        graph.Execute(*rhi->GetCommandContext());
+        graph.Execute(rhi->BeginCommandBuffer());
         rhi->SubmitCommandBuffer();
     }
 
@@ -543,8 +542,7 @@ private:
             magenta[texel + 2] = 255;
             magenta[texel + 3] = 255;
         }
-        rhi->BeginCommandBuffer();
-        placeholder->Upload(*rhi->GetCommandContext(), magenta.data());
+        placeholder->Upload(rhi->BeginCommandBuffer(), magenta.data());
         rhi->SubmitCommandBuffer();
 
         const auto quad =
@@ -981,8 +979,7 @@ private:
         });
 
         // the tracked state the graph starts from: sampled by pixel shaders
-        rhi->BeginCommandBuffer();
-        history->Transition(*rhi->GetCommandContext(), {.target_layout = RHIImageLayout::Read,
+        history->Transition(rhi->BeginCommandBuffer(), {.target_layout = RHIImageLayout::Read,
                                                         .after_stage = RHIPipelineStage::ColorOutput,
                                                         .before_stage = RHIPipelineStage::PixelShader});
         rhi->SubmitCommandBuffer();

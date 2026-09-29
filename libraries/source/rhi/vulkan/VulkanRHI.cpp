@@ -325,10 +325,11 @@ RHIResourceRef<RHIBuffer> VulkanRHI::CreateBuffer(const RHIBuffer::Attribute &at
     return CreateResource<VulkanBuffer>(attribute, name);
 }
 
-void VulkanRHI::BeginCommandBuffer()
+RHICommandContext &VulkanRHI::BeginCommandBuffer()
 {
     context->BeginCommandBuffer();
-};
+    return *context->GetCommandContext();
+}
 
 void VulkanRHI::SubmitCommandBuffer()
 {
