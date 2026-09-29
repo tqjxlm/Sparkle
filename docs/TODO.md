@@ -23,7 +23,8 @@
 ## RHI
 
 * [ ] msaa
-* [ ] render graph
+* [ ] render graph on-chip passes: merge raster passes through pixel-local reads (Vulkan dynamic rendering local read, Metal framebuffer fetch), with memoryless attachments, break reasons and a tile budget
+* [ ] render graph resize: transients re-resolve each frame and persistent resources reset through a hook, instead of recreating the renderer and scene proxies
 * [ ] subpass
 * [ ] `MetalSampler` ignores the sampler attribute's LOD range and anisotropy
 * [ ] `std::hash<RHISampler::SamplerAttribute>` hashes only the border color and address mode
