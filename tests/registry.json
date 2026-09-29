@@ -112,9 +112,13 @@
     {
         "name": "gpu_sync_validation",
         "test_case": "screenshot",
-        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward.",
+        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward, which the evaluator rejects.",
         "app_args": ["--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
-        "scene_args": ["--scene", "{scene}"]
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/rendering/effective_pipeline_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "Gpu"]
+        }
     },
     {
         "name": "cpu_sync_validation",
