@@ -71,7 +71,7 @@ protected:
             Path::External("screenshots/render_graph.json")));
         const auto runs = [&dump](std::string_view pass) {
             return std::ranges::any_of(dump.at("passes"), [pass](const nlohmann::json &dumped) {
-                return dumped.at("name") == pass && !dumped.at("culled").get<bool>();
+                return dumped.at("name").get_ref<const std::string &>() == pass && !dumped.at("culled").get<bool>();
             });
         };
 

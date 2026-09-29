@@ -18,8 +18,6 @@
 
 namespace sparkle
 {
-namespace
-{
 // the screen quad's pixel shader, declared here to name its resource table
 class PlaceholderQuadPixelShader : public RHIShaderInfo
 {
@@ -33,6 +31,8 @@ class PlaceholderQuadPixelShader : public RHIShaderInfo
     END_SHADER_RESOURCE_TABLE
 };
 
+namespace
+{
 // a screen quad whose input may be missing, drawing `placeholder` in its place
 class PlaceholderQuadPass : public ScreenQuadPass
 {
