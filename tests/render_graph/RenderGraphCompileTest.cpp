@@ -87,7 +87,7 @@ private:
 // reasons) against expected dump summaries, and executes each one. under synchronization validation that proves the
 // planned barriers order every access, including a pooled image reused by the next graph and a buffer copied through.
 // graphs read back a texture to prove the recorded passes ran and a draw binds the texture and sampler its pass
-// declared. a bilinear screen quad is checked for the sampler it chooses.
+// declared. screen quads are checked for the sampler each input filter chooses.
 class RenderGraphCompileTest : public TestCase
 {
 public:
@@ -599,27 +599,55 @@ private:
                "the graph writes the ray query through to the acceleration structure");
     }
 
-    // a bilinear screen quad filters its input bilinearly, edge-clamped, only when it resamples a format the device
-    // filters linearly
+    // a screen quad filters its input bilinearly, edge-clamped, only when its filter resamples the input and the
+    // device filters the input's format linearly. Bilinear resamples an input of another size than the 64x32 output,
+    // NearestAtIntegerScale one the output is not an integer multiple of in both axes.
     void ScreenInputFilter(RHIContext *rhi, const RenderConfig &config)
     {
-        const auto quad = PipelinePass::Create<SamplerProbePass>(config, rhi, "Upsample", Rgba8Output.format,
-                                                                 ScreenQuadPass::InputFilter::Bilinear);
-        for (const auto &[input_desc, resamples] :
-             {std::pair{Rgba8Scene, true}, std::pair{Rgba8Output, false},
-              std::pair{RGTextureDesc{.format = PixelFormat::RGBAFloat, .size_class = RGSizeClass::Scene}, true}})
+        using Filter = ScreenQuadPass::InputFilter;
+        const auto bilinear_quad =
+            PipelinePass::Create<SamplerProbePass>(config, rhi, "Upsample", Rgba8Output.format, Filter::Bilinear);
+        const auto integer_scale_quad = PipelinePass::Create<SamplerProbePass>(
+            config, rhi, "Present", Rgba8Output.format, Filter::NearestAtIntegerScale);
+
+        constexpr RGTextureDesc RgbaFloatScene{.format = PixelFormat::RGBAFloat, .size_class = RGSizeClass::Scene};
+        constexpr auto Absolute = [](PixelFormat format, uint32_t width, uint32_t height) {
+            return RGTextureDesc{
+                .format = format, .size_class = RGSizeClass::Absolute, .width = width, .height = height};
+        };
+
+        struct Case
         {
+            Filter filter;
+            RGTextureDesc input_desc;
+            bool resamples;
+        };
+
+        for (const auto &[filter, input_desc, resamples] : {
+                 Case{Filter::Bilinear, Rgba8Scene, true},
+                 Case{Filter::Bilinear, Rgba8Output, false},
+                 Case{Filter::Bilinear, RgbaFloatScene, true},
+                 Case{Filter::NearestAtIntegerScale, Rgba8Scene, false},
+                 Case{Filter::NearestAtIntegerScale, Rgba8Output, false},
+                 Case{Filter::NearestAtIntegerScale, Absolute(PixelFormat::R8G8B8A8Unorm, 48, 24), true},
+                 Case{Filter::NearestAtIntegerScale, Absolute(PixelFormat::R8G8B8A8Unorm, 64, 24), true},
+                 Case{Filter::NearestAtIntegerScale, Absolute(PixelFormat::RGBAFloat, 48, 24), true},
+             })
+        {
+            const auto &quad = filter == Filter::Bilinear ? bilinear_quad : integer_scale_quad;
             RGTexturePool pool(rhi);
             RenderGraph graph(rhi, pool, config);
-            quad->AddTo(graph, graph.CreateTexture("Input", input_desc), graph.CreateTexture("Output", Rgba8Output));
+            const auto input = graph.CreateTexture("Input", input_desc);
+            quad->AddTo(graph, input, graph.CreateTexture("Output", Rgba8Output));
 
             const bool bilinear = resamples && rhi->SupportsLinearFiltering(input_desc.format);
-            const auto filter = bilinear ? RHISampler::FilteringMethod::Linear : RHISampler::FilteringMethod::Nearest;
+            const auto method = bilinear ? RHISampler::FilteringMethod::Linear : RHISampler::FilteringMethod::Nearest;
             const auto &sampler = quad->GetInputSampler();
+            const auto size = graph.GetSize(input);
             Expect(sampler.address_mode == RHISampler::SamplerAddressMode::ClampToEdge &&
-                       sampler.filtering_method_min == filter && sampler.filtering_method_mag == filter,
-                   std::format("a {} input {} is sampled {}", Enum2Str(input_desc.format),
-                               resamples ? "resampled" : "at its size", bilinear ? "bilinearly" : "nearest"));
+                       sampler.filtering_method_min == method && sampler.filtering_method_mag == method,
+                   std::format("{} samples a {}x{} {} input {}", Enum2Str(filter), size.x(), size.y(),
+                               Enum2Str(input_desc.format), bilinear ? "bilinearly" : "nearest"));
         }
     }
 

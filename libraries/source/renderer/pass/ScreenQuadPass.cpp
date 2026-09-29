@@ -143,9 +143,37 @@ void ScreenQuadPass::BindVertexShaderResources()
     vs_resources->ubo().BindResource(vs_ub_);
 }
 
+// a pre-rotation by a quarter turn lays the input's x axis along the output's y axis
+static bool IsQuarterTurn(NativeView::WindowRotation rotation)
+{
+    return rotation == NativeView::WindowRotation::Landscape ||
+           rotation == NativeView::WindowRotation::ReverseLandscape;
+}
+
+static bool Resamples(ScreenQuadPass::InputFilter filter, const Vector2UInt &input_size, const Vector2UInt &output_size)
+{
+    switch (filter)
+    {
+    case ScreenQuadPass::InputFilter::Nearest:
+        return false;
+    case ScreenQuadPass::InputFilter::Bilinear:
+        return input_size != output_size;
+    case ScreenQuadPass::InputFilter::NearestAtIntegerScale:
+        return output_size.x() % input_size.x() != 0 || output_size.y() % input_size.y() != 0;
+    default:
+        UnImplemented(filter);
+        return false;
+    }
+}
+
 void ScreenQuadPass::AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const
 {
-    const bool bilinear = input_filter_ == InputFilter::Bilinear && graph.GetSize(input) != graph.GetSize(output) &&
+    auto output_size = graph.GetSize(output);
+    if (to_back_buffer_ && IsQuarterTurn(rhi_->GetHardwareInterface()->GetWindowOrientation()))
+    {
+        output_size = Vector2UInt(output_size.y(), output_size.x());
+    }
+    const bool bilinear = Resamples(input_filter_, graph.GetSize(input), output_size) &&
                           rhi_->SupportsLinearFiltering(graph.GetFormat(input));
     graph.AddRasterPass(name_, [this, input, output, bilinear](RGBuilder &builder) {
         SampleInput(builder, input, bilinear ? BilinearSampler : NearestSampler);

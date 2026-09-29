@@ -45,10 +45,13 @@ public:
         // bilinear when the input's size differs from the output's and the device filters the input's format
         // linearly, otherwise nearest
         Bilinear,
+        // as Bilinear, but nearest also when the output's size is an integer multiple of the input's in both axes
+        NearestAtIntegerScale,
     };
 
     // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at slot 0.
-    // `to_back_buffer` applies the window's pre-rotation.
+    // `to_back_buffer` applies the window's pre-rotation, and the filter compares the output's size along the rotated
+    // axes.
     ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format,
                    InputFilter input_filter = InputFilter::Nearest, bool to_back_buffer = false);
 

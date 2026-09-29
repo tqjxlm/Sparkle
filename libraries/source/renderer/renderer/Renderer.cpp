@@ -236,7 +236,7 @@ void Renderer::InitPostChain(const RGTextureDesc &screen_desc)
 
     present_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Present",
                                                          rhi_->GetBackBuffer()->GetAttributes().format,
-                                                         ScreenQuadPass::InputFilter::Nearest, true);
+                                                         ScreenQuadPass::InputFilter::NearestAtIntegerScale, true);
 
     graph_view_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, GraphViewPassName, screen_desc.format,
                                                             ScreenQuadPass::InputFilter::Bilinear);
