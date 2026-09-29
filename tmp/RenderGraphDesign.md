@@ -1,6 +1,6 @@
-# Render Graph Design (proposal)
+# Render Graph Design
 
-Proposal for a lean render graph in Sparkle. Nothing here is implemented. Research behind every choice: [RenderGraphResearch.md](RenderGraphResearch.md); raw notes and code maps with file:line references: [render_graph_notes/](render_graph_notes/). Every design decision, with its rationale, is listed in §14.
+Design of a lean render graph in Sparkle. Phases 0–2 of the migration plan (§13) are implemented: the RHI groundwork, the graph core with every renderer on it, and the visibility tools; Phases 3–5 are not. [RenderGraphProgress.md](RenderGraphProgress.md) records what landed in each phase and every deviation from this design with its reason. Research behind every choice: [RenderGraphResearch.md](RenderGraphResearch.md); raw notes and code maps with file:line references: [render_graph_notes/](render_graph_notes/). Every design decision, with its rationale, is listed in §14.
 
 ## 1. Goals and non-goals
 
