@@ -253,7 +253,7 @@
         "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "cpu"]
+            "args": ["--framework", "{framework}", "--golden", "cpu", "--page", "cpu_graph_shape"]
         }
     },
     {
@@ -263,7 +263,7 @@
         "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--width", "320", "--height", "180"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "gpu"]
+            "args": ["--framework", "{framework}", "--golden", "gpu", "--page", "gpu_graph_shape"]
         }
     },
     {
@@ -273,7 +273,7 @@
         "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--width", "320", "--height", "180"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "forward"]
+            "args": ["--framework", "{framework}", "--golden", "forward", "--page", "forward_graph_shape"]
         }
     },
     {
@@ -283,7 +283,7 @@
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "deferred"]
+            "args": ["--framework", "{framework}", "--golden", "deferred", "--page", "deferred_graph_shape"]
         }
     },
     {
@@ -293,7 +293,7 @@
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "SceneDepth"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "deferred_view"]
+            "args": ["--framework", "{framework}", "--golden", "deferred_view", "--page", "deferred_graph_view_shape"]
         }
     },
     {
@@ -303,7 +303,7 @@
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "GBufferPacked"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
-            "args": ["--framework", "{framework}", "--golden", "deferred"]
+            "args": ["--framework", "{framework}", "--golden", "deferred", "--page", "deferred_graph_view_fallback"]
         }
     },
     {

@@ -4,7 +4,7 @@ The render_graph_dump test case writes the dump; this evaluator projects it to
 one line per pass, access, barrier, attachment and resource, and diffs that
 against tests/render_graph/golden/<pipeline>.txt. --update rewrites the golden
 from the dump instead. Either way it renders the dump as a page through
-dev/render_graph_viewer.py to captures/render_graph_<pipeline>.html.
+dev/render_graph_viewer.py to captures/render_graph_<page>.html.
 """
 
 import argparse
@@ -73,6 +73,8 @@ def main():
                         choices=SUPPORTED_FRAMEWORKS)
     parser.add_argument("--golden", required=True,
                         help="golden name under tests/render_graph/golden, e.g. cpu")
+    parser.add_argument("--page",
+                        help="page name, e.g. the registry case; defaults to the golden name")
     parser.add_argument("--update", action="store_true",
                         help="rewrite the golden from the dump")
     args = parser.parse_args()
@@ -85,9 +87,10 @@ def main():
     with open(dump_path, encoding="utf-8") as dump_file:
         dump = json.load(dump_file)
 
-    page_path = os.path.join(get_captures_dir(args.framework), f"render_graph_{args.golden}.html")
+    page = args.page or args.golden
+    page_path = os.path.join(get_captures_dir(args.framework), f"render_graph_{page}.html")
     with open(page_path, "w", encoding="utf-8") as page_file:
-        page_file.write(render_html(dump, args.golden))
+        page_file.write(render_html(dump, page))
     print(f"Rendered {page_path}", flush=True)
 
     actual = project(dump)
