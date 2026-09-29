@@ -1,12 +1,10 @@
 #pragma once
 
-#include "renderer/renderer/Renderer.h"
+#include "renderer/renderer/RasterRenderer.h"
 
 namespace sparkle
 {
-class SkyRenderProxy;
-
-class ForwardRenderer : public Renderer
+class ForwardRenderer : public RasterRenderer
 {
 public:
     ForwardRenderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
@@ -17,28 +15,16 @@ public:
         return RenderConfig::Pipeline::Forward;
     }
 
-    void InitRenderResources() override;
-
     ~ForwardRenderer() override;
 
 private:
-    void Update() override;
+    void InitScenePasses() override;
 
-    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
+    void UpdateScenePasses() override;
 
-    void HandleSceneChanges();
+    [[nodiscard]] SceneTextures AddScenePasses(RenderGraph &graph, const LightingInputs &lighting) override;
 
-    // generate directional shadow map
-    std::unique_ptr<class DepthPass> directional_shadow_pass_;
     // render main scene_color
     std::unique_ptr<class ForwardMeshPass> scene_color_pass_;
-    // skybox to scene_color
-    std::unique_ptr<class SkyBoxPass> sky_box_pass_;
-
-    class ImageBasedLighting *ibl_ = nullptr;
-
-    SkyRenderProxy *bound_sky_proxy_ = nullptr;
-
-    bool ibl_cook_pending_ = false;
 };
 } // namespace sparkle

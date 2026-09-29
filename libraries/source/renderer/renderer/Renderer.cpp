@@ -6,12 +6,10 @@
 #include "core/ThreadManager.h"
 #include "renderer/graph/RenderGraph.h"
 #include "renderer/proxy/SceneRenderProxy.h"
-#include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/renderer/CPURenderer.h"
 #include "renderer/renderer/DeferredRenderer.h"
 #include "renderer/renderer/ForwardRenderer.h"
 #include "renderer/renderer/GPURenderer.h"
-#include "renderer/resource/ImageBasedLighting.h"
 #include "rhi/RHI.h"
 
 #include <nlohmann/json.hpp>
@@ -125,22 +123,6 @@ void Renderer::RequestGraphDump(std::function<void(const nlohmann::json &)> on_d
     ASSERT(ThreadManager::IsInRenderThread());
 
     graph_dump_consumer_ = std::move(on_dump);
-}
-
-Renderer::SkyBoxMap Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
-                                           const RHIResourceRef<RHIImage> &sky_map)
-{
-    RHIResourceRef<RHIImage> ibl_map;
-    if (ibl && mode == RenderConfig::OutputImage::IBLDiffuseMap)
-    {
-        ibl_map = ibl->GetDiffuseMap();
-    }
-    else if (ibl && mode == RenderConfig::OutputImage::IBLSpecularMap)
-    {
-        ibl_map = ibl->GetSpecularMap();
-    }
-    return ibl_map ? SkyBoxMap{.image = ibl_map, .sampler = ImageBasedLighting::MapSampler}
-                   : SkyBoxMap{.image = sky_map, .sampler = SkyRenderProxy::SkyMapSampler};
 }
 
 void Renderer::InitPostChain(PixelFormat screen_format, PostChain::ScreenPass screen_pass)

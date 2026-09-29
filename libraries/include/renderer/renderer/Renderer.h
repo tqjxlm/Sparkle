@@ -22,7 +22,6 @@ struct AppConfig;
 class CameraRenderProxy;
 class MaterialRenderProxy;
 class MeshRenderProxy;
-class ImageBasedLighting;
 
 // A renderer performs the following functionalities:
 // 1. process a scene of geometries
@@ -101,24 +100,6 @@ protected:
 
     // adds the frame's passes before the post chain, returning the texture they leave the scene in
     [[nodiscard]] virtual RGTexture BuildGraph(RenderGraph &graph) = 0;
-
-    // the scene depth of the renderers that rasterize the scene
-    static constexpr RGTextureDesc SceneDepthDesc{.format = PixelFormat::D32, .size_class = RGSizeClass::Scene};
-
-    // the scene color of the renderers that rasterize the scene
-    static constexpr RGTextureDesc SceneColorDesc{.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Scene};
-
-    // a cube map the sky box shows and the sampler it samples the map with
-    struct SkyBoxMap
-    {
-        RHIResourceRef<RHIImage> image;
-        RHISampler::SamplerAttribute sampler;
-    };
-
-    // the cube map the sky box shows in output mode `mode`: an IBL map once it is ready in the IBL map modes, otherwise
-    // `sky_map`
-    [[nodiscard]] static SkyBoxMap GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
-                                                const RHIResourceRef<RHIImage> &sky_map);
 
     // creates the post chain, whose Screen transient is of `screen_format`
     void InitPostChain(PixelFormat screen_format, PostChain::ScreenPass screen_pass);
