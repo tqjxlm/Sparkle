@@ -37,6 +37,7 @@ Status: review complete; fixes in progress. A finding marked **Done** is fixed i
   * `NativeAccess` on Compute passes and the graph resetting bind state after raw recording are dropped until a user needs them;
   * the `subpass` TODO entry stays until on-chip passes are implemented;
   * every push to PR #100 is followed by watching its CI.
+* **V9 follow-ups:** buffer uploads keep recording into the open context before the graph; `BeginCommandBuffer()` returns the context it opens; `GetCommandContext()` asserts it is not called while a graph executes.
 
 ## 0. Answers to the review questions (summary)
 
