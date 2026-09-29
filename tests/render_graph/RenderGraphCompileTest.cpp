@@ -50,14 +50,36 @@ protected:
         pipeline_state_->SetShader<RHIShaderStage::Pixel>(pixel_shader_);
     }
 
-    void SampleInput(RGBuilder &builder, RGTexture input) const override
+    void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const override
     {
         using Table = PlaceholderQuadPixelShader::ResourceTable;
-        builder.SampledOrPlaceholder(input, placeholder_, &Table::screenTexture, &Table::screenTextureSampler);
+        builder.SampledOrPlaceholder(input, placeholder_, &Table::screenTexture, &Table::screenTextureSampler, sampler);
     }
 
 private:
     RHIResourceRef<RHIImage> placeholder_;
+};
+
+// a screen quad that keeps the sampler its pass binds to the input
+class SamplerProbePass : public ScreenQuadPass
+{
+public:
+    using ScreenQuadPass::ScreenQuadPass;
+
+    [[nodiscard]] const RHISampler::SamplerAttribute &GetInputSampler() const
+    {
+        return input_sampler_;
+    }
+
+protected:
+    void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const override
+    {
+        input_sampler_ = sampler;
+        ScreenQuadPass::SampleInput(builder, input, sampler);
+    }
+
+private:
+    mutable RHISampler::SamplerAttribute input_sampler_;
 };
 } // namespace
 
@@ -65,7 +87,7 @@ private:
 // reasons) against expected dump summaries, and executes each one. under synchronization validation that proves the
 // planned barriers order every access, including a pooled image reused by the next graph and a buffer copied through.
 // graphs read back a texture to prove the recorded passes ran and a draw binds the texture and sampler its pass
-// declared.
+// declared. a bilinear screen quad is checked for the sampler it chooses.
 class RenderGraphCompileTest : public TestCase
 {
 public:
@@ -451,7 +473,7 @@ private:
 
         RGTexturePool pool(rhi);
         {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto b = graph.CreateTexture("B", Rgba8Output);
             quad->AddTo(graph, {}, b);
             AddReadback(graph, b, readback);
@@ -484,7 +506,7 @@ private:
 
         RGTexturePool pool(rhi);
         {
-            RenderGraph graph(pool, config);
+            RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", Rgba8Output);
             graph.AddRasterPass("Native", [a, &inside_rendering](RGBuilder &builder) {
                 builder.ColorWrite(a, 0, Vector4(1.f, 1.f, 0.f, 1.f));
@@ -530,7 +552,7 @@ private:
         auto tlas = rhi->CreateTLAS("RenderGraphTestTLAS");
         const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         const auto tlas_import = graph.Import("TLAS", tlas);
         for (const auto *name : {"Build", "Refit"})
         {
@@ -559,6 +581,30 @@ private:
                    RHIResourceAccess{.access = RHIAccess::AccelerationStructureRead,
                                      .stages = RHIShaderStageMask::Compute},
                "the graph writes the ray query through to the acceleration structure");
+    }
+
+    // a bilinear screen quad filters its input bilinearly, edge-clamped, only when it resamples a format the device
+    // filters linearly
+    void ScreenInputFilter(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto quad = PipelinePass::Create<SamplerProbePass>(config, rhi, "Upsample", Rgba8Output.format,
+                                                                 ScreenQuadPass::InputFilter::Bilinear);
+        for (const auto &[input_desc, resamples] :
+             {std::pair{Rgba8Scene, true}, std::pair{Rgba8Output, false},
+              std::pair{RGTextureDesc{.format = PixelFormat::RGBAFloat, .size_class = RGSizeClass::Scene}, true}})
+        {
+            RGTexturePool pool(rhi);
+            RenderGraph graph(rhi, pool, config);
+            quad->AddTo(graph, graph.CreateTexture("Input", input_desc), graph.CreateTexture("Output", Rgba8Output));
+
+            const bool bilinear = resamples && rhi->SupportsLinearFiltering(input_desc.format);
+            const auto filter = bilinear ? RHISampler::FilteringMethod::Linear : RHISampler::FilteringMethod::Nearest;
+            const auto &sampler = quad->GetInputSampler();
+            Expect(sampler.address_mode == RHISampler::SamplerAddressMode::ClampToEdge &&
+                       sampler.filtering_method_min == filter && sampler.filtering_method_mag == filter,
+                   std::format("a {} input {} is sampled {}", Enum2Str(input_desc.format),
+                               resamples ? "resampled" : "at its size", bilinear ? "bilinearly" : "nearest"));
+        }
     }
 
     // a face of one mip cleared, another mip written and the face sampled, then the whole cube sampled: each access
@@ -644,7 +690,7 @@ private:
         const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
 
         RGTexturePool pool(rhi);
-        RenderGraph graph(pool, config);
+        RenderGraph graph(rhi, pool, config);
         const auto mips_texture = graph.Import("Mips", mips);
         graph.AddComputePass("WriteBase", compute_pass, [mips_texture](RGBuilder &builder) {
             builder.StorageWrite(mips_texture.Mip(0));
@@ -1028,7 +1074,7 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 17> Steps{
+    static constexpr std::array<Step, 18> Steps{
         &RenderGraphCompileTest::ClearSampleReadback,
         &RenderGraphCompileTest::DeclaredBinding,
         &RenderGraphCompileTest::Placeholder,
@@ -1046,6 +1092,7 @@ private:
         &RenderGraphCompileTest::NextFrameReuse,
         &RenderGraphCompileTest::NextFrameReuse,
         &RenderGraphCompileTest::ReleaseUnused,
+        &RenderGraphCompileTest::ScreenInputFilter,
     };
 
     size_t step_ = 0;
