@@ -39,8 +39,27 @@ LEGEND = ("R read, W write, RW both; C color / D depth attachment with load (ld 
           " italic: imported. Hover a cell or header for details.")
 
 
-def subresources(entry):
-    return f" [{entry['subresources']}]" if "subresources" in entry else ""
+def resource_of(entry):
+    """The resource an entry names, with its subresources unless it covers every one."""
+    subresources = entry.get("subresources")
+    return f"{entry['resource']}[{subresources}]" if subresources else entry["resource"]
+
+
+def describe_access(access):
+    clear = " clear" if access.get("clear") else ""
+    return f"access {resource_of(access)} {access['access']}{clear}"
+
+
+def describe_barrier(barrier):
+    # memory barriers have no layouts
+    layouts = f" {barrier['from_layout']}->{barrier['to_layout']}" if "from_layout" in barrier else ""
+    return f"barrier {resource_of(barrier)}{layouts} [{barrier['from']} -> {barrier['to']}]"
+
+
+def describe_attachment(attachment):
+    return (f"attachment {resource_of(attachment)} slot {attachment['slot']}:"
+            f" {attachment['load']} ({attachment['load_reason']})"
+            f" / {attachment['store']} ({attachment['store_reason']})")
 
 
 def access_flags(access):
@@ -58,17 +77,9 @@ def cell(graph_pass, name, uses):
                  f"<small>{LOAD_OPS[attachment['load']]}/{STORE_OPS[attachment['store']]}</small>")
 
     details = [f"{graph_pass['name']} / {name}"]
-    for access in uses["accesses"]:
-        clear = " clear" if access.get("clear") else ""
-        details.append(f"access {access['access']}{subresources(access)}{clear}")
-    for attachment in uses["attachments"]:
-        details.append(f"attachment {attachment['slot']}{subresources(attachment)}:"
-                       f" {attachment['load']} ({attachment['load_reason']})"
-                       f" / {attachment['store']} ({attachment['store_reason']})")
-    for barrier in uses["barriers"]:
-        # memory barriers have no layouts
-        layouts = f" {barrier['from_layout']} -> {barrier['to_layout']}" if "from_layout" in barrier else ""
-        details.append(f"barrier{subresources(barrier)}{layouts}: {barrier['from']} -> {barrier['to']}")
+    details += [describe_access(access) for access in uses["accesses"]]
+    details += [describe_attachment(attachment) for attachment in uses["attachments"]]
+    details += [describe_barrier(barrier) for barrier in uses["barriers"]]
     tooltip = html.escape("\n".join(details))
     classes = kind.lower() + (" barrier" if uses["barriers"] else "")
     return f'<td class="{classes}" title="{tooltip}">{label}</td>'

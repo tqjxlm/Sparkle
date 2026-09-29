@@ -18,16 +18,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "rendering"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
 from render_test_support import SUPPORTED_FRAMEWORKS, get_captures_dir, get_screenshot_dir  # noqa: E402
-from render_graph_viewer import render_html  # noqa: E402
+from render_graph_viewer import describe_access, describe_attachment, describe_barrier, render_html  # noqa: E402
 
 GOLDEN_DIR = os.path.join(SCRIPT_DIR, "golden")
 DUMP_NAME = "render_graph.json"
-
-
-def resource_of(entry):
-    """The resource an entry names, with its subresources unless it covers every one."""
-    subresources = entry.get("subresources")
-    return f"{entry['resource']}[{subresources}]" if subresources else entry["resource"]
 
 
 def project(dump):
@@ -39,18 +33,9 @@ def project(dump):
             continue
 
         lines.append(f"{name}: {graph_pass['kind']}")
-        for access in graph_pass["accesses"]:
-            clear = " clear" if access.get("clear") else ""
-            lines.append(
-                f"  access {resource_of(access)} {access['access']}{clear}")
-        for barrier in graph_pass["barriers"]:
-            # memory barriers have no layouts
-            layouts = f" {barrier['from_layout']}->{barrier['to_layout']}" if "from_layout" in barrier else ""
-            lines.append(f"  barrier {resource_of(barrier)}{layouts} [{barrier['from']} -> {barrier['to']}]")
-        for attachment in graph_pass["attachments"]:
-            lines.append(f"  attachment {resource_of(attachment)} slot {attachment['slot']}:"
-                         f" {attachment['load']} ({attachment['load_reason']})"
-                         f" / {attachment['store']} ({attachment['store_reason']})")
+        lines += [f"  {describe_access(access)}" for access in graph_pass["accesses"]]
+        lines += [f"  {describe_barrier(barrier)}" for barrier in graph_pass["barriers"]]
+        lines += [f"  {describe_attachment(attachment)}" for attachment in graph_pass["attachments"]]
 
     passes = dump["passes"]
     for resource in dump["resources"]:

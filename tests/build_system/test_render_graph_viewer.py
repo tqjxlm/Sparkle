@@ -1,4 +1,4 @@
-"""Tests for the static render graph viewer."""
+"""Tests for the static render graph viewer and the graph shape projection built on its descriptions."""
 
 import json
 import os
@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "render_graph"))
+import graph_shape_test  # noqa: E402
 import render_graph_viewer  # noqa: E402
 
 DUMP = {
@@ -70,9 +72,9 @@ class RenderGraphViewerTest(unittest.TestCase):
         shadow = rows(render_graph_viewer.render_html(DUMP, "fixture"))[0]
 
         self.assertIn("<td>0.250</td>", shadow)
-        self.assertIn('<td class="w barrier" title="Shadow / ShadowMap\naccess DepthWrite clear\n'
-                      "attachment depth: Clear (clear) / Store (read by Trace)\n"
-                      'barrier Undefined -&gt; DepthStencilOutput: Sampled(Compute) -&gt; DepthWrite">'
+        self.assertIn('<td class="w barrier" title="Shadow / ShadowMap\naccess ShadowMap DepthWrite clear\n'
+                      "attachment ShadowMap slot depth: Clear (clear) / Store (read by Trace)\n"
+                      'barrier ShadowMap Undefined-&gt;DepthStencilOutput [Sampled(Compute) -&gt; DepthWrite]">'
                       "D<small>clr/st</small></td>", shadow)
 
     def test_culled_pass_is_greyed_with_its_reason_and_names_are_escaped(self):
@@ -87,7 +89,7 @@ class RenderGraphViewerTest(unittest.TestCase):
     def test_lifetime_shades_passes_between_first_and_last_use(self):
         culled = rows(render_graph_viewer.render_html(DUMP, "fixture"))[1]
 
-        self.assertIn('<td class="w" title="Debug&lt;View&gt; / Debug&lt;1&gt;\naccess ColorWrite">W</td>'
+        self.assertIn('<td class="w" title="Debug&lt;View&gt; / Debug&lt;1&gt;\naccess Debug&lt;1&gt; ColorWrite">W</td>'
                       '<td></td><td></td>', culled)
         self.assertIn('</td><td class="life"></td><td class="w"', culled)
 
@@ -117,9 +119,10 @@ class RenderGraphViewerTest(unittest.TestCase):
     def test_buffer_cells_show_read_write_and_memory_barriers(self):
         trace = rows(render_graph_viewer.render_html(DUMP, "fixture"))[2]
 
-        self.assertIn('<td class="rw barrier" title="Trace / Counter\naccess StorageRead|StorageWrite(Compute)\n'
-                      'barrier: CopyDst -&gt; StorageRead|StorageWrite(Compute)">RW</td>', trace)
-        self.assertIn('<td class="r" title="Trace / TLAS\naccess AccelerationStructureRead(Compute)">R</td>', trace)
+        self.assertIn('<td class="rw barrier" title="Trace / Counter\naccess Counter StorageRead|StorageWrite(Compute)\n'
+                      'barrier Counter [CopyDst -&gt; StorageRead|StorageWrite(Compute)]">RW</td>', trace)
+        self.assertIn('<td class="r" title="Trace / TLAS\naccess TLAS AccelerationStructureRead(Compute)">R</td>',
+                      trace)
 
     def test_renders_a_graph_without_timings_or_buffers(self):
         shadow, debug, trace = ({key: value for key, value in graph_pass.items() if key != "gpu_ms"}
@@ -143,6 +146,45 @@ class RenderGraphViewerTest(unittest.TestCase):
 
             with open(os.path.join(directory, "render_graph.html"), encoding="utf-8") as page_file:
                 self.assertIn("<title>Render graph: render_graph.json</title>", page_file.read())
+
+
+class GraphShapeProjectionTest(unittest.TestCase):
+    def test_projects_one_line_per_pass_access_barrier_attachment_and_resource(self):
+        self.assertEqual(graph_shape_test.project(DUMP), [
+            "Shadow: Raster",
+            "  access ShadowMap DepthWrite clear",
+            "  barrier ShadowMap Undefined->DepthStencilOutput [Sampled(Compute) -> DepthWrite]",
+            "  attachment ShadowMap slot depth: Clear (clear) / Store (read by Trace)",
+            "Debug<View>: culled (unread outputs: Debug<1>)",
+            "Trace: Compute",
+            "  access ShadowMap Sampled(Compute)",
+            "  access Counter StorageRead|StorageWrite(Compute)",
+            "  access TLAS AccelerationStructureRead(Compute)",
+            "  barrier ShadowMap DepthStencilOutput->Read [DepthWrite -> Sampled(Compute)]",
+            "  barrier Counter [CopyDst -> StorageRead|StorageWrite(Compute)]",
+            "ShadowMap: Transient D32 Absolute 1024x1024, physical 0, Shadow..Trace, Texture|DepthStencilAttachment",
+            "Debug<1>: Transient RGBAFloat16 Scene, no image",
+            "Counter: Imported, Trace..Trace, StorageRead|StorageWrite(Compute)",
+            "TLAS: Imported, Trace..Trace, AccelerationStructureRead(Compute)",
+        ])
+
+    def test_names_the_subresources_of_partial_accesses(self):
+        face = {"resource": "Cube", "subresources": "mip 1 layer 2"}
+        graph_pass = {
+            "name": "Face", "kind": "Raster", "culled": False,
+            "accesses": [{**face, "access": "ColorWrite"}],
+            "barriers": [{**face, "from_layout": "Undefined", "to_layout": "ColorOutput", "from": "None",
+                          "to": "ColorWrite"}],
+            "attachments": [{**face, "slot": 0, "load": "Load", "load_reason": "imported", "store": "Store",
+                             "store_reason": "imported"}],
+        }
+
+        self.assertEqual(graph_shape_test.project({"passes": [graph_pass], "resources": []}), [
+            "Face: Raster",
+            "  access Cube[mip 1 layer 2] ColorWrite",
+            "  barrier Cube[mip 1 layer 2] Undefined->ColorOutput [None -> ColorWrite]",
+            "  attachment Cube[mip 1 layer 2] slot 0: Load (imported) / Store (imported)",
+        ])
 
 
 if __name__ == "__main__":
