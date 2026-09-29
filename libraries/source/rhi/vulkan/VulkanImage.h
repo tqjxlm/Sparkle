@@ -359,11 +359,9 @@ public:
 
     ~VulkanImage() override;
 
-    void Transition(const TransitionRequest &request) override;
+    void Upload(RHICommandContext &command_context, const uint8_t *data) override;
 
-    void Upload(const uint8_t *data) override;
-
-    void UploadFaces(std::array<const uint8_t *, 6> data) override;
+    void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) override;
 
     void CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const;
 

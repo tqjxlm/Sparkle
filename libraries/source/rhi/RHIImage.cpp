@@ -121,6 +121,11 @@ std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &
     return barriers;
 }
 
+void RHIImage::Transition(RHICommandContext &command_context, const TransitionRequest &request)
+{
+    command_context.Barrier(TrackTransition(request), {});
+}
+
 std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 {
     auto image_size = GetStorageSize();
@@ -134,16 +139,16 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 
     rhi->BeginCommandBuffer();
 
-    Transition({.target_layout = RHIImageLayout::TransferSrc,
-                .after_stage = RHIPipelineStage::Bottom,
-                .before_stage = RHIPipelineStage::Transfer});
-    auto *command_context = rhi->GetCommandContext();
-    command_context->CopyImageToBuffer(this, staging_buffer.get());
+    auto &command_context = *rhi->GetCommandContext();
+    Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                 .after_stage = RHIPipelineStage::Bottom,
+                                 .before_stage = RHIPipelineStage::Transfer});
+    command_context.CopyImageToBuffer(this, staging_buffer.get());
     // waiting for the device does not make its writes visible to the host
-    command_context->Barrier({.from = {.access = RHIAccess::CopyDst}, .to = {.access = RHIAccess::HostRead}});
-    Transition({.target_layout = RHIImageLayout::Read,
-                .after_stage = RHIPipelineStage::Transfer,
-                .before_stage = RHIPipelineStage::PixelShader});
+    command_context.Barrier({.from = {.access = RHIAccess::CopyDst}, .to = {.access = RHIAccess::HostRead}});
+    Transition(command_context, {.target_layout = RHIImageLayout::Read,
+                                 .after_stage = RHIPipelineStage::Transfer,
+                                 .before_stage = RHIPipelineStage::PixelShader});
 
     rhi->SubmitCommandBuffer();
 

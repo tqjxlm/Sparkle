@@ -127,7 +127,7 @@ RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const s
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
 
     auto rhi_image = CreateImage(attribute, name);
-    rhi_image->Upload(upload_image->GetRawData());
+    rhi_image->Upload(*GetCommandContext(), upload_image->GetRawData());
 
     return rhi_image;
 }
@@ -170,7 +170,7 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
     {
         data[i] = upload_faces[i]->GetRawData();
     }
-    rhi_image->UploadFaces(data);
+    rhi_image->UploadFaces(*GetCommandContext(), data);
 
     return rhi_image;
 }
@@ -429,7 +429,8 @@ RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute
     // a dummy never gets per-use transitions, so it rests in the one layout that satisfies all
     // bindings it can appear in: General when it can be bound as storage, Read otherwise
     const bool has_uav_usage = attribute.usages & RHIImage::ImageUsage::UAV;
-    texture->Transition({.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
+    texture->Transition(*GetCommandContext(),
+                        {.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
                          .after_stage = RHIPipelineStage::Top,
                          .before_stage = RHIPipelineStage::Bottom});
     dummy_textures_.emplace(hash, texture);

@@ -15,6 +15,8 @@
 
 namespace sparkle
 {
+class RHICommandContext;
+
 enum class RHIPipelineStage : uint8_t
 {
     Top,
@@ -174,11 +176,12 @@ public:
 
 #pragma region RHIImage Interface
 
-    virtual void Transition(const TransitionRequest &request) = 0;
+    // records the barriers TrackTransition returns into `command_context`
+    void Transition(RHICommandContext &command_context, const TransitionRequest &request);
 
-    virtual void Upload(const uint8_t *data) = 0;
+    virtual void Upload(RHICommandContext &command_context, const uint8_t *data) = 0;
 
-    virtual void UploadFaces(std::array<const uint8_t *, 6> data) = 0;
+    virtual void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) = 0;
 
 #pragma endregion
 

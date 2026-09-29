@@ -214,7 +214,7 @@ void MetalImage::UploadStaged(const uint8_t *data)
     }
 }
 
-void MetalImage::Upload(const uint8_t *data)
+void MetalImage::Upload(RHICommandContext & /*command_context*/, const uint8_t *data)
 {
     if (texture_.storageMode == MTLStorageModePrivate)
     {
@@ -246,7 +246,7 @@ void MetalImage::Upload(const uint8_t *data)
     }
 }
 
-void MetalImage::UploadFaces(std::array<const uint8_t *, 6> data)
+void MetalImage::UploadFaces(RHICommandContext & /*command_context*/, std::array<const uint8_t *, 6> data)
 {
     ASSERT(attributes_.type == RHIImage::ImageType::Image2DCube);
 

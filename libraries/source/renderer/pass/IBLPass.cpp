@@ -24,17 +24,17 @@ void IBLPass::Finalize()
     auto fp16_image = CreateIBLMap(false, true, PixelFormat::RGBAFloat16);
 
     rhi_->BeginCommandBuffer();
+    auto &command_context = *rhi_->GetCommandContext();
 
-    cooked_ibl_image->Transition({.target_layout = RHIImageLayout::TransferSrc,
-                                  .after_stage = RHIPipelineStage::ComputeShader,
-                                  .before_stage = RHIPipelineStage::Transfer});
+    cooked_ibl_image->Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                                   .after_stage = RHIPipelineStage::ComputeShader,
+                                                   .before_stage = RHIPipelineStage::Transfer});
 
-    fp16_image->Transition({.target_layout = RHIImageLayout::TransferDst,
-                            .after_stage = RHIPipelineStage::Top,
-                            .before_stage = RHIPipelineStage::Transfer});
+    fp16_image->Transition(command_context, {.target_layout = RHIImageLayout::TransferDst,
+                                             .after_stage = RHIPipelineStage::Top,
+                                             .before_stage = RHIPipelineStage::Transfer});
 
-    rhi_->GetCommandContext()->BlitImage(cooked_ibl_image.get(), fp16_image.get(),
-                                         RHISampler::FilteringMethod::Nearest);
+    command_context.BlitImage(cooked_ibl_image.get(), fp16_image.get(), RHISampler::FilteringMethod::Nearest);
 
     rhi_->SubmitCommandBuffer();
 
@@ -110,7 +110,7 @@ RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &paylo
         {
             return nullptr;
         }
-        image->Upload(reinterpret_cast<const uint8_t *>(payload.data()) + sizeof(header));
+        image->Upload(*rhi_->GetCommandContext(), reinterpret_cast<const uint8_t *>(payload.data()) + sizeof(header));
         return image;
     }
 
@@ -120,7 +120,7 @@ RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &paylo
     {
         return nullptr;
     }
-    image->Upload(fp16_bytes.data());
+    image->Upload(*rhi_->GetCommandContext(), fp16_bytes.data());
     return image;
 }
 

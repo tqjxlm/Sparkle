@@ -500,15 +500,15 @@ void MetalFxDenoiser::Encode(RGExternalContext &pass_context, const DenoiserInpu
         .projection = impl_->frame.projection, .resolution = size, .far_depth = 1.f};
     impl_->prepare_ubo->Upload(impl_->rhi, &ubo);
 
+    auto &command_context = static_cast<MetalCommandContext &>(pass_context.GetCommandContext());
+
     for (const auto &output : {impl_->color, impl_->depth, impl_->motion, impl_->diffuse_albedo, impl_->specular_albedo,
                                impl_->normal, impl_->roughness})
     {
-        output->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                            .after_stage = RHIPipelineStage::Top,
-                            .before_stage = RHIPipelineStage::ComputeShader});
+        output->Transition(command_context, {.target_layout = RHIImageLayout::StorageWrite,
+                                             .after_stage = RHIPipelineStage::Top,
+                                             .before_stage = RHIPipelineStage::ComputeShader});
     }
-
-    auto &command_context = static_cast<MetalCommandContext &>(pass_context.GetCommandContext());
 
     command_context.BeginComputePass(impl_->prepare_pass);
     command_context.DispatchCompute(impl_->prepare_pipeline, {size.x(), size.y(), 1u}, {16u, 16u, 1u});
@@ -517,9 +517,9 @@ void MetalFxDenoiser::Encode(RGExternalContext &pass_context, const DenoiserInpu
     for (const auto &prepared : {impl_->color, impl_->depth, impl_->motion, impl_->diffuse_albedo,
                                  impl_->specular_albedo, impl_->normal, impl_->roughness})
     {
-        prepared->Transition({.target_layout = RHIImageLayout::Read,
-                              .after_stage = RHIPipelineStage::ComputeShader,
-                              .before_stage = RHIPipelineStage::ComputeShader});
+        prepared->Transition(command_context, {.target_layout = RHIImageLayout::Read,
+                                               .after_stage = RHIPipelineStage::ComputeShader,
+                                               .before_stage = RHIPipelineStage::ComputeShader});
     }
 
 #if SPARKLE_HAS_METALFX_DENOISED
@@ -572,9 +572,9 @@ void MetalFxDenoiser::Encode(RGExternalContext &pass_context, const DenoiserInpu
 
         if (run_resolve)
         {
-            impl_->output->Transition({.target_layout = RHIImageLayout::Read,
-                                       .after_stage = RHIPipelineStage::ComputeShader,
-                                       .before_stage = RHIPipelineStage::ComputeShader});
+            impl_->output->Transition(command_context, {.target_layout = RHIImageLayout::Read,
+                                                        .after_stage = RHIPipelineStage::ComputeShader,
+                                                        .before_stage = RHIPipelineStage::ComputeShader});
 
             const auto &output_size = impl_->desc.output_size;
             MetalFxResolveShader::UniformBufferData resolve_ubo_data{

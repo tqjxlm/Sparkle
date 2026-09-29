@@ -43,7 +43,7 @@ void VulkanImage::CreateImage()
     context->SetDebugInfo(reinterpret_cast<uint64_t>(image_), VK_OBJECT_TYPE_IMAGE, GetName().c_str());
 }
 
-void VulkanImage::Upload(const uint8_t *data)
+void VulkanImage::Upload(RHICommandContext &command_context, const uint8_t *data)
 {
     auto image_size = GetStorageSize();
     RHIBuffer::Attribute staging_attribute{.size = image_size,
@@ -56,16 +56,16 @@ void VulkanImage::Upload(const uint8_t *data)
     // immediate and blocking upload
     staging_buffer->UploadImmediate(data);
 
-    Transition({.target_layout = RHIImageLayout::TransferDst,
-                .after_stage = RHIPipelineStage::Top,
-                .before_stage = RHIPipelineStage::Transfer});
-    context->GetCommandContext()->CopyBufferToImage(staging_buffer.get(), this);
-    Transition({.target_layout = RHIImageLayout::Read,
-                .after_stage = RHIPipelineStage::Transfer,
-                .before_stage = RHIPipelineStage::Bottom});
+    Transition(command_context, {.target_layout = RHIImageLayout::TransferDst,
+                                 .after_stage = RHIPipelineStage::Top,
+                                 .before_stage = RHIPipelineStage::Transfer});
+    command_context.CopyBufferToImage(staging_buffer.get(), this);
+    Transition(command_context, {.target_layout = RHIImageLayout::Read,
+                                 .after_stage = RHIPipelineStage::Transfer,
+                                 .before_stage = RHIPipelineStage::Bottom});
 }
 
-void VulkanImage::UploadFaces(std::array<const uint8_t *, 6> data)
+void VulkanImage::UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data)
 {
     ASSERT(attributes_.type == RHIImage::ImageType::Image2DCube);
 
@@ -87,13 +87,13 @@ void VulkanImage::UploadFaces(std::array<const uint8_t *, 6> data)
     }
     staging_buffer->UnLock();
 
-    Transition({.target_layout = RHIImageLayout::TransferDst,
-                .after_stage = RHIPipelineStage::Top,
-                .before_stage = RHIPipelineStage::Transfer});
-    context->GetCommandContext()->CopyBufferToImage(staging_buffer.get(), this);
-    Transition({.target_layout = RHIImageLayout::Read,
-                .after_stage = RHIPipelineStage::Transfer,
-                .before_stage = RHIPipelineStage::Bottom});
+    Transition(command_context, {.target_layout = RHIImageLayout::TransferDst,
+                                 .after_stage = RHIPipelineStage::Top,
+                                 .before_stage = RHIPipelineStage::Transfer});
+    command_context.CopyBufferToImage(staging_buffer.get(), this);
+    Transition(command_context, {.target_layout = RHIImageLayout::Read,
+                                 .after_stage = RHIPipelineStage::Transfer,
+                                 .before_stage = RHIPipelineStage::Bottom});
 }
 
 void VulkanImage::BlitToImage(VulkanCommandContext &command_context, const RHIImage *image,
@@ -179,11 +179,6 @@ void VulkanImage::CopyToBuffer(VulkanCommandContext &command_context, const RHIB
     vkCmdCopyImageToBuffer(command_context.GetCommandBuffer(), image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            buffer->GetResourceThisFrame(), static_cast<unsigned>(copy_regions.size()),
                            copy_regions.data());
-}
-
-void VulkanImage::Transition(const TransitionRequest &request)
-{
-    context->GetCommandContext()->Barrier(TrackTransition(request), {});
 }
 
 VulkanSampler::VulkanSampler(RHISampler::SamplerAttribute attribute, const std::string &name)

@@ -527,9 +527,9 @@ VkResult VulkanContext::EndFrame()
     auto image_index = swap_chain_->GetCurrentImageIndex();
     auto back_buffer_color = swap_chain_->GetImage(image_index);
 
-    back_buffer_color->Transition({.target_layout = RHIImageLayout::Present,
-                                   .after_stage = RHIPipelineStage::ColorOutput,
-                                   .before_stage = RHIPipelineStage::Bottom});
+    back_buffer_color->Transition(frame_command_context_, {.target_layout = RHIImageLayout::Present,
+                                                           .after_stage = RHIPipelineStage::ColorOutput,
+                                                           .before_stage = RHIPipelineStage::Bottom});
 
     VkCommandBuffer command_buffer = EndFrameCommandBuffer();
 

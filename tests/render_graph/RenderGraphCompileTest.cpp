@@ -544,7 +544,7 @@ private:
             magenta[texel + 3] = 255;
         }
         rhi->BeginCommandBuffer();
-        placeholder->Upload(magenta.data());
+        placeholder->Upload(*rhi->GetCommandContext(), magenta.data());
         rhi->SubmitCommandBuffer();
 
         const auto quad =
@@ -970,9 +970,9 @@ private:
             return [history_texture](RGExternalContext &context) {
                 // foreign code transitioning into the state the graph already put the image in
                 context.GetImage(history_texture)
-                    ->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                  .after_stage = RHIPipelineStage::ColorOutput,
-                                  .before_stage = RHIPipelineStage::ColorOutput});
+                    ->Transition(context.GetCommandContext(), {.target_layout = RHIImageLayout::ColorOutput,
+                                                               .after_stage = RHIPipelineStage::ColorOutput,
+                                                               .before_stage = RHIPipelineStage::ColorOutput});
             };
         });
         graph.AddRasterPass("WriteHistory", [history_texture](RGBuilder &builder) {
@@ -982,9 +982,9 @@ private:
 
         // the tracked state the graph starts from: sampled by pixel shaders
         rhi->BeginCommandBuffer();
-        history->Transition({.target_layout = RHIImageLayout::Read,
-                             .after_stage = RHIPipelineStage::ColorOutput,
-                             .before_stage = RHIPipelineStage::PixelShader});
+        history->Transition(*rhi->GetCommandContext(), {.target_layout = RHIImageLayout::Read,
+                                                        .after_stage = RHIPipelineStage::ColorOutput,
+                                                        .before_stage = RHIPipelineStage::PixelShader});
         rhi->SubmitCommandBuffer();
 
         Run(rhi, graph,

@@ -30,15 +30,10 @@ public:
 
     MetalImage(const Attribute &attributes, id<MTLTexture> texture, const std::string &name);
 
-    // Metal tracks hazards itself: this tracks the state the graph plans from and records nothing
-    void Transition(const TransitionRequest &request) override
-    {
-        static_cast<void>(TrackTransition(request));
-    }
+    // uploads synchronously through the texture or a standalone command buffer, recording nothing into the context
+    void Upload(RHICommandContext &command_context, const uint8_t *data) override;
 
-    void Upload(const uint8_t *data) override;
-
-    void UploadFaces(std::array<const uint8_t *, 6> data) override;
+    void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) override;
 
     void CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const;
 

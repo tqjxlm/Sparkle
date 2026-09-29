@@ -457,6 +457,7 @@ void VulkanNrdBackend::RunDispatches(RHICommandContext &command_context, const D
                 break;
             case DispatchResource::Source::User: {
                 resource.user_image->Transition(
+                    command_context,
                     {.target_layout = resource.is_uav ? RHIImageLayout::StorageWrite : RHIImageLayout::Read,
                      .after_stage = RHIPipelineStage::ComputeShader,
                      .before_stage = RHIPipelineStage::ComputeShader});

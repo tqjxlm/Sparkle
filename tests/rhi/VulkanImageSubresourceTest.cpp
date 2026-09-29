@@ -56,9 +56,9 @@ public:
 
             VerifyRenderPassLayout(image.get());
 
-            image->Transition({.target_layout = RHIImageLayout::TransferSrc,
-                               .after_stage = RHIPipelineStage::ColorOutput,
-                               .before_stage = RHIPipelineStage::Transfer});
+            image->Transition(*command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                                 .after_stage = RHIPipelineStage::ColorOutput,
+                                                 .before_stage = RHIPipelineStage::Transfer});
             VerifyUniformLayout(image.get(), RHIImageLayout::TransferSrc);
             rhi->SubmitCommandBuffer();
 

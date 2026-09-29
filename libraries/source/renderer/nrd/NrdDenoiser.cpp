@@ -24,10 +24,10 @@ constexpr float HitDistA = 3.0f;
 constexpr float HitDistB = 0.1f;
 constexpr float HitDistC = 20.0f;
 
-void ToLayout(const RHIResourceRef<RHIImage> &image, RHIImageLayout layout, RHIPipelineStage after,
-              RHIPipelineStage before)
+void ToLayout(RHICommandContext &command_context, const RHIResourceRef<RHIImage> &image, RHIImageLayout layout,
+              RHIPipelineStage after, RHIPipelineStage before)
 {
-    image->Transition({.target_layout = layout, .after_stage = after, .before_stage = before});
+    image->Transition(command_context, {.target_layout = layout, .after_stage = after, .before_stage = before});
 }
 
 void CopyMatrix(float (&dst)[16], const Mat4 &src)
@@ -149,7 +149,8 @@ RHIResourceRef<RHIImage> NrdDenoiser::CreateFullScreenTexture(PixelFormat format
         },
         name);
 
-    ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::Top, RHIPipelineStage::ComputeShader);
+    ToLayout(*rhi_->GetCommandContext(), image, RHIImageLayout::Read, RHIPipelineStage::Top,
+             RHIPipelineStage::ComputeShader);
 
     return image;
 }
@@ -424,7 +425,8 @@ void NrdDenoiser::Encode(RGExternalContext &context, const DenoiserInputs &input
     for (const auto &image :
          {out_diff_, out_spec_, validation_, in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     NrdResolveShader::UniformBufferData resolve_ubo{
@@ -454,7 +456,8 @@ void NrdDenoiser::RenderReblur(RHICommandContext &command_context, const Vector3
 
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     NrdPackShader::UniformBufferData pack_ubo{
@@ -474,11 +477,13 @@ void NrdDenoiser::RenderReblur(RHICommandContext &command_context, const Vector3
     // ReBLUR reads the freshly packed inputs and writes the OUT_* textures on its own encoder.
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
     for (const auto &image : {out_diff_, out_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     // NRD assumes D3D clip conventions (+Y up); undo the engine's Vulkan-style Y flip (proj(1,1) < 0)
