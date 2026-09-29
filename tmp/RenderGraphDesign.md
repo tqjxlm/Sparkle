@@ -1,6 +1,6 @@
 # Render Graph Design
 
-Design of a lean render graph in Sparkle. Phases 0–2 of the migration plan (§13) are implemented: the RHI groundwork, the graph core with every renderer on it, and the visibility tools; Phases 3–5 are not. [RenderGraphProgress.md](RenderGraphProgress.md) records what landed in each phase and every deviation from this design with its reason. Research behind every choice: [RenderGraphResearch.md](RenderGraphResearch.md); raw notes and code maps with file:line references: [render_graph_notes/](render_graph_notes/). Every design decision, with its rationale, is listed in §14.
+Design of a lean render graph in Sparkle. Phases 0–2 of the migration plan (§13) are implemented: the RHI groundwork, the graph core with every renderer on it, and the visibility tools; Phases 3–5 are not. [RenderGraphProgress.md](RenderGraphProgress.md) records what landed in each phase and every deviation from this design with its reason; §16 lists the parts of the design the code does not implement and the open deviations. Research behind every choice: [RenderGraphResearch.md](RenderGraphResearch.md); raw notes and code maps with file:line references: [render_graph_notes/](render_graph_notes/). Every design decision, with its rationale, is listed in §14.
 
 ## 1. Goals and non-goals
 
@@ -365,3 +365,31 @@ Static reading only; none reproduced. Several are exactly the classes the graph 
 9. ImGui's raw `vkCmd*` leaves `RHITrackedState` stale; the following present draw is correct only because its pipeline/vertex buffer/viewport happen to differ.
 10. `SkyBoxPass` is initialized twice in both raster renderers; SSAO (`use_ssao`, `SSAOResource`), `BlurPass` and Forward's ray-tracing branch are dead code.
 11. The CPU renderer creates its upload target with `RHIConfig::msaa_samples` (`CPURenderer.cpp:60`) although it is filled by a buffer-to-image copy and never resolved; a copy into a multisampled image is invalid on Vulkan. Every other target is single-sampled.
+
+## 16. Gaps between the design and the code
+
+Phases 0–2 implement this design with the deviations [RenderGraphProgress.md](RenderGraphProgress.md) records, except for these gaps.
+
+Deferred to Phase 3/4, with the pass merging and graph-driven resize that need them:
+
+* transient mips, array layers and cube maps (§4.1): a transient is a single-mip 2D texture;
+* buffer accesses beyond copies and host reads (§4.2): no uniform, vertex, index, indirect or storage access, no transient buffers, and binding a graph buffer is an error;
+* Copy passes that blit, clear or generate mips (§4.3), and indirect dispatch;
+* reader look-ahead folding and the collapse to `GENERAL` under unified image layouts (§6.6);
+* the dump fields the design lists that the dump lacks: backward-dependency flags (§6.6), dependency levels (§9), CPU record time and byte totals (§10), and the physical-pass and memoryless fields that come with merging.
+
+Dropped until a user exists:
+
+* `graph.Extract` (§4.1);
+* mip, layer and channel selection in the resource viewer (§10);
+* mandatory bindings: a declared binding is optional, and only a binding that reaches no pipeline of a pass that drew is an error;
+* the `pool_reuse` kill switch (§10).
+
+Implemented: the dump names each resource's type (`Texture`, `Buffer`, `AccelerationStructure`), and `render_graph_full_barriers` is the `full_barriers` kill switch (§6.6), one memory barrier from every earlier access of the graph before each pass.
+
+Not implemented and not yet scheduled: `NativeAccess` on Compute passes (the builder accepts it only on Raster passes), and the graph resetting the tracked bind state after External passes (§4.3).
+
+Open deviations, scheduled after the correctness and trim work:
+
+* **Post chain in the `Renderer` base class (§5).** §5 has a free `AddPostChain(g, PostPasses &, scene, FrameFlags)` and a per-renderer `BuildGraph(g)`. The code makes the post chain part of `Renderer` (`ui_pass_`, `present_pass_`, `graph_view_pass_`, the view state, `screen_desc_` and the pass timers), and every renderer's `Render()` repeats create graph → `AddPostChain` → `ExecuteGraph`. The plan is a `PostChain` component and a non-virtual `Renderer::Render()` that calls a virtual `BuildGraph(graph)` returning the scene texture and screen pass; the tone mapping pass, which Forward, Deferred and GPU create and update identically, moves into it.
+* **No shared raster renderer.** Forward and Deferred differ only in their scene passes (`BasePass` versus `GBuffer` and `Lighting`), yet each has its own copy of `HandleSceneChanges`, the IBL cook bookkeeping, the graph prologue (IBL cook, shadow, `LightingInputs`) and the sky box. The plan is an intermediate raster renderer base (or shared component) that holds them, together with the raster-only helpers `SceneDepthDesc`, `SceneColorDesc` and `GetSkyBoxMap`.
