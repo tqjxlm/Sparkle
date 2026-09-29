@@ -18,6 +18,49 @@
 
 namespace sparkle
 {
+namespace
+{
+// the screen quad's pixel shader, declared here to name its resource table
+class PlaceholderQuadPixelShader : public RHIShaderInfo
+{
+    REGISTGER_SHADER(PlaceholderQuadPixelShader, RHIShaderStage::Pixel, "shaders/screen/screen.ps.slang", "shader_main")
+
+    BEGIN_SHADER_RESOURCE_TABLE(RHIShaderResourceTable)
+
+    USE_SHADER_RESOURCE(screenTexture, RHIShaderResourceReflection::ResourceType::Texture2D)
+    USE_SHADER_RESOURCE(screenTextureSampler, RHIShaderResourceReflection::ResourceType::Sampler)
+
+    END_SHADER_RESOURCE_TABLE
+};
+
+// a screen quad whose input may be missing, drawing `placeholder` in its place
+class PlaceholderQuadPass : public ScreenQuadPass
+{
+public:
+    PlaceholderQuadPass(RHIContext *rhi, std::string name, PixelFormat output_format,
+                        RHIResourceRef<RHIImage> placeholder)
+        : ScreenQuadPass(rhi, std::move(name), output_format), placeholder_(std::move(placeholder))
+    {
+    }
+
+protected:
+    void SetupPixelShader() override
+    {
+        pixel_shader_ = rhi_->CreateShader<PlaceholderQuadPixelShader>();
+        pipeline_state_->SetShader<RHIShaderStage::Pixel>(pixel_shader_);
+    }
+
+    void SampleInput(RGBuilder &builder, RGTexture input) const override
+    {
+        using Table = PlaceholderQuadPixelShader::ResourceTable;
+        builder.SampledOrPlaceholder(input, placeholder_, &Table::screenTexture, &Table::screenTextureSampler);
+    }
+
+private:
+    RHIResourceRef<RHIImage> placeholder_;
+};
+} // namespace
+
 // builds synthetic render graphs, compares their compiled plans (culling, physical images, barriers, load/store with
 // reasons) against expected dump summaries, and executes each one. under synchronization validation that proves the
 // planned barriers order every access, including a pooled image reused by the next graph and a buffer copied through.
@@ -187,6 +230,19 @@ private:
                                 name);
     }
 
+    // a square R8G8B8A8Unorm image
+    static RHIResourceRef<RHIImage> CreateImage(RHIContext *rhi, const std::string &name, uint32_t size,
+                                                RHIImage::ImageUsage usages, uint8_t mips = 1)
+    {
+        RHIImage::Attribute attribute;
+        attribute.format = PixelFormat::R8G8B8A8Unorm;
+        attribute.width = size;
+        attribute.height = size;
+        attribute.usages = usages;
+        attribute.mip_levels = mips;
+        return rhi->CreateImage(attribute, name);
+    }
+
     void ClearSampleReadback(RHIContext *rhi, const RenderConfig &config)
     {
         auto readback = CreateReadbackBuffer(rhi, config);
@@ -270,6 +326,8 @@ private:
             const auto a = graph.CreateTexture("A", Rgba8Output);
             const auto b = graph.CreateTexture("B", Rgba8Output);
             const auto buffer = graph.Import("Staging", staging);
+            Expect(graph.Import("StagingAgain", staging) == buffer,
+                   "importing a buffer again returns its first import");
             graph.AddRasterPass("Clear", [a](RGBuilder &builder) {
                 builder.ColorWrite(a, 0, Vector4(0.f, 0.f, 1.f, 1.f));
                 return [](RGRasterContext &) {};
@@ -372,6 +430,138 @@ private:
         readback->UnLock();
     }
 
+    // a quad whose input is missing binds and draws a placeholder image outside the graph, which the plan never names
+    void Placeholder(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto placeholder = CreateImage(rhi, "RenderGraphTestPlaceholder", 4,
+                                       RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst);
+        std::array<uint8_t, 4u * 4u * 4u> magenta{};
+        for (auto texel = 0u; texel < magenta.size(); texel += 4)
+        {
+            magenta[texel] = 255;
+            magenta[texel + 2] = 255;
+            magenta[texel + 3] = 255;
+        }
+        rhi->BeginCommandBuffer();
+        placeholder->Upload(magenta.data());
+        rhi->SubmitCommandBuffer();
+
+        const auto quad =
+            PipelinePass::Create<PlaceholderQuadPass>(config, rhi, "Quad", Rgba8Output.format, placeholder);
+        auto readback = CreateReadbackBuffer(rhi, config);
+
+        RGTexturePool pool(rhi);
+        {
+            RenderGraph graph(pool, config);
+            const auto b = graph.CreateTexture("B", Rgba8Output);
+            quad->AddTo(graph, {}, b);
+            AddReadback(graph, b, readback);
+
+            Run(rhi, graph,
+                {
+                    "Quad: Raster",
+                    "  barrier B Undefined->ColorOutput [None -> ColorWrite]",
+                    "  attachment B slot 0: DontCare (fully overwritten) / Store (read by Readback)",
+                    "Readback: Copy",
+                    "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "B: physical 0",
+                },
+                "placeholder");
+        }
+
+        rhi->WaitForDeviceIdle();
+        const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
+        Expect(pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 255 && pixel[3] == 255,
+               "the quad draws the placeholder of its missing input");
+        readback->UnLock();
+    }
+
+    // a raster pass declaring native access records through the raw command context, inside the rendering the graph
+    // began over its attachments
+    void NativeRecording(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto readback = CreateReadbackBuffer(rhi, config);
+        bool inside_rendering = false;
+
+        RGTexturePool pool(rhi);
+        {
+            RenderGraph graph(pool, config);
+            const auto a = graph.CreateTexture("A", Rgba8Output);
+            graph.AddRasterPass("Native", [a, &inside_rendering](RGBuilder &builder) {
+                builder.ColorWrite(a, 0, Vector4(1.f, 1.f, 0.f, 1.f));
+                builder.NativeAccess();
+                return [a, &inside_rendering](RGRasterContext &context) {
+                    const auto &attachment = context.GetNativeContext().GetRenderingInfo().color_attachments[0];
+                    inside_rendering =
+                        attachment.image == context.GetImage(a) && attachment.load_op == RHILoadOp::Clear;
+                };
+            });
+            AddReadback(graph, a, readback);
+
+            Run(rhi, graph,
+                {
+                    "Native: Raster",
+                    "  barrier A Undefined->ColorOutput [None -> ColorWrite]",
+                    "  attachment A slot 0: Clear (clear) / Store (read by Readback)",
+                    "Readback: Copy",
+                    "  barrier A ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "A: physical 0",
+                },
+                "native recording");
+        }
+        Expect(inside_rendering, "the native context records inside the rendering over the pass's attachment");
+
+        rhi->WaitForDeviceIdle();
+        const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
+        Expect(pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255,
+               "the native pass's attachment is cleared");
+        readback->UnLock();
+    }
+
+    // a build waits for earlier builds (the BLAS it reads, the scratch memory it reuses), and a ray query for the
+    // build. acceleration structures exist only with hardware ray tracing.
+    void AccelerationStructureBuilds(RHIContext *rhi, const RenderConfig &config)
+    {
+        if (!rhi->SupportsHardwareRayTracing())
+        {
+            Log(Info, "{}: no hardware ray tracing, skipping acceleration structure builds", GetName());
+            return;
+        }
+
+        auto tlas = rhi->CreateTLAS("RenderGraphTestTLAS");
+        const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
+        RGTexturePool pool(rhi);
+        RenderGraph graph(pool, config);
+        const auto tlas_import = graph.Import("TLAS", tlas);
+        for (const auto *name : {"Build", "Refit"})
+        {
+            graph.AddCopyPass(name, [tlas_import](RGBuilder &builder) {
+                builder.AccelerationStructureBuild(tlas_import);
+                return [](RGCopyContext &) {};
+            });
+        }
+        graph.AddComputePass("Trace", compute_pass, [tlas_import](RGBuilder &builder) {
+            builder.AccelerationStructureRead(tlas_import);
+            builder.SideEffect();
+            return [](RGComputeContext &) {};
+        });
+
+        Run(rhi, graph,
+            {
+                "Build: Copy",
+                "  barrier TLAS [AccelerationStructureBuild -> AccelerationStructureBuild]",
+                "Refit: Copy",
+                "  barrier TLAS [AccelerationStructureBuild -> AccelerationStructureBuild]",
+                "Trace: Compute",
+                "  barrier TLAS [AccelerationStructureBuild -> AccelerationStructureRead(Compute)]",
+            },
+            "acceleration structure builds");
+        Expect(tlas->GetTracked().GetTrackedAccess() ==
+                   RHIResourceAccess{.access = RHIAccess::AccelerationStructureRead,
+                                     .stages = RHIShaderStageMask::Compute},
+               "the graph writes the ray query through to the acceleration structure");
+    }
+
     // a face of one mip cleared, another mip written and the face sampled, then the whole cube sampled: each access
     // plans barriers for its own subresources, the clear is stored for the reader of its face rather than dropped for
     // the writer of the other mip, and the face already sampled needs no second barrier
@@ -445,6 +635,47 @@ private:
             }
         }
         Expect(all_sampled, "the graph writes each subresource's final state through to the import");
+    }
+
+    // a downsample samples mip 0 and writes mips 1 and 2, then the whole image is sampled: the mips left in one state
+    // move with one barrier over their run, and mip 0, already sampled, needs none
+    void MipRun(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto mips =
+            CreateImage(rhi, "RenderGraphTestMips", 8, RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::Texture, 3);
+        const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
+
+        RGTexturePool pool(rhi);
+        RenderGraph graph(pool, config);
+        const auto mips_texture = graph.Import("Mips", mips);
+        graph.AddComputePass("WriteBase", compute_pass, [mips_texture](RGBuilder &builder) {
+            builder.StorageWrite(mips_texture.Mip(0));
+            return [](RGComputeContext &) {};
+        });
+        graph.AddComputePass("Downsample", compute_pass, [mips_texture](RGBuilder &builder) {
+            builder.Sampled(mips_texture.Mip(0));
+            builder.StorageWrite(mips_texture.Mip(1));
+            builder.StorageWrite(mips_texture.Mip(2));
+            return [](RGComputeContext &) {};
+        });
+        graph.AddComputePass("ReadAll", compute_pass, [mips_texture](RGBuilder &builder) {
+            builder.Sampled(mips_texture);
+            builder.SideEffect();
+            return [](RGComputeContext &) {};
+        });
+
+        Run(rhi, graph,
+            {
+                "WriteBase: Compute",
+                "  barrier Mips[mip 0] Undefined->StorageWrite [None -> StorageWrite(Compute)]",
+                "Downsample: Compute",
+                "  barrier Mips[mip 0] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+                "  barrier Mips[mip 1] Undefined->StorageWrite [None -> StorageWrite(Compute)]",
+                "  barrier Mips[mip 2] Undefined->StorageWrite [None -> StorageWrite(Compute)]",
+                "ReadAll: Compute",
+                "  barrier Mips[mips 1-2] StorageWrite->Read [StorageWrite(Compute) -> Sampled(Compute)]",
+            },
+            "mip run");
     }
 
     void CulledBranch(RHIContext *rhi, const RenderConfig &config)
@@ -799,13 +1030,23 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 13> Steps{
-        &RenderGraphCompileTest::ClearSampleReadback, &RenderGraphCompileTest::DeclaredBinding,
-        &RenderGraphCompileTest::BufferRoundTrip,     &RenderGraphCompileTest::FullBarriers,
-        &RenderGraphCompileTest::Subresources,        &RenderGraphCompileTest::CulledBranch,
-        &RenderGraphCompileTest::IntraFrameReuse,     &RenderGraphCompileTest::ImportedSeeding,
-        &RenderGraphCompileTest::LoadStore,           &RenderGraphCompileTest::FullyOverwritesReadWrite,
-        &RenderGraphCompileTest::NextFrameReuse,      &RenderGraphCompileTest::NextFrameReuse,
+    static constexpr std::array<Step, 17> Steps{
+        &RenderGraphCompileTest::ClearSampleReadback,
+        &RenderGraphCompileTest::DeclaredBinding,
+        &RenderGraphCompileTest::Placeholder,
+        &RenderGraphCompileTest::NativeRecording,
+        &RenderGraphCompileTest::BufferRoundTrip,
+        &RenderGraphCompileTest::FullBarriers,
+        &RenderGraphCompileTest::AccelerationStructureBuilds,
+        &RenderGraphCompileTest::Subresources,
+        &RenderGraphCompileTest::MipRun,
+        &RenderGraphCompileTest::CulledBranch,
+        &RenderGraphCompileTest::IntraFrameReuse,
+        &RenderGraphCompileTest::ImportedSeeding,
+        &RenderGraphCompileTest::LoadStore,
+        &RenderGraphCompileTest::FullyOverwritesReadWrite,
+        &RenderGraphCompileTest::NextFrameReuse,
+        &RenderGraphCompileTest::NextFrameReuse,
         &RenderGraphCompileTest::ReleaseUnused,
     };
 
