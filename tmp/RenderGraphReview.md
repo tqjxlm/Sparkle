@@ -21,6 +21,14 @@ Status: review complete; fixes in progress. A finding marked **Done** is fixed i
   * dropped until a user exists: `graph.Extract`, viewer mip/layer/channel selection, mandatory bindings, the `pool_reuse` kill switch;
   * implemented now: the dump resource-type field and the `full_barriers` kill switch.
 * **A2: rename** to `DontCare`, no decision needed.
+* **A1 details:**
+  * each screen pass chooses its own filtering: the policy is a per-pass choice, not one rule in `ScreenQuadPass`;
+  * whether a format can be filtered linearly is asked of the device (`RHIContext`), not read from a fixed list;
+  * the sky box keeps each map's exact sampler (`GetSkyBoxMap` returns the image with its sampler);
+  * shared sampler constants live on the class that owns the resource (`SkyRenderProxy::SkyMapSampler`, `ImageBasedLighting::MapSampler`);
+  * the pre-existing sampler issues the A1 study found are TODO entries;
+  * `RenderGraph` takes its own `RHIContext *` in the same change (G12).
+* **V2: keep** seeding swap chain images with a `Present` access.
 
 ## 0. Answers to the review questions (summary)
 

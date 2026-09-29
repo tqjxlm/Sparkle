@@ -9,6 +9,7 @@
 
 * [ ] vendor-specific denoising and super sampling
 * [ ] dynamic scene
+* [ ] the GPU path tracer samples material textures with nearest filtering
 
 ## Rasterization Renderers
 
@@ -24,6 +25,9 @@
 * [ ] msaa
 * [ ] render graph
 * [ ] subpass
+* [ ] `MetalSampler` ignores the sampler attribute's LOD range and anisotropy
+* [ ] `std::hash<RHISampler::SamplerAttribute>` hashes only the border color and address mode
+* [ ] `RHIContext::GetOrCreateDummyTexture` keys its cache by a 32-bit attribute hash without an equality check
 * [ ] `PickPhysicalDevice` appends the ray tracing extension list to `device_extensions_` once per candidate device, and `CheckDeviceExtensionSupport` mutates that static list (portability subset), so duplicate extension names are possible on multi-GPU hosts and on MoltenVK
 
 ## IO
