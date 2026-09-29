@@ -64,7 +64,7 @@ Status: review complete; fixes in progress. A finding marked **Done** is fixed i
 * **Done.** **A6 [low, C] Binding type spelled three times.** `std::function<RHIMemberBinding(RHIContext *, RHIImage &, const RGSubresources &)>` appears at `RenderGraph.h:296` (as `RGBuilder::ImageBinding`), `:540` and `:572`. Action: one alias shared by `RGBuilder` and `RenderGraph`.
 * **A7 [info] Size is within target.** The core is 2,241 physical lines, but about 1,276 once blanks, comments and brace-only lines are excluded; that is inside the design's 1,000–1,500. Not over-engineered: the per-mip runs, reason strings, placeholders and binding validation all have users. Action: the dead API (G11) and DRY merges (G15–G19) trim roughly another 150 lines.
 * **Done.** **A8 [low, C] Binding check depends on list order.** `CheckBindingsApplied` (`RenderGraph.cpp:1030`) walks `pass.bindings` by index, which relies on `ResolveBindings` (`:694`) appending textures, then buffers, then placeholders in that exact order. Action: store the resource name (or access index) with each resolved binding.
-* **A9 [low, C] Buffer planning calls the image rule with fake layouts.** `RenderGraph.cpp:735` wraps accesses in `RHIImageState{Undefined, access}` to reuse `TransitionImageState`. Action: expose the access-only rule from `RHIBarrier`/`RHIImage` and have the image rule call it.
+* **Done.** **A9 [low, C] Buffer planning calls the image rule with fake layouts.** `RenderGraph.cpp:735` wraps accesses in `RHIImageState{Undefined, access}` to reuse `TransitionImageState`. Action: expose the access-only rule from `RHIBarrier`/`RHIImage` and have the image rule call it.
 * **Done** (commented next to the loop). **A10 [info] Culling works per texture, not per subresource.** `Cull` (`RenderGraph.cpp:557`) keeps one `needed` flag per texture. Correct today because transients have one mip and one layer and imports always keep their writers. Action: keep it, and note the constraint next to the loop if multi-mip transients arrive.
 
 ## 2. Graph core
@@ -83,7 +83,7 @@ Correctness (latent):
 * **Closed** (unreachable: `RHIImage` has no 2D array type and transients have one layer; the view type comes with transient layers, G9). **G2 [low, C] Storage view type misses 2D arrays.** A storage view is `Image2DArray` only for cubes (`RenderGraph.cpp:311-317`), so a multi-layer non-cube storage binding builds an invalid `Image2D` view. Action: use `layer_count > 1 || cube`.
 * **G3 [low, C] Culling keeps unneeded writers alive.** A partial write always sets `needed = true` (`RenderGraph.cpp:580-583`), even when nothing later needs the texture. This keeps earlier writers alive (extra work, never wrong output). Action: `needed = ReadsContents || (needed_after && !(clear || fully))`.
 * **Done.** **G4 [low, C] Only External passes are contract-checked.** A Raster, Compute or Copy `record` that calls `Transition`/`Upload` on a declared image desyncs the tracker silently (`RenderGraph.cpp:1012`). Action: run `CheckExternalContract` for every kind; it is cheap.
-* **G5 [low, P] Unsubmitted command buffers leave stale tracked state.** When a recorded frame is never submitted (surface loss), imports' tracked states describe transitions that never ran. This is the same class of problem `RHIImage::Transition` has. Action: note it; consider resetting imports' tracked state on a skipped submit.
+* **Done** (see V1). **G5 [low, P] Unsubmitted command buffers leave stale tracked state.** When a recorded frame is never submitted (surface loss), imports' tracked states describe transitions that never ran. This is the same class of problem `RHIImage::Transition` has. Action: note it; consider resetting imports' tracked state on a skipped submit.
 * **G6 [low, C] Wrong load reason on imports.** `last_writer` is per texture (`RenderGraph.cpp:762,797`), so a mip-1 write makes a later mip-0 attachment report "written by X". The load op itself is right.
 * **G7 [low, C] Pooled images keep their first name.** A pooled image keeps the debug name of the transient that created it (`RenderGraph.cpp:654`), so reused images are mislabelled in captures. Action: rename on acquire, or name by physical slot.
 * **G8 [low, C] Barrier splitting ignores layer uniformity.** Non-uniform accesses split per layer first (`RenderGraph.cpp:879-894`), so a cube whose mips differ but whose layers match gets 6× the barriers. Performance only. Also, one memory barrier is emitted per buffer access (`:742`); merge them per pass.
@@ -163,7 +163,7 @@ Traced and correct:
 
 Correctness:
 
-* **V1 [med, P] A dropped frame leaves CPU-side state ahead of the GPU** (also G5). When `!CanRender()`, a fully recorded frame is discarded (`VulkanContext.cpp:333-338`, `RenderFramework.cpp:404-413`). Its CPU-side commitments stay:
+* **Done** (a recorded frame is always submitted; the lost surface only fails the present). **V1 [med, P] A dropped frame leaves CPU-side state ahead of the GPU** (also G5). When `!CanRender()`, a fully recorded frame is discarded (`VulkanContext.cpp:333-338`, `RenderFramework.cpp:404-413`). Its CPU-side commitments stay:
   * the tracked image states the graph wrote through;
   * `RHITLAS::staged_`, which `RecordBuild` cleared (`RHIRayTracing.h:74-78`);
   * timers left waiting on queries whose reset never ran.
