@@ -384,10 +384,10 @@ Dropped until a user exists:
 * mip, layer and channel selection in the resource viewer (§10);
 * mandatory bindings: a declared binding is optional, and only a binding that reaches no pipeline of a pass that drew is an error;
 * the `pool_reuse` kill switch (§10).
+* `NativeAccess` on Compute passes (§4.3): the builder accepts it only on Raster passes;
+* the graph resetting the tracked bind state after External and `NativeAccess` passes (§4.3): the only raw recorder, the Vulkan ImGui handler, resets it itself.
 
 Implemented: the dump names each resource's type (`Texture`, `Buffer`, `AccelerationStructure`), and `render_graph_full_barriers` is the `full_barriers` kill switch (§6.6), one memory barrier from every earlier access of the graph before each pass.
-
-Not implemented and not yet scheduled: `NativeAccess` on Compute passes (the builder accepts it only on Raster passes), and the graph resetting the tracked bind state after External passes (§4.3).
 
 Open deviations, scheduled after the correctness and trim work:
 

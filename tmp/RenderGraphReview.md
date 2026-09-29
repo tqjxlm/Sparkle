@@ -29,6 +29,14 @@ Status: review complete; fixes in progress. A finding marked **Done** is fixed i
   * the pre-existing sampler issues the A1 study found are TODO entries;
   * `RenderGraph` takes its own `RHIContext *` in the same change (G12).
 * **V2: keep** seeding swap chain images with a `Present` access.
+* **Follow-ups:**
+  * the GPU pipeline's `RGBAFloat` accumulator upsamples bilinearly where the device filters it linearly;
+  * Present samples nearest when the back buffer is an integer multiple of Screen, bilinear otherwise;
+  * the path tracer's next event estimation samples the sky map only when there is one (fix it);
+  * `RenderGraph::ReadOnHost` stays a separate call, and each host-read barrier is recorded right after the buffer's last pass;
+  * `NativeAccess` on Compute passes and the graph resetting bind state after raw recording are dropped until a user needs them;
+  * the `subpass` TODO entry stays until on-chip passes are implemented;
+  * every push to PR #100 is followed by watching its CI.
 
 ## 0. Answers to the review questions (summary)
 
