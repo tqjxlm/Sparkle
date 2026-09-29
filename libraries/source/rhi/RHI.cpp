@@ -251,6 +251,12 @@ void RHIContext::EndFrame()
     total_frame_++;
 }
 
+RHICommandContext *RHIContext::GetCommandContext()
+{
+    ASSERT_F(!executing_graph_, "a graph pass records through its pass context, not RHIContext::GetCommandContext");
+    return GetCommandContextInternal();
+}
+
 void RHIContext::RecreateBuffer(RHIBuffer::Attribute attribute, const std::string &name,
                                 RHIResourceRef<RHIBuffer> &in_out_existing_buffer)
 {

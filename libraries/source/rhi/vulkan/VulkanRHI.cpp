@@ -336,7 +336,7 @@ void VulkanRHI::SubmitCommandBuffer()
     context->SubmitCommandBuffer();
 }
 
-RHICommandContext *VulkanRHI::GetCommandContext()
+RHICommandContext *VulkanRHI::GetCommandContextInternal()
 {
     return context->GetCommandContext();
 }

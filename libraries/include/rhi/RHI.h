@@ -151,13 +151,34 @@ public:
     virtual RHICommandContext &BeginCommandBuffer() = 0;
     virtual void SubmitCommandBuffer() = 0;
 
+    // while it lives, a render graph executes and GetCommandContext asserts
+    class GraphExecutionScope
+    {
+    public:
+        explicit GraphExecutionScope(RHIContext &rhi) : rhi_(rhi)
+        {
+            rhi_.executing_graph_ = true;
+        }
+
+        ~GraphExecutionScope()
+        {
+            rhi_.executing_graph_ = false;
+        }
+
+        GraphExecutionScope(const GraphExecutionScope &) = delete;
+        GraphExecutionScope &operator=(const GraphExecutionScope &) = delete;
+
+    private:
+        RHIContext &rhi_;
+    };
+
     // the context recording the open command buffer (the frame's, or the one BeginCommandBuffer opened); null when
     // none is open. a backend may reuse one context object across command buffers.
-    // graph passes never call it: they record through their pass context. it serves frame setup handing the frame's
-    // context to the graph, and resource creation and updates issued outside the graph (texture uploads and initial
-    // layouts, RHIBuffer::Upload and PartialUpdate), which record before the graph in the frame, or in a
-    // BeginCommandBuffer scope.
-    virtual RHICommandContext *GetCommandContext() = 0;
+    // graph passes never call it: they record through their pass context, and it asserts while a graph executes. it
+    // serves frame setup handing the frame's context to the graph, and resource creation and updates issued outside
+    // the graph (texture uploads and initial layouts, RHIBuffer::Upload and PartialUpdate), which record before the
+    // graph in the frame, or in a BeginCommandBuffer scope.
+    RHICommandContext *GetCommandContext();
 
     virtual void WaitForDeviceIdle() = 0;
 
@@ -289,6 +310,7 @@ protected:
     [[nodiscard]] virtual bool BeginFrameInternal() = 0;
     virtual void EndFrameInternal() = 0;
     virtual void CleanupInternal() = 0;
+    virtual RHICommandContext *GetCommandContextInternal() = 0;
     virtual RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute,
                                                      const std::string &name) = 0;
     virtual RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) = 0;
@@ -329,6 +351,7 @@ private:
     unsigned frame_index_ = 0;
     bool frame_active_ = false;
     bool is_deleting_deferred_resources_ = false;
+    bool executing_graph_ = false;
 
     struct DeferredDeletion
     {

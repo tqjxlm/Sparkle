@@ -1033,6 +1033,7 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
 {
     RGCheck(compiled_ && !executed_, "the graph executes once, after compiling");
     executed_ = true;
+    const RHIContext::GraphExecutionScope graph_execution(*rhi_);
 
     RHIResourceAccess earlier_accesses{};
     for (auto &pass : passes_ | std::views::filter(&Pass::live))

@@ -35,8 +35,6 @@ public:
     RHICommandContext &BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 
-    RHICommandContext *GetCommandContext() override;
-
     bool RecreateSurface() override;
     void RecreateSwapChain() override;
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
@@ -68,6 +66,8 @@ protected:
     void EndFrameInternal() override;
 
     void CleanupInternal() override;
+
+    RHICommandContext *GetCommandContextInternal() override;
 
     RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
 };

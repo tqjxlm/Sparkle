@@ -163,7 +163,7 @@ RHICommandContext &MetalRHI::BeginCommandBuffer()
     return *context->GetCommandContext();
 }
 
-RHICommandContext *MetalRHI::GetCommandContext()
+RHICommandContext *MetalRHI::GetCommandContextInternal()
 {
     return context->GetCommandContext();
 }

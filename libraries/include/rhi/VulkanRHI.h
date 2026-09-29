@@ -72,8 +72,6 @@ public:
     RHICommandContext &BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 
-    RHICommandContext *GetCommandContext() override;
-
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
 
@@ -107,6 +105,8 @@ protected:
     void EndFrameInternal() override;
 
     void CleanupInternal() override;
+
+    RHICommandContext *GetCommandContextInternal() override;
 
     RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute, const std::string &name) override;
 
