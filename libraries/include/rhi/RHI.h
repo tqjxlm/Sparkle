@@ -126,6 +126,9 @@ public:
     // textures fall back to a CPU decode and an uncompressed upload when unsupported
     virtual bool SupportsSampledFormat(PixelFormat format) = 0;
 
+    // whether a sampler with linear filtering may sample an image of the format
+    virtual bool SupportsLinearFiltering(PixelFormat format) = 0;
+
     // errors the API validation layer has reported so far; nullopt when no validation layer is active
     [[nodiscard]] virtual std::optional<unsigned> GetValidationErrorCount() const
     {

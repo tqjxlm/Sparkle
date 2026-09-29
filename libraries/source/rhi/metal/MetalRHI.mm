@@ -111,6 +111,26 @@ bool MetalRHI::SupportsSampledFormat(PixelFormat format)
     }
 }
 
+// Metal feature set tables: 32-bit float color formats and Depth32Float filter only where the device reports
+// supports32BitFloatFiltering; integer formats never filter. Depth24Unorm_Stencil8 exists only on some Mac GPUs and is
+// treated as unfilterable.
+bool MetalRHI::SupportsLinearFiltering(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::R32UInt:
+    case PixelFormat::RGBAUInt32:
+    case PixelFormat::D24S8:
+        return false;
+    case PixelFormat::R32Float:
+    case PixelFormat::RGBAFloat:
+    case PixelFormat::D32:
+        return context->GetDevice().supports32BitFloatFiltering;
+    default:
+        return SupportsSampledFormat(format);
+    }
+}
+
 bool MetalRHI::BeginFrameInternal()
 {
     context->BeginFrame();

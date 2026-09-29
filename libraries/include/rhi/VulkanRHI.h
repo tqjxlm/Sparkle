@@ -61,6 +61,8 @@ public:
 
     bool SupportsSampledFormat(PixelFormat format) override;
 
+    bool SupportsLinearFiltering(PixelFormat format) override;
+
     [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const override;
 
     [[nodiscard]] bool IsSyncValidationActive() const override;

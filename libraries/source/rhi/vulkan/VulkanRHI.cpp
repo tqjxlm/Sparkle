@@ -197,6 +197,13 @@ bool VulkanRHI::HasPhysicalGpu()
     return properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU;
 }
 
+static VkFormatFeatureFlags GetOptimalTilingFeatures(PixelFormat format)
+{
+    VkFormatProperties properties;
+    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
+    return properties.optimalTilingFeatures;
+}
+
 bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
 {
     if (format == PixelFormat::ASTC4x4HDR && !context->SupportsAstcHdr())
@@ -217,13 +224,15 @@ bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
         }
     }
 
-    VkFormatProperties properties;
-    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
-
     constexpr VkFormatFeatureFlags Required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
                                               VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
                                               VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-    return (properties.optimalTilingFeatures & Required) == Required;
+    return (GetOptimalTilingFeatures(format) & Required) == Required;
+}
+
+bool VulkanRHI::SupportsLinearFiltering(PixelFormat format)
+{
+    return (GetOptimalTilingFeatures(format) & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
 }
 
 uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const

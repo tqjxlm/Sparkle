@@ -25,6 +25,8 @@ public:
 
     bool SupportsSampledFormat(PixelFormat format) override;
 
+    bool SupportsLinearFiltering(PixelFormat format) override;
+
     bool HasPhysicalGpu() override
     {
         return true;
