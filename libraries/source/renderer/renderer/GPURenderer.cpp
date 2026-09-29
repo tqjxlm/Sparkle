@@ -62,6 +62,12 @@ class RayTracingComputeShader : public RHIShaderInfo
     };
 };
 
+static constexpr RHISampler::SamplerAttribute MaterialTextureSampler{
+    .address_mode = RHISampler::SamplerAddressMode::Repeat,
+    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
     : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool),
@@ -255,7 +261,6 @@ void GPURenderer::Update()
             auto sky_map = sky_light->GetSkyMap();
 
             cs_resources->skyMap().BindResource(sky_map->GetDefaultView(rhi_));
-            cs_resources->skyMapSampler().BindResource(sky_map->GetSampler());
         }
         else
         {
@@ -269,7 +274,6 @@ void GPURenderer::Update()
                 .type = RHIImage::ImageType::Image2DCube,
             });
             cs_resources->skyMap().BindResource(dummy_texture->GetDefaultView(rhi_));
-            cs_resources->skyMapSampler().BindResource(dummy_texture->GetSampler());
         }
     }
 
@@ -476,15 +480,6 @@ void GPURenderer::InitSceneRenderResources()
     // the dummies the tracer binds until the path trace pass declares allocated inputs
     BindDenoiserInputs();
 
-    auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::R8G8B8A8Srgb,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-        .usages = RHIImage::ImageUsage::Texture,
-    });
-
     auto dummy_texture_cube = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::RGBAFloat16,
         .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
@@ -496,9 +491,9 @@ void GPURenderer::InitSceneRenderResources()
     });
 
     cs_resources->skyMap().BindResource(dummy_texture_cube->GetDefaultView(rhi_));
-    cs_resources->skyMapSampler().BindResource(dummy_texture_cube->GetSampler());
+    cs_resources->skyMapSampler().BindResource(rhi_->GetSampler(SkyRenderProxy::SkyMapSampler));
 
-    cs_resources->materialTextureSampler().BindResource(dummy_texture_2d->GetSampler());
+    cs_resources->materialTextureSampler().BindResource(rhi_->GetSampler(MaterialTextureSampler));
 
     BindBindlessResources();
 }
