@@ -1,6 +1,5 @@
 """Tests for the static render graph viewer."""
 
-import importlib.util
 import json
 import os
 import sys
@@ -9,11 +8,8 @@ import unittest
 from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SPEC = importlib.util.spec_from_file_location(
-    "render_graph_viewer", os.path.join(PROJECT_ROOT, "dev", "render_graph_viewer.py"))
-render_graph_viewer = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = render_graph_viewer
-SPEC.loader.exec_module(render_graph_viewer)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
+import render_graph_viewer  # noqa: E402
 
 DUMP = {
     "passes": [
