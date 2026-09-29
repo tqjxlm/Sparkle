@@ -38,6 +38,7 @@
 ## Cook
 
 * [ ] standalone shader compiler
+* [ ] drop the NRD cook's SPIR-V 1.5 to 1.4 version rewrite and its `vulkan1.1spv1.4` validation target (`shaders/nrd/cook/cook_nrd_shaders.py`) at the next NRD recook
 * [ ] texture compression
 * [ ] compile ray_trace shaders slang->metal directly and drop the spirv-cross stage.
       Blocked on slang emitting invalid MSL for bindless resource arrays
