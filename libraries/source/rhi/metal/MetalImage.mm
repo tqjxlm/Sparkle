@@ -16,8 +16,7 @@ static MTLTextureUsage GetMetalTextureUsage(RHIImage::ImageUsage usage)
 {
     NSUInteger metal_usage = MTLTextureUsageUnknown;
 
-    if (usage & RHIImage::ImageUsage::ColorAttachment || usage & RHIImage::ImageUsage::DepthStencilAttachment ||
-        usage & RHIImage::ImageUsage::TransientAttachment)
+    if (usage & RHIImage::ImageUsage::ColorAttachment || usage & RHIImage::ImageUsage::DepthStencilAttachment)
     {
         metal_usage |= MTLTextureUsageRenderTarget;
     }
