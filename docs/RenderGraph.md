@@ -81,6 +81,7 @@ Each kind's record function receives a context that exposes only what the kind m
 * `context.GetImage(texture)` returns the image behind a texture the pass declared. A Copy pass reaches buffers and acceleration structures only through its copy and build commands.
 * Copies record no barrier of their own: the graph orders them through the declared accesses, and makes the data of a buffer the host reads visible to it.
 * Every pass must leave each declared image in its declared layout, with no pending access beyond the declared one; the graph checks this after the pass records.
+* A pass records only through its context, also when it transitions or uploads an image (`RHIImage::Transition` and `Upload` take the command context). `RHIContext::GetCommandContext()` is for code outside graph passes.
 * Foreign code in an External pass that still calls `RHIImage::Transition` sees the state the graph planned, because the graph writes it to the image before the pass runs.
 
 ## What the Compiler Decides
