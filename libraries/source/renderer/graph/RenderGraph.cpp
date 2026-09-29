@@ -543,7 +543,8 @@ uint32_t RenderGraph::NewPass(std::string name, RGPassKind kind, RHIResourceRef<
                        .record = {},
                        .cull_reason = {},
                        .bindings = {},
-                       .bound_resources = {}});
+                       .bound_resources = {},
+                       .host_reads = {}});
     return static_cast<uint32_t>(passes_.size() - 1);
 }
 
@@ -847,14 +848,20 @@ void RenderGraph::PlanBarriers()
         }
     }
 
+    // a buffer the host reads becomes visible to it right after its last live pass, from the state that pass left
     for (auto index = 0u; index < buffers_.size(); index++)
     {
-        auto &buffer = buffers_[index];
-        if (buffer.read_on_host)
+        const auto &buffer = buffers_[index];
+        if (!buffer.read_on_host || !buffer.lifetime.first)
         {
-            buffer.final_barrier = PlanMemoryBarrier(buffer_states[index], {.access = RHIAccess::HostRead});
-            buffer.final_state = buffer_states[index];
+            continue;
         }
+
+        auto &state = buffer_states[index];
+        const RHIResourceAccess host_read{.access = RHIAccess::HostRead};
+        const auto barrier = PlanMemoryBarrier(state, host_read);
+        passes_[buffer.lifetime.last].host_reads.push_back(
+            {.buffer = index, .access = host_read, .bindings = {}, .barrier = barrier, .state = state});
     }
 }
 
@@ -1084,22 +1091,22 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
         CheckBoundResourcesDeclared(pass, command_context);
         command_context.SetBindings({});
 
+        std::vector<RHIMemoryBarrier> host_read_barriers;
+        for (const auto &host_read : pass.host_reads)
+        {
+            if (host_read.barrier)
+            {
+                host_read_barriers.push_back(*host_read.barrier);
+            }
+            buffers_[host_read.buffer].GetTracked().SetTrackedAccess(host_read.state);
+        }
+        command_context.Barrier({}, host_read_barriers);
+
         if (timed_pass)
         {
             pass.gpu_ms = timed_pass->GetExecutionTime();
         }
     }
-
-    std::vector<RHIMemoryBarrier> final_barriers;
-    for (const auto &buffer : buffers_ | std::views::filter(&Buffer::read_on_host))
-    {
-        if (buffer.final_barrier)
-        {
-            final_barriers.push_back(*buffer.final_barrier);
-        }
-        buffer.GetTracked().SetTrackedAccess(buffer.final_state);
-    }
-    command_context.Barrier({}, final_barriers);
 }
 
 // a declared binding that no pipeline the pass drew or dispatched has would bind nothing. a pass that drew nothing (an

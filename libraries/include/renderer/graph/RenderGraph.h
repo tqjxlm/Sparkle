@@ -448,8 +448,8 @@ public:
     // a persistent buffer, imported like an image: planning starts from its tracked access
     [[nodiscard]] RGBuffer Import(std::string name, const RHIResourceRef<RHIBuffer> &buffer);
 
-    // the host reads the buffer once the graph's commands complete: after the last pass, the graph makes the buffer's
-    // contents visible to the host
+    // the host reads the buffer once the graph's commands complete: right after the last live pass that uses it, the
+    // graph makes the buffer's contents visible to the host
     void ReadOnHost(RGBuffer buffer);
 
     // a top-level acceleration structure, imported like a buffer

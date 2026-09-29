@@ -15,9 +15,10 @@ import render_graph_viewer  # noqa: E402
 
 READBACK = {
     "passes": [{"name": "Readback", "kind": "Copy", "culled": False,
-                "accesses": [{"resource": "Staging", "access": "CopyDst"}], "barriers": [], "attachments": []}],
+                "accesses": [{"resource": "Staging", "access": "CopyDst"}], "barriers": [], "attachments": [],
+                "barriers_after": [{"resource": "Staging", "from": "CopyDst", "to": "HostRead"}]}],
     "resources": [{"name": "Staging", "type": "Buffer", "kind": "Imported", "first_use": 0, "last_use": 0,
-                   "usage": "CopyDst", "final_barrier": {"from": "CopyDst", "to": "HostRead"}}],
+                   "usage": "CopyDst"}],
 }
 
 DUMP = {
@@ -142,11 +143,12 @@ class RenderGraphViewerTest(unittest.TestCase):
         self.assertNotIn("GPU ms", page)
         self.assertIn('<td class="r barrier" title="Trace / ShadowMap', rows(page)[2])
 
-    def test_buffer_header_names_its_final_barrier(self):
+    def test_cell_marks_and_counts_a_barrier_after_the_pass(self):
         page = render_graph_viewer.render_html(READBACK, "fixture")
 
-        self.assertIn('title="Staging\nImported Buffer\nused Readback..Readback\nusage CopyDst\n'
-                      'final barrier [CopyDst -&gt; HostRead]"', page)
+        self.assertIn("1 passes (1 live, 0 culled), 1 barriers, 1 resources (0 transient)</p>", page)
+        self.assertIn('<td class="w barrier-after" title="Readback / Staging\naccess Staging CopyDst\n'
+                      'barrier after Staging [CopyDst -&gt; HostRead]">W</td>', rows(page)[0])
 
     def test_writes_the_page_next_to_the_dump_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -181,11 +183,12 @@ class GraphShapeProjectionTest(unittest.TestCase):
             "TLAS: Imported, Trace..Trace, AccelerationStructureRead(Compute)",
         ])
 
-    def test_projects_the_final_barrier_of_a_buffer_the_host_reads(self):
+    def test_projects_the_barrier_after_the_pass_that_records_it(self):
         self.assertEqual(graph_shape_test.project(READBACK), [
             "Readback: Copy",
             "  access Staging CopyDst",
-            "Staging: Imported, Readback..Readback, CopyDst, final barrier [CopyDst -> HostRead]",
+            "  barrier after Staging [CopyDst -> HostRead]",
+            "Staging: Imported, Readback..Readback, CopyDst",
         ])
 
     def test_names_the_subresources_of_partial_accesses(self):

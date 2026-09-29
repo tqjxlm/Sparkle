@@ -82,6 +82,8 @@ struct RenderGraph::Pass
     std::vector<RHIMemberBinding> bindings;
     // for each binding, the name of the graph resource it binds; none for a placeholder
     std::vector<std::optional<std::string>> bound_resources;
+    // the host reads of the buffers whose last live pass this is, recorded after the pass
+    std::vector<BufferAccess> host_reads;
 
     // executed: the GPU time in ms its timer reports for this frame's slot, -1 when unknown
     float gpu_ms = -1.f;
@@ -115,9 +117,6 @@ struct RenderGraph::Buffer
     // compiled
     RGLifetime lifetime{};
     RHIResourceAccess accesses{};
-    // after the last pass, for a buffer the host reads
-    std::optional<RHIMemoryBarrier> final_barrier = std::nullopt;
-    RHIResourceAccess final_state{};
 
     [[nodiscard]] RHIResource *Get() const
     {

@@ -189,6 +189,12 @@ private:
                     attachment.at("load").get<std::string>(), attachment.at("load_reason").get<std::string>(),
                     attachment.at("store").get<std::string>(), attachment.at("store_reason").get<std::string>()));
             }
+            for (const auto &barrier : pass.value("barriers_after", nlohmann::json::array()))
+            {
+                lines.push_back(std::format("  barrier after {} [{} -> {}]", GetResource(barrier),
+                                            barrier.at("from").get<std::string>(),
+                                            barrier.at("to").get<std::string>()));
+            }
         }
 
         for (const auto &resource : dump.at("resources"))
@@ -199,13 +205,6 @@ private:
                                     ? std::format("{}: physical {}", resource.at("name").get<std::string>(),
                                                   resource.at("physical").get<unsigned>())
                                     : std::format("{}: no image", resource.at("name").get<std::string>()));
-            }
-            if (resource.contains("final_barrier"))
-            {
-                const auto &barrier = resource.at("final_barrier");
-                lines.push_back(std::format("{}: final barrier [{} -> {}]", resource.at("name").get<std::string>(),
-                                            barrier.at("from").get<std::string>(),
-                                            barrier.at("to").get<std::string>()));
             }
         }
         return lines;
@@ -302,9 +301,9 @@ private:
                     "  attachment B slot 0: Clear (clear) / Store (read by Readback)",
                     "Readback: Copy",
                     "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
                     "A: physical 0",
                     "B: physical 1",
-                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "clear, sample, readback");
         }
@@ -388,9 +387,9 @@ private:
                     "  barrier Staging [CopyDst -> CopySrc]",
                     "Readback: Copy",
                     "  barrier B TransferDst->TransferSrc [CopyDst -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
                     "A: physical 0",
                     "B: physical 0",
-                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "buffer round trip");
 
@@ -419,6 +418,73 @@ private:
         auto full_barriers = config;
         full_barriers.render_graph_full_barriers = true;
         BufferRoundTrip(rhi, full_barriers);
+    }
+
+    // a buffer the host reads becomes visible to it right after its last live pass, before the passes after it. a
+    // culled pass does not count: a buffer only culled passes use gets no barrier and keeps its tracked access.
+    void HostReadAfterLastPass(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto output = config.GetResolution().output;
+        auto readback = CreateReadbackBuffer(rhi, config);
+        auto unread =
+            rhi->CreateBuffer({.size = output.x() * output.y() * 4u,
+                               .usages = RHIBuffer::BufferUsage::TransferSrc | RHIBuffer::BufferUsage::TransferDst,
+                               .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                               .is_dynamic = false},
+                              "RenderGraphTestUnread");
+        // as an earlier device write left it
+        unread->GetTracked().SetTrackedAccess({.access = RHIAccess::CopyDst});
+
+        RGTexturePool pool(rhi);
+        {
+            RenderGraph graph(rhi, pool, config);
+            const auto a = graph.CreateTexture("A", Rgba8Output);
+            const auto b = graph.CreateTexture("B", Rgba8Output);
+            const auto c = graph.CreateTexture("C", Rgba8Output);
+            const auto unread_buffer = graph.Import("Unread", unread);
+            graph.ReadOnHost(unread_buffer);
+            graph.AddRasterPass("Clear", [a](RGBuilder &builder) {
+                builder.ColorWrite(a, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            AddReadback(graph, a, readback);
+            graph.AddRasterPass("Sample", [a, b](RGBuilder &builder) {
+                builder.Sampled(a);
+                builder.ColorWrite(b, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                builder.SideEffect();
+                return [](RGRasterContext &) {};
+            });
+            graph.AddCopyPass("Upload", [unread_buffer, c](RGBuilder &builder) {
+                builder.CopySrc(unread_buffer);
+                builder.CopyDst(c);
+                builder.FullyOverwrites();
+                return [unread_buffer, c](RGCopyContext &context) { context.CopyFromBuffer(unread_buffer, c); };
+            });
+
+            Run(rhi, graph,
+                {
+                    "Clear: Raster",
+                    "  barrier A Undefined->ColorOutput [None -> ColorWrite]",
+                    "  attachment A slot 0: Clear (clear) / Store (read by Readback)",
+                    "Readback: Copy",
+                    "  barrier A ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
+                    "Sample: Raster",
+                    "  barrier A TransferSrc->Read [CopySrc -> Sampled(Pixel)]",
+                    "  barrier B Undefined->ColorOutput [None -> ColorWrite]",
+                    "  attachment B slot 0: Clear (clear) / DontCare (no later reader)",
+                    "Upload: culled (unread outputs: C)",
+                    "A: physical 0",
+                    "B: physical 1",
+                    "C: no image",
+                },
+                "host read after the last pass");
+        }
+
+        Expect(readback->GetTracked().GetTrackedAccess() == RHIResourceAccess{.access = RHIAccess::HostRead},
+               "the graph writes the host read through to the buffer the host reads");
+        Expect(unread->GetTracked().GetTrackedAccess() == RHIResourceAccess{.access = RHIAccess::CopyDst},
+               "a buffer the host reads that no live pass uses keeps its tracked access");
     }
 
     // a screen quad pipeline created from an attachment signature, with nothing bound to sample, draws a cleared
@@ -451,9 +517,9 @@ private:
                     "  attachment B slot 0: DontCare (fully overwritten) / Store (read by Readback)",
                     "Readback: Copy",
                     "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
                     "A: physical 0",
                     "B: physical 1",
-                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "declared binding");
         }
@@ -499,8 +565,8 @@ private:
                     "  attachment B slot 0: DontCare (fully overwritten) / Store (read by Readback)",
                     "Readback: Copy",
                     "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
                     "B: physical 0",
-                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "placeholder");
         }
@@ -541,8 +607,8 @@ private:
                     "  attachment A slot 0: Clear (clear) / Store (read by Readback)",
                     "Readback: Copy",
                     "  barrier A ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
                     "A: physical 0",
-                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "native recording");
         }
@@ -1118,13 +1184,14 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 18> Steps{
+    static constexpr std::array<Step, 19> Steps{
         &RenderGraphCompileTest::ClearSampleReadback,
         &RenderGraphCompileTest::DeclaredBinding,
         &RenderGraphCompileTest::Placeholder,
         &RenderGraphCompileTest::NativeRecording,
         &RenderGraphCompileTest::BufferRoundTrip,
         &RenderGraphCompileTest::FullBarriers,
+        &RenderGraphCompileTest::HostReadAfterLastPass,
         &RenderGraphCompileTest::AccelerationStructureBuilds,
         &RenderGraphCompileTest::Subresources,
         &RenderGraphCompileTest::MipRun,

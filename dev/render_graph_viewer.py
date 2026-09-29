@@ -30,13 +30,15 @@ th.resource span { writing-mode: vertical-rl; transform: rotate(180deg); }
 .w { background: #f7c9a9; }
 .rw { background: #e3c8f0; }
 .barrier { box-shadow: inset 0 3px #d33; }
+.barrier-after { box-shadow: inset 0 -3px #d33; }
+.barrier.barrier-after { box-shadow: inset 0 3px #d33, inset 0 -3px #d33; }
 tr.culled { opacity: 0.45; }
 td small { display: block; font-size: 10px; }
 """
 
 LEGEND = ("R read, W write, RW both; C color / D depth attachment with load (ld load, clr clear, – don't care)"
-          " / store (st store, – don't care); red top edge: barrier before the pass; shaded: resource lifetime;"
-          " italic: imported. Hover a cell or header for details.")
+          " / store (st store, – don't care); red top edge: barrier before the pass, red bottom edge: barrier after it;"
+          " shaded: resource lifetime; italic: imported. Hover a cell or header for details.")
 
 
 def resource_of(entry):
@@ -56,10 +58,9 @@ def describe_barrier(barrier):
     return f"barrier {resource_of(barrier)}{layouts} [{barrier['from']} -> {barrier['to']}]"
 
 
-def describe_final_barrier(resource):
-    """The barrier after the last pass that makes a buffer the host reads visible to it."""
-    barrier = resource["final_barrier"]
-    return f"final barrier [{barrier['from']} -> {barrier['to']}]"
+def describe_barrier_after(barrier):
+    """A memory barrier recorded after the pass, e.g. one that makes a buffer the host reads visible to it."""
+    return f"barrier after {resource_of(barrier)} [{barrier['from']} -> {barrier['to']}]"
 
 
 def describe_attachment(attachment):
@@ -86,8 +87,10 @@ def cell(graph_pass, name, uses):
     details += [describe_access(access) for access in uses["accesses"]]
     details += [describe_attachment(attachment) for attachment in uses["attachments"]]
     details += [describe_barrier(barrier) for barrier in uses["barriers"]]
+    details += [describe_barrier_after(barrier) for barrier in uses["barriers_after"]]
     tooltip = html.escape("\n".join(details))
     classes = kind.lower() + (" barrier" if uses["barriers"] else "")
+    classes += " barrier-after" if uses["barriers_after"] else ""
     return f'<td class="{classes}" title="{tooltip}">{label}</td>'
 
 
@@ -103,8 +106,6 @@ def resource_header(resource, passes):
     if "first_use" in resource:
         first, last = passes[resource["first_use"]]["name"], passes[resource["last_use"]]["name"]
         details += [f"used {first}..{last}", f"usage {resource['usage']}"]
-    if "final_barrier" in resource:
-        details.append(describe_final_barrier(resource))
     css = "resource imported" if resource["kind"] == "Imported" else "resource"
     tooltip = html.escape("\n".join(details))
     return f'<th class="{css}" title="{tooltip}"><span>{html.escape(resource["name"])}</span></th>'
@@ -112,10 +113,10 @@ def resource_header(resource, passes):
 
 def uses_by_resource(graph_pass):
     """Groups a pass's accesses, attachments and barriers by the resource they name."""
-    keys = ("accesses", "attachments", "barriers")
+    keys = ("accesses", "attachments", "barriers", "barriers_after")
     uses = defaultdict(lambda: {key: [] for key in keys})
     for key in keys:
-        for entry in graph_pass[key]:
+        for entry in graph_pass.get(key, []):
             uses[entry["resource"]][key].append(entry)
     return uses
 
@@ -124,7 +125,7 @@ def render_html(dump, title):
     passes, resources = dump["passes"], dump["resources"]
     timed = any("gpu_ms" in graph_pass for graph_pass in passes)
     culled = sum(graph_pass["culled"] for graph_pass in passes)
-    barriers = sum(len(graph_pass["barriers"]) for graph_pass in passes)
+    barriers = sum(len(graph_pass["barriers"]) + len(graph_pass.get("barriers_after", [])) for graph_pass in passes)
     transients = sum(resource["kind"] == "Transient" for resource in resources)
     summary = (f"{len(passes)} passes ({len(passes) - culled} live, {culled} culled), {barriers} barriers,"
                f" {len(resources)} resources ({transients} transient)")

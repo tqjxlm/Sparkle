@@ -101,11 +101,11 @@ Each kind's record function receives a context that exposes only what the kind m
   * Depth tests synchronize as depth writes, because the attachment's store op writes the depth image.
   * Buffers and acceleration structures synchronize through memory barriers by the same rule without layouts, starting from their tracked access (`RHITrackedAccess`).
   * A build also waits for earlier builds, which covers the BLAS it reads (built before the frame) and the scratch memory it reuses.
-  * After the last pass, a buffer the host reads moves to `HostRead` through a barrier from its last access (the dump's `final_barrier`), unless it has none: waiting for the device does not make device writes visible to the host.
+  * Right after its last live pass, a buffer the host reads moves to `HostRead` through a barrier from its last access (the pass's `barriers_after` in the dump), unless it has none: waiting for the device does not make device writes visible to the host. A buffer no live pass uses gets no barrier and keeps its tracked access.
   * Barriers are batched per pass. On Metal the batches record nothing, but the plan and the tracked states are the same.
 * **Load/store.** Per raster attachment, the load op is `Clear` if the access clears, `DontCare` if the pass fully overwrites it or it is a transient with no earlier writer, otherwise `Load`. The store op is `Store` if the next live pass touching the subresource uses its contents or the texture is imported, otherwise `DontCare`.
 
-`Execute()` records each live pass: it writes the planned states through to the trackers of the images, buffers and acceleration structures, so foreign code and the next frame start from them, then records the pass's barrier batch and the pass. After the passes it records the barriers to `HostRead` in one batch.
+`Execute()` records each live pass: it writes the planned states through to the trackers of the images, buffers and acceleration structures, so foreign code and the next frame start from them, then records the pass's barrier batch and the pass. After the pass it records the barriers to `HostRead` of the buffers whose last live pass it is.
 
 ## Errors
 
@@ -169,15 +169,15 @@ python3 dev/render_graph_viewer.py <external-storage-path>/screenshots/render_gr
 
 `Dump()` returns the compiled graph as JSON:
 
-* `passes`, in declaration order: each pass's `kind`, `culled` and `cull_reason`, `gpu_ms` once executed with a timer that has a result, `accesses`, `barriers` (images with layouts, buffers and acceleration structures without) and `attachments` (slot, load and store with their reasons). Each entry names its subresources unless it covers every one.
-* `resources`, textures first, then buffers and acceleration structures: each resource's `type` (`Texture`, `Buffer` or `AccelerationStructure`) and `kind` (`Transient` or `Imported`); a transient's `format`, `size_class` (with the pixel size of an `Absolute` one) and `physical` image; the indices of the first and last live passes that use it with its `usage`, which for a buffer or acceleration structure is the union of its accesses; and the `final_barrier` of a buffer the host reads.
+* `passes`, in declaration order: each pass's `kind`, `culled` and `cull_reason`, `gpu_ms` once executed with a timer that has a result, `accesses`, `barriers` (images with layouts, buffers and acceleration structures without) and `attachments` (slot, load and store with their reasons), and `barriers_after`, the barriers recorded after a pass that records any (to `HostRead`, for buffers the host reads). Each entry names its subresources unless it covers every one.
+* `resources`, textures first, then buffers and acceleration structures: each resource's `type` (`Texture`, `Buffer` or `AccelerationStructure`) and `kind` (`Transient` or `Imported`); a transient's `format`, `size_class` (with the pixel size of an `Absolute` one) and `physical` image; the indices of the first and last live passes that use it with its `usage`, which for a buffer or acceleration structure is the union of its accesses.
 * The dump names size classes instead of pixel sizes, so a steady frame dumps the same passes, accesses, barriers and attachments at any resolution and on either backend. The `physical` assignment is the exception: transients of one format but different size classes share an image when their sizes resolve equal, e.g. `Scene` and `Output` at `render_scale` 1.
 
 ### Viewer
 
 * `python3 dev/render_graph_viewer.py <dump.json> [-o <page.html>]` renders a dump as one self-contained static HTML page (next to the dump by default), using only the Python standard library.
 * The page is a pass × resource grid: one row per pass in execution order, culled passes greyed with their reason, and one column per resource in dump order.
-* A cell shows the pass's access (`R`, `W`, `RW`; `C` or `D` for a color or depth attachment with its load/store) and marks a barrier before the pass; hovering it details accesses, subresources, attachment reasons and barriers with layouts. Shaded cells span each resource's lifetime.
+* A cell shows the pass's access (`R`, `W`, `RW`; `C` or `D` for a color or depth attachment with its load/store) and marks a barrier before or after the pass; hovering it details accesses, subresources, attachment reasons and barriers with layouts. Shaded cells span each resource's lifetime.
 * A header counts passes, barriers and transient resources, and a `GPU ms` column appears when the dump has timings.
 
 ### Pass Timing

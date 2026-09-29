@@ -138,6 +138,20 @@ nlohmann::json RenderGraph::Dump() const
         dumped["accesses"] = std::move(accesses);
         dumped["barriers"] = std::move(barriers);
         dumped["attachments"] = std::move(attachments);
+        auto barriers_after = nlohmann::json::array();
+        for (const auto &host_read : pass.host_reads)
+        {
+            if (host_read.barrier)
+            {
+                barriers_after.push_back({{"resource", buffers_[host_read.buffer].name},
+                                          {"from", ToString(host_read.barrier->from)},
+                                          {"to", ToString(host_read.barrier->to)}});
+            }
+        }
+        if (!barriers_after.empty())
+        {
+            dumped["barriers_after"] = std::move(barriers_after);
+        }
         passes.push_back(std::move(dumped));
     }
 
@@ -172,11 +186,6 @@ nlohmann::json RenderGraph::Dump() const
                               {"type", acceleration_structure ? "AccelerationStructure" : "Buffer"},
                               {"kind", "Imported"}};
         DumpUses(dumped, buffer.lifetime, ToString(buffer.accesses));
-        if (buffer.final_barrier)
-        {
-            dumped["final_barrier"] = {{"from", ToString(buffer.final_barrier->from)},
-                                       {"to", ToString(buffer.final_barrier->to)}};
-        }
         resources.push_back(std::move(dumped));
     }
 
