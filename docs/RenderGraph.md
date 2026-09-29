@@ -231,6 +231,14 @@ The renderers:
 
 A change that alters a graph on purpose updates its golden in two steps: run the shape case, whose compare step fails with the diff and leaves the dump in the screenshots folder, then rewrite the golden from that dump with the case's `--golden` name. `dev/run_tests.py` passes unknown arguments to the app, not to the evaluator, so `--update` goes to `graph_shape_test.py` directly. Each shape case overwrites the same dump, so update one golden per run.
 
+A golden is a shape gate, not a pure function of the renderer's code. Besides a change to the passes or their declarations, these change it:
+
+* the previous frame's graph: a transient's or import's first barrier starts from the access the previous frame left in the image's tracked state;
+* the pool's order: a transient gets the first free matching image in the order the pool created them, so earlier graphs (another pipeline's, an IBL cook frame's) decide which image it gets and which earlier access its first barrier waits for;
+* the scene: a directional light, a sky map and ready IBL maps add passes and imports;
+* `shadow_map_resolution`: the ShadowMap's pixel size is in the golden;
+* the resolution: transients whose sizes resolve equal may share an image, which changes `physical`.
+
 ```bash
 python3 dev/run_tests.py --framework glfw --config Release --case deferred_graph_shape
 python3 tests/render_graph/graph_shape_test.py --framework glfw --golden deferred --update
