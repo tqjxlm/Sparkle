@@ -475,6 +475,12 @@ RGBuffer RenderGraph::Import(std::string name, const RHIResourceRef<RHIBuffer> &
     return {.index = ImportBuffer({.name = std::move(name), .resource = buffer})};
 }
 
+void RenderGraph::ReadOnHost(RGBuffer buffer)
+{
+    RGCheck(buffer.index < buffers_.size(), "the host reads an invalid buffer");
+    buffers_[buffer.index].read_on_host = true;
+}
+
 RGAccelerationStructure RenderGraph::Import(std::string name, const RHIResourceRef<RHITLAS> &acceleration_structure)
 {
     RGCheck(acceleration_structure, "import {} is not an acceleration structure", name);
@@ -747,6 +753,28 @@ void RenderGraph::ResolveBindings()
     }
 }
 
+// buffers and acceleration structures follow the image rule without layouts: the memory barrier `access` needs after
+// `state`, which becomes the state after it. a build also waits for earlier builds: the BLAS it reads, submitted before
+// the frame, and the scratch memory it reuses.
+static std::optional<RHIMemoryBarrier> PlanMemoryBarrier(RHIResourceAccess &state, const RHIResourceAccess &access)
+{
+    const auto next = TransitionImageState({.layout = RHIImageLayout::Undefined, .access = state},
+                                           {.layout = RHIImageLayout::Undefined, .access = access});
+    if (!next)
+    {
+        return std::nullopt;
+    }
+
+    const bool build = access.access & RHIAccess::AccelerationStructureBuild;
+    const auto from = build ? state | access : state;
+    state = next->access;
+    if (from.access == RHIAccess::None)
+    {
+        return std::nullopt;
+    }
+    return RHIMemoryBarrier{.from = from, .to = access};
+}
+
 // each access transitions its subresources from the states the previous accesses left, seeded from the tracked states.
 // writes to contents nobody may use again discard them.
 void RenderGraph::PlanBarriers()
@@ -761,22 +789,10 @@ void RenderGraph::PlanBarriers()
 
     for (auto &pass : passes_ | std::views::filter(&Pass::live))
     {
-        // memory barriers follow the image rule without layouts. a build also waits for earlier builds: the BLAS it
-        // reads, submitted before the frame, and the scratch memory it reuses.
         for (auto &access : pass.buffer_accesses)
         {
             auto &state = buffer_states[access.buffer];
-            if (const auto next = TransitionImageState({.layout = RHIImageLayout::Undefined, .access = state},
-                                                       {.layout = RHIImageLayout::Undefined, .access = access.access}))
-            {
-                const bool build = access.access.access & RHIAccess::AccelerationStructureBuild;
-                const auto from = build ? state | access.access : state;
-                if (from.access != RHIAccess::None)
-                {
-                    access.barrier = RHIMemoryBarrier{.from = from, .to = access.access};
-                }
-                state = next->access;
-            }
+            access.barrier = PlanMemoryBarrier(state, access.access);
             access.state = state;
         }
 
@@ -828,6 +844,16 @@ void RenderGraph::PlanBarriers()
             {
                 access.load_reason = writer ? "written by " + writer->name : "imported";
             }
+        }
+    }
+
+    for (auto index = 0u; index < buffers_.size(); index++)
+    {
+        auto &buffer = buffers_[index];
+        if (buffer.read_on_host)
+        {
+            buffer.final_barrier = PlanMemoryBarrier(buffer_states[index], {.access = RHIAccess::HostRead});
+            buffer.final_state = buffer_states[index];
         }
     }
 }
@@ -990,6 +1016,7 @@ void RenderGraph::BuildRenderingInfos()
 
 // the graph writes each pass's planned state through to the tracked state before recording the pass, so foreign code
 // and the next frame start from it. with full barriers, each pass also waits for every access of the earlier passes.
+// after the passes, one batch makes the buffers the host reads visible to it.
 void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *timers)
 {
     RGCheck(compiled_ && !executed_, "the graph executes once, after compiling");
@@ -1062,6 +1089,17 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
             pass.gpu_ms = timed_pass->GetExecutionTime();
         }
     }
+
+    std::vector<RHIMemoryBarrier> final_barriers;
+    for (const auto &buffer : buffers_ | std::views::filter(&Buffer::read_on_host))
+    {
+        if (buffer.final_barrier)
+        {
+            final_barriers.push_back(*buffer.final_barrier);
+        }
+        buffer.GetTracked().SetTrackedAccess(buffer.final_state);
+    }
+    command_context.Barrier({}, final_barriers);
 }
 
 // a declared binding that no pipeline the pass drew or dispatched has would bind nothing. a pass that drew nothing (an

@@ -179,10 +179,6 @@ void VulkanImage::CopyToBuffer(VulkanCommandContext &command_context, const RHIB
     vkCmdCopyImageToBuffer(command_context.GetCommandBuffer(), image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            buffer->GetResourceThisFrame(), static_cast<unsigned>(copy_regions.size()),
                            copy_regions.data());
-
-    // waiting for the fence does not make device writes visible to the host
-    const RHIMemoryBarrier host_read{.from = {.access = RHIAccess::CopyDst}, .to = {.access = RHIAccess::HostRead}};
-    command_context.Barrier(host_read);
 }
 
 void VulkanImage::Transition(const TransitionRequest &request)

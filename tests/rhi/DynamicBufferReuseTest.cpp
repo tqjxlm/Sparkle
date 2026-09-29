@@ -127,7 +127,9 @@ private:
 
         rhi->BeginCommandBuffer();
         target->Upload(rhi, Data.data());
-        rhi->GetCommandContext()->CopyBuffer(target.get(), readback.get());
+        auto *command_context = rhi->GetCommandContext();
+        command_context->CopyBuffer(target.get(), readback.get());
+        command_context->Barrier({.from = {.access = RHIAccess::CopyDst}, .to = {.access = RHIAccess::HostRead}});
         rhi->SubmitCommandBuffer();
         rhi->WaitForDeviceIdle();
 

@@ -87,13 +87,8 @@ void VulkanBuffer::CopyToBuffer(VulkanCommandContext &command_context, const RHI
 
     ASSERT_EQUAL(GetSize(), buffer->GetSize());
 
-    const auto [before_copy, after_copy] = dst_buffer->GetUsageBarriers({.access = RHIAccess::CopyDst});
-    command_context.Barrier(before_copy);
-
     vkCmdCopyBuffer(command_context.GetCommandBuffer(), GetResourceThisFrame(), dst_buffer->GetResourceThisFrame(), 1,
                     &copy_region);
-
-    command_context.Barrier(after_copy);
 }
 
 void VulkanBuffer::CopyToImage(VulkanCommandContext &command_context, const RHIImage *image) const

@@ -159,10 +159,6 @@ public:
     }
 
 protected:
-    // barriers before and after `access`, against every access the usages allow: for a write whose earlier accesses and
-    // later consumers are unknown
-    [[nodiscard]] std::pair<RHIMemoryBarrier, RHIMemoryBarrier> GetUsageBarriers(const RHIResourceAccess &access) const;
-
     Attribute attribute_;
 
     // when IsDynamic(), RHIBuffer does not contain real resource. dynamic_allocation points to the real resource
@@ -172,6 +168,10 @@ protected:
 
 private:
     [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
+
+    // barriers before and after `access`, against every access the usages allow: for a write whose earlier accesses and
+    // later consumers are unknown
+    [[nodiscard]] std::pair<RHIMemoryBarrier, RHIMemoryBarrier> GetUsageBarriers(const RHIResourceAccess &access) const;
 
     RHITrackedAccess tracked_;
 };

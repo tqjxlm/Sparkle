@@ -200,6 +200,13 @@ private:
                                                   resource.at("physical").get<unsigned>())
                                     : std::format("{}: no image", resource.at("name").get<std::string>()));
             }
+            if (resource.contains("final_barrier"))
+            {
+                const auto &barrier = resource.at("final_barrier");
+                lines.push_back(std::format("{}: final barrier [{} -> {}]", resource.at("name").get<std::string>(),
+                                            barrier.at("from").get<std::string>(),
+                                            barrier.at("to").get<std::string>()));
+            }
         }
         return lines;
     }
@@ -297,6 +304,7 @@ private:
                     "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
                     "A: physical 0",
                     "B: physical 1",
+                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "clear, sample, readback");
         }
@@ -318,10 +326,12 @@ private:
                                  "RenderGraphTestReadback");
     }
 
-    // copies `texture` into the imported `readback` buffer
+    // copies `texture` into the imported `readback` buffer, which the host reads
     static void AddReadback(RenderGraph &graph, RGTexture texture, const RHIResourceRef<RHIBuffer> &readback)
     {
-        graph.AddCopyPass("Readback", [texture, buffer = graph.Import("Readback", readback)](RGBuilder &builder) {
+        const auto buffer = graph.Import("Readback", readback);
+        graph.ReadOnHost(buffer);
+        graph.AddCopyPass("Readback", [texture, buffer](RGBuilder &builder) {
             builder.CopySrc(texture);
             builder.CopyDst(buffer);
             return [texture, buffer](RGCopyContext &context) { context.CopyToBuffer(texture, buffer); };
@@ -380,6 +390,7 @@ private:
                     "  barrier B TransferDst->TransferSrc [CopyDst -> CopySrc]",
                     "A: physical 0",
                     "B: physical 0",
+                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "buffer round trip");
 
@@ -392,6 +403,8 @@ private:
 
         Expect(staging->GetTracked().GetTrackedAccess() == RHIResourceAccess{.access = RHIAccess::CopySrc},
                "the graph writes the final access through to the buffer");
+        Expect(readback->GetTracked().GetTrackedAccess() == RHIResourceAccess{.access = RHIAccess::HostRead},
+               "the graph writes the host read through to the buffer the host reads");
 
         rhi->WaitForDeviceIdle();
         const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
@@ -440,6 +453,7 @@ private:
                     "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
                     "A: physical 0",
                     "B: physical 1",
+                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "declared binding");
         }
@@ -486,6 +500,7 @@ private:
                     "Readback: Copy",
                     "  barrier B ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
                     "B: physical 0",
+                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "placeholder");
         }
@@ -527,6 +542,7 @@ private:
                     "Readback: Copy",
                     "  barrier A ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
                     "A: physical 0",
+                    "Readback: final barrier [CopyDst -> HostRead]",
                 },
                 "native recording");
         }

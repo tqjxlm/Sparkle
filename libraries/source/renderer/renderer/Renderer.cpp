@@ -201,6 +201,7 @@ void Renderer::AddReadback(RenderGraph &graph, RGTexture texture, bool capture_u
     const auto staging_buffer =
         graph.Import("ScreenshotBuffer",
                      CreateScreenshotBuffer(graph.GetFormat(texture), graph.GetSize(texture), std::move(*request)));
+    graph.ReadOnHost(staging_buffer);
     graph.AddCopyPass("Readback", [texture, staging_buffer](RGBuilder &builder) {
         builder.CopySrc(texture);
         builder.CopyDst(staging_buffer);

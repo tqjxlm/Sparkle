@@ -295,7 +295,11 @@ void RHIBuffer::Upload(RHIContext *rhi, const void *data)
             staging_buffer->UploadImmediate(data);
         }
 
-        rhi->GetCommandContext()->CopyBuffer(staging_buffer.get(), this);
+        auto *command_context = rhi->GetCommandContext();
+        const auto [before_copy, after_copy] = GetUsageBarriers({.access = RHIAccess::CopyDst});
+        command_context->Barrier(before_copy);
+        command_context->CopyBuffer(staging_buffer.get(), this);
+        command_context->Barrier(after_copy);
     }
 }
 } // namespace sparkle

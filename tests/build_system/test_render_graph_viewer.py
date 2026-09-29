@@ -13,6 +13,13 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "render_graph"))
 import graph_shape_test  # noqa: E402
 import render_graph_viewer  # noqa: E402
 
+READBACK = {
+    "passes": [{"name": "Readback", "kind": "Copy", "culled": False,
+                "accesses": [{"resource": "Staging", "access": "CopyDst"}], "barriers": [], "attachments": []}],
+    "resources": [{"name": "Staging", "type": "Buffer", "kind": "Imported", "first_use": 0, "last_use": 0,
+                   "usage": "CopyDst", "final_barrier": {"from": "CopyDst", "to": "HostRead"}}],
+}
+
 DUMP = {
     "passes": [
         {
@@ -135,6 +142,12 @@ class RenderGraphViewerTest(unittest.TestCase):
         self.assertNotIn("GPU ms", page)
         self.assertIn('<td class="r barrier" title="Trace / ShadowMap', rows(page)[2])
 
+    def test_buffer_header_names_its_final_barrier(self):
+        page = render_graph_viewer.render_html(READBACK, "fixture")
+
+        self.assertIn('title="Staging\nImported Buffer\nused Readback..Readback\nusage CopyDst\n'
+                      'final barrier [CopyDst -&gt; HostRead]"', page)
+
     def test_writes_the_page_next_to_the_dump_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
             dump_path = os.path.join(directory, "render_graph.json")
@@ -166,6 +179,13 @@ class GraphShapeProjectionTest(unittest.TestCase):
             "Debug<1>: Transient RGBAFloat16 Scene, no image",
             "Counter: Imported, Trace..Trace, StorageRead|StorageWrite(Compute)",
             "TLAS: Imported, Trace..Trace, AccelerationStructureRead(Compute)",
+        ])
+
+    def test_projects_the_final_barrier_of_a_buffer_the_host_reads(self):
+        self.assertEqual(graph_shape_test.project(READBACK), [
+            "Readback: Copy",
+            "  access Staging CopyDst",
+            "Staging: Imported, Readback..Readback, CopyDst, final barrier [CopyDst -> HostRead]",
         ])
 
     def test_names_the_subresources_of_partial_accesses(self):

@@ -18,7 +18,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "rendering"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
 from render_test_support import SUPPORTED_FRAMEWORKS, get_captures_dir, get_screenshot_dir  # noqa: E402
-from render_graph_viewer import describe_access, describe_attachment, describe_barrier, render_html  # noqa: E402
+from render_graph_viewer import (describe_access, describe_attachment, describe_barrier,  # noqa: E402
+                                 describe_final_barrier, render_html)
 
 GOLDEN_DIR = os.path.join(SCRIPT_DIR, "golden")
 DUMP_NAME = "render_graph.json"
@@ -48,6 +49,8 @@ def project(dump):
         if "first_use" in resource:
             first, last = passes[resource["first_use"]]["name"], passes[resource["last_use"]]["name"]
             line += f", {first}..{last}, {resource['usage']}"
+        if "final_barrier" in resource:
+            line += f", {describe_final_barrier(resource)}"
         lines.append(line)
     return lines
 

@@ -172,6 +172,11 @@ nlohmann::json RenderGraph::Dump() const
                               {"type", acceleration_structure ? "AccelerationStructure" : "Buffer"},
                               {"kind", "Imported"}};
         DumpUses(dumped, buffer.lifetime, ToString(buffer.accesses));
+        if (buffer.final_barrier)
+        {
+            dumped["final_barrier"] = {{"from", ToString(buffer.final_barrier->from)},
+                                       {"to", ToString(buffer.final_barrier->to)}};
+        }
         resources.push_back(std::move(dumped));
     }
 

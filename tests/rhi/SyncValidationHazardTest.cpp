@@ -67,7 +67,7 @@ public:
 private:
     static constexpr size_t BufferSize = 256;
 
-    // raw copies bypass RHICommandContext::CopyBuffer, whose barriers would order them
+    // two raw copies into one buffer, with no barrier between them
     void RecordHazard(RHIContext *rhi)
     {
         auto source =

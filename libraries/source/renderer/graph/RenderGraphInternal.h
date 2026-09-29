@@ -110,10 +110,14 @@ struct RenderGraph::Buffer
 {
     std::string name;
     std::variant<RHIResourceRef<RHIBuffer>, RHIResourceRef<RHITLAS>> resource;
+    bool read_on_host = false;
 
     // compiled
     RGLifetime lifetime{};
     RHIResourceAccess accesses{};
+    // after the last pass, for a buffer the host reads
+    std::optional<RHIMemoryBarrier> final_barrier = std::nullopt;
+    RHIResourceAccess final_state{};
 
     [[nodiscard]] RHIResource *Get() const
     {

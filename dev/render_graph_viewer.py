@@ -56,6 +56,12 @@ def describe_barrier(barrier):
     return f"barrier {resource_of(barrier)}{layouts} [{barrier['from']} -> {barrier['to']}]"
 
 
+def describe_final_barrier(resource):
+    """The barrier after the last pass that makes a buffer the host reads visible to it."""
+    barrier = resource["final_barrier"]
+    return f"final barrier [{barrier['from']} -> {barrier['to']}]"
+
+
 def describe_attachment(attachment):
     return (f"attachment {resource_of(attachment)} slot {attachment['slot']}:"
             f" {attachment['load']} ({attachment['load_reason']})"
@@ -97,6 +103,8 @@ def resource_header(resource, passes):
     if "first_use" in resource:
         first, last = passes[resource["first_use"]]["name"], passes[resource["last_use"]]["name"]
         details += [f"used {first}..{last}", f"usage {resource['usage']}"]
+    if "final_barrier" in resource:
+        details.append(describe_final_barrier(resource))
     css = "resource imported" if resource["kind"] == "Imported" else "resource"
     tooltip = html.escape("\n".join(details))
     return f'<th class="{css}" title="{tooltip}"><span>{html.escape(resource["name"])}</span></th>'
