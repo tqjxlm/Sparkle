@@ -760,13 +760,12 @@ void RenderGraph::ResolveBindings()
     }
 }
 
-// buffers and acceleration structures follow the image rule without layouts: the memory barrier `access` needs after
-// `state`, which becomes the state after it. a build also waits for earlier builds: the BLAS it reads, submitted before
-// the frame, and the scratch memory it reuses.
+// buffers and acceleration structures follow the access rule: the memory barrier `access` needs after `state`, which
+// becomes the state after it. a build also waits for earlier builds: the BLAS it reads, submitted before the frame, and
+// the scratch memory it reuses.
 static std::optional<RHIMemoryBarrier> PlanMemoryBarrier(RHIResourceAccess &state, const RHIResourceAccess &access)
 {
-    const auto next = TransitionImageState({.layout = RHIImageLayout::Undefined, .access = state},
-                                           {.layout = RHIImageLayout::Undefined, .access = access});
+    const auto next = TransitionAccess(state, access);
     if (!next)
     {
         return std::nullopt;
@@ -774,7 +773,7 @@ static std::optional<RHIMemoryBarrier> PlanMemoryBarrier(RHIResourceAccess &stat
 
     const bool build = access.access & RHIAccess::AccelerationStructureBuild;
     const auto from = build ? state | access : state;
-    state = next->access;
+    state = *next;
     if (from.access == RHIAccess::None)
     {
         return std::nullopt;
