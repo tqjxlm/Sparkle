@@ -411,20 +411,20 @@ void RenderFramework::EndFrame()
 {
     PROFILE_SCOPE("RenderFramework::EndFrame");
 
+    // a recorded frame is submitted even when the surface is lost while it records: recording already advanced the
+    // CPU-side state (tracked resource states, staged builds, timer queries), and a lost surface only fails the present
+    rhi_->EndFrame();
+
+    // reset debug point
+    renderer_->SetDebugPoint(-1., -1.);
+
     if (!native_view_->CanRender())
     {
         Log(Debug, "lost rendering surface. releasing render resources now...");
 
         rhi_->ReleaseRenderResources();
         rhi_->DestroySurface();
-
-        return;
     }
-
-    rhi_->EndFrame();
-
-    // reset debug point
-    renderer_->SetDebugPoint(-1., -1.);
 }
 
 void RenderFramework::ConsumeRenderThreadTasks()

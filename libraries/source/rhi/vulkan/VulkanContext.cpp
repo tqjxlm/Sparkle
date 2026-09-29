@@ -320,12 +320,7 @@ void VulkanContext::Cleanup()
 
 void VulkanContext::ReleaseRenderResources()
 {
-    // surface loss releases the resources instead of ending a recorded frame
-    if (command_context_ == &frame_command_context_)
-    {
-        frame_command_context_.End();
-        command_context_ = nullptr;
-    }
+    ASSERT_F(command_context_ != &frame_command_context_, "render resources are released inside a frame");
 
     if (!command_buffers_.empty())
     {
