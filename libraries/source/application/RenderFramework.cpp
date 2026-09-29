@@ -91,6 +91,12 @@ const char *FindViewedTexture(const nlohmann::json &dump)
     return nullptr;
 }
 
+// the name of the pass a dumped resource names by index under `key`, e.g. its first use
+const char *DumpPassName(const nlohmann::json &dump, const nlohmann::json &resource, const char *key)
+{
+    return DumpString(dump.at("passes").at(resource.at(key).get<size_t>()), "name");
+}
+
 // the format and size class of a dumped transient, e.g. "RGBAFloat16 Scene", or the kind of an import
 std::string DescribeResource(const nlohmann::json &resource)
 {
@@ -671,7 +677,11 @@ void RenderFramework::DrawGraphUi()
             ImGui::TableNextRow();
 
             ImGui::TableNextColumn();
-            if (ImGui::Selectable(name.c_str(), name == view, ImGuiSelectableFlags_SpanAllColumns) && name != view)
+            if (resource.at("type").get_ref<const std::string &>() != "Texture")
+            {
+                ImGui::TextUnformatted(name.c_str());
+            }
+            else if (ImGui::Selectable(name.c_str(), name == view, ImGuiSelectableFlags_SpanAllColumns) && name != view)
             {
                 view_config->Set(name);
             }
@@ -682,7 +692,8 @@ void RenderFramework::DrawGraphUi()
             ImGui::TableNextColumn();
             if (resource.contains("first_use"))
             {
-                ImGui::TextWrapped("%s..%s", DumpString(resource, "first_use"), DumpString(resource, "last_use"));
+                ImGui::TextWrapped("%s..%s", DumpPassName(*graph_dump, resource, "first_use"),
+                                   DumpPassName(*graph_dump, resource, "last_use"));
             }
         }
 
