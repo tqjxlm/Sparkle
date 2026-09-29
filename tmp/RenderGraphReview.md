@@ -45,11 +45,11 @@ Status: review complete; fixes in progress. A finding marked **Done** is fixed i
 * **Done.** **A3 [high] Workflow: nothing is built or run locally.** RenderGraphProgress.md:148 says so, which contradicts the standing local-gates rule (check_format → check_tidy → full run_tests before push). The one local physical-GPU run (M5 Max) is what found the Metal skipped-encoder timer bug, and CI cannot exercise Metal timing, NRD or MetalFX at all. Action: every step builds and runs the local gates on macOS (macos + glfw/MoltenVK) before pushing; CI covers the platforms that can't run locally (Windows, Linux lavapipe, Android emulator). Update the Workflow section.
 * **Closed (owner: no split).** **A4 [med] PR shape.** PR #100 is ~11K insertions and 5.7K deletions; `0ca0123` alone ("Phase 0+1") touches 133 files, +4.9K/−3.5K. Action: split into reviewable PRs merged in order: (1) Phase 0 RHI (`cc35c0e`..`8c98057`, independently valuable: sync2, dynamic rendering, sync-validation gate, several real hazard fixes); (2) graph core + tests; (3) renderer ports; (4) Phase 2 visibility. Split `0ca0123` back into its step commits (1.2–1.11) if the history still allows it.
 * **A5 [low] Stale design header.** `RenderGraphDesign.md:3` says "Nothing here is implemented", but Phases 0–2 are. Action: state which phases are implemented and point to the progress log for deviations.
-* **A6 [low, C] Binding type spelled three times.** `std::function<RHIMemberBinding(RHIContext *, RHIImage &, const RGSubresources &)>` appears at `RenderGraph.h:296` (as `RGBuilder::ImageBinding`), `:540` and `:572`. Action: one alias shared by `RGBuilder` and `RenderGraph`.
+* **Done.** **A6 [low, C] Binding type spelled three times.** `std::function<RHIMemberBinding(RHIContext *, RHIImage &, const RGSubresources &)>` appears at `RenderGraph.h:296` (as `RGBuilder::ImageBinding`), `:540` and `:572`. Action: one alias shared by `RGBuilder` and `RenderGraph`.
 * **A7 [info] Size is within target.** The core is 2,241 physical lines, but about 1,276 once blanks, comments and brace-only lines are excluded; that is inside the design's 1,000–1,500. Not over-engineered: the per-mip runs, reason strings, placeholders and binding validation all have users. Action: the dead API (G11) and DRY merges (G15–G19) trim roughly another 150 lines.
-* **A8 [low, C] Binding check depends on list order.** `CheckBindingsApplied` (`RenderGraph.cpp:1030`) walks `pass.bindings` by index, which relies on `ResolveBindings` (`:694`) appending textures, then buffers, then placeholders in that exact order. Action: store the resource name (or access index) with each resolved binding.
+* **Done.** **A8 [low, C] Binding check depends on list order.** `CheckBindingsApplied` (`RenderGraph.cpp:1030`) walks `pass.bindings` by index, which relies on `ResolveBindings` (`:694`) appending textures, then buffers, then placeholders in that exact order. Action: store the resource name (or access index) with each resolved binding.
 * **A9 [low, C] Buffer planning calls the image rule with fake layouts.** `RenderGraph.cpp:735` wraps accesses in `RHIImageState{Undefined, access}` to reuse `TransitionImageState`. Action: expose the access-only rule from `RHIBarrier`/`RHIImage` and have the image rule call it.
-* **A10 [info] Culling works per texture, not per subresource.** `Cull` (`RenderGraph.cpp:557`) keeps one `needed` flag per texture. Correct today because transients have one mip and one layer and imports always keep their writers. Action: keep it, and note the constraint next to the loop if multi-mip transients arrive.
+* **Done** (commented next to the loop). **A10 [info] Culling works per texture, not per subresource.** `Cull` (`RenderGraph.cpp:557`) keeps one `needed` flag per texture. Correct today because transients have one mip and one layer and imports always keep their writers. Action: keep it, and note the constraint next to the loop if multi-mip transients arrive.
 
 ## 2. Graph core
 
@@ -85,37 +85,37 @@ Deviations from the design not recorded in the progress log. For all of these, u
   * kill switches `pool_reuse` and `full_barriers`;
   * viewer mip, layer and channel selection;
   * mandatory bindings (declared bindings are optional).
-* **G10** Better than designed: `RGAccelerationStructure` is its own handle type (D17 names only `RGTexture`/`RGBuffer`). Action items worth doing now: add the dump resource-type field, which removes the viewer's "textures first" assumption (T26), and the `full_barriers` kill switch for bisecting synchronization bugs.
+* **Done** (dump `type` field and `render_graph_full_barriers`: one memory barrier from every earlier access per pass). **G10** Better than designed: `RGAccelerationStructure` is its own handle type (D17 names only `RGTexture`/`RGBuffer`). Action items worth doing now: add the dump resource-type field, which removes the viewer's "textures first" assumption (T26), and the `full_barriers` kill switch for bisecting synchronization bugs.
 
 API scope and encapsulation:
 
-* **G11 [low, C] Dead API.**
+* **Done.** **G11 [low, C] Dead API.**
   * `RGBuilder::StorageRead` (both overloads, `RenderGraph.h:179,217`) and `RGRasterContext::GetAttachmentSignature` (`:378`) have no callers. Action: delete them.
   * `RGExternalContext::GetCommandContext` (`:439`) has no callers either. Keep it: route NRD (`NrdDenoiser.cpp:443,473`) and MetalFX (M9) through it instead of `rhi_->GetCommandContext()`.
-* **G12 [low] Access narrower than public.**
+* **Partly done** (the graph still reads the pool's `rhi_`: giving `RenderGraph` its own `RHIContext *` changes the 5 construction sites). **G12 [low] Access narrower than public.**
   * Make protected: `RGPassContext::GetBuffer` and `GetAccelerationStructure` (only `RGCopyContext` uses them).
   * Make private: `RGTexturePool::Key`.
   * Move into the .cpp: `RGSubresources::Overlaps`/`Contains` (used only there).
   * `friend class RenderGraph` in `RGPassContext` (`RenderGraph.h:358`) is likely redundant (P, needs a compile).
   * The graph reads the pool's private `rhi_` through friendship (`RenderGraph.cpp:703,712`); give the graph its own `RHIContext *`.
-* **G13 [med/low] Internals in the public header.** `Access`, `BufferAccess`, `Pass`, `Texture` and `Buffer` (`RenderGraph.h:529-624`, ~100 lines) are in the header only because the `AddPass` template writes `passes_[index].record`. Action: a non-template `SetRecord(index, std::function<void(RHICommandContext &)>)` (or pimpl) moves all of them to the .cpp; also fixes A6.
-* **G14 [low] `Buffer` is a union tagged by null pointers.** `RenderGraph.h:609-623`, `.cpp:686`. Action: store the tracked access pointer plus a kind (which also feeds the dump type field).
+* **Done** (private `RenderGraphInternal.h` plus a non-template `SetRecord`). **G13 [med/low] Internals in the public header.** `Access`, `BufferAccess`, `Pass`, `Texture` and `Buffer` (`RenderGraph.h:529-624`, ~100 lines) are in the header only because the `AddPass` template writes `passes_[index].record`. Action: a non-template `SetRecord(index, std::function<void(RHICommandContext &)>)` (or pimpl) moves all of them to the .cpp; also fixes A6.
+* **Done** (a `std::variant` of the buffer and TLAS references: the binding needs the typed TLAS). **G14 [low] `Buffer` is a union tagged by null pointers.** `RenderGraph.h:609-623`, `.cpp:686`. Action: store the tracked access pointer plus a kind (which also feeds the dump type field).
 
 Reuse / DRY:
 
-* **G15** Lifetime accumulation is written twice (`RenderGraph.cpp:590-602`, `670-684`) and dumped twice (`RenderGraphDump.cpp:206-211`, `225-230`). Action: one `Lifetime { optional first; last; Extend(pass) }`.
-* **G16** The slot → attachment dispatch appears three times (`RenderGraph.cpp:809-825`, `947-954`; `RenderGraphDump.cpp:161-163`). Action: store `load_op`/`store_op` on `Access` with the reasons, and build `rendering_info` once after store inference. This also takes attachment assembly out of `PlanBarriers`.
-* **G17** Duplicated checks and lookups:
+* **Done.** **G15** Lifetime accumulation is written twice (`RenderGraph.cpp:590-602`, `670-684`) and dumped twice (`RenderGraphDump.cpp:206-211`, `225-230`). Action: one `Lifetime { optional first; last; Extend(pass) }`.
+* **Done.** **G16** The slot → attachment dispatch appears three times (`RenderGraph.cpp:809-825`, `947-954`; `RenderGraphDump.cpp:161-163`). Action: store `load_op`/`store_op` on `Access` with the reasons, and build `rendering_info` once after store inference. This also takes attachment assembly out of `PlanBarriers`.
+* **Done.** **G17** Duplicated checks and lookups:
   * default-stage resolution (`RenderGraph.cpp:198,287`): one `ResolveStages(kind, stages)`;
   * the kind and declared-twice checks in `Declare`/`DeclareBuffer` (`:171-179`, `257-262`);
   * declared-lookup in `GetImage`/`CheckDeclared` (`:350,370`).
-* **G18** The dump's hand-written enum name tables (`RenderGraphDump.cpp:27-70`) already miss `SRV` and `TransientAttachment`. Action: `magic_enum::enum_flags_name` with `is_flags`.
-* **G19** The four bound-access overload templates (`RenderGraph.h:185-238`) can share one private helper.
+* **Done** (usages now print in bit order; goldens updated). **G18** The dump's hand-written enum name tables (`RenderGraphDump.cpp:27-70`) already miss `SRV` and `TransientAttachment`. Action: `magic_enum::enum_flags_name` with `is_flags`.
+* **Closed** (the overloads already share `Bind`; merging further needs member pointers). **G19** The four bound-access overload templates (`RenderGraph.h:185-238`) can share one private helper.
 
 Modern C++ (C++20):
 
-* **G20 [med/low, C] Double type erasure.** `AddPass` (`RenderGraph.h:631-636`) wraps the execute lambda in `std::function<void(Context &)>` inside another `std::function`. Action: capture the returned callable directly.
-* **G21 [low] Unconstrained templates.** `template <typename Setup>` has no constraint. Action: `requires std::invocable<Setup, RGBuilder &> && std::invocable<std::invoke_result_t<Setup, RGBuilder &>, Context &>` for a readable error when the context type is wrong.
+* **Done.** **G20 [med/low, C] Double type erasure.** `AddPass` (`RenderGraph.h:631-636`) wraps the execute lambda in `std::function<void(Context &)>` inside another `std::function`. Action: capture the returned callable directly.
+* **Done.** **G21 [low] Unconstrained templates.** `template <typename Setup>` has no constraint. Action: `requires std::invocable<Setup, RGBuilder &> && std::invocable<std::invoke_result_t<Setup, RGBuilder &>, Context &>` for a readable error when the context type is wrong.
 * **G22 [low] Constants could be constexpr.** `RenderGraph.cpp:15-21` are `static const` because the `RegisterEnumAsFlag` operators are not constexpr. Action: make them constexpr; `KindAllows` follows.
 * **G23 [low] Initializer noise.** Default member initializers (`= {}`) on the vector/string fields of `Access` and `Pass` remove the `.bindings = {}, .barriers = {}, …` noise at `RenderGraph.cpp:181-191, 504-512`.
 * **G24 [low] Map where a vector fits.** `std::unordered_map<const RHIImage *, …>` (`RenderGraph.cpp:722`). Action: a vector indexed by physical image or import.
@@ -126,7 +126,7 @@ Comments:
   * `RenderGraph.h:115` says size classes resolve "when the graph compiles"; they resolve in `CreateTexture`.
   * The `// compiled` marker on `Texture` (`RenderGraph.h:595-601`) covers fields set at `Import`/`CreateTexture`.
 * **G26** Comments that restate the name: `RenderGraph.h:292,295,324,327`; `RenderGraph.cpp:18`.
-* **G27** Missing invariants:
+* **Done.** **G27** Missing invariants:
   * the positional coupling between bindings and checks (A8);
   * per-texture `needed` relying on single-subresource transients (A10);
   * planned states shared by aliased transients (`RenderGraph.cpp:722`).
@@ -336,7 +336,7 @@ Proposed docs/RenderGraph.md outline:
 
 Coverage of the compiler is better than expected. `render_graph_compile` asserts exact plans for culling, sharing within and across frames, pool release, load/store with reasons, per-subresource barriers, tracked-state seeding, the External contract and buffer barriers, and reads pixels back.
 
-* **T13 [high] No test for any aborting check.** About 31 `RGCheck`s have no negative test; binding validation is the most intricate. Action: route `RGCheck` through a swappable handler (record instead of abort under test), then add a `render_graph_errors` case with one mistake per error class and its expected message.
+* **Done** (`RGErrorsThrow` makes `RGCheck` throw on its thread; `render_graph_errors` covers 29 mistakes). **T13 [high] No test for any aborting check.** About 31 `RGCheck`s have no negative test; binding validation is the most intricate. Action: route `RGCheck` through a swappable handler (record instead of abort under test), then add a `render_graph_errors` case with one mistake per error class and its expected message.
 * **T14 [med] Untested paths.** A merged run of several mips (the 2-mip cube always differs per mip), `SampledOrPlaceholder`, `NativeAccess` inside graph rendering, AS build → read and build → build barriers (`BuildTLAS` is absent from gpu.txt), a buffer imported twice, and `render_graph_view` on renderers other than deferred. Action: add them to `render_graph_compile` where synthetic graphs can reach them.
 * **T15 [med] Lost platform coverage.** `render_graph_compile` runs only on macos-macos (where barriers record nothing) and, as `render_graph_sync_validation`, on ubuntu. The removed `render_target_pool` ran on 5 triplets. Action: run `render_graph_compile` on every triplet `render_target_pool` covered.
 * **T16 [med] Golden churn is undocumented.** First-barrier sources depend on the previous frame's graph, pool order, scene content and `shadow_map_resolution`. That is acceptable for a shape gate. Action: document what churns the goldens and the update workflow (T5).
@@ -349,7 +349,7 @@ Coverage of the compiler is better than expected. `render_graph_compile` asserts
 * **T23 [low] Duplicated test helpers.** `Expect()` exists in 6 test files (3 new). `PassTimestampTest` and `RenderGraphPassTimingTest` share the same recording/finish state machine. Action: move `Expect` into `TestCase`.
 * **T24 [med] Dump formatting written three times.** Resource/subresource, barrier and attachment strings are built in `dev/render_graph_viewer.py:42,60-71`, `graph_shape_test.py:27-53` and `RenderGraphCompileTest.cpp:84-140`, with different separators. `project()`, the actual gate, has no unit test. Action: have `graph_shape_test.py` import the viewer's `describe_*` helpers, and unit-test `project()`.
 * **T25 [low] Brittle viewer tests.** `test_render_graph_viewer.py:77-114` compares exact HTML strings against a hand-written fixture. Action: assert on key substrings or parsed cells, and generate the fixture from a real dump.
-* **T26 [low] Lifetimes keyed by pass name.** `render_graph_viewer.py:103-109` maps lifetimes by name, but names repeat (`ClearIbl*Cook`), so lifetimes can map to the wrong pass. The viewer also labels only a resource's first attachment (:56). Action: dump pass indices for `first_use`/`last_use` (`RenderGraphDump.cpp:210,227`).
+* **Done** (the dump names lifetimes by pass index). **T26 [low] Lifetimes keyed by pass name.** `render_graph_viewer.py:103-109` maps lifetimes by name, but names repeat (`ClearIbl*Cook`), so lifetimes can map to the wrong pass. The viewer also labels only a resource's first attachment (:56). Action: dump pass indices for `first_use`/`last_use` (`RenderGraphDump.cpp:210,227`).
 * **T27 [low] Inconsistent imports.** `graph_shape_test.py` uses `sys.path` inserts and the viewer test uses `importlib`. Action: pick one.
 * **T28 [med] CI restores the whole SDK cache for one layer.** `ci.yml:894-900` restores the full Linux SDK cache (several GB) to get one `.so` and one manifest. A `restore-keys` prefix hit can also restore a mismatched SDK. On a cache miss, `ci.yml:912-914` fails with a traceback instead of a clear message. Action: move the Linux manifest rewrite into `build_system/prerequisites.py` `set_vulkan_layer_path`, which fixes local Linux runs too (see T12). Then either upload the layer as a small build artifact or use `fail-on-cache-miss: true`.
 * **T29 [med] CI cost unmeasured.** Every ubuntu case now runs under core validation, plus 5 sync, 6 shape and two 1280×720 64 spp lavapipe runs. Action: record the ubuntu job duration before and after in the PR.
