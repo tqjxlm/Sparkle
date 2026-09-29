@@ -174,7 +174,7 @@ Correctness:
 Surgical / dead code:
 
 * **Done.** **V7 [med, C] Unused capabilities enable real extensions.** `SupportsPixelLocalRead`/`SupportsUnifiedImageLayouts` have no callers (`RHI.h:118-122`), yet `VulkanContext.cpp:945-968, 1025-1046` enable `dynamic_rendering_local_read` and `unified_image_layouts` on every device that has them, which is driver risk for no benefit. Action: remove until Phase 3 (with M6).
-* **Done** (`TransientAttachment` stays: Metal uses it; the `VulkanRHI.h` reorder no longer exists). **V8 [low, C] Leftover declarations.**
+* **Done** (the `VulkanRHI.h` reorder no longer exists). **V8 [low, C] Leftover declarations.**
   * `RHIPipelineStage::DrawIndirect/VertexInput/VertexShader/EarlyZ/LateZ` are referenced only by the legacy translation switch, and `TransitionRequest::discard` only by tests (`RHIImage.h:18-31`).
   * `ImageUsage::TransientAttachment` has no Vulkan user left (`RHIImage.h:117`).
   * The `msaa` config and `VulkanContext::msaa_samples_` are write-only (`RHIConfig.cpp:22`, `VulkanContext.cpp:792`).
@@ -199,7 +199,7 @@ API scope:
   * `GetVkPipelineRenderingCreateInfo` → next to the PSO code.
   * `VulkanRenderPass.{h,cpp}` no longer holds a render pass → rename or fold.
 * **Done.** **V11 [low] Pointer vs reference contexts.** `RHIUiHandler::Render(RHICommandContext *)` and `RHINrdBackend::RunDispatches(RHICommandContext *, …)` take pointers, while timers and `RecordBuild` take references. Action: references everywhere.
-* **Done** (Metal's label is still a no-op outside encoders). **V12 [low] Copy and External passes get no debug label**, because `BeginDebugLabel` is protected. That misses the "labels always on" goal for `BuildTLAS`, `Upload` and `Readback`. Action: let the graph label every pass.
+* **Done** (Metal records labels as command buffer debug groups). **V12 [low] Copy and External passes get no debug label**, because `BeginDebugLabel` is protected. That misses the "labels always on" goal for `BuildTLAS`, `Upload` and `Readback`. Action: let the graph label every pass.
 * **Done.** **V13 [low] Compute passes take barriers differently from raster passes.** `BeginRendering` takes the barrier batch, but compute calls `Barrier` after `BeginComputePass` (`RenderGraph.cpp:999-1000`). Action: `BeginComputePass(pass, barriers)`.
 
 Reuse:
@@ -209,7 +209,7 @@ Reuse:
   * `Barrier({}, std::span(&b, 1))` appears 7 times: add a single-barrier overload.
   * `VulkanNrdBackend.cpp:333-366` hand-builds `VkImageMemoryBarrier2`/`VkDependencyInfo`: share the `BarrierInternal` helper.
   * Headless and windowed frame begin/end are duplicated (`VulkanContext.cpp:429-438/504-510`, `518-521/538-541`).
-* **Done** (documented the current rule; "copies record nothing" needs a HostRead graph access first). **V15 [low] Copy synchronization is inconsistent and undocumented.**
+* **Done** (copies record nothing; `RenderGraph::ReadOnHost` plans the host read of readback buffers). **V15 [low] Copy synchronization is inconsistent and undocumented.**
   * `CopyBuffer` self-synchronizes with usage barriers.
   * `CopyImageToBuffer` adds only HostRead.
   * `CopyBufferToImage`/`BlitImage` add none.
