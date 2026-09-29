@@ -1,6 +1,7 @@
 #include "renderer/pass/IBLDiffusePass.h"
 
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
@@ -118,7 +119,7 @@ void IBLDiffusePass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)
 
     graph.AddComputePass("CookIblDiffuse", compute_pass_, [this, env_map, map](RGBuilder &builder) {
         using Table = IBLDiffuseMapComputeShader::ResourceTable;
-        builder.Sampled(env_map, &Table::env_map, &Table::env_map_sampler);
+        builder.Sampled(env_map, &Table::env_map, &Table::env_map_sampler, SkyRenderProxy::SkyMapSampler);
         builder.StorageReadWrite(map, &Table::out_cube_map);
         return [this, threads = Vector3UInt(ibl_image_->GetWidth(), ibl_image_->GetHeight(), 6u)](
                    RGComputeContext &context) { context.DispatchCompute(pipeline_state_, threads, {16u, 16u, 1u}); };

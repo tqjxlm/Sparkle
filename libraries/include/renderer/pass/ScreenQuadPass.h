@@ -38,11 +38,21 @@ public:
         Vector2 uv;
     };
 
+    // how AddTo samples its input, always with edge clamping
+    enum class InputFilter : uint8_t
+    {
+        Nearest,
+        // bilinear when the input's size differs from the output's and the device filters the input's format
+        // linearly, otherwise nearest
+        Bilinear,
+    };
+
     // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at slot 0.
     // `to_back_buffer` applies the window's pre-rotation.
-    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, bool to_back_buffer = false);
+    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format,
+                   InputFilter input_filter = InputFilter::Nearest, bool to_back_buffer = false);
 
-    // adds a Raster pass drawing `input`, sampled with the sampler its image carries, over all of `output`
+    // adds a Raster pass drawing `input`, sampled as the pass's InputFilter chooses, over all of `output`
     void AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const;
 
     void InitRenderResources(const RenderConfig &config) override;
@@ -57,8 +67,8 @@ protected:
     {
     }
 
-    // declares the pass's input, bound to the pixel shader's texture and sampler
-    virtual void SampleInput(RGBuilder &builder, RGTexture input) const;
+    // declares the pass's input, bound to the pixel shader's texture, and binds `sampler` to its sampler
+    virtual void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const;
 
     const static std::array<ScreenVertex, 4> Vertices;
     const static std::array<uint32_t, 6> Indices;
@@ -83,6 +93,7 @@ private:
     void BindVertexShaderResources();
 
     RHIAttachmentSignature signature_;
+    InputFilter input_filter_;
     bool to_back_buffer_ = false;
 };
 } // namespace sparkle

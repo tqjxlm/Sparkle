@@ -116,7 +116,7 @@ struct RGTextureDesc
     // Absolute only
     uint32_t width = 0;
     uint32_t height = 0;
-    // images carry the sampler shaders sample them with
+    // the sampler the pooled image carries; bindings take their sampler from the pass
     RHISampler::SamplerAttribute sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
                                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
                                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
@@ -151,7 +151,7 @@ enum class RGPassKind : uint8_t
 // compute, external: all). a shader access given a `binding` member of a shader's ResourceTable binds the resource
 // there in every pipeline the pass draws or dispatches whose shader uses that table: a sampled binding views the whole
 // image, a storage binding the access's single mip (a cube's layers as a 2D array). a sampled access given a
-// `sampler_binding` member too binds the sampler the image carries there.
+// `sampler_binding` member too binds a sampler of the given attributes there.
 class RGBuilder
 {
 public:
@@ -178,25 +178,26 @@ public:
 
     template <class Table>
     void Sampled(RGTextureRange texture, RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding,
-                 RHIShaderStageMask stages = RHIShaderStageMask::None)
+                 const RHISampler::SamplerAttribute &sampler, RHIShaderStageMask stages = RHIShaderStageMask::None)
     {
         Sampled(texture, binding, stages);
-        BindLastAccess(SamplerBinding(sampler_binding));
+        BindLastAccess(SamplerBinding(sampler_binding, sampler));
     }
 
     // Sampled when `texture` is valid. otherwise the input is missing, and `placeholder`, an image outside the graph,
-    // binds there with its sampler, so no pipeline keeps an image an earlier graph bound.
+    // binds there instead, so no pipeline keeps an image an earlier graph bound.
     template <class Table>
     void SampledOrPlaceholder(RGTexture texture, const RHIResourceRef<RHIImage> &placeholder,
-                              RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding)
+                              RGSampledBinding<Table> binding, RGSamplerBinding<Table> sampler_binding,
+                              const RHISampler::SamplerAttribute &sampler)
     {
         if (texture.IsValid())
         {
-            Sampled(texture, binding, sampler_binding);
+            Sampled(texture, binding, sampler_binding, sampler);
             return;
         }
         BindPlaceholder(placeholder, ViewBinding(binding));
-        BindPlaceholder(placeholder, SamplerBinding(sampler_binding));
+        BindPlaceholder(placeholder, SamplerBinding(sampler_binding, sampler));
     }
 
     template <class Table>
@@ -288,10 +289,14 @@ private:
         };
     }
 
-    template <class Table> static ImageBinding SamplerBinding(RGSamplerBinding<Table> binding)
+    [[nodiscard]] static RHIResourceRef<RHISampler> GetSampler(RHIContext *rhi,
+                                                               const RHISampler::SamplerAttribute &sampler);
+
+    template <class Table>
+    static ImageBinding SamplerBinding(RGSamplerBinding<Table> binding, const RHISampler::SamplerAttribute &sampler)
     {
-        return [binding](RHIContext *, RHIImage &image, const RGSubresources &) {
-            return RHIMemberBinding(binding, image.GetSampler());
+        return [binding, sampler](RHIContext *rhi, RHIImage &, const RGSubresources &) {
+            return RHIMemberBinding(binding, GetSampler(rhi, sampler));
         };
     }
 

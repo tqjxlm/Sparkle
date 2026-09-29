@@ -1,6 +1,7 @@
 #include "renderer/pass/IBLSpecularPass.h"
 
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
@@ -85,7 +86,7 @@ void IBLSpecularPass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)
     const auto level = current_caching_level_;
     graph.AddComputePass("CookIblSpecular", compute_pass_, [this, env_map, map, level](RGBuilder &builder) {
         using Table = IBLSpecularMapComputeShader::ResourceTable;
-        builder.Sampled(env_map, &Table::env_map, &Table::env_map_sampler);
+        builder.Sampled(env_map, &Table::env_map, &Table::env_map_sampler, SkyRenderProxy::SkyMapSampler);
         builder.StorageReadWrite(map.Mip(level), &Table::out_cube_map);
         return [this, threads = Vector3UInt(ibl_image_->GetWidth(level), ibl_image_->GetHeight(level), 6u)](
                    RGComputeContext &context) { context.DispatchCompute(pipeline_state_, threads, {16u, 16u, 1u}); };

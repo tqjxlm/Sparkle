@@ -8,6 +8,7 @@
 #include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/pass/UiPass.h"
 #include "renderer/proxy/SceneRenderProxy.h"
+#include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/renderer/CPURenderer.h"
 #include "renderer/renderer/DeferredRenderer.h"
 #include "renderer/renderer/ForwardRenderer.h"
@@ -207,28 +208,8 @@ void Renderer::AddReadback(RenderGraph &graph, RGTexture texture, bool capture_u
     });
 }
 
-RGTextureDesc Renderer::GetSceneColorDesc() const
-{
-    RGTextureDesc desc{.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Scene};
-    if (resolution_.NeedUpsample())
-    {
-        desc.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                        .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-    }
-    else
-    {
-        desc.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-    }
-    return desc;
-}
-
-RHIResourceRef<RHIImage> Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
-                                                const RHIResourceRef<RHIImage> &sky_map)
+Renderer::SkyBoxMap Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
+                                           const RHIResourceRef<RHIImage> &sky_map)
 {
     RHIResourceRef<RHIImage> ibl_map;
     if (ibl && mode == RenderConfig::OutputImage::IBLDiffuseMap)
@@ -239,7 +220,8 @@ RHIResourceRef<RHIImage> Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, 
     {
         ibl_map = ibl->GetSpecularMap();
     }
-    return ibl_map ? ibl_map : sky_map;
+    return ibl_map ? SkyBoxMap{.image = ibl_map, .sampler = ImageBasedLighting::MapSampler}
+                   : SkyBoxMap{.image = sky_map, .sampler = SkyRenderProxy::SkyMapSampler};
 }
 
 void Renderer::InitPostChain(const RGTextureDesc &screen_desc)
@@ -252,10 +234,11 @@ void Renderer::InitPostChain(const RGTextureDesc &screen_desc)
     }
 
     present_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Present",
-                                                         rhi_->GetBackBuffer()->GetAttributes().format, true);
+                                                         rhi_->GetBackBuffer()->GetAttributes().format,
+                                                         ScreenQuadPass::InputFilter::Nearest, true);
 
-    graph_view_pass_ =
-        PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, GraphViewPassName, screen_desc.format);
+    graph_view_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, GraphViewPassName, screen_desc.format,
+                                                            ScreenQuadPass::InputFilter::Bilinear);
 }
 
 // a float Texture2D samples the default view of an image of `format`: integer formats need an integer texture, and a

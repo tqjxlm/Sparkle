@@ -30,7 +30,7 @@ void DeferredRenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
-    const auto scene_color_format = GetSceneColorDesc().format;
+    const auto scene_color_format = SceneColorDesc.format;
 
     gbuffer_pass_ = PipelinePass::Create<GBufferPass>(render_config_, rhi_, scene_render_proxy_, SceneDepthDesc.format);
 
@@ -68,14 +68,14 @@ void DeferredRenderer::Render()
     const auto lighting = LightingInputs::Import(graph, shadow_map, ibl_);
     const auto scene_depth = graph.CreateTexture("SceneDepth", SceneDepthDesc);
     const auto gbuffer = gbuffer_pass_->AddTo(graph, scene_depth);
-    const auto scene_color = graph.CreateTexture("SceneColor", GetSceneColorDesc());
+    const auto scene_color = graph.CreateTexture("SceneColor", SceneColorDesc);
     directional_lighting_pass_->AddTo(graph, lighting, gbuffer, scene_depth, scene_color);
 
     const auto output_mode = render_config_.output_image;
     const auto sky_map = GetSkyBoxMap(output_mode, ibl_, bound_sky_proxy_ ? bound_sky_proxy_->GetSkyMap() : nullptr);
-    if (sky_map)
+    if (sky_map.image)
     {
-        sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map), scene_color, scene_depth);
+        sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map.image), sky_map.sampler, scene_color, scene_depth);
     }
 
     AddPostChain(graph, scene_color, tone_mapping_pass_.get());

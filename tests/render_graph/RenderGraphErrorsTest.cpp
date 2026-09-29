@@ -48,13 +48,13 @@ public:
     }
 
 protected:
-    void SampleInput(RGBuilder &builder, RGTexture input) const override
+    void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const override
     {
         if (input_ == Input::Undeclared)
         {
             return;
         }
-        ScreenQuadPass::SampleInput(builder, input);
+        ScreenQuadPass::SampleInput(builder, input, sampler);
         if (input_ == Input::ExtraBinding)
         {
             builder.Sampled(extra_, &ErrorTable::texture);

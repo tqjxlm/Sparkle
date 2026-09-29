@@ -28,8 +28,21 @@ const std::array<ScreenQuadPass::ScreenVertex, 4> ScreenQuadPass::Vertices{{
 
 const std::array<uint32_t, 6> ScreenQuadPass::Indices{0, 2, 1, 0, 3, 2};
 
-ScreenQuadPass::ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, bool to_back_buffer)
-    : PipelinePass(ctx), name_(std::move(name)), to_back_buffer_(to_back_buffer)
+static constexpr RHISampler::SamplerAttribute NearestSampler{
+    .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
+static constexpr RHISampler::SamplerAttribute BilinearSampler{
+    .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+    .filtering_method_min = RHISampler::FilteringMethod::Linear,
+    .filtering_method_mag = RHISampler::FilteringMethod::Linear,
+    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
+ScreenQuadPass::ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, InputFilter input_filter,
+                               bool to_back_buffer)
+    : PipelinePass(ctx), name_(std::move(name)), input_filter_(input_filter), to_back_buffer_(to_back_buffer)
 {
     signature_.color_formats[0] = output_format;
 }
@@ -132,18 +145,20 @@ void ScreenQuadPass::BindVertexShaderResources()
 
 void ScreenQuadPass::AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const
 {
-    graph.AddRasterPass(name_, [this, input, output](RGBuilder &builder) {
-        SampleInput(builder, input);
+    const bool bilinear = input_filter_ == InputFilter::Bilinear && graph.GetSize(input) != graph.GetSize(output) &&
+                          rhi_->SupportsLinearFiltering(graph.GetFormat(input));
+    graph.AddRasterPass(name_, [this, input, output, bilinear](RGBuilder &builder) {
+        SampleInput(builder, input, bilinear ? BilinearSampler : NearestSampler);
         builder.ColorWrite(output, 0);
         builder.FullyOverwrites();
         return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
     });
 }
 
-void ScreenQuadPass::SampleInput(RGBuilder &builder, RGTexture input) const
+void ScreenQuadPass::SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const
 {
     using Table = ScreenQuadPixelShader::ResourceTable;
-    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler);
+    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler, sampler);
 }
 
 void ScreenQuadPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)

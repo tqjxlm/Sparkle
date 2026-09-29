@@ -7,7 +7,8 @@ namespace sparkle
 class ToneMappingPass : public ScreenQuadPass
 {
 public:
-    ToneMappingPass(RHIContext *ctx, PixelFormat output_format) : ScreenQuadPass(ctx, "ToneMapping", output_format)
+    ToneMappingPass(RHIContext *ctx, PixelFormat output_format)
+        : ScreenQuadPass(ctx, "ToneMapping", output_format, InputFilter::Bilinear)
     {
     }
 
@@ -18,6 +19,6 @@ protected:
 
     void BindPixelShaderResources() override;
 
-    void SampleInput(RGBuilder &builder, RGTexture input) const override;
+    void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const override;
 };
 } // namespace sparkle

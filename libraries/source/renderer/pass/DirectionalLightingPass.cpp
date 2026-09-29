@@ -50,6 +50,13 @@ class DirectionalLightingPassPixelShader : public RHIShaderInfo
     };
 };
 
+// the depth is sampled at the texel centres of a target of its own size
+static constexpr RHISampler::SamplerAttribute DepthSampler{.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+                                                           .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+                                                           .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+                                                           .filtering_method_mipmap =
+                                                               RHISampler::FilteringMethod::Nearest};
+
 void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)
 {
     ScreenQuadPass::UpdateFrameData(config, scene);
@@ -102,7 +109,7 @@ void DirectionalLightingPass::AddTo(RenderGraph &graph, const LightingInputs &li
     graph.AddRasterPass(name_, [this, lighting, gbuffer, scene_depth, scene_color](RGBuilder &builder) {
         using Table = DirectionalLightingPassPixelShader::ResourceTable;
         builder.Sampled(gbuffer, &Table::gbuffer_texture);
-        builder.Sampled(scene_depth, &Table::depth_texture, &Table::depth_sampler);
+        builder.Sampled(scene_depth, &Table::depth_texture, &Table::depth_sampler, DepthSampler);
         lighting.Sample<Table>(builder, rhi_);
         builder.ColorWrite(scene_color, 0);
         builder.FullyOverwrites();

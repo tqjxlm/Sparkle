@@ -103,26 +103,26 @@ protected:
     virtual void Update() = 0;
 
     // the screen of renderers that tone map on the GPU
-    static constexpr RGTextureDesc ToneMappedScreenDesc{
-        .format = PixelFormat::B8G8R8A8Srgb,
-        .size_class = RGSizeClass::Output,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest}};
+    static constexpr RGTextureDesc ToneMappedScreenDesc{.format = PixelFormat::B8G8R8A8Srgb,
+                                                        .size_class = RGSizeClass::Output};
 
     // the scene depth of the renderers that rasterize the scene
     static constexpr RGTextureDesc SceneDepthDesc{.format = PixelFormat::D32, .size_class = RGSizeClass::Scene};
 
-    // the scene color of the renderers that rasterize the scene. tone mapping samples it bilinearly with edge clamping
-    // when it upsamples.
-    [[nodiscard]] RGTextureDesc GetSceneColorDesc() const;
+    // the scene color of the renderers that rasterize the scene
+    static constexpr RGTextureDesc SceneColorDesc{.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Scene};
+
+    // a cube map the sky box shows and the sampler it samples the map with
+    struct SkyBoxMap
+    {
+        RHIResourceRef<RHIImage> image;
+        RHISampler::SamplerAttribute sampler;
+    };
 
     // the cube map the sky box shows in output mode `mode`: an IBL map once it is ready in the IBL map modes, otherwise
     // `sky_map`
-    [[nodiscard]] static RHIResourceRef<RHIImage> GetSkyBoxMap(RenderConfig::OutputImage mode,
-                                                               const ImageBasedLighting *ibl,
-                                                               const RHIResourceRef<RHIImage> &sky_map);
+    [[nodiscard]] static SkyBoxMap GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
+                                                const RHIResourceRef<RHIImage> &sky_map);
 
     // creates the passes of the post chain, which ends in a Screen texture of `screen_desc`
     void InitPostChain(const RGTextureDesc &screen_desc);

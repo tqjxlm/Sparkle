@@ -5,6 +5,7 @@
 #include "renderer/RenderConfig.h"
 #include "renderer/graph/RGPassTimers.h"
 #include "renderer/graph/RGTexturePool.h"
+#include "rhi/RHI.h"
 
 #include <algorithm>
 #include <iterator>
@@ -339,6 +340,11 @@ RHIResourceRef<RHIImageView> RGBuilder::GetView(RHIContext *rhi, RHIImage &image
               .mip_level_count = 1,
               .base_array_layer = subresources.base_layer,
               .array_layer_count = subresources.layer_count});
+}
+
+RHIResourceRef<RHISampler> RGBuilder::GetSampler(RHIContext *rhi, const RHISampler::SamplerAttribute &sampler)
+{
+    return rhi->GetSampler(sampler);
 }
 
 void RGBuilder::BindLastAccess(ImageBinding binding)

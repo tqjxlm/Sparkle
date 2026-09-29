@@ -20,15 +20,8 @@ class DepthOnlyPixelShader : public RHIShaderInfo
 
 DepthPass::DepthPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, unsigned width, unsigned height)
     : MeshPass(ctx, scene_proxy),
-      shadow_map_desc_{.format = PixelFormat::D32,
-                       .size_class = RGSizeClass::Absolute,
-                       .width = width,
-                       .height = height,
-                       .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToBorder,
-                                   .border_color = RHISampler::BorderColor::FloatOpaqueWhite,
-                                   .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                                   .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                                   .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest}}
+      shadow_map_desc_{
+          .format = PixelFormat::D32, .size_class = RGSizeClass::Absolute, .width = width, .height = height}
 {
 }
 

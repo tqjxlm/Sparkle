@@ -30,7 +30,7 @@ void ForwardRenderer::InitRenderResources()
 
     tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, screen_desc_.format);
 
-    const auto scene_color_format = GetSceneColorDesc().format;
+    const auto scene_color_format = SceneColorDesc.format;
 
     scene_color_pass_ = PipelinePass::Create<ForwardMeshPass>(render_config_, rhi_, scene_render_proxy_,
                                                               scene_color_format, SceneDepthDesc.format);
@@ -60,15 +60,15 @@ void ForwardRenderer::Render()
 
     const auto shadow_map = directional_shadow_pass_ ? directional_shadow_pass_->AddTo(graph) : RGTexture{};
     const auto lighting = LightingInputs::Import(graph, shadow_map, ibl_);
-    const auto scene_color = graph.CreateTexture("SceneColor", GetSceneColorDesc());
+    const auto scene_color = graph.CreateTexture("SceneColor", SceneColorDesc);
     const auto scene_depth = graph.CreateTexture("SceneDepth", SceneDepthDesc);
     scene_color_pass_->AddTo(graph, lighting, scene_color, scene_depth);
 
     const auto output_mode = render_config_.output_image;
     const auto sky_map = GetSkyBoxMap(output_mode, ibl_, bound_sky_proxy_ ? bound_sky_proxy_->GetSkyMap() : nullptr);
-    if (sky_map)
+    if (sky_map.image)
     {
-        sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map), scene_color, scene_depth);
+        sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map.image), sky_map.sampler, scene_color, scene_depth);
     }
 
     AddPostChain(graph, scene_color, tone_mapping_pass_.get());
