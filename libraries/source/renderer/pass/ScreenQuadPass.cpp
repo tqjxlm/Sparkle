@@ -173,7 +173,8 @@ void ScreenQuadPass::AddTo(RenderGraph &graph, RGTexture input, RGTexture output
     {
         output_size = Vector2UInt(output_size.y(), output_size.x());
     }
-    const bool bilinear = Resamples(input_filter_, graph.GetSize(input), output_size) &&
+    // a missing input draws its placeholder, which is sampled nearest
+    const bool bilinear = input.IsValid() && Resamples(input_filter_, graph.GetSize(input), output_size) &&
                           rhi_->SupportsLinearFiltering(graph.GetFormat(input));
     graph.AddRasterPass(name_, [this, input, output, bilinear](RGBuilder &builder) {
         SampleInput(builder, input, bilinear ? BilinearSampler : NearestSampler);

@@ -548,6 +548,8 @@ private:
     // resulting states
     void PlanAccess(Access &access, bool discard, std::vector<RHIImageState> &states) const;
 
+    [[nodiscard]] const Texture &GetTexture(RGTexture texture) const;
+
     void InferStoreOps();
 
     // the attachments of each live raster pass, with the load and store actions planned for them

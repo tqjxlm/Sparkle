@@ -205,6 +205,11 @@ private:
             std::ignore = graph.Import("NoTLAS", RHIResourceRef<RHITLAS>());
         });
 
+        ExpectError("an invalid texture has no format or size", [&] {
+            RenderGraph graph(rhi, pool, config);
+            std::ignore = graph.GetSize(RGTexture{});
+        });
+
         // declaring
         ExpectError("pass Invalid declares an invalid texture", [&] {
             RenderGraph graph(rhi, pool, config);

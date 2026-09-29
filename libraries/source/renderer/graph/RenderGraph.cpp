@@ -506,9 +506,15 @@ RGTexture RenderGraph::FindTexture(std::string_view name) const
                                     : RGTexture{.index = static_cast<uint32_t>(found - textures_.begin())};
 }
 
+const RenderGraph::Texture &RenderGraph::GetTexture(RGTexture texture) const
+{
+    RGCheck(texture.index < textures_.size(), "an invalid texture has no format or size");
+    return textures_[texture.index];
+}
+
 bool RenderGraph::CanSample2D(RGTexture texture) const
 {
-    const auto &found = textures_[texture.index];
+    const auto &found = GetTexture(texture);
     if (found.imported)
     {
         return found.layers == 1 && found.imported->GetAttributes().usages & RHIImage::ImageUsage::Texture;
@@ -522,13 +528,13 @@ bool RenderGraph::CanSample2D(RGTexture texture) const
 
 PixelFormat RenderGraph::GetFormat(RGTexture texture) const
 {
-    const auto &found = textures_[texture.index];
+    const auto &found = GetTexture(texture);
     return found.imported ? found.imported->GetAttributes().format : found.desc.format;
 }
 
 Vector2UInt RenderGraph::GetSize(RGTexture texture) const
 {
-    const auto &found = textures_[texture.index];
+    const auto &found = GetTexture(texture);
     return {found.width, found.height};
 }
 
