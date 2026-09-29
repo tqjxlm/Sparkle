@@ -52,7 +52,7 @@ Maintaining the two tables:
 * Adding a platform: add a triplet column to [tests/coverage.csv](../tests/coverage.csv), mark its picks, give the triplet a suite invocation in `TEST_RUNNERS` in [dev/ci_matrix.py](../dev/ci_matrix.py), and regenerate the pipeline with `python3 dev/ci_matrix.py --fix`.
 * Retiring a case or platform: remove both sides (registry entry and coverage row, or column and `TEST_RUNNERS` entry).
 
-Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators, coverage rows picking only registry cases, and a `TEST_RUNNERS` entry for every covered triplet.
+Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators and graph shape goldens, coverage rows picking only registry cases, and a `TEST_RUNNERS` entry for every covered triplet.
 
 ## Test Orchestration
 
