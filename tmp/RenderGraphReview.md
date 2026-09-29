@@ -264,7 +264,7 @@ Behavior:
 
 Design conformance:
 
-* **R6 [med] Post chain lives in the base class, not as a component (§5).** Design §5 has a free `AddPostChain(g, PostPasses &, scene, FrameFlags)` and a per-renderer `BuildGraph(g)`. The code makes the post chain part of the `Renderer` base class instead: `ui_pass_`, `present_pass_`, `graph_view_pass_`, the view state, `screen_desc_` and the timers (`Renderer.h:127-156`). Every `Render()` repeats create graph → `AddPostChain` → `ExecuteGraph`. Action (preferred): a `PostChain` component, plus a non-virtual `Renderer::Render()` that calls a virtual `BuildGraph(graph)` returning the scene texture and screen pass. The tone mapping pass, created and updated identically in three renderers (Forward :32/:98, Deferred :39/:106, GPU :106/:433), moves into it. Otherwise record the deviation.
+* **Done** (`PostChain` component; `Renderer::Render` calls each renderer's `BuildGraph`). **R6 [med] Post chain lives in the base class, not as a component (§5).** Design §5 has a free `AddPostChain(g, PostPasses &, scene, FrameFlags)` and a per-renderer `BuildGraph(g)`. The code makes the post chain part of the `Renderer` base class instead: `ui_pass_`, `present_pass_`, `graph_view_pass_`, the view state, `screen_desc_` and the timers (`Renderer.h:127-156`). Every `Render()` repeats create graph → `AddPostChain` → `ExecuteGraph`. Action (preferred): a `PostChain` component, plus a non-virtual `Renderer::Render()` that calls a virtual `BuildGraph(graph)` returning the scene texture and screen pass. The tone mapping pass, created and updated identically in three renderers (Forward :32/:98, Deferred :39/:106, GPU :106/:433), moves into it. Otherwise record the deviation.
 * **Done.** **R7 [med, C] Denoisers record through the global command context.** `Encode` takes `const RGPassContext &` and then uses `rhi_->GetCommandContext()` (`NrdDenoiser.cpp:373,443,473`; `MetalFxDenoiser.mm:499,521`). This goes against D3. Action: take `RGExternalContext &` and pass its context down to `RenderReblur`/`RunDispatches`; covers G11 and M9.
 
 Surgical / dead code:
@@ -276,10 +276,10 @@ Surgical / dead code:
 
 Encapsulation:
 
-* **R9 [med, C] Base-class members wider than needed.**
+* **Done.** **R9 [med, C] Base-class members wider than needed.**
   * `ui_pass_` and `present_pass_` (`Renderer.h:153-156`) are protected, but no derived class uses them. Make them private.
   * `screen_desc_` can be private too: derived classes read only what they just passed to `InitPostChain`.
-* **R10 [low] Helpers on the wrong class.**
+* **Partly done** (`Renderer.h` still includes `RGTexturePool.h`). **R10 [low] Helpers on the wrong class.**
   * `ToneMappedScreenDesc` belongs on `ToneMappingPass`.
   * `SceneDepthDesc`, `GetSceneColorDesc` and `GetSkyBoxMap` are raster-only (see R12).
   * `CreateScreenshotBuffer` only uses `rhi_`: anonymous namespace.
@@ -288,7 +288,7 @@ Encapsulation:
 
 Reuse / DRY:
 
-* **R12 [med, C] Forward and Deferred differ only in their scene passes.** Their shared parts are now identical:
+* **Done** (`RasterRenderer` base with scene-pass hooks). **R12 [med, C] Forward and Deferred differ only in their scene passes.** Their shared parts are now identical:
   * `HandleSceneChanges` (`ForwardRenderer.cpp:101-142` = `DeferredRenderer.cpp:109-150`);
   * the `ibl_cook_pending_` block (`:46-53` = `:51-58`);
   * the graph prologue (cook, shadow, `LightingInputs`) and the sky-box tail;
