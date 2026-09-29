@@ -2,6 +2,7 @@
 
 #include "core/FileManager.h"
 #include "core/Path.h"
+#include "core/Profiler.h"
 #include "core/ThreadManager.h"
 #include "renderer/graph/RenderGraph.h"
 #include "renderer/proxy/SceneRenderProxy.h"
@@ -147,9 +148,17 @@ void Renderer::InitPostChain(PixelFormat screen_format, PostChain::ScreenPass sc
     post_chain_ = std::make_unique<PostChain>(render_config_, rhi_, screen_format, screen_pass);
 }
 
-void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene)
+void Renderer::Render()
 {
+    PROFILE_SCOPE("Renderer::Render");
+
+    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
+
+    const auto scene = BuildGraph(graph);
+
     post_chain_->AddTo(graph, scene);
+
+    ExecuteGraph(graph);
 }
 
 void Renderer::ExecuteGraph(RenderGraph &graph)

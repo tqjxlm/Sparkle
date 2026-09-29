@@ -17,14 +17,14 @@ public:
         return RenderConfig::Pipeline::Forward;
     }
 
-    void Render() override;
-
     void InitRenderResources() override;
 
     ~ForwardRenderer() override;
 
 private:
     void Update() override;
+
+    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
 
     void HandleSceneChanges();
 

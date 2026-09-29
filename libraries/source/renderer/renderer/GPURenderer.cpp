@@ -114,13 +114,12 @@ void GPURenderer::InitRenderResources()
     compute_pass_ = rhi_->CreateComputePass("GPURendererComputePass", true);
 }
 
-void GPURenderer::Render()
+RGTexture GPURenderer::BuildGraph(RenderGraph &graph)
 {
-    PROFILE_SCOPE("GPURenderer::Render");
+    PROFILE_SCOPE("GPURenderer::BuildGraph");
 
     auto *camera = scene_render_proxy_->GetCamera();
 
-    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
     const auto accumulator = graph.Import("Accumulator", scene_texture_);
     const auto tlas = graph.Import("TLAS", tlas_);
 
@@ -200,9 +199,7 @@ void GPURenderer::Render()
         tone_mapping_input = graph.Import("DenoiserOutput", displayed_image_);
     }
 
-    AddPostChain(graph, tone_mapping_input);
-
-    ExecuteGraph(graph);
+    return tone_mapping_input;
 }
 
 GPURenderer::~GPURenderer() = default;

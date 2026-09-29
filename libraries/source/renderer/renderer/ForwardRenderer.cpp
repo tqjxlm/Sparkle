@@ -36,9 +36,9 @@ void ForwardRenderer::InitRenderResources()
     sky_box_pass_ = PipelinePass::Create<SkyBoxPass>(render_config_, rhi_, scene_color_format, SceneDepthDesc.format);
 }
 
-void ForwardRenderer::Render()
+RGTexture ForwardRenderer::BuildGraph(RenderGraph &graph)
 {
-    PROFILE_SCOPE("ForwardRenderer::Render");
+    PROFILE_SCOPE("ForwardRenderer::BuildGraph");
 
     if (ibl_cook_pending_)
     {
@@ -48,8 +48,6 @@ void ForwardRenderer::Render()
             ibl_cook_pending_ = false;
         }
     }
-
-    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
 
     if (ibl_)
     {
@@ -69,9 +67,7 @@ void ForwardRenderer::Render()
         sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map.image), sky_map.sampler, scene_color, scene_depth);
     }
 
-    AddPostChain(graph, scene_color);
-
-    ExecuteGraph(graph);
+    return scene_color;
 }
 
 void ForwardRenderer::Update()

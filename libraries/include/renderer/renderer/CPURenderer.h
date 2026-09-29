@@ -19,8 +19,6 @@ public:
         return RenderConfig::Pipeline::Cpu;
     }
 
-    void Render() override;
-
     void InitRenderResources() override;
 
     void Update() override
@@ -32,6 +30,8 @@ public:
     ~CPURenderer() override;
 
 private:
+    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
+
     void RenderPixel(unsigned i, unsigned j, Scalar pixel_width, Scalar pixel_height, const SceneRenderProxy &scene,
                      const RenderConfig &config, const Vector2UInt &debug_point);
 

@@ -17,14 +17,14 @@ public:
         return RenderConfig::Pipeline::Deferred;
     }
 
-    void Render() override;
-
     void InitRenderResources() override;
 
     ~DeferredRenderer() override;
 
 private:
     void Update() override;
+
+    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
 
     void HandleSceneChanges();
 

@@ -42,9 +42,9 @@ void DeferredRenderer::InitRenderResources()
     sky_box_pass_ = PipelinePass::Create<SkyBoxPass>(render_config_, rhi_, scene_color_format, SceneDepthDesc.format);
 }
 
-void DeferredRenderer::Render()
+RGTexture DeferredRenderer::BuildGraph(RenderGraph &graph)
 {
-    PROFILE_SCOPE("DeferredRenderer::Render");
+    PROFILE_SCOPE("DeferredRenderer::BuildGraph");
 
     if (ibl_cook_pending_)
     {
@@ -54,8 +54,6 @@ void DeferredRenderer::Render()
             ibl_cook_pending_ = false;
         }
     }
-
-    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
 
     if (ibl_)
     {
@@ -76,9 +74,7 @@ void DeferredRenderer::Render()
         sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map.image), sky_map.sampler, scene_color, scene_depth);
     }
 
-    AddPostChain(graph, scene_color);
-
-    ExecuteGraph(graph);
+    return scene_color;
 }
 
 void DeferredRenderer::Update()

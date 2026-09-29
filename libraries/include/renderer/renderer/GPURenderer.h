@@ -29,8 +29,6 @@ public:
         return RenderConfig::Pipeline::Gpu;
     }
 
-    void Render() override;
-
     void InitRenderResources() override;
 
     [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
@@ -48,6 +46,8 @@ private:
     };
 
     void Update() override;
+
+    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
 
     void InitSceneRenderResources();
 

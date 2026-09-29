@@ -58,9 +58,9 @@ void CPURenderer::InitRenderResources()
     actual_sample_per_pixel_ = sub_pixel_count_ * sub_pixel_count_;
 }
 
-void CPURenderer::Render()
+RGTexture CPURenderer::BuildGraph(RenderGraph &graph)
 {
-    PROFILE_SCOPE("CPURenderer::Render");
+    PROFILE_SCOPE("CPURenderer::BuildGraph");
 
     // re-fetch every frame: a loaded scene may bring its own main camera and replace the proxy
     camera_ = scene_render_proxy_->GetCamera();
@@ -93,7 +93,9 @@ void CPURenderer::Render()
 
     image_buffer_->Upload(rhi_, output_image_.GetRawData());
 
-    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
+    dispatched_sample_count_ += actual_sample_per_pixel_;
+    camera_->AccumulateSample(actual_sample_per_pixel_);
+
     const auto scene_color =
         graph.CreateTexture("SceneColor", {.format = output_image_.GetFormat(), .size_class = RGSizeClass::Scene});
     const auto host_scene_color = graph.Import("HostSceneColor", image_buffer_);
@@ -107,12 +109,7 @@ void CPURenderer::Render()
         };
     });
 
-    AddPostChain(graph, scene_color);
-
-    ExecuteGraph(graph);
-
-    dispatched_sample_count_ += actual_sample_per_pixel_;
-    camera_->AccumulateSample(actual_sample_per_pixel_);
+    return scene_color;
 }
 
 namespace

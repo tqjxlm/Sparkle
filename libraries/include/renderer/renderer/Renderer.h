@@ -40,7 +40,9 @@ public:
 
     virtual void InitRenderResources() = 0;
 
-    virtual void Render() = 0;
+    // builds the frame's graph, its scene passes (BuildGraph) followed by the post chain, then compiles, records and
+    // dumps it when a dump is pending
+    void Render();
 
     [[nodiscard]] virtual RenderConfig::Pipeline GetRenderMode() const = 0;
 
@@ -97,6 +99,9 @@ public:
 protected:
     virtual void Update() = 0;
 
+    // adds the frame's passes before the post chain, returning the texture they leave the scene in
+    [[nodiscard]] virtual RGTexture BuildGraph(RenderGraph &graph) = 0;
+
     // the scene depth of the renderers that rasterize the scene
     static constexpr RGTextureDesc SceneDepthDesc{.format = PixelFormat::D32, .size_class = RGSizeClass::Scene};
 
@@ -118,12 +123,6 @@ protected:
     // creates the post chain, whose Screen transient is of `screen_format`
     void InitPostChain(PixelFormat screen_format, PostChain::ScreenPass screen_pass);
 
-    // adds the post chain after the scene passes, which leave the scene in `scene`
-    void AddPostChain(RenderGraph &graph, RGTexture scene);
-
-    // compiles and records the frame's graph, then dumps it when a dump is pending
-    void ExecuteGraph(RenderGraph &graph);
-
     RHIContext *rhi_;
     SceneRenderProxy *scene_render_proxy_;
 
@@ -136,10 +135,13 @@ protected:
 
     std::atomic<int32_t> pending_async_tasks_{0};
 
+private:
+    // compiles and records the frame's graph, then dumps it when a dump is pending
+    void ExecuteGraph(RenderGraph &graph);
+
     // images behind the transients of the renderer's graphs, kept across frames and renderers
     RGTexturePool &graph_texture_pool_;
 
-private:
     std::unique_ptr<PostChain> post_chain_;
 
     // times the raster passes of the renderer's graphs across frames

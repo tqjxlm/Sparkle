@@ -6,13 +6,11 @@ The RHI only lowers the graph's plan: `RHICommandContext::BeginRendering` over a
 
 ## Adding a Pass to a Renderer
 
-A renderer builds its graph in `Render()` from the texture pool it was given, adds its scene passes, ends with the post chain (`Renderer::AddPostChain`, see [Renderers](#renderers)) and hands the graph to `Renderer::ExecuteGraph`, which compiles it, executes it with the renderer's pass timers and dumps it when a dump is pending. A pass class keeps its persistent state (pipelines, shaders, uniform buffers) and adds its pass through an `AddTo(graph, inputs...)` method. The setup lambda declares the pass's accesses on the builder and returns the lambda that records the pass.
+`Renderer::Render()` creates the frame's graph from the texture pool the renderer was given, lets the renderer add its scene passes (`BuildGraph`, which returns the texture they leave the scene in), adds the post chain (see [Renderers](#renderers)), then compiles the graph, executes it with the renderer's pass timers and dumps it when a dump is pending. A pass class keeps its persistent state (pipelines, shaders, uniform buffers) and adds its pass through an `AddTo(graph, inputs...)` method. The setup lambda declares the pass's accesses on the builder and returns the lambda that records the pass.
 
 ```cpp
-void MyRenderer::Render()
+RGTexture MyRenderer::BuildGraph(RenderGraph &graph)
 {
-    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
-
     const auto history = graph.Import("History", history_image_);
     const auto scene_color = graph.CreateTexture("SceneColor", SceneColorDesc);
 
@@ -23,8 +21,7 @@ void MyRenderer::Render()
         return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
     });
 
-    AddPostChain(graph, scene_color);
-    ExecuteGraph(graph);
+    return scene_color;
 }
 ```
 
