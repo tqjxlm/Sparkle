@@ -251,7 +251,6 @@
         "test_case": "render_graph_dump",
         "description": "The cpu pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
             "args": ["--framework", "{framework}", "--golden", "cpu"]
@@ -262,7 +261,6 @@
         "test_case": "render_graph_dump_accumulating",
         "description": "The gpu pipeline's render graph of a frame that traces samples into the accumulator (passes, accesses, barriers, load/store, resources), compared against its golden graph shape. Needs ray query support; without it the pipeline falls back to forward, whose graph differs from the golden.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
             "args": ["--framework", "{framework}", "--golden", "gpu"]
@@ -273,7 +271,6 @@
         "test_case": "render_graph_dump",
         "description": "The forward pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
             "args": ["--framework", "{framework}", "--golden", "forward"]
@@ -284,7 +281,6 @@
         "test_case": "render_graph_dump",
         "description": "The deferred pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
             "args": ["--framework", "{framework}", "--golden", "deferred"]
@@ -295,7 +291,6 @@
         "test_case": "render_graph_dump",
         "description": "The deferred pipeline's render graph while render_graph_view shows the scene depth: the depth is drawn into the screen in place of tone mapping, and the passes that only fed the scene color are culled.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "SceneDepth"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
             "args": ["--framework", "{framework}", "--golden", "deferred_view"]
@@ -306,7 +301,6 @@
         "test_case": "render_graph_dump",
         "description": "render_graph_view naming a texture the post chain cannot sample (the integer GBufferPacked) falls back to the normal frame: the deferred golden graph shape.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "GBufferPacked"],
-        "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
             "args": ["--framework", "{framework}", "--golden", "deferred"]
