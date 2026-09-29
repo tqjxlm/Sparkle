@@ -10,6 +10,8 @@
 * [ ] vendor-specific denoising and super sampling
 * [ ] dynamic scene
 * [ ] the GPU path tracer samples material textures with nearest filtering
+* [ ] GPU path tracer MIS: an emissive surface a bounce reaches takes the sky light's MIS weight although next event estimation never samples emissive surfaces (its shadow ray treats them as occluders), so emissive light is too dark with NEE on; weight only sky misses
+* [ ] GPU path tracer MIS: the NEE weight pairs the light pdf with the pdf of the BSDF's own sampled direction instead of the BSDF pdf at the light direction, so the two strategies' weights do not sum to 1; needs a BSDF pdf evaluation
 
 ## Rasterization Renderers
 
