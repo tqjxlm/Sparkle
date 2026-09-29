@@ -27,10 +27,6 @@ void MetalContext::CreateBackBuffer()
     attribute.msaa_samples = 1;
     attribute.format = PixelFormat::B8G8R8A8Srgb;
     attribute.usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
     attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
 
     // a windowed back buffer takes each frame's drawable texture (SwapBuffer); a headless one owns a texture, so passes

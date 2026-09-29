@@ -296,10 +296,6 @@ void VulkanRHI::CreateBackBuffer()
         attribute.mip_levels = 1;
         attribute.msaa_samples = 1;
         attribute.usages = RHIImage::ImageUsage::ColorAttachment;
-        attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 
         headless_back_buffer_ = CreateImage(attribute, "HeadlessBackBuffer");
     }

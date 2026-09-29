@@ -47,7 +47,6 @@ private:
         PixelFormat format;
         uint32_t width;
         uint32_t height;
-        RHISampler::SamplerAttribute sampler;
         // a pooled image serves any request whose usages it covers
         RHIImage::ImageUsage usages;
     };

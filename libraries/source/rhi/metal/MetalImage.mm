@@ -164,16 +164,12 @@ MetalImage::MetalImage(const Attribute &attributes, const std::string &name) : R
     SetDebugInfo(texture_, GetName());
 
     ASSERT_F(texture_, "Failed to created texture {}", name);
-
-    CreateSamplerIfNeeded();
 }
 
 MetalImage::MetalImage(const Attribute &attributes, id<MTLTexture> texture, const std::string &name)
     : RHIImage(attributes, name)
 {
     texture_ = texture;
-
-    CreateSamplerIfNeeded();
 }
 
 // private textures cannot use replaceRegion; stage the payload in a shared buffer and
@@ -357,14 +353,6 @@ void MetalImage::BlitToImage(id<MTLCommandBuffer> command_buffer, const RHIImage
                                  destinationTexture:dest_view];
             }
         }
-    }
-}
-
-void MetalImage::CreateSamplerIfNeeded()
-{
-    if (attributes_.usages & RHIImage::ImageUsage::Texture)
-    {
-        sampler_ = context->GetRHI()->GetSampler(attributes_.sampler);
     }
 }
 

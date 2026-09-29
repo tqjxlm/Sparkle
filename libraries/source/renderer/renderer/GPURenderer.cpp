@@ -90,10 +90,6 @@ void GPURenderer::InitRenderResources()
     scene_texture_ = rhi_->CreateImage(
         {
             .format = PixelFormat::RGBAFloat,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
             .width = resolution_.scene.x(),
             .height = resolution_.scene.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
@@ -266,10 +262,6 @@ void GPURenderer::Update()
         {
             auto dummy_texture = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
                 .format = PixelFormat::RGBAFloat16,
-                .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
                 .usages = RHIImage::ImageUsage::Texture,
                 .type = RHIImage::ImageType::Image2DCube,
             });
@@ -482,10 +474,6 @@ void GPURenderer::InitSceneRenderResources()
 
     auto dummy_texture_cube = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
         .usages = RHIImage::ImageUsage::Texture,
         .type = RHIImage::ImageType::Image2DCube,
     });

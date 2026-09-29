@@ -43,14 +43,6 @@ void VulkanImage::CreateImage()
     context->SetDebugInfo(reinterpret_cast<uint64_t>(image_), VK_OBJECT_TYPE_IMAGE, GetName().c_str());
 }
 
-void VulkanImage::CreateSampler()
-{
-    if (attributes_.sampler.address_mode != RHISampler::SamplerAddressMode::Count)
-    {
-        sampler_ = context->GetRHI()->GetSampler(attributes_.sampler);
-    }
-}
-
 void VulkanImage::Upload(const uint8_t *data)
 {
     auto image_size = GetStorageSize();

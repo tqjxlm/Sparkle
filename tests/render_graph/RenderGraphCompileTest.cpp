@@ -223,7 +223,6 @@ private:
     static RHIResourceRef<RHIImage> CreateImportImage(RHIContext *rhi, Vector2UInt size, const std::string &name)
     {
         return rhi->CreateImage({.format = PixelFormat::R8G8B8A8Unorm,
-                                 .sampler = Rgba8Output.sampler,
                                  .width = size.x(),
                                  .height = size.y(),
                                  .usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::Texture},
@@ -568,7 +567,6 @@ private:
     void Subresources(RHIContext *rhi, const RenderConfig &config)
     {
         auto cube = rhi->CreateImage({.format = PixelFormat::R8G8B8A8Unorm,
-                                      .sampler = Rgba8Output.sampler,
                                       .width = 8,
                                       .height = 8,
                                       .usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::UAV |

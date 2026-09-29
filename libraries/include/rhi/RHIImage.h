@@ -121,7 +121,6 @@ public:
     struct Attribute
     {
         PixelFormat format = PixelFormat::Count;
-        RHISampler::SamplerAttribute sampler;
         uint32_t width = 1;
         uint32_t height = 1;
         RHIImage::ImageUsage usages = RHIImage::ImageUsage::Undefined;
@@ -139,7 +138,6 @@ public:
         {
             uint32_t hash = 0;
             HashCombine(hash, format);
-            HashCombine(hash, sampler.GetHash());
             HashCombine(hash, usages);
             HashCombine(hash, memory_properties);
             HashCombine(hash, type);
@@ -163,11 +161,6 @@ public:
     };
 
     RHIImage(const Attribute &attributes, const std::string &name);
-
-    [[nodiscard]] RHIResourceRef<RHISampler> GetSampler() const
-    {
-        return sampler_;
-    }
 
     [[nodiscard]] RHIResourceRef<RHIImageView> GetView(RHIContext *rhi, const RHIImageView::Attribute &attribute);
 
@@ -306,8 +299,6 @@ public:
 
 protected:
     Attribute attributes_;
-
-    RHIResourceRef<RHISampler> sampler_;
 
     std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
 

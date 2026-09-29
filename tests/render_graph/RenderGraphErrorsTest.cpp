@@ -158,8 +158,8 @@ private:
     static RHIResourceRef<RHIImage> CreateImage(RHIContext *rhi, const std::string &name, RHIImage::ImageUsage usages,
                                                 uint8_t mips = 1)
     {
-        return rhi->CreateImage(
-            {.format = Format, .sampler = {}, .width = 16, .height = 16, .usages = usages, .mip_levels = mips}, name);
+        return rhi->CreateImage({.format = Format, .width = 16, .height = 16, .usages = usages, .mip_levels = mips},
+                                name);
     }
 
     static RHIResourceRef<RHIBuffer> CreateBuffer(RHIContext *rhi, const std::string &name,

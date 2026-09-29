@@ -348,7 +348,6 @@ public:
         ASSERT(attributes_.format != PixelFormat::Count);
 
         CreateImage();
-        CreateSampler();
     }
 
     VulkanImage(const Attribute &attribute, VkFormat format_override, VkImage image, const std::string &name)
@@ -356,8 +355,6 @@ public:
           vulkan_attributes_(VulkanImageAttribute(attribute, format_override)), image_(image)
     {
         attributes_.format = VkFormatToPixelFormat(format_override);
-
-        CreateSampler();
     }
 
     ~VulkanImage() override;
@@ -406,8 +403,6 @@ public:
 
 private:
     void CreateImage();
-
-    void CreateSampler();
 
     bool external_ = false;
     VulkanImageAttribute vulkan_attributes_;

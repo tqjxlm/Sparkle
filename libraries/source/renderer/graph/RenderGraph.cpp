@@ -619,7 +619,7 @@ void RenderGraph::Cull()
     }
 }
 
-// transients whose lifetimes do not overlap share an image when format, extent and sampler match
+// transients whose lifetimes do not overlap share an image when format and extent match
 void RenderGraph::ResolveTextures()
 {
     for (auto pass_index = 0u; pass_index < passes_.size(); pass_index++)
@@ -658,8 +658,7 @@ void RenderGraph::ResolveTextures()
             const auto found = std::ranges::find_if(physicals, [&texture, pass_index](const Physical &physical) {
                 const auto &first = *physical.first;
                 return physical.last_pass < pass_index && first.desc.format == texture.desc.format &&
-                       first.width == texture.width && first.height == texture.height &&
-                       first.desc.sampler == texture.desc.sampler;
+                       first.width == texture.width && first.height == texture.height;
             });
             if (found == physicals.end())
             {
@@ -680,12 +679,9 @@ void RenderGraph::ResolveTextures()
     for (const auto &physical : physicals)
     {
         const auto &first = *physical.first;
-        images.push_back(pool_.Acquire({.format = first.desc.format,
-                                        .width = first.width,
-                                        .height = first.height,
-                                        .sampler = first.desc.sampler,
-                                        .usages = physical.usages},
-                                       first.name));
+        images.push_back(pool_.Acquire(
+            {.format = first.desc.format, .width = first.width, .height = first.height, .usages = physical.usages},
+            first.name));
     }
 
     for (auto &texture : textures_)

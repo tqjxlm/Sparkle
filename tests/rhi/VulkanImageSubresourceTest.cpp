@@ -87,12 +87,6 @@ private:
         attribute.height = 4;
         attribute.usages =
             RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransferSrc | RHIImage::ImageUsage::Texture;
-        attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                             .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                             .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest,
-                             .max_lod = 1,
-                             .enable_anisotropy = false};
         attribute.mip_levels = 2;
         attribute.type = RHIImage::ImageType::Image2DCube;
         return attribute;

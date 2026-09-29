@@ -140,10 +140,6 @@ RHIResourceRef<RHIImage> NrdDenoiser::CreateFullScreenTexture(PixelFormat format
     auto image = rhi_->CreateImage(
         RHIImage::Attribute{
             .format = format,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
             .width = input_size_.x(),
             .height = input_size_.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,

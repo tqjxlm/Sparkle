@@ -160,11 +160,6 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 
 RHIImage::RHIImage(const Attribute &attributes, const std::string &name) : RHIResource(name), attributes_(attributes)
 {
-    if (attributes_.usages & ImageUsage::Texture)
-    {
-        ASSERT(attributes_.sampler.address_mode != RHISampler::SamplerAddressMode::Count);
-    }
-
     subresource_states_.assign(attributes_.mip_levels * GetArrayLayerCount(),
                                {.layout = attributes_.initial_layout, .access = {}});
 }

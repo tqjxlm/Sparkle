@@ -116,11 +116,6 @@ struct RGTextureDesc
     // Absolute only
     uint32_t width = 0;
     uint32_t height = 0;
-    // the sampler the pooled image carries; bindings take their sampler from the pass
-    RHISampler::SamplerAttribute sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 };
 
 // a binding member of a shader's ResourceTable that a texture binds to

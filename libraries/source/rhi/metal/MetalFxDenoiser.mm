@@ -32,14 +32,6 @@ constexpr MTLTextureUsage KnownTextureUsages = MTLTextureUsageShaderRead | MTLTe
                                                MTLTextureUsageRenderTarget | MTLTextureUsagePixelFormatView |
                                                MTLTextureUsageShaderAtomic;
 
-RHISampler::SamplerAttribute GetPreparedSampler()
-{
-    return {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-}
-
 #if SPARKLE_HAS_METALFX_DENOISED
 simd_float4x4 ToSimdMatrix(const Mat4 &source)
 {
@@ -163,7 +155,6 @@ struct MetalFxDenoiser::Impl
         SetDebugInfo(texture, name);
 
         RHIImage::Attribute attribute{.format = format,
-                                      .sampler = GetPreparedSampler(),
                                       .width = size.x(),
                                       .height = size.y(),
                                       .usages = writable ? RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV
@@ -202,7 +193,6 @@ struct MetalFxDenoiser::Impl
         resolved_output = rhi->CreateImage(
             RHIImage::Attribute{
                 .format = PixelFormat::RGBAFloat16,
-                .sampler = GetPreparedSampler(),
                 .width = desc.output_size.x(),
                 .height = desc.output_size.y(),
                 .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
