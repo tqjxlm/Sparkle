@@ -153,7 +153,12 @@ void ImageBasedLighting::RequestCpuCook(std::unique_ptr<CookJob> brdf_job, std::
                     return;
                 }
 
-                if (pass->ApplyArtifact(payload))
+                // render thread tasks run before the frame opens its command buffer
+                rhi_->BeginCommandBuffer();
+                const bool applied = pass->ApplyArtifact(payload);
+                rhi_->SubmitCommandBuffer();
+
+                if (applied)
                 {
                     render_resource_change_event_.Trigger();
                 }
