@@ -12,6 +12,7 @@
 #include "core/task/TaskDispatcher.h"
 #include "core/task/TaskManager.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/pass/PostChain.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/renderer/Renderer.h"
 #include "rhi/RHI.h"
@@ -83,7 +84,7 @@ const char *FindViewedTexture(const nlohmann::json &dump)
 {
     for (const auto &pass : dump.at("passes"))
     {
-        if (pass.at("name").get_ref<const std::string &>() == Renderer::GraphViewPassName)
+        if (pass.at("name").get_ref<const std::string &>() == PostChain::GraphViewPassName)
         {
             return DumpString(pass.at("accesses").at(0), "resource");
         }

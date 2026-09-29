@@ -26,9 +26,7 @@ void ForwardRenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
-    InitPostChain(ToneMappedScreenDesc);
-
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, screen_desc_.format);
+    InitPostChain(ToneMappingPass::ScreenFormat, PostChain::ScreenPass::ToneMapping);
 
     const auto scene_color_format = SceneColorDesc.format;
 
@@ -71,7 +69,7 @@ void ForwardRenderer::Render()
         sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map.image), sky_map.sampler, scene_color, scene_depth);
     }
 
-    AddPostChain(graph, scene_color, tone_mapping_pass_.get());
+    AddPostChain(graph, scene_color);
 
     ExecuteGraph(graph);
 }
@@ -93,8 +91,6 @@ void ForwardRenderer::Update()
     }
 
     sky_box_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
-    tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 }
 
 void ForwardRenderer::HandleSceneChanges()

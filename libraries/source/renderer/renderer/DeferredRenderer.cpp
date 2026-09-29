@@ -34,9 +34,7 @@ void DeferredRenderer::InitRenderResources()
 
     gbuffer_pass_ = PipelinePass::Create<GBufferPass>(render_config_, rhi_, scene_render_proxy_, SceneDepthDesc.format);
 
-    InitPostChain(ToneMappedScreenDesc);
-
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, screen_desc_.format);
+    InitPostChain(ToneMappingPass::ScreenFormat, PostChain::ScreenPass::ToneMapping);
 
     directional_lighting_pass_ =
         PipelinePass::Create<DirectionalLightingPass>(render_config_, rhi_, scene_color_format);
@@ -78,7 +76,7 @@ void DeferredRenderer::Render()
         sky_box_pass_->AddTo(graph, graph.Import("SkyMap", sky_map.image), sky_map.sampler, scene_color, scene_depth);
     }
 
-    AddPostChain(graph, scene_color, tone_mapping_pass_.get());
+    AddPostChain(graph, scene_color);
 
     ExecuteGraph(graph);
 }
@@ -102,8 +100,6 @@ void DeferredRenderer::Update()
     directional_lighting_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 
     sky_box_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
-    tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 }
 
 void DeferredRenderer::HandleSceneChanges()

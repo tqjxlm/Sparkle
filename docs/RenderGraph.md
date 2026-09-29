@@ -23,7 +23,7 @@ void MyRenderer::Render()
         return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
     });
 
-    AddPostChain(graph, scene_color, tone_mapping_pass_.get());
+    AddPostChain(graph, scene_color);
     ExecuteGraph(graph);
 }
 ```
@@ -141,8 +141,8 @@ Declaration and recording errors log their message and abort in every build, inc
 ### Viewing a Texture
 
 * `render_graph_view` names a graph texture to show in place of the frame, on every renderer.
-* `AddPostChain` looks it up (`RenderGraph::FindTexture`) among the textures the frame's passes created or imported before the post chain. The `GraphView` pass then samples its final contents into Screen instead of the screen pass, so culling removes every pass that only fed the scene.
-* The texture must be one a pass added then can sample through a 2D binding (`RenderGraph::CanSample2D`: a single-layer import with texture usage, or a transient an earlier pass writes), of a format a float texture samples (`SamplesAsFloat` in [Renderer.cpp](../libraries/source/renderer/renderer/Renderer.cpp)). Otherwise the frame shows as usual, with a warning logged once per change of the value.
+* The post chain looks it up (`RenderGraph::FindTexture`) among the textures the frame's passes created or imported before the post chain. The `GraphView` pass then samples its final contents into Screen instead of the screen pass, so culling removes every pass that only fed the scene.
+* The texture must be one a pass added then can sample through a 2D binding (`RenderGraph::CanSample2D`: a single-layer import with texture usage, or a transient an earlier pass writes), of a format a float texture samples (`SamplesAsFloat` in [PostChain.cpp](../libraries/source/renderer/pass/PostChain.cpp)). Otherwise the frame shows as usual, with a warning logged once per change of the value.
 * `GraphView` shows the values it samples (an sRGB texture decoded) as colors in Screen's format, which clips them, stretched over the output.
 * For example, `IblBrdf` shows the BRDF map of a ready IBL, and `SceneDepth` on Deferred shows the depth `GBuffer` writes, with only `GBuffer`, `GraphView` and `Present` left live.
 
@@ -193,9 +193,9 @@ python3 dev/render_graph_viewer.py <external-storage-path>/screenshots/render_gr
 
 Each renderer builds one graph per frame from the `RenderFramework`'s texture pool, which outlives renderer recreation, so a pipeline switch reuses the images both pipelines' graphs need. The goldens in [tests/render_graph/golden/](../tests/render_graph/golden/) list the passes, accesses, barriers, attachments and resources of a typical frame of each renderer (see [Tests](#tests)); the [viewer](#viewer) renders a dump of any frame.
 
-Every frame ends with `Renderer::AddPostChain(graph, scene, screen_pass)`:
+Every frame ends with the post chain (`PostChain`, [PostChain.h](../libraries/include/renderer/pass/PostChain.h)), added after the scene passes, which leave the scene in `scene`:
 
-* The screen pass (`ToneMapping` or `Upsample`), when given, draws `scene` into Screen, a transient at output resolution whose format the renderer chooses once (`Renderer::InitPostChain`): `B8G8R8A8Srgb` for the renderers that tone map on the GPU, the CPU renderer's `RGBAFloat16` otherwise. Without a screen pass, `scene` is the screen; `GraphView` replaces the screen pass while `render_graph_view` shows a texture.
+* The screen pass the renderer chooses once with Screen's format (`Renderer::InitPostChain`) draws `scene` into Screen, a transient at output resolution: `ToneMapping` into `B8G8R8A8Srgb` for the renderers that tone map on the GPU, and for the CPU renderer `Upsample` into its `RGBAFloat16` when `render_scale` < 1. Without a screen pass, `scene` is the screen; `GraphView` replaces the screen pass while `render_graph_view` shows a texture.
 * `Readback` is a Copy pass that copies the screen into a staging buffer the host reads, when a screenshot is pending: before `Ui` for a screenshot without UI, after it for one with UI, which gets the screen without UI when `Ui` does not draw. The buffer is created with the pass (its size comes from `RenderGraph::GetFormat` and `GetSize`), imported, and saved once the frame completes.
 * `Ui` (UI shown, not headless) draws ImGui into the rendering the graph begins over Screen, through `NativeAccess()`. The ImGui backend compiles its pipelines for Screen's format (`RHIUiHandler::Setup` takes an attachment signature).
 * `Present` draws the screen into BackBuffer, the image `RHIContext::GetBackBuffer()` returns: a windowed Vulkan device's acquired swap chain image, otherwise one image whose Metal texture is the frame's drawable when windowed.

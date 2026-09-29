@@ -103,9 +103,7 @@ void GPURenderer::InitRenderResources()
 
     InitSceneRenderResources();
 
-    InitPostChain(ToneMappedScreenDesc);
-
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, screen_desc_.format);
+    InitPostChain(ToneMappingPass::ScreenFormat, PostChain::ScreenPass::ToneMapping);
     displayed_image_ = scene_texture_;
 
     performance_history_.resize(rhi_->GetMaxFramesInFlight());
@@ -202,7 +200,7 @@ void GPURenderer::Render()
         tone_mapping_input = graph.Import("DenoiserOutput", displayed_image_);
     }
 
-    AddPostChain(graph, tone_mapping_input, tone_mapping_pass_.get());
+    AddPostChain(graph, tone_mapping_input);
 
     ExecuteGraph(graph);
 }
@@ -425,8 +423,6 @@ void GPURenderer::Update()
         ubo.dir_light = dir_light->GetRenderData();
     }
     uniform_buffer_->Upload(rhi_, &ubo);
-
-    tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 
     spp_logger_.Tick();
 

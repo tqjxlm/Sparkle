@@ -34,8 +34,6 @@ private:
     std::unique_ptr<class ForwardMeshPass> scene_color_pass_;
     // skybox to scene_color
     std::unique_ptr<class SkyBoxPass> sky_box_pass_;
-    // convert scene_color to the screen
-    std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
 
     class ImageBasedLighting *ibl_ = nullptr;
 

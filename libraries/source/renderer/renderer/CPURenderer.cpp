@@ -7,7 +7,6 @@
 #include "core/math/Sampler.h"
 #include "core/task/TaskManager.h"
 #include "renderer/graph/RenderGraph.h"
-#include "renderer/pass/ScreenQuadPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/PrimitiveRenderProxy.h"
@@ -47,13 +46,8 @@ void CPURenderer::InitRenderResources()
                                         .is_dynamic = true},
                                        "RayTracingOutputBuffer");
 
-    InitPostChain({.format = output_image_.GetFormat(), .size_class = RGSizeClass::Output});
-
-    if (resolution_.NeedUpsample())
-    {
-        upsample_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Upsample", screen_desc_.format,
-                                                              ScreenQuadPass::InputFilter::Bilinear);
-    }
+    InitPostChain(output_image_.GetFormat(),
+                  resolution_.NeedUpsample() ? PostChain::ScreenPass::Upsample : PostChain::ScreenPass::None);
 
     gbuffer_.Resize(resolution_.scene.x(), resolution_.scene.y());
     ping_pong_buffer_.resize(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
@@ -113,7 +107,7 @@ void CPURenderer::Render()
         };
     });
 
-    AddPostChain(graph, scene_color, upsample_pass_.get());
+    AddPostChain(graph, scene_color);
 
     ExecuteGraph(graph);
 

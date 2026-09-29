@@ -45,9 +45,6 @@ private:
 
     RHIResourceRef<RHIBuffer> image_buffer_;
 
-    // fills the screen from the uploaded image when sub-resolution rendering makes them differ
-    std::unique_ptr<class ScreenQuadPass> upsample_pass_;
-
     Image2D output_image_;
 
     // output of rendering passes. cleared every frame.

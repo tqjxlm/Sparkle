@@ -33,9 +33,6 @@ private:
     std::unique_ptr<class DirectionalLightingPass> directional_lighting_pass_;
     std::unique_ptr<class SkyBoxPass> sky_box_pass_;
 
-    // convert scene_color to the screen
-    std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
-
     class ImageBasedLighting *ibl_ = nullptr;
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;

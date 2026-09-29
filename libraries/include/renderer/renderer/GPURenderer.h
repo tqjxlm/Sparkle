@@ -78,7 +78,6 @@ private:
     RHIResourceRef<RHIImage> scene_texture_;
     std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
 
-    std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
     // what tone mapping displayed last: the accumulator or a denoiser's output
     RHIResourceRef<RHIImage> displayed_image_;
 

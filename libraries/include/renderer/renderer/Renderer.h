@@ -5,11 +5,11 @@
 #include "renderer/graph/RGPassTimers.h"
 #include "renderer/graph/RGTexturePool.h"
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/PostChain.h"
 #include "rhi/RHIImage.h"
 
 #include <atomic>
 #include <functional>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,8 +23,6 @@ class CameraRenderProxy;
 class MaterialRenderProxy;
 class MeshRenderProxy;
 class ImageBasedLighting;
-class ScreenQuadPass;
-class UiPass;
 
 // A renderer performs the following functionalities:
 // 1. process a scene of geometries
@@ -96,15 +94,8 @@ public:
         return resolution_;
     }
 
-    // the pass drawing the texture render_graph_view names into the Screen transient; its first access samples it
-    static constexpr const char *GraphViewPassName = "GraphView";
-
 protected:
     virtual void Update() = 0;
-
-    // the screen of renderers that tone map on the GPU
-    static constexpr RGTextureDesc ToneMappedScreenDesc{.format = PixelFormat::B8G8R8A8Srgb,
-                                                        .size_class = RGSizeClass::Output};
 
     // the scene depth of the renderers that rasterize the scene
     static constexpr RGTextureDesc SceneDepthDesc{.format = PixelFormat::D32, .size_class = RGSizeClass::Scene};
@@ -124,13 +115,11 @@ protected:
     [[nodiscard]] static SkyBoxMap GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
                                                 const RHIResourceRef<RHIImage> &sky_map);
 
-    // creates the passes of the post chain, which ends in a Screen texture of `screen_desc`
-    void InitPostChain(const RGTextureDesc &screen_desc);
+    // creates the post chain, whose Screen transient is of `screen_format`
+    void InitPostChain(PixelFormat screen_format, PostChain::ScreenPass screen_pass);
 
-    // adds the passes every frame ends with: `screen_pass` drawing `scene` into the Screen transient (tone mapping or
-    // upsampling), or `scene` as the screen without one, unless the texture render_graph_view names is drawn there
-    // instead; the screenshot readbacks; the ui when shown; and the present drawing the screen into the back buffer
-    void AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQuadPass *screen_pass);
+    // adds the post chain after the scene passes, which leave the scene in `scene`
+    void AddPostChain(RenderGraph &graph, RGTexture scene);
 
     // compiles and records the frame's graph, then dumps it when a dump is pending
     void ExecuteGraph(RenderGraph &graph);
@@ -150,41 +139,8 @@ protected:
     // images behind the transients of the renderer's graphs, kept across frames and renderers
     RGTexturePool &graph_texture_pool_;
 
-    RGTextureDesc screen_desc_;
-    // null when headless
-    std::unique_ptr<UiPass> ui_pass_;
-    std::unique_ptr<ScreenQuadPass> present_pass_;
-
 private:
-    struct PendingScreenshot
-    {
-        std::string file_path;
-        bool capture_ui;
-        ScreenshotCallback on_complete;
-    };
-
-    [[nodiscard]] std::optional<PendingScreenshot> TakeScreenshotRequest(bool capture_ui);
-
-    // the texture render_graph_view names when the post chain can show it; otherwise invalid, with a warning once per
-    // change of the value
-    [[nodiscard]] RGTexture FindGraphView(const RenderGraph &graph);
-
-    // when a screenshot with or without ui is pending, adds a pass that copies `texture` into a staging buffer, which
-    // is saved once the frame completes
-    void AddReadback(RenderGraph &graph, RGTexture texture, bool capture_ui);
-
-    // a staging buffer for an image of `format` and `size`, saved as the screenshot once the frame completes. the
-    // caller records the copy.
-    [[nodiscard]] RHIResourceRef<RHIBuffer> CreateScreenshotBuffer(PixelFormat format, Vector2UInt size,
-                                                                   PendingScreenshot screenshot);
-
-    std::optional<PendingScreenshot> pending_screenshot_;
-
-    // draws the texture render_graph_view names into the Screen transient
-    std::unique_ptr<ScreenQuadPass> graph_view_pass_;
-    // the render_graph_view the post chain last looked up, and whether its fallback was logged
-    std::string graph_view_;
-    bool graph_view_warned_ = false;
+    std::unique_ptr<PostChain> post_chain_;
 
     // times the raster passes of the renderer's graphs across frames
     RGPassTimers graph_pass_timers_;

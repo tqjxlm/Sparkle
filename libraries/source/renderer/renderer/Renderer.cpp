@@ -3,10 +3,7 @@
 #include "core/FileManager.h"
 #include "core/Path.h"
 #include "core/ThreadManager.h"
-#include "io/Image.h"
 #include "renderer/graph/RenderGraph.h"
-#include "renderer/pass/ScreenQuadPass.h"
-#include "renderer/pass/UiPass.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/renderer/CPURenderer.h"
@@ -86,7 +83,7 @@ void Renderer::Tick()
 
     Update();
 
-    present_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
+    post_chain_->UpdateFrameData(scene_render_proxy_);
 
     scene_render_proxy_->EndUpdate(rhi_);
 }
@@ -110,14 +107,7 @@ bool Renderer::IsReadyForAutoScreenshot() const
 void Renderer::RequestSaveScreenshot(const std::string &file_path, bool capture_ui,
                                      Renderer::ScreenshotCallback on_complete)
 {
-    ASSERT(ThreadManager::IsInRenderThread());
-    ASSERT(!file_path.empty());
-
-    std::filesystem::path screenshot_path = std::filesystem::path("screenshots") / file_path;
-    screenshot_path.replace_extension(".png");
-
-    pending_screenshot_ = PendingScreenshot{
-        .file_path = screenshot_path.string(), .capture_ui = capture_ui, .on_complete = std::move(on_complete)};
+    post_chain_->RequestScreenshot(file_path, capture_ui, std::move(on_complete));
 }
 
 void Renderer::RequestGraphDump(const std::string &name, std::function<void()> on_complete)
@@ -136,79 +126,6 @@ void Renderer::RequestGraphDump(std::function<void(const nlohmann::json &)> on_d
     graph_dump_consumer_ = std::move(on_dump);
 }
 
-std::optional<Renderer::PendingScreenshot> Renderer::TakeScreenshotRequest(bool capture_ui)
-{
-    ASSERT(ThreadManager::IsInRenderThread());
-
-    if (!pending_screenshot_ || pending_screenshot_->capture_ui != capture_ui)
-    {
-        return std::nullopt;
-    }
-
-    return std::exchange(pending_screenshot_, std::nullopt);
-}
-
-RHIResourceRef<RHIBuffer> Renderer::CreateScreenshotBuffer(PixelFormat format, Vector2UInt size,
-                                                           PendingScreenshot screenshot)
-{
-    auto staging_buffer =
-        rhi_->CreateBuffer({.size = GetImageMipByteSize(format, size.x(), size.y()),
-                            .usages = RHIBuffer::BufferUsage::TransferDst,
-                            .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                            .is_dynamic = false},
-                           "ScreenshotReadbackStagingBuffer");
-
-    const auto width = size.x();
-    const auto height = size.y();
-    auto *rhi = rhi_;
-
-    rhi_->EnqueueEndOfFrameTasks([rhi, staging_buffer, width, height, format,
-                                  output_path = std::move(screenshot.file_path),
-                                  on_complete = std::move(screenshot.on_complete)]() {
-        rhi->WaitForDeviceIdle();
-
-        const auto *raw_data = reinterpret_cast<const uint8_t *>(staging_buffer->Lock());
-        auto pixels = Image2D::CreateFromRawPixels(raw_data, width, height, format);
-        staging_buffer->UnLock();
-        bool success = pixels.WriteToFile(Path::External(output_path));
-
-        if (success)
-        {
-            Log(Info, "Screenshot saved to {}", output_path);
-        }
-        else
-        {
-            Log(Error, "Failed to save screenshot to {}", output_path);
-        }
-
-        if (on_complete)
-        {
-            on_complete();
-        }
-    });
-
-    return staging_buffer;
-}
-
-void Renderer::AddReadback(RenderGraph &graph, RGTexture texture, bool capture_ui)
-{
-    auto request = TakeScreenshotRequest(capture_ui);
-    if (!request)
-    {
-        return;
-    }
-
-    const auto staging_buffer =
-        graph.Import("ScreenshotBuffer",
-                     CreateScreenshotBuffer(graph.GetFormat(texture), graph.GetSize(texture), std::move(*request)));
-    graph.ReadOnHost(staging_buffer);
-    graph.AddCopyPass("Readback", [texture, staging_buffer](RGBuilder &builder) {
-        builder.CopySrc(texture);
-        builder.CopyDst(staging_buffer);
-        return [texture, staging_buffer](RGCopyContext &context) { context.CopyToBuffer(texture, staging_buffer); };
-    });
-}
-
 Renderer::SkyBoxMap Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, const ImageBasedLighting *ibl,
                                            const RHIResourceRef<RHIImage> &sky_map)
 {
@@ -225,86 +142,14 @@ Renderer::SkyBoxMap Renderer::GetSkyBoxMap(RenderConfig::OutputImage mode, const
                    : SkyBoxMap{.image = sky_map, .sampler = SkyRenderProxy::SkyMapSampler};
 }
 
-void Renderer::InitPostChain(const RGTextureDesc &screen_desc)
+void Renderer::InitPostChain(PixelFormat screen_format, PostChain::ScreenPass screen_pass)
 {
-    screen_desc_ = screen_desc;
-
-    if (!rhi_->IsHeadless())
-    {
-        ui_pass_ = std::make_unique<UiPass>(rhi_, screen_desc.format);
-    }
-
-    present_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, "Present",
-                                                         rhi_->GetBackBuffer()->GetAttributes().format,
-                                                         ScreenQuadPass::InputFilter::NearestAtIntegerScale, true);
-
-    graph_view_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, GraphViewPassName, screen_desc.format,
-                                                            ScreenQuadPass::InputFilter::Bilinear);
+    post_chain_ = std::make_unique<PostChain>(render_config_, rhi_, screen_format, screen_pass);
 }
 
-// a float Texture2D samples the default view of an image of `format`: integer formats need an integer texture, and a
-// depth-stencil view cannot be sampled
-static bool SamplesAsFloat(PixelFormat format)
+void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene)
 {
-    return format != PixelFormat::R32UInt && format != PixelFormat::RGBAUInt32 && format != PixelFormat::D24S8;
-}
-
-RGTexture Renderer::FindGraphView(const RenderGraph &graph)
-{
-    const auto &name = render_config_.render_graph_view;
-    if (name != graph_view_)
-    {
-        graph_view_ = name;
-        graph_view_warned_ = false;
-    }
-
-    if (name.empty())
-    {
-        return {};
-    }
-
-    if (const auto texture = graph.FindTexture(name);
-        texture.IsValid() && graph.CanSample2D(texture) && SamplesAsFloat(graph.GetFormat(texture)))
-    {
-        return texture;
-    }
-
-    if (!graph_view_warned_)
-    {
-        Log(Warn, "render_graph_view {} is not a 2D color texture this frame's graph can sample. showing the frame",
-            name);
-        graph_view_warned_ = true;
-    }
-    return {};
-}
-
-void Renderer::AddPostChain(RenderGraph &graph, RGTexture scene, const ScreenQuadPass *screen_pass)
-{
-    if (const auto view = FindGraphView(graph); view.IsValid())
-    {
-        scene = view;
-        screen_pass = graph_view_pass_.get();
-    }
-
-    auto screen = scene;
-    if (screen_pass)
-    {
-        screen = graph.CreateTexture("Screen", screen_desc_);
-        screen_pass->AddTo(graph, scene, screen);
-    }
-
-    AddReadback(graph, screen, false);
-
-    if (render_config_.render_ui && ui_pass_)
-    {
-        ui_pass_->AddTo(graph, screen);
-    }
-
-    // a screenshot with ui is served without it when the ui does not draw
-    AddReadback(graph, screen, true);
-
-    const auto back_buffer = graph.Import("BackBuffer", rhi_->GetBackBuffer());
-    present_pass_->AddTo(graph, screen, back_buffer);
+    post_chain_->AddTo(graph, scene);
 }
 
 void Renderer::ExecuteGraph(RenderGraph &graph)
