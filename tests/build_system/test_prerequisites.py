@@ -129,5 +129,27 @@ class InstallWithRetryTests(unittest.TestCase):
         self.assertEqual(provision.call_count, 2)
 
 
+@patch("build_system.prerequisites.load_prerequisites_versions", return_value={"slang": "2026.19"})
+@patch("build_system.prerequisites.install_slangc", return_value="installed")
+@patch("build_system.prerequisites._installed_slangc_version")
+class FindSlangcTests(unittest.TestCase):
+    def test_pinned_version_is_kept(self, mock_version, mock_install, _):
+        mock_version.return_value = "2026.19"
+        self.assertTrue(prerequisites.find_slangc().startswith(prerequisites._BUILD_CACHE_DIR))
+        mock_install.assert_not_called()
+
+    def test_other_version_is_replaced(self, mock_version, mock_install, _):
+        mock_version.return_value = "2026.1.1"
+        with patch("builtins.print"):
+            self.assertEqual(prerequisites.find_slangc(), "installed")
+        mock_install.assert_called_once_with(prerequisites._BUILD_CACHE_DIR, "2026.19")
+
+    def test_missing_slangc_is_installed(self, mock_version, mock_install, _):
+        mock_version.return_value = None
+        with patch("builtins.print"):
+            self.assertEqual(prerequisites.find_slangc(), "installed")
+        mock_install.assert_called_once_with(prerequisites._BUILD_CACHE_DIR, "2026.19")
+
+
 if __name__ == "__main__":
     unittest.main()
