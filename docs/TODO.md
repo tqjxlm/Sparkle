@@ -24,6 +24,8 @@
 
 ## RHI
 
+* [ ] the glfw CMake cache keeps `Vulkan_LIBRARY` from the first configure, so after a Vulkan SDK bump an existing build still links (and on macOS bundles MoltenVK from) the old SDK until it is reconfigured from scratch
+
 * [ ] msaa
 * [ ] render graph on-chip passes: merge raster passes through pixel-local reads (Vulkan dynamic rendering local read, Metal framebuffer fetch), with memoryless attachments, break reasons and a tile budget
 * [ ] render graph resize: transients re-resolve each frame and persistent resources reset through a hook, instead of recreating the renderer and scene proxies

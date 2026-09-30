@@ -807,14 +807,10 @@ bool VulkanContext::CreateInstance()
     create_info.enabledExtensionCount = static_cast<uint32_t>(instance_extensions_.size());
     create_info.ppEnabledExtensionNames = instance_extensions_.data();
 
-#ifdef VK_EXT_layer_settings
     std::vector<VkLayerSettingEXT> layer_settings;
-#endif
 
 #if PLATFORM_MACOS
-#if VK_KHR_portability_enumeration
     create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
 
     const int use_metal_argument_buffers = 1;
     layer_settings.push_back({"MoltenVK", "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", VK_LAYER_SETTING_TYPE_INT32_EXT, 1,
@@ -829,18 +825,13 @@ bool VulkanContext::CreateInstance()
 
     if (enable_validation_ && rhi_->GetConfig().enable_sync_validation)
     {
-#ifdef VK_EXT_layer_settings
         static constexpr VkBool32 ValidateSync = VK_TRUE;
         layer_settings.push_back(
             {validation_layers_.front(), "validate_sync", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &ValidateSync});
         enable_sync_validation_ = true;
         Log(Info, "Vulkan synchronization validation enabled");
-#else
-        Log(Warn, "synchronization validation requested, but the Vulkan headers have no layer settings");
-#endif
     }
 
-#ifdef VK_EXT_layer_settings
     const VkLayerSettingsCreateInfoEXT layer_settings_create_info = {
         .sType = VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT,
         .pNext = nullptr,
@@ -851,7 +842,6 @@ bool VulkanContext::CreateInstance()
     {
         create_info.pNext = &layer_settings_create_info;
     }
-#endif
 
     if (enable_validation_)
     {
@@ -1061,7 +1051,6 @@ void VulkanContext::GetRequiredInstanceExtensions()
     }
 
 #if PLATFORM_MACOS
-#if VK_KHR_portability_enumeration
     // Required on macOS regardless of headless mode, since CreateInstance always
     // sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.
     instance_extensions_.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
@@ -1071,7 +1060,6 @@ void VulkanContext::GetRequiredInstanceExtensions()
     {
         instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
     }
-#endif
 #endif
 
     Log(Info, "enabled instance extensions:");

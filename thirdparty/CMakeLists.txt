@@ -144,17 +144,18 @@ target_link_libraries(sparkle_thirdparty PRIVATE tinyusdz::tinyusdz_static)
 if (ENABLE_VULKAN)
     target_compile_definitions(sparkle_thirdparty PUBLIC VULKAN_USE_VOLK=1 IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
 
+    # the only vulkan headers of every platform; they precede the android ndk sysroot's older ones
+    target_include_directories(sparkle_thirdparty SYSTEM PUBLIC Vulkan-Headers/include)
+
     if (ANDROID)
-        # android will use vulkan SDK provided by android toolchain
         target_link_libraries(sparkle_thirdparty PRIVATE
-            # vulkan
             game-activity::game-activity_static
             android
             log
         )
 
     elseif(GLFW)
-        target_link_libraries(sparkle_thirdparty PRIVATE Vulkan::Vulkan glfw)
+        target_link_libraries(sparkle_thirdparty PRIVATE glfw)
     endif()
 endif()
 
