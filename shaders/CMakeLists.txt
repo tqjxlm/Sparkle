@@ -68,7 +68,7 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
         OUTPUT ${SPIRV}
         COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}
         COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}"
-        DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
+        DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC}
     )
     list(APPEND ALL_SPIRV_OUTPUTS ${SPIRV})
 endforeach(SLANG)
@@ -120,7 +120,7 @@ if (ENABLE_METAL)
                 OUTPUT ${MSL}
                 COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include
                 COMMENT "Compiling ${SHADER_NAME} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include"
-                DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
+                DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC}
             )
         endif()
         list(APPEND ALL_MTL_OUTPUTS ${MSL})

@@ -383,19 +383,25 @@ def install_vulkan_sdk(build_cache_dir):
     return vulkan_sdk_path
 
 
-def install_slangc(build_cache_dir):
-    """Install slangc (Slang shader compiler) to build_cache directory."""
-    prerequisites = load_prerequisites_versions()
-    slang_version = prerequisites.get("slang", "2026.1.1")
-
+def _slangc_paths(build_cache_dir):
+    """(install dir, executable) of the slangc shader compiler in the build cache."""
     slang_dir = os.path.join(build_cache_dir, "slang")
-    slangc_executable = os.path.join(slang_dir, "bin", "slangc")
-    if is_windows:
-        slangc_executable += ".exe"
+    executable = os.path.join(slang_dir, "bin", "slangc" + (".exe" if is_windows else ""))
+    return slang_dir, executable
 
-    if os.path.exists(slangc_executable):
-        print("slangc already installed in build_cache.")
-        return slangc_executable
+
+def _installed_slangc_version(slangc_executable):
+    """The version slangc reports, or None when it is missing or cannot run."""
+    try:
+        result = subprocess.run([slangc_executable, "-version"], capture_output=True, text=True)
+    except OSError:
+        return None
+    return (result.stdout + result.stderr).strip() if result.returncode == 0 else None
+
+
+def install_slangc(build_cache_dir, slang_version):
+    """Install slangc (Slang shader compiler) to build_cache directory, replacing any other version."""
+    slang_dir, slangc_executable = _slangc_paths(build_cache_dir)
 
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -424,6 +430,7 @@ def install_slangc(build_cache_dir):
     download_file(download_url, download_path)
 
     print("Extracting slangc...")
+    shutil.rmtree(slang_dir, ignore_errors=True)
     os.makedirs(slang_dir, exist_ok=True)
     extract_zip(download_path, slang_dir)
 
@@ -516,18 +523,17 @@ def find_ispc():
 
 
 def find_slangc():
-    """Find slangc or install it automatically. Returns the path to the slangc executable."""
-    slang_dir = os.path.join(_BUILD_CACHE_DIR, "slang")
-    slangc_executable = os.path.join(slang_dir, "bin", "slangc")
-    if is_windows:
-        slangc_executable += ".exe"
+    """Find the pinned slangc or install it automatically. Returns the path to the slangc executable."""
+    slang_version = load_prerequisites_versions().get("slang", "2026.19")
+    _, slangc_executable = _slangc_paths(_BUILD_CACHE_DIR)
 
-    if os.path.exists(slangc_executable):
+    installed_version = _installed_slangc_version(slangc_executable)
+    if installed_version == slang_version:
         return slangc_executable
 
-    print("slangc not found. Installing to build_cache...")
+    print(f"slangc {slang_version} is pinned, build_cache has {installed_version or 'none'}. Installing...")
     os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
-    return install_slangc(_BUILD_CACHE_DIR)
+    return install_slangc(_BUILD_CACHE_DIR, slang_version)
 
 
 def find_llvm_path():
