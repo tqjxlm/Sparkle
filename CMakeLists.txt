@@ -300,9 +300,7 @@ if(ENABLE_VULKAN)
     if (ANDROID)
         find_package(game-activity REQUIRED CONFIG)
 
-        # android will use vulkan SDK provided by android toolchain
         set(LIBRARIES ${LIBRARIES}
-            # vulkan
             game-activity::game-activity_static
             android
             log
@@ -314,7 +312,8 @@ if(ENABLE_VULKAN)
     elseif(GLFW)
         find_package(Vulkan REQUIRED)
 
-        set(LIBRARIES ${LIBRARIES} Vulkan::Vulkan)
+        # the loader only: headers come from thirdparty/Vulkan-Headers on every platform
+        set(LIBRARIES ${LIBRARIES} ${Vulkan_LIBRARY})
 
         if(APPLE)
             # Bundle MoltenVK for self-contained builds (no external VK_ICD_FILENAMES needed)
@@ -342,11 +341,6 @@ if(ENABLE_VULKAN)
             )
         endif()
     endif()
-
-    set(INCLUDES
-        ${INCLUDES}
-        ${Vulkan_INCLUDE_DIRS}
-    )
 endif()
 
 # ------------------ resources ------------------

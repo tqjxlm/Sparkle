@@ -24,7 +24,7 @@ These libraries should be installed via an installer or package manager (apt, br
   apt # Linux
   ```
 
-* **Vulkan SDK**: 1.4.350.0+
+* **Vulkan SDK**: 1.4.350.0+. It provides the Vulkan loader (and MoltenVK on macOS) that glfw builds link, the validation layer and shader tools. No build compiles against its headers: every Vulkan framework (glfw and android) uses the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git) submodule, pinned to the SDK version in [prerequisites.json](../prerequisites.json), so an installed SDK or NDK never changes the Vulkan API a build sees. Bump both together.
 
   ``` shell
   https://vulkan.lunarg.com/sdk/home
@@ -73,6 +73,7 @@ These libraries are managed by git submodules or CMake. They will be set up auto
 * [tracy](https://github.com/wolfpld/tracy.git)
 * [vma](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 * [volk](https://github.com/zeux/volk.git)
+* [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git)
 * [Xoshiro-cpp](https://github.com/Reputeless/Xoshiro-cpp.git)
 
 </details>
