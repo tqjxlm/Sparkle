@@ -3,6 +3,7 @@
   <application
     android:icon="@mipmap/ic_launcher"
     android:label="@string/sparkle_activity">
+    <profileable android:shell="true" />
     <activity android:name="VulkanActivity"
       android:theme="@style/Application.Fullscreen"
       android:launchMode="singleTask"
