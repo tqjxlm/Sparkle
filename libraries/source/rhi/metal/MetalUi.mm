@@ -9,7 +9,8 @@
 
 namespace sparkle
 {
-MetalUiHandler::MetalUiHandler() : RHIUiHandler("MetalUiHandler")
+MetalUiHandler::MetalUiHandler()
+    : RHIUiHandler("MetalUiHandler", ImGui_ImplMetal_UpdateTexture, context->GetRHI()->GetMaxFramesInFlight())
 {
     ImGui_ImplMetal_Init(context->GetDevice());
 
@@ -18,6 +19,7 @@ MetalUiHandler::MetalUiHandler() : RHIUiHandler("MetalUiHandler")
 
 MetalUiHandler::~MetalUiHandler()
 {
+    ShutdownTextureQueue();
     ImGui_ImplMetal_Shutdown();
     is_valid_ = false;
 }
@@ -29,16 +31,13 @@ void MetalUiHandler::Render(RHICommandContext &command_context)
     // it has been set in UiManager::Render()
     auto *draw_data = reinterpret_cast<ImDrawData *>(ImGui::GetIO().UserData);
 
+    ProcessTextureRequests(*draw_data);
+
     ImGui_ImplMetal_RenderDrawData(draw_data, metal_context.GetCommandBuffer(), metal_context.GetRenderEncoder());
 }
 
 void MetalUiHandler::BeginFrame(const RHIRenderingInfo &info)
 {
-    ImGuiIO &io = ImGui::GetIO();
-
-    // it may be override by platform specific callbacks, so we need to set it every frame
-    io.DisplaySize = ImVec2(static_cast<float>(info.width), static_cast<float>(info.height));
-
     ImGui_ImplMetal_NewFrame(CreateMetalRenderPassDescriptor(info));
 }
 } // namespace sparkle

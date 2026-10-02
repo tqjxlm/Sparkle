@@ -76,6 +76,9 @@
 [submodule "thirdparty/Vulkan-Headers"]
 	path = thirdparty/Vulkan-Headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "thirdparty/imgui_club"]
+	path = thirdparty/imgui_club
+	url = https://github.com/ocornut/imgui_club.git
 [submodule "thirdparty/elkjs"]
 	path = thirdparty/elkjs
 	url = https://github.com/kieler/elkjs.git

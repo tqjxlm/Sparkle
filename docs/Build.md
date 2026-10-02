@@ -60,6 +60,7 @@ These libraries are managed by git submodules or CMake. They will be set up auto
 * [fast_float](https://github.com/fastfloat/fast_float.git)
 * [hash-library](https://github.com/lazy-eggplant/hash-library.git)
 * [imgui](https://github.com/ocornut/imgui.git), pinned to a master commit after v1.92.9b: the Vulkan and Metal backends of releases up to v1.92.9b cannot draw inside renderings with several color attachments
+* [imgui_club](https://github.com/ocornut/imgui_club.git), for `imgui_threaded_rendering`'s texture queue, which hands ImGui's texture requests from the main thread to the render thread
 * [ios-cmake](https://github.com/leetal/ios-cmake.git)
 * [json](https://github.com/nlohmann/json.git)
 * [magic_enum](https://github.com/Neargye/magic_enum.git)

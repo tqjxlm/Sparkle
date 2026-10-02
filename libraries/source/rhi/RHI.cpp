@@ -55,6 +55,8 @@ void RHIContext::Cleanup()
 {
     ReleaseRenderResources();
 
+    ui_handler_instance_ = nullptr;
+
     samplers_.clear();
     dummy_textures_.clear();
 
@@ -418,11 +420,11 @@ void RHIContext::ReleaseRenderResources()
 
     WaitForDeviceIdle();
 
-    ui_handler_instance_ = nullptr;
-
     // deliberately NOT the sampler/dummy-texture caches: this also runs mid-session (swap chain
     // recreation on rotation, surface loss), where live pipelines still bind those resources
     // through raw pointers. they are released in Cleanup only.
+    // nor the ui handler: its texture queue cannot hand ImGui's textures back to the backend while the main thread
+    // runs ImGui, and its backend depends on no surface.
 }
 
 RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute attribute)
