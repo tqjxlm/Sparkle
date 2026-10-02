@@ -12,7 +12,8 @@
 
 namespace sparkle
 {
-VulkanUiHandler::VulkanUiHandler() : RHIUiHandler("VulkanUiHandler")
+VulkanUiHandler::VulkanUiHandler()
+    : RHIUiHandler("VulkanUiHandler", ImGui_ImplVulkan_UpdateTexture, context->GetRHI()->GetMaxFramesInFlight())
 {
 #ifdef VK_NO_PROTOTYPES
     auto func_loader = [](const char *func_name, void * /*handler*/) {
@@ -51,13 +52,8 @@ VulkanUiHandler::VulkanUiHandler() : RHIUiHandler("VulkanUiHandler")
     is_valid_ = true;
 }
 
-void VulkanUiHandler::BeginFrame(const RHIRenderingInfo &info)
+void VulkanUiHandler::BeginFrame(const RHIRenderingInfo & /*info*/)
 {
-    ImGuiIO &io = ImGui::GetIO();
-
-    // it may be override by platform specific callbacks, so we need to set it every frame
-    io.DisplaySize = ImVec2(static_cast<float>(info.width), static_cast<float>(info.height));
-
     ImGui_ImplVulkan_NewFrame();
 }
 
@@ -67,6 +63,8 @@ void VulkanUiHandler::Render(RHICommandContext &command_context)
 
     // it has been set in UiManager::Render()
     auto *draw_data = reinterpret_cast<ImDrawData *>(io.UserData);
+
+    ProcessTextureRequests(*draw_data);
 
     if (draw_data->CmdListsCount == 0 || draw_data->CmdLists[0]->CmdBuffer.empty())
     {
@@ -106,6 +104,7 @@ void VulkanUiHandler::CompilePipeline(const RHIAttachmentSignature &signature)
 
 VulkanUiHandler::~VulkanUiHandler()
 {
+    ShutdownTextureQueue();
     ImGui_ImplVulkan_Shutdown();
     vkDestroyDescriptorPool(context->GetDevice(), descriptor_pool_, nullptr);
     is_valid_ = false;

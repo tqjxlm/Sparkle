@@ -332,6 +332,7 @@ target_include_directories(sparkle_thirdparty SYSTEM PUBLIC
     imgui
     imgui/backends
     imgui/misc/cpp
+    imgui_club/imgui_threaded_rendering
     spirv_reflect
     magic_enum/include
     xoshiro_cpp

@@ -5,6 +5,7 @@
 #include "core/FileManager.h"
 #include "core/ThreadManager.h"
 #include "core/task/TaskManager.h"
+#include "rhi/RHIUiHandler.h"
 
 #include <IconsFontAwesome7.h>
 #include <imgui.h>
@@ -185,6 +186,7 @@ void UiManager::Render()
     {
         native_view_->TickUiSystem();
 
+        RHIUiHandler::BeginImGuiFrame();
         ImGui::NewFrame();
 
         for (auto &window : pending_windows_to_draw_)
@@ -194,6 +196,7 @@ void UiManager::Render()
 
         // render does not actually happen at this point.
         ImGui::Render();
+        RHIUiHandler::QueueTextureRequests(*ImGui::GetDrawData());
 
         draw_data = std::shared_ptr<ImDrawData>(CloneDrawData(ImGui::GetDrawData()), FreeDrawData);
 
