@@ -278,6 +278,8 @@ open build_system/macos/project/sparkle.xcodeproj      # or build_system/ios/pro
 
 The project builds with Android Gradle Plugin 9.3, which needs a matching Android Studio (Panda 3 or newer) and JDK 17 or newer to sync.
 
+The native build runs the Android SDK's `cmake;<version>` package at the CMake version pinned in [prerequisites.json](../prerequisites.json); `build.py` installs it through the SDK cmdline-tools' `sdkmanager` when it is missing and passes the build the pinned ninja, since the package's bundled ninja 1.10 cannot build C++20 module sources.
+
 ``` shell
 python3 build.py --framework=android --generate_only
 # open project folder `build_system/android` in Android Studio

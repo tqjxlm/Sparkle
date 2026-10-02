@@ -54,6 +54,7 @@ android {
     externalNativeBuild {
         cmake {
             path '../../../CMakeLists.txt'
+            version new groovy.json.JsonSlurper().parse(file('../../../prerequisites.json')).cmake
             buildStagingDirectory "${rootProject.projectDir}/output"
         }
     }
