@@ -104,7 +104,14 @@ struct RenderConfig : public ConfigCollection
     bool clear_screenshots;
     bool manual_accumulation;
     bool render_graph_cull;
+    bool render_graph_merge;
+    bool render_graph_memoryless;
+    bool render_graph_pixel_local;
     bool render_graph_full_barriers;
+    uint32_t render_graph_tile_budget;
+    bool render_graph_tile_budget_split;
+    bool render_graph_export;
+    uint32_t render_graph_profile_frames;
     float target_framerate;
     float gpu_time_budget_ratio;
     float render_scale;

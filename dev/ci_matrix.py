@@ -346,6 +346,14 @@ TEST_JOB_HEAD = """
         uses: actions/checkout@v7
 """
 
+# test jobs check out without submodules; the graph shape evaluators render each dump as a
+# page that inlines elkjs, so the jobs that run them fetch that one submodule
+STEP_ELKJS = """
+      - name: Fetch elkjs
+        run: git submodule update --init --depth 1 thirdparty/elkjs
+"""
+GRAPH_SHAPE_EVALUATOR = "tests/render_graph/graph_shape_test.py"
+
 STEP_SETUP_ENV = """
       # the suite drives the app through build.py, which needs the build prerequisites;
       # the android cell needs the SDK for adb and the emulator
@@ -558,6 +566,15 @@ def covered_triplets():
     return [column for column in header if column != "case"]
 
 
+def renders_graph_pages(triplet):
+    """Whether the triplet runs a case whose evaluator renders a dump through dev/render_graph_viewer.py."""
+    with open(os.path.join(REPO_ROOT, "tests", "registry.json"), encoding="utf-8") as registry_file:
+        scripts = {case["name"]: case.get("evaluator", {}).get("script") for case in json.load(registry_file)}
+    with open(os.path.join(REPO_ROOT, "tests", "coverage.csv"), newline="") as coverage_file:
+        cases = [row["case"] for row in csv.DictReader(coverage_file) if (row[triplet] or "").strip() == "x"]
+    return any(scripts.get(case) == GRAPH_SHAPE_EVALUATOR for case in cases)
+
+
 def host(product):
     return product["os"].removesuffix("-latest")
 
@@ -732,6 +749,8 @@ def test_job(product, runner):
     text = render(TEST_JOB_HEAD, id=slug("test", product), os=os_name,
                   framework=framework, name_abi=name_abi(product),
                   release_id=slug("release", product))
+    if renders_graph_pages(tested_triplet(product)):
+        text += STEP_ELKJS
     if os_name == "macos-latest" or framework == "android":
         text += render(STEP_SETUP_ENV, framework=framework, os=os_name)
     if os_name == "windows-latest" or linux_glfw:

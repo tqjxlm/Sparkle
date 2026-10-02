@@ -138,7 +138,8 @@ public:
 
     // records lowered barriers as one vkCmdPipelineBarrier2
     void RecordBarriers(std::span<const VkImageMemoryBarrier2> image_barriers,
-                        std::span<const VkMemoryBarrier2> memory_barriers) const;
+                        std::span<const VkMemoryBarrier2> memory_barriers,
+                        VkDependencyFlags dependency_flags = 0) const;
 
 protected:
     void DrawMeshInternal(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
@@ -146,6 +147,7 @@ protected:
                                  Vector3UInt thread_per_group) override;
     void BarrierInternal(std::span<const RHIImageBarrier> image_barriers,
                          std::span<const RHIMemoryBarrier> memory_barriers) override;
+    void PixelLocalBarrierInternal(std::span<const RHIImageBarrier> image_barriers) override;
     void CopyBufferInternal(const RHIBuffer *src, const RHIBuffer *dst) override;
     void CopyBufferToImageInternal(const RHIBuffer *src, const RHIImage *dst) override;
     void CopyImageToBufferInternal(const RHIImage *src, const RHIBuffer *dst) override;

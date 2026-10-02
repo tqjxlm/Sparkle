@@ -12,7 +12,7 @@ struct RGTexture;
 class ForwardMeshPass : public MeshPass
 {
 public:
-    // draws into a color attachment of `color_format` at slot 0 and a depth attachment of `depth_format`
+    // draws into a color attachment of `color_format` at ColorSlot::SceneColor and a depth attachment of `depth_format`
     ForwardMeshPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PixelFormat color_format, PixelFormat depth_format);
 
     void InitRenderResources(const RenderConfig &config) override;

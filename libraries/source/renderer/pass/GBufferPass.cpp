@@ -2,6 +2,7 @@
 
 #include "../shader/MeshPassVertexShader.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/pass/ColorSlot.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/MeshRenderProxy.h"
@@ -51,7 +52,8 @@ public:
 GBufferPass::GBufferPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PixelFormat depth_format)
     : MeshPass(ctx, scene_proxy)
 {
-    signature_.color_formats[0] = PackedDesc.format;
+    signature_.color_formats[ColorSlot::GBufferPacked] = PackedDesc.format;
+    signature_.color_formats[ColorSlot::DepthCopy] = DepthCopyDesc.format;
     signature_.depth_format = depth_format;
 }
 
@@ -128,11 +130,13 @@ void GBufferPass::HandleUpdatedPrimitive([[maybe_unused]] uint32_t primitive_id)
 {
 }
 
-RGTexture GBufferPass::AddTo(RenderGraph &graph, RGTexture scene_depth) const
+GBufferPass::Textures GBufferPass::AddTo(RenderGraph &graph, RGTexture scene_depth) const
 {
-    const auto gbuffer = graph.CreateTexture("GBufferPacked", PackedDesc);
+    const Textures gbuffer{.packed = graph.CreateTexture("GBufferPacked", PackedDesc),
+                           .depth_copy = graph.CreateTexture("DepthCopy", DepthCopyDesc)};
     graph.AddRasterPass("GBuffer", [this, gbuffer, scene_depth](RGBuilder &builder) {
-        builder.ColorWrite(gbuffer, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.ColorWrite(gbuffer.packed, ColorSlot::GBufferPacked, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.ColorWrite(gbuffer.depth_copy, ColorSlot::DepthCopy, Vector4(1.f, 0.f, 0.f, 0.f));
         builder.DepthWrite(scene_depth, 1.f);
         return [this](RGRasterContext &context) { DrawPrimitives(context); };
     });

@@ -19,6 +19,7 @@ namespace sparkle
 class NativeView;
 class Scene;
 class RenderFramework;
+class ScreenshotRequest;
 class CameraComponent;
 class RHIContext;
 class UiManager;
@@ -98,6 +99,12 @@ public:
         return render_framework_.get();
     }
 
+    // the export render_graph_export started once the scene was ready for a screenshot, null before
+    [[nodiscard]] const std::shared_ptr<ScreenshotRequest> &GetGraphExport() const
+    {
+        return graph_export_;
+    }
+
     void PushInputEvent(const InputEvent &event);
 
     [[nodiscard]] InputManager *GetInputManager() const
@@ -171,6 +178,8 @@ private:
     std::shared_ptr<ThreadTaskQueue> pending_tasks_;
 
     std::shared_ptr<TaskFuture<bool>> scene_load_task_;
+
+    std::shared_ptr<ScreenshotRequest> graph_export_;
 
     bool core_initialized_ = false;
     bool initialized_ = false;

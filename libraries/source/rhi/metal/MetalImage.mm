@@ -390,6 +390,14 @@ MetalImageView::MetalImageView(Attribute attribute, RHIImage *image) : RHIImageV
 {
     auto *metal_image = RHICast<MetalImage>(image);
 
+    // Metal cannot view a memoryless texture. only framebuffer fetches read one, without a binding, so the texture
+    // stands for its views
+    if (metal_image->GetAttributes().memory_properties & RHIMemoryProperty::Memoryless)
+    {
+        view_ = metal_image->GetResource();
+        return;
+    }
+
     view_ = [metal_image->GetResource()
         newTextureViewWithPixelFormat:GetMetalPixelFormat(metal_image->GetAttributes().format)
                           textureType:GetMetalTextureType(attribute_.type)

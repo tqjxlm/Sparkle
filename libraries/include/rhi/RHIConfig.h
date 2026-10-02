@@ -19,6 +19,7 @@ struct RHIConfig : public ConfigCollection
     bool enable_sync_validation;
     bool enable_pre_transform;
     bool measure_gpu_time;
+    bool sampler_anisotropy;
 
     void Init();
 

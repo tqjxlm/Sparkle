@@ -1,3 +1,4 @@
+#include "color_slot.h.slang"
 #include "gbuffer.h.slang"
 #include "mesh.h.slang"
 #include "sampler.h.slang"
@@ -62,9 +63,9 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
     return surface;
 }
 
-[shader("fragment")] uint4 shader_main(MeshPassVSInterpolant vs_in) : SV_Target0
-{
+[shader("fragment")] GBufferOutput shader_main(MeshPassVSInterpolant vs_in) {
     SurfaceAttributes surface = LoadSurface(vs_in);
 
-    return EncodeSurfaceToGBuffer(surface);
+    // the depth the depth attachment stores for the fragment
+    return {EncodeSurfaceToGBuffer(surface), vs_in.gl_Position.z};
 }

@@ -7,6 +7,8 @@
 #include "core/FileManager.h"
 #include "core/Logger.h"
 
+#include <regex>
+
 namespace sparkle
 {
 void MetalShader::Load()
@@ -16,7 +18,7 @@ void MetalShader::Load()
         return;
     }
 
-    auto path = shader_info_->GetPath() + ".metal";
+    auto path = GetCompiledPath() + ".metal";
     auto shader_data = FileManager::GetNativeFileManager()->ReadAsType<std::string>(Path::Resource(path));
 
     MTLCompileOptions *compile_option = [[MTLCompileOptions alloc] init];
@@ -30,6 +32,15 @@ void MetalShader::Load()
     {
         Log(Error, "Failed to load shader file {}", path);
         DumpAndAbort();
+    }
+
+    // slang lowers a SubpassInput to an entry point argument named after it with a numeric suffix (e.g. "input_0
+    // [[color(1)]]"); output struct members carry the attribute too, but no resource is named after them
+    const std::regex color_argument(R"(([A-Za-z_][A-Za-z0-9_]*)_[0-9]+ \[\[color\([0-9]+\)\]\])");
+    for (auto match = std::sregex_iterator(shader_data.begin(), shader_data.end(), color_argument);
+         match != std::sregex_iterator(); ++match)
+    {
+        framebuffer_fetches_.insert((*match)[1].str());
     }
 
     library_ = [context->GetDevice() newLibraryWithSource:shader_source options:compile_option error:&error];

@@ -107,9 +107,10 @@ public:
 
     void Cleanup();
 
-    template <class T> RHIResourceRef<RHIShader> CreateShader()
+    // the shader T, or its variant compiled with the define `variant`
+    template <class T> RHIResourceRef<RHIShader> CreateShader(std::string variant = {})
     {
-        return CreateShader(T::GetShaderInfo());
+        return CreateShader(T::GetShaderInfo(), std::move(variant));
     }
 
     virtual void InitRenderResources() = 0;
@@ -117,6 +118,20 @@ public:
 
     // GPU timestamps can measure render and compute passes (see RHIPass)
     virtual bool SupportsPassTimestamps() = 0;
+
+    // images of `format` and `usages` may be created with RHIMemoryProperty::Memoryless
+    virtual bool SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages) = 0;
+
+    // fragment shaders may read the value an earlier draw of their rendering wrote to a color attachment at the same
+    // pixel (RHIAccess::PixelLocalRead)
+    virtual bool SupportsPixelLocalRead() = 0;
+
+    // memoryless attachments keep their contents across RHICommandContext::PixelLocalBarrier
+    virtual bool KeepsMemorylessAcrossPixelLocalBarrier() = 0;
+
+    // the bytes per pixel of color attachments a render pass keeps in tile memory at the full tile size, none where it
+    // is unknown or unlimited
+    virtual std::optional<uint32_t> GetTileBudget() = 0;
 
     // false on software rasterizers (e.g. lavapipe): GPU-accelerated cooking is only
     // worthwhile on a physical device, otherwise the CPU cook jobs run instead
@@ -314,7 +329,7 @@ protected:
     virtual RHICommandContext &BeginCommandBufferInternal() = 0;
     virtual RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute,
                                                      const std::string &name) = 0;
-    virtual RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) = 0;
+    virtual RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info, std::string variant) = 0;
     virtual RHIResourceRef<RHIUiHandler> CreateUiHandler() = 0;
 
     void CheckRHIResourceLeak();

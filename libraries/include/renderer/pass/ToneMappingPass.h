@@ -22,6 +22,15 @@ protected:
 
     void BindPixelShaderResources() override;
 
+    // reads the input pixel-locally at ColorSlot::SceneColor where the graph keeps it in the physical pass that wrote
+    // it, otherwise samples it
     void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const override;
+
+    [[nodiscard]] const RHIResourceRef<RHIPipelineState> &GetPipeline(const RGRasterContext &context,
+                                                                      RGTexture input) const override;
+
+private:
+    // of the PIXEL_LOCAL shader variant, compiled at the first frame that reads the input pixel-locally
+    mutable RHIResourceRef<RHIPipelineState> pixel_local_pipeline_;
 };
 } // namespace sparkle

@@ -1,3 +1,4 @@
+#include "color_slot.h.slang"
 #include "debug.h.slang"
 #include "depth.h.slang"
 #include "directional_light.h.slang"
@@ -92,7 +93,7 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
     return surface;
 }
 
-[shader("fragment")] float4 shader_main(MeshPassVSInterpolant vs_in) : SV_Target
+float4 Shade(MeshPassVSInterpolant vs_in)
 {
     SurfaceAttributes surface = LoadSurface(vs_in);
 
@@ -149,3 +150,5 @@ SurfaceAttributes LoadSurface(MeshPassVSInterpolant vs_in)
         result = (float3)0;
     return float4(result, 1.0f);
 }
+
+[shader("fragment")] SceneColorOutput shader_main(MeshPassVSInterpolant vs_in) { return {Shade(vs_in)}; }

@@ -29,6 +29,8 @@ inline VkDescriptorType GetVulkanDescriptorType(RHIShaderResourceReflection::Res
         return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     case RHIShaderResourceReflection::ResourceType::AccelerationStructure:
         return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    case RHIShaderResourceReflection::ResourceType::InputAttachment:
+        return VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
     default:
         UnImplemented(type);
         break;

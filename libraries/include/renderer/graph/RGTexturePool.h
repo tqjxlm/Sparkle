@@ -49,6 +49,8 @@ private:
         uint32_t height;
         // a pooled image serves any request whose usages it covers
         RHIImage::ImageUsage usages;
+        // a pooled image serves only requests of its memory properties: memoryless or not
+        RHIMemoryProperty memory_properties;
     };
 
     void BeginGraph();

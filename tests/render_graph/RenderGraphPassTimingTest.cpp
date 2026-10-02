@@ -15,9 +15,9 @@
 
 namespace sparkle
 {
-// executes a graph of a compute pass and a raster pass once per frame, with pass timers kept across frames, until its
-// dump carries a GPU time for both passes once their frame slot comes back (0 accepted: some devices cannot resolve
-// it). a device without pass timestamps must dump no time at all.
+// executes a graph of a compute pass and two raster passes merged into one physical pass once per frame, with pass
+// timers kept across frames, until its dump carries a GPU time for both physical passes once their frame slot comes
+// back (0 accepted: some devices cannot resolve it). a device without pass timestamps must dump no time at all.
 class RenderGraphPassTimingTest : public TestCase
 {
 public:
@@ -90,6 +90,11 @@ private:
             builder.SideEffect();
             return [](RGRasterContext &) {};
         });
+        graph.AddRasterPass("Overlay", [shown](RGBuilder &builder) {
+            builder.ColorWrite(shown, 0);
+            builder.SideEffect();
+            return [](RGRasterContext &) {};
+        });
         graph.Compile();
 
         graph.Execute(rhi->BeginCommandBuffer(), timers_.get());
@@ -101,19 +106,24 @@ private:
     void RecordAndCheck(RHIContext *rhi, const RenderConfig &config)
     {
         const auto dump = ExecuteGraph(rhi, config);
-        unsigned timed = 0;
-        for (const auto &pass : dump.at("passes"))
+        const auto &physical_passes = dump.at("physical_passes");
+        if (recordings_ == 0)
         {
-            if (pass.contains("gpu_ms"))
+            Expect(physical_passes.size() == 2 && physical_passes.at(1).at("members").size() == 2,
+                   "the raster passes merge into one physical pass");
+        }
+        unsigned timed = 0;
+        for (const auto &physical : physical_passes)
+        {
+            if (physical.contains("gpu_ms"))
             {
-                Log(Info, "{}: {} took {:.6f} ms", GetName(), pass.at("name").get<std::string>(),
-                    pass.at("gpu_ms").get<float>());
+                Log(Info, "{}: physical pass {} took {:.6f} ms", GetName(), timed, physical.at("gpu_ms").get<float>());
                 timed++;
             }
         }
         if (!supported_)
         {
-            Expect(timed == 0, "graph passes report no time without pass timestamps");
+            Expect(timed == 0, "physical passes report no time without pass timestamps");
         }
 
         recordings_++;
@@ -123,7 +133,7 @@ private:
         }
         else if (recordings_ == MaxRecordings)
         {
-            Expect(!supported_, "the raster and the compute pass report their GPU time");
+            Expect(!supported_, "the raster and the compute physical pass report their GPU time");
             Finish();
         }
     }

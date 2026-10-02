@@ -111,6 +111,8 @@ public:
         UAV = 1u << 4,
         ColorAttachment = 1u << 5,
         DepthStencilAttachment = 1u << 6,
+        // read pixel-locally by draws of a rendering it is a color attachment of
+        InputAttachment = 1u << 7,
     };
 
     enum class ImageType : uint8_t

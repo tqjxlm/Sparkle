@@ -33,6 +33,10 @@ inline VkMemoryPropertyFlags GetVulkanMemoryPropertyFlags(RHIMemoryProperty prop
     {
         flags |= VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
     }
+    if (properties & RHIMemoryProperty::Memoryless)
+    {
+        flags |= VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+    }
 
     return flags;
 }

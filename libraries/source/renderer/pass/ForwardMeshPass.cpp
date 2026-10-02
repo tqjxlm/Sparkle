@@ -3,6 +3,7 @@
 #include "../shader/MeshPassVertexShader.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/ColorSlot.h"
 #include "renderer/pass/LightingInputs.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
@@ -74,7 +75,7 @@ ForwardMeshPass::ForwardMeshPass(RHIContext *ctx, SceneRenderProxy *scene_proxy,
                                  PixelFormat depth_format)
     : MeshPass(ctx, scene_proxy)
 {
-    signature_.color_formats[0] = color_format;
+    signature_.color_formats[ColorSlot::SceneColor] = color_format;
     signature_.depth_format = depth_format;
 }
 
@@ -208,7 +209,7 @@ void ForwardMeshPass::AddTo(RenderGraph &graph, const LightingInputs &lighting, 
 {
     graph.AddRasterPass("BasePass", [this, lighting, scene_color, scene_depth](RGBuilder &builder) {
         lighting.Sample<ForwardPixelShader::ResourceTable>(builder, rhi_);
-        builder.ColorWrite(scene_color, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.ColorWrite(scene_color, ColorSlot::SceneColor, Vector4(0.f, 0.f, 0.f, 1.f));
         builder.DepthWrite(scene_depth, 1.f);
         return [this](RGRasterContext &context) { DrawPrimitives(context); };
     });

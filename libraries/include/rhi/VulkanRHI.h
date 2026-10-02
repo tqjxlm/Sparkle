@@ -57,6 +57,14 @@ public:
 
     bool SupportsPassTimestamps() override;
 
+    bool SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages) override;
+
+    bool SupportsPixelLocalRead() override;
+
+    bool KeepsMemorylessAcrossPixelLocalBarrier() override;
+
+    std::optional<uint32_t> GetTileBudget() override;
+
     bool HasPhysicalGpu() override;
 
     bool SupportsSampledFormat(PixelFormat format) override;
@@ -111,7 +119,7 @@ protected:
 
     RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute, const std::string &name) override;
 
-    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
+    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info, std::string variant) override;
 
 private:
     std::vector<RHIResourceRef<RHITimer>> frame_timers_;

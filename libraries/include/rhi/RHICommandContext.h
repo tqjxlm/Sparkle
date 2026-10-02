@@ -49,7 +49,7 @@ public:
     RHICommandContext(const RHICommandContext &) = delete;
     RHICommandContext &operator=(const RHICommandContext &) = delete;
 
-    // begins rendering into attachments whose tracked layouts are already their attachment layouts. the only barriers
+    // begins rendering into attachments whose tracked layouts are already the layouts the info gives. the only barriers
     // it records are `barriers` and `memory_barriers`, before the rendering; the debug label `name` and, when given,
     // the timer of `timed_pass` bracket both.
     void BeginRendering(const RHIRenderingInfo &info, const std::string &name, RHIPass *timed_pass = nullptr,
@@ -75,6 +75,9 @@ public:
         return attachment_signature_;
     }
 
+    // masks attachments of the open rendering for the pipelines drawn from now on (see RHIAttachmentSignature)
+    void SetUnusedAttachments(uint8_t unwritten_color_slots, bool depth_unused);
+
     // begins a compute pass. the only barriers it records are `barriers` and `memory_barriers`, before the pass; the
     // pass's debug label and timer bracket both.
     void BeginComputePass(const RHIResourceRef<RHIComputePass> &pass, std::span<const RHIImageBarrier> barriers = {},
@@ -89,6 +92,11 @@ public:
 
     // records one batch of barriers outside any render pass. Metal tracks hazards itself and records nothing.
     void Barrier(std::span<const RHIImageBarrier> image_barriers, std::span<const RHIMemoryBarrier> memory_barriers);
+
+    // records, between draws of the open rendering, barriers of its LocalRead attachments that make the writes of
+    // earlier draws visible to pixel-local reads of later draws at the same pixel. Metal orders framebuffer fetches
+    // itself and records nothing.
+    void PixelLocalBarrier(std::span<const RHIImageBarrier> image_barriers);
 
     void Barrier(const RHIMemoryBarrier &memory_barrier)
     {
@@ -146,6 +154,7 @@ protected:
                                          Vector3UInt thread_per_group) = 0;
     virtual void BarrierInternal(std::span<const RHIImageBarrier> image_barriers,
                                  std::span<const RHIMemoryBarrier> memory_barriers) = 0;
+    virtual void PixelLocalBarrierInternal(std::span<const RHIImageBarrier> image_barriers) = 0;
     virtual void CopyBufferInternal(const RHIBuffer *src, const RHIBuffer *dst) = 0;
     virtual void CopyBufferToImageInternal(const RHIBuffer *src, const RHIImage *dst) = 0;
     virtual void CopyImageToBufferInternal(const RHIImage *src, const RHIBuffer *dst) = 0;

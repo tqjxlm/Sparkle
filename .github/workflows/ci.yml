@@ -508,6 +508,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Fetch elkjs
+        run: git submodule update --init --depth 1 thirdparty/elkjs
+
       # the suite drives the app through build.py, which needs the build prerequisites;
       # the android cell needs the SDK for adb and the emulator
       - name: Setup Environment
@@ -880,6 +883,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+
+      - name: Fetch elkjs
+        run: git submodule update --init --depth 1 thirdparty/elkjs
 
       - name: Setup Mesa Lavapipe
         uses: ./.github/actions/setup-mesa

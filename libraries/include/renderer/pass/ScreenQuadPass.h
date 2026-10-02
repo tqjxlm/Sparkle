@@ -10,6 +10,7 @@ namespace sparkle
 {
 class RenderGraph;
 class RGBuilder;
+class RGRasterContext;
 struct RGTexture;
 
 class ScreenQuadVertexShader : public RHIShaderInfo
@@ -49,7 +50,7 @@ public:
         NearestAtIntegerScale,
     };
 
-    // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at slot 0.
+    // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at ColorSlot::Screen.
     // `to_back_buffer` applies the window's pre-rotation, and the filter compares the output's size along the rotated
     // axes.
     ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, InputFilter input_filter,
@@ -63,12 +64,18 @@ public:
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
 protected:
+    // as above, for a pixel shader that writes `output_slot`
+    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, uint8_t output_slot,
+                   InputFilter input_filter, bool to_back_buffer = false);
+
     static constexpr RHISampler::SamplerAttribute NearestSampler{
         .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest,
+        .enable_anisotropy = false};
 
+    // sets the pixel shader of pipeline_state_, before it compiles
     virtual void SetupPixelShader();
 
     // binds what the pixel shader reads beyond the graph's bindings
@@ -78,6 +85,22 @@ protected:
 
     // declares the pass's input, bound to the pixel shader's texture, and binds `sampler` to its sampler
     virtual void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const;
+
+    // the pipeline the pass draws `input` with: pipeline_state_
+    [[nodiscard]] virtual const RHIResourceRef<RHIPipelineState> &GetPipeline(const RGRasterContext &context,
+                                                                              RGTexture input) const;
+
+    // a pipeline drawing the quad against `signature` without a pixel shader, which CompilePipeline compiles once it
+    // has one
+    [[nodiscard]] RHIResourceRef<RHIPipelineState> CreatePipeline(const RHIAttachmentSignature &signature) const;
+
+    // compiles a pipeline of CreatePipeline and binds the vertex shader's resources
+    void CompilePipeline(RHIPipelineState &pipeline) const;
+
+    [[nodiscard]] const RHIAttachmentSignature &GetSignature() const
+    {
+        return signature_;
+    }
 
     const static std::array<ScreenVertex, 4> Vertices;
     const static std::array<uint32_t, 6> Indices;
@@ -95,12 +118,11 @@ protected:
     std::string name_;
 
 private:
-    void SetupPipeline();
     void SetupVertices();
     void SetupVertexShader();
-    void BindVertexShaderResources();
 
     RHIAttachmentSignature signature_;
+    uint8_t output_slot_;
     InputFilter input_filter_;
     bool to_back_buffer_ = false;
 };

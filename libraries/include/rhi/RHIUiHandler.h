@@ -17,24 +17,14 @@ public:
 
     ~RHIUiHandler() override = 0;
 
-    // prepares drawing into attachments of `signature`
-    void Setup(const RHIAttachmentSignature &signature)
-    {
-        signature_ = signature;
-
-        Init();
-    }
-
     // starts a frame drawn into the open rendering of `info`, whose extent is the display size
     virtual void BeginFrame(const RHIRenderingInfo &info) = 0;
 
+    // draws into color slot 0 of the open rendering, leaving its other attachments untouched, with pipelines compiled
+    // for its attachment signature
     virtual void Render(RHICommandContext &command_context) = 0;
-
-    virtual void Init() = 0;
 
 protected:
     bool is_valid_ = false;
-
-    RHIAttachmentSignature signature_;
 };
 } // namespace sparkle

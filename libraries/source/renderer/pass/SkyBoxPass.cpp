@@ -3,6 +3,7 @@
 #include "core/math/Utilities.h"
 #include "io/Mesh.h"
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/ColorSlot.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "rhi/RHI.h"
@@ -40,7 +41,7 @@ class SkyBoxPixelShader : public RHIShaderInfo
 
 SkyBoxPass::SkyBoxPass(RHIContext *rhi, PixelFormat color_format, PixelFormat depth_format) : PipelinePass(rhi)
 {
-    signature_.color_formats[0] = color_format;
+    signature_.color_formats[ColorSlot::SceneColor] = color_format;
     signature_.depth_format = depth_format;
 }
 
@@ -118,7 +119,7 @@ void SkyBoxPass::AddTo(RenderGraph &graph, RGTexture sky_map, const RHISampler::
     graph.AddRasterPass("SkyBox", [this, sky_map, sky_map_sampler, scene_color, scene_depth](RGBuilder &builder) {
         using Table = SkyBoxPixelShader::ResourceTable;
         builder.Sampled(sky_map, &Table::sky_map, &Table::sky_map_sampler, sky_map_sampler);
-        builder.ColorWrite(scene_color, 0);
+        builder.ColorWrite(scene_color, ColorSlot::SceneColor);
         builder.DepthTest(scene_depth);
         return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
     });

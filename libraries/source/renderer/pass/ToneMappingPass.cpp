@@ -1,6 +1,7 @@
 #include "renderer/pass/ToneMappingPass.h"
 
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/ColorSlot.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "rhi/RHI.h"
@@ -58,6 +59,27 @@ void ToneMappingPass::SampleInput(RGBuilder &builder, RGTexture input,
                                   const RHISampler::SamplerAttribute &sampler) const
 {
     using Table = ToneMappingPixelShader::ResourceTable;
-    builder.Sampled(input, &Table::screenTexture, &Table::screenTextureSampler, sampler);
+    builder.PixelLocalRead(input, ColorSlot::SceneColor, &Table::screenTexture, &Table::screenTextureSampler, sampler);
+}
+
+const RHIResourceRef<RHIPipelineState> &ToneMappingPass::GetPipeline(const RGRasterContext &context,
+                                                                     RGTexture input) const
+{
+    if (!context.IsPixelLocal(input))
+    {
+        return pipeline_state_;
+    }
+
+    if (!pixel_local_pipeline_)
+    {
+        auto signature = GetSignature();
+        signature.color_formats[ColorSlot::SceneColor] = context.GetImage(input)->GetAttributes().format;
+        pixel_local_pipeline_ = CreatePipeline(signature);
+        pixel_local_pipeline_->SetShader<RHIShaderStage::Pixel>(
+            rhi_->CreateShader<ToneMappingPixelShader>("PIXEL_LOCAL"));
+        CompilePipeline(*pixel_local_pipeline_);
+        pixel_local_pipeline_->GetShaderResource<ToneMappingPixelShader>()->ubo().BindResource(ps_ub_);
+    }
+    return pixel_local_pipeline_;
 }
 } // namespace sparkle

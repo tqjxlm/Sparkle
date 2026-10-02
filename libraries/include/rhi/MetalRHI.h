@@ -23,6 +23,14 @@ public:
 
     bool SupportsPassTimestamps() override;
 
+    bool SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages) override;
+
+    bool SupportsPixelLocalRead() override;
+
+    bool KeepsMemorylessAcrossPixelLocalBarrier() override;
+
+    std::optional<uint32_t> GetTileBudget() override;
+
     bool SupportsSampledFormat(PixelFormat format) override;
 
     bool SupportsLinearFiltering(PixelFormat format) override;
@@ -70,7 +78,7 @@ protected:
 
     RHICommandContext &BeginCommandBufferInternal() override;
 
-    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
+    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info, std::string variant) override;
 };
 } // namespace sparkle
 #endif

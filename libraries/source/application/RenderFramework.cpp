@@ -3,7 +3,6 @@
 #include "application/InputManager.h"
 #include "application/NativeView.h"
 #include "application/UiManager.h"
-#include "core/ConfigManager.h"
 #include "core/CoreStates.h"
 #include "core/FileManager.h"
 #include "core/Path.h"
@@ -13,7 +12,6 @@
 #include "core/task/TaskManager.h"
 #include "renderer/RenderConfig.h"
 #include "renderer/graph/RGTexturePool.h"
-#include "renderer/pass/PostChain.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/renderer/Renderer.h"
 #include "rhi/RHI.h"
@@ -23,12 +21,16 @@
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <functional>
+#include <limits>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 constexpr float LogInterval = 1.f;
 
@@ -91,46 +93,121 @@ void SaveGraphDump(const nlohmann::json &dump, const std::string &name)
     }
 }
 
-// a string field of an entry of a render graph dump
-const char *DumpString(const nlohmann::json &entry, const char *key)
+// the timings of one kind (e.g. cpu_ms) of one dump entry over the profiled frames that have it
+struct GraphTiming
 {
-    return entry.at(key).get_ref<const std::string &>().c_str();
+    double sum = 0.0;
+    double min = std::numeric_limits<double>::max();
+    double max = std::numeric_limits<double>::lowest();
+    unsigned samples = 0;
+};
+
+void AddTimings(const nlohmann::json &entries, const char *key, std::vector<GraphTiming> &timings)
+{
+    for (auto index = 0u; index < entries.size(); index++)
+    {
+        const auto &entry = entries.at(index);
+        if (!entry.contains(key))
+        {
+            continue;
+        }
+
+        const auto value = entry.at(key).get<double>();
+        auto &timing = timings[index];
+        timing.sum += value;
+        timing.min = std::min(timing.min, value);
+        timing.max = std::max(timing.max, value);
+        timing.samples++;
+    }
 }
 
-// the texture the dumped graph shows in place of the frame, null when it shows the frame
-const char *FindViewedTexture(const nlohmann::json &dump)
+void AnnotateTimings(nlohmann::json &entries, const char *key, const std::vector<GraphTiming> &timings)
 {
-    for (const auto &pass : dump.at("passes"))
+    for (auto index = 0u; index < entries.size(); index++)
     {
-        if (pass.at("name").get_ref<const std::string &>() == PostChain::GraphViewPassName)
+        const auto &timing = timings[index];
+        if (timing.samples > 0)
         {
-            return DumpString(pass.at("accesses").at(0), "resource");
+            entries.at(index)["profile"][key] = {{"mean", timing.sum / timing.samples},
+                                                 {"min", timing.min},
+                                                 {"max", timing.max},
+                                                 {"samples", timing.samples}};
         }
     }
-    return nullptr;
 }
 
-// the name of the pass a dumped resource names by index under `key`, e.g. its first use
-const char *DumpPassName(const nlohmann::json &dump, const nlohmann::json &resource, const char *key)
+// what a profile requires of consecutive dumps: the same passes with the same physical passes
+nlohmann::json GraphStructure(const nlohmann::json &dump)
 {
-    return DumpString(dump.at("passes").at(resource.at(key).get<size_t>()), "name");
+    nlohmann::json structure = {{"passes", nlohmann::json::array()}, {"physical_passes", nlohmann::json::array()}};
+    for (const auto &pass : dump.at("passes"))
+    {
+        structure["passes"].push_back({pass.at("name"), pass.at("culled"), pass.value("physical_pass", -1)});
+    }
+    for (const auto &physical : dump.at("physical_passes"))
+    {
+        structure["physical_passes"].push_back(physical.at("members"));
+    }
+    return structure;
 }
 
-// the format and size class of a dumped transient, e.g. "RGBAFloat16 Scene", or the kind of an import
-std::string DescribeResource(const nlohmann::json &resource)
+// the timings of consecutive dumps of one graph structure. a dump of another structure restarts the profile.
+class GraphDumpProfile
 {
-    if (!resource.contains("format"))
+public:
+    // returns the number of dumps profiled
+    unsigned Add(const nlohmann::json &dump)
     {
-        return resource.at("kind").get<std::string>();
+        auto structure = GraphStructure(dump);
+        if (structure != structure_)
+        {
+            if (frames_ > 0)
+            {
+                Log(Info, "Render graph profile restarts after {} frames: the graph changed", frames_);
+            }
+            structure_ = std::move(structure);
+            cpu_ms_.assign(dump.at("passes").size(), {});
+            gpu_ms_.assign(dump.at("physical_passes").size(), {});
+            frames_ = 0;
+        }
+
+        AddTimings(dump.at("passes"), "cpu_ms", cpu_ms_);
+        AddTimings(dump.at("physical_passes"), "gpu_ms", gpu_ms_);
+        return ++frames_;
     }
 
-    auto description = std::format("{} {}", DumpString(resource, "format"), DumpString(resource, "size_class"));
-    if (resource.contains("width"))
+    // `dump`, the last one added, with the profile
+    [[nodiscard]] nlohmann::json Annotate(nlohmann::json dump) const
     {
-        description +=
-            std::format(" {}x{}", resource.at("width").get<uint32_t>(), resource.at("height").get<uint32_t>());
+        dump["profile"] = {{"frames", frames_}};
+        AnnotateTimings(dump.at("passes"), "cpu_ms", cpu_ms_);
+        AnnotateTimings(dump.at("physical_passes"), "gpu_ms", gpu_ms_);
+        return dump;
     }
-    return description;
+
+private:
+    nlohmann::json structure_;
+    std::vector<GraphTiming> cpu_ms_;
+    std::vector<GraphTiming> gpu_ms_;
+    unsigned frames_ = 0;
+};
+
+using GraphDumpConsumers = std::vector<std::function<void(std::shared_ptr<const nlohmann::json>)>>;
+
+// serves the next dumps until `frames` consecutive ones share one graph structure, then saves the last one with their
+// profile and completes `request`
+void ProfileGraphDumps(GraphDumpConsumers &consumers, const std::shared_ptr<ScreenshotRequest> &request,
+                       uint32_t frames, const std::shared_ptr<GraphDumpProfile> &profile)
+{
+    consumers.emplace_back([&consumers, request, frames, profile](const std::shared_ptr<const nlohmann::json> &dump) {
+        if (profile->Add(*dump) < frames)
+        {
+            ProfileGraphDumps(consumers, request, frames, profile);
+            return;
+        }
+        SaveGraphDump(profile->Annotate(*dump), request->GetName());
+        request->MarkCompleted();
+    });
 }
 } // namespace
 
@@ -508,9 +585,10 @@ const RGTexturePool &RenderFramework::GetGraphTexturePool() const
     return *graph_texture_pool_;
 }
 
-std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const std::string &name)
+std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const std::string &name, bool capture_ui,
+                                                                          bool dump_graph)
 {
-    auto request = std::make_shared<ScreenshotRequest>(name);
+    auto request = std::make_shared<ScreenshotRequest>(name, capture_ui, dump_graph);
     {
         std::scoped_lock<std::mutex> lock(screenshot_queue_mutex_);
         screenshot_queue_.push(request);
@@ -522,6 +600,11 @@ std::shared_ptr<ScreenshotRequest> RenderFramework::RequestGraphDump(const std::
 {
     auto request = std::make_shared<ScreenshotRequest>(name);
     TaskManager::RunInRenderThread([this, request] {
+        if (const auto frames = render_config_.render_graph_profile_frames; frames > 0)
+        {
+            ProfileGraphDumps(graph_dump_consumers_, request, frames, std::make_shared<GraphDumpProfile>());
+            return;
+        }
         graph_dump_consumers_.emplace_back([request](const std::shared_ptr<const nlohmann::json> &dump) {
             SaveGraphDump(*dump, request->GetName());
             request->MarkCompleted();
@@ -553,7 +636,15 @@ void RenderFramework::ProcessScreenshotRequest()
     }
 
     Log(Info, "Screenshot requested: {}", active_screenshot_->GetName());
-    renderer_->RequestSaveScreenshot(active_screenshot_->GetName(), false, [this]() {
+    // the next graph reads the screenshot back, and its dump is saved before the readback completes
+    if (active_screenshot_->DumpsGraph())
+    {
+        graph_dump_consumers_.emplace_back(
+            [name = active_screenshot_->GetName()](const std::shared_ptr<const nlohmann::json> &dump) {
+                SaveGraphDump(*dump, name);
+            });
+    }
+    renderer_->RequestSaveScreenshot(active_screenshot_->GetName(), active_screenshot_->CapturesUi(), [this]() {
         active_screenshot_->MarkCompleted();
         active_screenshot_.reset();
     });
@@ -595,19 +686,6 @@ void RenderFramework::DrawUi()
     {
         ImGui::TextWrapped(saving ? "Saving: %s" : "Saved: %s", last_saved_screenshot_path_.c_str());
     }
-}
-
-void RenderFramework::DrawGraphUi()
-{
-    TaskManager::RunInRenderThread([this]() {
-        graph_dump_consumers_.emplace_back([this](std::shared_ptr<const nlohmann::json> dump) {
-            std::scoped_lock<std::mutex> lock(graph_dump_mutex_);
-            graph_dump_ = std::move(dump);
-        });
-    });
-
-    ImGui::TextUnformatted("Render Graph");
-    ImGui::Separator();
 
     if (ImGui::Button("Save Graph Dump"))
     {
@@ -618,109 +696,6 @@ void RenderFramework::DrawGraphUi()
     {
         ImGui::TextWrapped(saved_graph_dump_->IsCompleted() ? "Saved: %s.json" : "Saving: %s.json",
                            saved_graph_dump_->GetName().c_str());
-    }
-
-    std::shared_ptr<const nlohmann::json> graph_dump;
-    {
-        std::scoped_lock<std::mutex> lock(graph_dump_mutex_);
-        graph_dump = graph_dump_;
-    }
-
-    if (!graph_dump)
-    {
-        return;
-    }
-
-    const auto *viewed_texture = FindViewedTexture(*graph_dump);
-    ImGui::Text("Shows: %s", viewed_texture ? viewed_texture : "the frame");
-
-    ImGui::SeparatorText("Passes");
-
-    if (ImGui::BeginTable("passes", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
-    {
-        ImGui::TableSetupColumn("Pass");
-        ImGui::TableSetupColumn("Kind");
-        ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableHeadersRow();
-
-        for (const auto &pass : graph_dump->at("passes"))
-        {
-            const bool culled = pass.at("culled").get<bool>();
-
-            ImGui::TableNextRow();
-            ImGui::BeginDisabled(culled);
-
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(DumpString(pass, "name"));
-
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(DumpString(pass, "kind"));
-
-            ImGui::TableNextColumn();
-            if (culled)
-            {
-                ImGui::TextWrapped("culled: %s", DumpString(pass, "cull_reason"));
-            }
-            else if (pass.contains("gpu_ms"))
-            {
-                ImGui::Text("%.3f", pass.at("gpu_ms").get<double>());
-            }
-
-            ImGui::EndDisabled();
-        }
-
-        ImGui::EndTable();
-    }
-
-    ImGui::SeparatorText("Resources");
-
-    auto *view_config = ConfigManager::Instance().GetConfig<std::string>("render_graph_view");
-    ASSERT(view_config);
-    const auto view = view_config->Get();
-
-    // selecting a texture shows it in place of the frame
-    if (ImGui::BeginTable("resources", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
-    {
-        ImGui::TableSetupColumn("Resource");
-        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableHeadersRow();
-
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        if (ImGui::Selectable("Frame", view.empty(), ImGuiSelectableFlags_SpanAllColumns) && !view.empty())
-        {
-            view_config->Set("");
-        }
-
-        for (const auto &resource : graph_dump->at("resources"))
-        {
-            const auto &name = resource.at("name").get_ref<const std::string &>();
-
-            ImGui::TableNextRow();
-
-            ImGui::TableNextColumn();
-            if (resource.at("type").get_ref<const std::string &>() != "Texture")
-            {
-                ImGui::TextUnformatted(name.c_str());
-            }
-            else if (ImGui::Selectable(name.c_str(), name == view, ImGuiSelectableFlags_SpanAllColumns) && name != view)
-            {
-                view_config->Set(name);
-            }
-
-            ImGui::TableNextColumn();
-            ImGui::TextWrapped("%s", DescribeResource(resource).c_str());
-
-            ImGui::TableNextColumn();
-            if (resource.contains("first_use"))
-            {
-                ImGui::TextWrapped("%s..%s", DumpPassName(*graph_dump, resource, "first_use"),
-                                   DumpPassName(*graph_dump, resource, "last_use"));
-            }
-        }
-
-        ImGui::EndTable();
     }
 }
 } // namespace sparkle

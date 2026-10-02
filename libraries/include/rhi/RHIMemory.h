@@ -17,6 +17,9 @@ enum class RHIMemoryProperty : uint8_t
     DeviceLocal = 1 << 3,
     // it means the memory is always mapped
     AlwaysMap = 1 << 4,
+    // it means an image lives only in tile memory while one rendering attaches it: it is never loaded, stored,
+    // sampled or copied. only for images, and only where RHIContext::SupportsMemorylessImage
+    Memoryless = 1 << 5,
 };
 
 RegisterEnumAsFlag(RHIMemoryProperty);

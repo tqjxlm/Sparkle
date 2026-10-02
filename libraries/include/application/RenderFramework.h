@@ -23,17 +23,30 @@ class Scene;
 class UiManager;
 struct ThreadTaskQueue;
 
-// a named output the render thread writes to the screenshots directory: a screenshot or a render graph dump
+// a named output the render thread writes to the screenshots directory: a screenshot, a render graph dump, or both
 class ScreenshotRequest
 {
 public:
-    explicit ScreenshotRequest(std::string name) : name_(std::move(name))
+    explicit ScreenshotRequest(std::string name, bool capture_ui = false, bool dumps_graph = false)
+        : name_(std::move(name)), capture_ui_(capture_ui), dumps_graph_(dumps_graph)
     {
     }
 
     [[nodiscard]] const std::string &GetName() const
     {
         return name_;
+    }
+
+    // whether a screenshot shows the ui
+    [[nodiscard]] bool CapturesUi() const
+    {
+        return capture_ui_;
+    }
+
+    // whether a screenshot also dumps the render graph of the frame it reads back
+    [[nodiscard]] bool DumpsGraph() const
+    {
+        return dumps_graph_;
     }
 
     [[nodiscard]] bool IsCompleted() const
@@ -48,6 +61,8 @@ public:
 
 private:
     std::string name_;
+    bool capture_ui_;
+    bool dumps_graph_;
     std::atomic<bool> completed_{false};
 };
 
@@ -85,17 +100,18 @@ public:
 
     void DrawUi();
 
-    // the render graph page: the passes and resources of the frame's graph, the texture render_graph_view shows, and
-    // saving a dump. while it is drawn, the render thread publishes the dump of each graph the renderer executes.
-    void DrawGraphUi();
-
     // called by main thread, run on render thread
     void NotifySceneLoaded();
 
-    // Called from main thread. Returns a request handle the caller can poll for completion.
-    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
+    // Called from main thread. Returns a request handle the caller can poll for completion. With `dump_graph`, the
+    // render graph of the frame the screenshot reads back is written to screenshots/<name>.json before it completes.
+    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name,
+                                                                           bool capture_ui = false,
+                                                                           bool dump_graph = false);
 
-    // Called from main thread. The next render graph the renderer executes is written to screenshots/<name>.json.
+    // Called from main thread. The next render graph the renderer executes is written to screenshots/<name>.json. With
+    // render_graph_profile_frames, the last of that many consecutive graphs of one structure is written instead, with
+    // their aggregated timings.
     [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestGraphDump(const std::string &name);
 
     // Thread-safe. Returns true when the renderer has accumulated enough samples for a screenshot.
@@ -183,11 +199,7 @@ private:
     // render thread only: served by the dump of the next render graph the renderer executes
     std::vector<std::function<void(std::shared_ptr<const nlohmann::json>)>> graph_dump_consumers_;
 
-    // the latest dump the render thread published for the render graph page
-    std::mutex graph_dump_mutex_;
-    std::shared_ptr<const nlohmann::json> graph_dump_;
-
-    // main thread only: the last dump saved from the render graph page
+    // main thread only: the last dump saved from the ui
     std::shared_ptr<ScreenshotRequest> saved_graph_dump_;
 };
 } // namespace sparkle

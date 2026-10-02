@@ -41,11 +41,6 @@ void MetalUiHandler::BeginFrame(const RHIRenderingInfo &info)
 
     ImGui_ImplMetal_NewFrame(CreateMetalRenderPassDescriptor(info));
 }
-
-// ImGui compiles its Metal pipelines for the framebuffer it draws into, so the signature needs no setup
-void MetalUiHandler::Init()
-{
-}
 } // namespace sparkle
 
 #endif

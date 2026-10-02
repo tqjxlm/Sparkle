@@ -1,7 +1,8 @@
 """Compare a render graph dump against the pipeline's golden graph shape.
 
 The render_graph_dump test case writes the dump; this evaluator projects it to
-one line per pass, access, barrier, attachment and resource, and diffs that
+one line per pass, access, barrier, physical pass, attachment and resource, leaving
+out what depends on the device (GPU times, the image backing a transient), and diffs that
 against tests/render_graph/golden/<pipeline>.txt. --update rewrites the golden
 from the dump instead. Either way it renders the dump as a page through
 dev/render_graph_viewer.py to captures/render_graph_<page>.html.
@@ -19,27 +20,34 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests", "rendering"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "dev"))
 from render_test_support import SUPPORTED_FRAMEWORKS, get_captures_dir, get_screenshot_dir  # noqa: E402
 from render_graph_viewer import (describe_access, describe_attachment, describe_barrier,  # noqa: E402
-                                 describe_barrier_after, render_html)
+                                 describe_barrier_after, describe_physical_pass, render_html)
 
 GOLDEN_DIR = os.path.join(SCRIPT_DIR, "golden")
 DUMP_NAME = "render_graph.json"
 
 
 def project(dump):
+    """Each pass with its accesses and barriers; after the last member of a physical pass, the physical pass and its
+    attachments."""
     lines = []
-    for graph_pass in dump["passes"]:
+    passes = dump["passes"]
+    for index, graph_pass in enumerate(passes):
         name = graph_pass["name"]
         if graph_pass["culled"]:
             lines.append(f"{name}: culled ({graph_pass['cull_reason']})")
             continue
 
-        lines.append(f"{name}: {graph_pass['kind']}")
+        step = f", step {graph_pass['step']}" if graph_pass["step"] else ""
+        lines.append(f"{name}: {graph_pass['kind']}{step}")
         lines += [f"  {describe_access(access)}" for access in graph_pass["accesses"]]
         lines += [f"  {describe_barrier(barrier)}" for barrier in graph_pass["barriers"]]
-        lines += [f"  {describe_attachment(attachment)}" for attachment in graph_pass["attachments"]]
         lines += [f"  {describe_barrier_after(barrier)}" for barrier in graph_pass.get("barriers_after", [])]
 
-    passes = dump["passes"]
+        physical = dump["physical_passes"][graph_pass["physical_pass"]]
+        if physical["members"][-1] == index:
+            lines.append(describe_physical_pass(physical, passes))
+            lines += [f"  {describe_attachment(attachment)}" for attachment in physical["attachments"]]
+
     for resource in dump["resources"]:
         line = f"{resource['name']}: {resource['kind']}"
         if resource["kind"] == "Transient":
@@ -47,6 +55,7 @@ def project(dump):
             if "width" in resource:
                 line += f" {resource['width']}x{resource['height']}"
             line += f", physical {resource['physical']}" if "physical" in resource else ", no image"
+            line += ", memoryless" if resource.get("memoryless") else ""
         if "first_use" in resource:
             first, last = passes[resource["first_use"]]["name"], passes[resource["last_use"]]["name"]
             line += f", {first}..{last}, {resource['usage']}"
