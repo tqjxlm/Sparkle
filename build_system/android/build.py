@@ -13,7 +13,7 @@ from pathlib import Path
 
 from build_system.utils import run_command_with_logging, download_file, extract_zip, robust_rmtree
 from build_system.builder_interface import FrameworkBuilder
-from build_system.prerequisites import setup_android_validation
+from build_system.prerequisites import find_or_install_ninja, load_prerequisites_versions, setup_android_validation
 
 SCRIPT = os.path.abspath(__file__)
 SCRIPTPATH = os.path.dirname(SCRIPT)
@@ -118,6 +118,7 @@ def prepare_environment(args=None):
                 "   Example: export JAVA_HOME='/usr/lib/jvm/java-17-openjdk-amd64'")
         raise RuntimeError("Java environment not found")
 
+    ensure_sdk_cmake()
     download_gradle_wrapper()
 
     gradlew_path = os.path.join(
@@ -261,6 +262,21 @@ def run_sdk_install(sdkmanager, package):
                            f"{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
 
 
+def cmdline_tool(name):
+    tool = sdk_tool("cmdline-tools", "latest", "bin", name)
+    if not os.path.exists(tool):
+        raise RuntimeError(f"{tool} not found; install the Android SDK cmdline-tools package")
+    return tool
+
+
+def ensure_sdk_cmake():
+    """build.gradle pins the SDK CMake package to the prerequisites.json version."""
+    version = load_prerequisites_versions()["cmake"]
+    if not os.path.isdir(os.path.join(find_android_sdk(), "cmake", version)):
+        print(f"Installing cmake;{version}...", flush=True)
+        run_sdk_install(cmdline_tool("sdkmanager"), f"cmake;{version}")
+
+
 def ensure_emulator():
     """Make sure a device is online, booting the project emulator if none is.
 
@@ -275,12 +291,8 @@ def ensure_emulator():
     host_abi = "arm64-v8a" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
     image = f"system-images;android-{EMULATOR_API_LEVEL};google_apis;{host_abi}"
 
-    sdkmanager = sdk_tool("cmdline-tools", "latest", "bin", "sdkmanager")
-    avdmanager = sdk_tool("cmdline-tools", "latest", "bin", "avdmanager")
-    for tool in (sdkmanager, avdmanager):
-        if not os.path.exists(tool):
-            raise RuntimeError(f"{tool} not found; install the Android SDK"
-                               " cmdline-tools package")
+    sdkmanager = cmdline_tool("sdkmanager")
+    avdmanager = cmdline_tool("avdmanager")
 
     # pin the AVD home so avdmanager and the emulator cannot disagree on it
     avd_home = os.environ.setdefault("ANDROID_AVD_HOME",
@@ -599,18 +611,24 @@ def gradle_abi_properties(args):
     return [f"-PtargetAbi={abi}"] if abi else []
 
 
+def gradle_cmake_property(args):
+    """The SDK CMake package bundles ninja 1.10, which CMake rejects for the C++20
+    module sources cpptrace declares; ninja 1.11+ is required."""
+    cmake_args = [f"-DCMAKE_MAKE_PROGRAM={find_or_install_ninja()}"] + args["cmake_options"]
+    return f"-PcmakeArgs={' '.join(cmake_args)}"
+
+
 def sync_only(args):
     """Trigger Gradle sync without building to generate CMake files."""
     gradlew_path, output_dir = prepare_environment(args)
 
     config = args["config"]
-    cmake_args = args["cmake_options"]
     gradle_task = "generateJsonModelDebug" if config == "Debug" else "generateJsonModelRelease"
 
     sync_cmd = [
         gradlew_path,
         gradle_task,
-        f"-PcmakeArgs={' '.join(cmake_args)}",
+        gradle_cmake_property(args),
         "--info",
     ] + gradle_abi_properties(args)
 
@@ -644,13 +662,12 @@ class AndroidBuilder(FrameworkBuilder):
         gradlew_path, output_dir = prepare_environment(args)
 
         config = args["config"]
-        cmake_args = args["cmake_options"]
         gradle_task = "assembleDebug" if config == "Debug" else "assembleRelease"
 
         build_cmd = [
             gradlew_path,
             gradle_task,
-            f"-PcmakeArgs={' '.join(cmake_args)}",
+            gradle_cmake_property(args),
             "--info"
         ] + gradle_abi_properties(args)
 
