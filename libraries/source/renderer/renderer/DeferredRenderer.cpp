@@ -36,7 +36,7 @@ RasterRenderer::SceneTextures DeferredRenderer::AddScenePasses(RenderGraph &grap
     const auto scene_depth = graph.CreateTexture("SceneDepth", SceneDepthDesc);
     const auto gbuffer = gbuffer_pass_->AddTo(graph, scene_depth);
     const auto scene_color = graph.CreateTexture("SceneColor", SceneColorDesc);
-    directional_lighting_pass_->AddTo(graph, lighting, gbuffer, scene_depth, scene_color);
+    directional_lighting_pass_->AddTo(graph, lighting, gbuffer.packed, gbuffer.depth_copy, scene_color);
     return {.color = scene_color, .depth = scene_depth};
 }
 } // namespace sparkle

@@ -180,6 +180,36 @@ bool VulkanRHI::SupportsPassTimestamps()
     return context->GetTimestampValidBits() > 0;
 }
 
+bool VulkanRHI::SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages)
+{
+    return context->SupportsLazilyAllocatedImage(GetVkPixelFormat(format),
+                                                 GetVkImageUsage(usages) | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
+}
+
+bool VulkanRHI::SupportsPixelLocalRead()
+{
+    return context->SupportsDynamicRenderingLocalRead();
+}
+
+bool VulkanRHI::KeepsMemorylessAcrossPixelLocalBarrier()
+{
+    return context->KeepsMemorylessAcrossPixelLocalBarrier();
+}
+
+// Arm GPU datasheets: 256 bits of tile color storage per pixel at the full tile size from Mali-G72 on. other vendors
+// publish no per-pixel limit.
+std::optional<uint32_t> VulkanRHI::GetTileBudget()
+{
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &properties);
+    const std::string_view name(properties.deviceName);
+    if (name.find("Mali") != std::string_view::npos || name.find("Immortalis") != std::string_view::npos)
+    {
+        return 32;
+    }
+    return std::nullopt;
+}
+
 std::optional<unsigned> VulkanRHI::GetValidationErrorCount() const
 {
     return context->GetValidationErrorCount();
@@ -374,9 +404,9 @@ RHIResourceRef<RHISampler> VulkanRHI::CreateSampler(RHISampler::SamplerAttribute
     return CreateResource<VulkanSampler>(attribute, name);
 }
 
-RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info)
+RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info, std::string variant)
 {
-    return CreateResource<VulkanShader>(shader_info);
+    return CreateResource<VulkanShader>(shader_info, std::move(variant));
 }
 
 RHIResourceRef<RHIPipelineState> VulkanRHI::CreatePipelineState(RHIPipelineState::PipelineType type,

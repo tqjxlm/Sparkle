@@ -13,7 +13,8 @@ struct RGTexture;
 class SkyBoxPass : public PipelinePass
 {
 public:
-    // draws into a color attachment of `color_format` at slot 0, tested against a depth attachment of `depth_format`
+    // draws into a color attachment of `color_format` at ColorSlot::SceneColor, tested against a depth attachment of
+    // `depth_format`
     SkyBoxPass(RHIContext *rhi, PixelFormat color_format, PixelFormat depth_format);
 
     void InitRenderResources(const RenderConfig &config) override;

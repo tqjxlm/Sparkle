@@ -48,6 +48,30 @@
         }
     },
     {
+        "name": "forward_render_static_sampled",
+        "test_case": "screenshot",
+        "description": "The forward still frame with render_graph_pixel_local off, so tone mapping samples the scene color after the physical pass that writes it instead of reading it pixel-locally, FLIP-compared against the same ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--render_graph_pixel_local", "false"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "forward"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "deferred_render_static_sampled",
+        "test_case": "screenshot",
+        "description": "The deferred still frame with render_graph_pixel_local off, so tone mapping samples the scene color after the physical pass that writes it instead of reading it pixel-locally, FLIP-compared against the same ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--render_graph_pixel_local", "false"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "deferred"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
         "name": "gpu_render_static",
         "test_case": "screenshot",
         "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Converging it is too slow on the software-rendering runners, so it stays local-only; gpu_render_static_64spp gates a partly converged frame in CI.",
@@ -232,7 +256,7 @@
     {
         "name": "render_graph_compile",
         "test_case": "render_graph_compile",
-        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, barriers seeded from tracked state, load/store inference, mip runs, acceleration structure builds, the dump, draws binding their declared textures or a placeholder and native recording, then executed and read back."
+        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, physical passes with every break reason, barriers seeded from tracked state, load/store inference, write masks of merged passes, mip runs, acceleration structure builds, the dump, draws binding their declared textures or a placeholder and native recording, then executed and read back."
     },
     {
         "name": "render_graph_sync_validation",
@@ -248,7 +272,35 @@
     {
         "name": "render_graph_pass_timing",
         "test_case": "render_graph_pass_timing",
-        "description": "Render graph raster and compute passes dump their GPU time once their frame slot returns, and none without device support."
+        "description": "Render graph compute and merged raster physical passes dump their GPU time once their frame slot returns, and none without device support."
+    },
+    {
+        "name": "render_graph_merge_parity",
+        "test_case": "render_graph_merge_parity",
+        "description": "A forward frame with render_graph_merge, render_graph_memoryless and render_graph_pixel_local on, one with memoryless off, one with pixel-local reads off and one with merging off, switched at runtime, must be bit-identical; only the first three graphs merge passes, only the first and third may have memoryless transients and only the first two read pixel-locally.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "forward"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "render_graph_merge_parity_sync_validation",
+        "test_case": "render_graph_merge_parity",
+        "description": "render_graph_merge_parity under Vulkan synchronization validation, so the barriers of every frame it captures must order every access.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "forward", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "render_graph_merge_parity_deferred",
+        "test_case": "render_graph_merge_parity",
+        "description": "render_graph_merge_parity on a deferred frame, whose GBuffer, lighting, sky box and tone mapping share one physical pass only with pixel-local reads.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "deferred"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "render_graph_merge_parity_deferred_sync_validation",
+        "test_case": "render_graph_merge_parity",
+        "description": "render_graph_merge_parity_deferred under Vulkan synchronization validation.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "deferred", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
     },
     {
         "name": "cpu_graph_shape",
@@ -278,6 +330,26 @@
         "evaluator": {
             "script": "tests/render_graph/graph_shape_test.py",
             "args": ["--framework", "{framework}", "--golden", "forward", "--page", "forward_graph_shape"]
+        }
+    },
+    {
+        "name": "forward_graph_shape_no_merge",
+        "test_case": "render_graph_dump",
+        "description": "The forward pipeline's render graph of a still frame with render_graph_merge off, where every live pass is its own physical pass, compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--render_graph_merge", "false", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "forward_no_merge", "--page", "forward_graph_shape_no_merge"]
+        }
+    },
+    {
+        "name": "forward_graph_shape_halfres",
+        "test_case": "render_graph_dump",
+        "description": "The forward pipeline's render graph of a still frame at render_scale 0.5, where tone mapping upsamples the scene color and so samples it after the physical pass that writes it, compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--render_scale", "0.5", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "forward_halfres", "--page", "forward_graph_shape_halfres"]
         }
     },
     {

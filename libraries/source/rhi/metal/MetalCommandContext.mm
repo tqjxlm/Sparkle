@@ -104,16 +104,28 @@ void MetalCommandContext::BlitImageInternal(const RHIImage *src, const RHIImage 
     RHICast<MetalImage>(src)->BlitToImage(command_buffer_, dst);
 }
 
-// a debug group of the command buffer, pushed and popped while no encoder is open: by RHICommandContext before a pass
-// opens its encoder and after it ends it, and by the render graph around the encoders a copy or external pass opens.
+// a debug group of the open render encoder, or else of the command buffer, pushed and popped while no encoder is open:
+// by RHICommandContext before a pass opens its encoder and after it ends it, and by the render graph around the
+// encoders a copy or external pass opens.
 void MetalCommandContext::BeginDebugLabel(const std::string &name) const
 {
+    auto *label = [NSString stringWithUTF8String:name.c_str()];
+    if (render_encoder_)
+    {
+        [render_encoder_ pushDebugGroup:label];
+        return;
+    }
     AssertOutsidePass("BeginDebugLabel");
-    [command_buffer_ pushDebugGroup:[NSString stringWithUTF8String:name.c_str()]];
+    [command_buffer_ pushDebugGroup:label];
 }
 
 void MetalCommandContext::EndDebugLabel() const
 {
+    if (render_encoder_)
+    {
+        [render_encoder_ popDebugGroup];
+        return;
+    }
     AssertOutsidePass("EndDebugLabel");
     [command_buffer_ popDebugGroup];
 }

@@ -131,6 +131,17 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     return all_extension_good;
 }
 
+static bool HasDeviceExtension(VkPhysicalDevice device, std::string_view name)
+{
+    uint32_t extension_count = 0;
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
+    std::vector<VkExtensionProperties> extensions(extension_count);
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, extensions.data());
+    return std::ranges::any_of(extensions, [name](const VkExtensionProperties &extension) {
+        return std::string_view(extension.extensionName) == name;
+    });
+}
+
 template <class T> static T QueryDeviceFeatures(VkPhysicalDevice device, VkStructureType type)
 {
     T features{};
@@ -217,6 +228,10 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     else if (device_features.samplerAnisotropy == 0)
     {
         fail_reason = "Anisotropy sampling not supported";
+    }
+    else if (device_features.independentBlend == 0)
+    {
+        fail_reason = "Independent blend not supported";
     }
     else
     {
@@ -901,9 +916,64 @@ void VulkanContext::QueryOptionalDeviceFeatures()
     compressed_image_barriers_need_sync1_ =
         FRAMEWORK_ANDROID && std::string_view(device_properties.deviceName).find("llvmpipe") != std::string_view::npos;
 
+    // MoltenVK ends the Metal render pass at a by-region input attachment barrier and begins another, which stores and
+    // reloads the attachments (MVKCmdPipelineBarrier::encode)
+    VkPhysicalDeviceDriverProperties driver_properties{};
+    driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    VkPhysicalDeviceProperties2 device_properties2{};
+    device_properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    device_properties2.pNext = &driver_properties;
+    vkGetPhysicalDeviceProperties2(physical_device_, &device_properties2);
+    keeps_memoryless_across_pixel_local_barrier_ = driver_properties.driverID != VK_DRIVER_ID_MOLTENVK;
+
     supports_astc_hdr_ = QueryDeviceFeatures<VkPhysicalDeviceVulkan13Features>(
                              physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
                              .textureCompressionASTC_HDR == VK_TRUE;
+
+    supports_dynamic_rendering_local_read_ =
+        HasDeviceExtension(physical_device_, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) &&
+        QueryDeviceFeatures<VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR>(
+            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR)
+                .dynamicRenderingLocalRead == VK_TRUE;
+    if (supports_dynamic_rendering_local_read_)
+    {
+        device_extensions_.push_back(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
+    }
+}
+
+bool VulkanContext::SupportsLazilyAllocatedImage(VkFormat format, VkImageUsageFlags usage) const
+{
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = format;
+    image_info.extent = {.width = 1, .height = 1, .depth = 1};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = usage;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkDeviceImageMemoryRequirements requirements_info{};
+    requirements_info.sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS;
+    requirements_info.pCreateInfo = &image_info;
+    VkMemoryRequirements2 requirements{};
+    requirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+    vkGetDeviceImageMemoryRequirements(device_, &requirements_info, &requirements);
+
+    VkPhysicalDeviceMemoryProperties memory_properties;
+    vkGetPhysicalDeviceMemoryProperties(physical_device_, &memory_properties);
+    for (auto type = 0u; type < memory_properties.memoryTypeCount; type++)
+    {
+        if ((requirements.memoryRequirements.memoryTypeBits & (1u << type)) != 0u &&
+            (memory_properties.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) != 0u)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool VulkanContext::CreateLogicalDevice()
@@ -935,6 +1005,8 @@ bool VulkanContext::CreateLogicalDevice()
 
     VkPhysicalDeviceFeatures device_features{};
     device_features.samplerAnisotropy = VK_TRUE;
+    // per-slot write masks of attachments a merged render graph pass does not write
+    device_features.independentBlend = VK_TRUE;
     // DXC-compiled shaders (NRD) access storage images without format decorations; without these
     // features such reads are undefined (Adreno returns zeros) with no validation-layer diagnostic
     device_features.shaderStorageImageReadWithoutFormat = supported_features.shaderStorageImageReadWithoutFormat;
@@ -955,6 +1027,7 @@ bool VulkanContext::CreateLogicalDevice()
     VkPhysicalDeviceRayQueryFeaturesKHR enabled_ray_query_features{};
     VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing_features{};
     VkPhysicalDeviceRobustness2FeaturesEXT enabled_robustness_features{};
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR enabled_local_read_features{};
 
     VkPhysicalDeviceVulkan13Features enabled_vulkan13_features{};
     enabled_vulkan13_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
@@ -962,6 +1035,13 @@ bool VulkanContext::CreateLogicalDevice()
     enabled_vulkan13_features.synchronization2 = VK_TRUE;
     enabled_vulkan13_features.textureCompressionASTC_HDR = supports_astc_hdr_ ? VK_TRUE : VK_FALSE;
     ChainVkStructurePtr(create_info, enabled_vulkan13_features);
+
+    if (supports_dynamic_rendering_local_read_)
+    {
+        enabled_local_read_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR;
+        enabled_local_read_features.dynamicRenderingLocalRead = VK_TRUE;
+        ChainVkStructurePtr(create_info, enabled_local_read_features);
+    }
 
     if (rhi_->SupportsHardwareRayTracing())
     {

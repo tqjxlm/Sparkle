@@ -2,17 +2,20 @@ PathTrace: Compute
   access Accumulator StorageRead|StorageWrite(Compute)
   access TLAS AccelerationStructureRead(Compute)
   barrier Accumulator Read->StorageWrite [Sampled(Pixel) -> StorageRead|StorageWrite(Compute)]
+physical PathTrace, break NonRasterPass
 ToneMapping: Raster
-  access Accumulator Sampled(Pixel)
+  access Accumulator Sampled(Pixel) lowered from PixelLocalRead slot 1: NonRasterPass
   access Screen ColorWrite
   barrier Accumulator StorageWrite->Read [StorageRead|StorageWrite(Compute) -> Sampled(Pixel)]
   barrier Screen Undefined->ColorOutput [Sampled(Pixel) -> ColorWrite]
+physical ToneMapping, break SlotConflict(BackBuffer), NonLocalRead(Screen)
   attachment Screen slot 0: DontCare (fully overwritten) / Store (read by Present)
 Present: Raster
   access Screen Sampled(Pixel)
   access BackBuffer ColorWrite
   barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
   barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+physical Present
   attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
 Accumulator: Imported, PathTrace..ToneMapping, Texture|UAV
 Screen: Transient B8G8R8A8Srgb Output, physical 0, ToneMapping..Present, Texture|ColorAttachment

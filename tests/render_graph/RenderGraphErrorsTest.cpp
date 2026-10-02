@@ -281,6 +281,14 @@ private:
                 return [](RGComputeContext &) {};
             });
         });
+        ExpectError("Compute pass Compute cannot read pixel-locally", [&] {
+            RenderGraph graph(rhi, pool, config);
+            const auto a = graph.CreateTexture("A", OutputDesc);
+            graph.AddComputePass("Compute", nullptr, [a](RGBuilder &builder) {
+                builder.PixelLocalRead(a, 1);
+                return [](RGComputeContext &) {};
+            });
+        });
         ExpectError("Copy pass Native cannot declare native access", [&] {
             RenderGraph graph(rhi, pool, config);
             graph.AddCopyPass("Native", [](RGBuilder &builder) {
@@ -314,6 +322,21 @@ private:
             graph.AddComputePass("Compute", nullptr, [](RGBuilder &builder) {
                 builder.SideEffect();
                 return [](RGComputeContext &) {};
+            });
+            graph.Compile();
+        });
+        ExpectError("pass Read reads slot 0 pixel-locally, which it writes", [&] {
+            RenderGraph graph(rhi, pool, config);
+            const auto a = graph.CreateTexture("A", OutputDesc);
+            const auto output = graph.Import("Target", target);
+            graph.AddRasterPass("Write", [a](RGBuilder &builder) {
+                builder.ColorWrite(a, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("Read", [a, output](RGBuilder &builder) {
+                builder.PixelLocalRead(a, 0);
+                builder.ColorWrite(output, 0);
+                return [](RGRasterContext &) {};
             });
             graph.Compile();
         });

@@ -55,6 +55,9 @@ struct RHIShaderResourceReflection
         Sampler,
         StorageImage2D,
         AccelerationStructure,
+        // a Texture2D binding that a shader variant reads pixel-locally instead: an input attachment on Vulkan, a
+        // framebuffer fetch without any binding on Metal
+        InputAttachment,
     };
 
     std::string_view name;
@@ -88,6 +91,14 @@ public:
     {
         decl_->set = set;
         decl_->slot = slot;
+    }
+
+    // the compiled shader reads this Texture2D binding as a subpass input
+    void ReflectAsInputAttachment()
+    {
+        ASSERT_F(decl_->type == RHIShaderResourceReflection::ResourceType::Texture2D,
+                 "shader resource {} is a subpass input but not declared as Texture2D", decl_->name);
+        decl_->type = RHIShaderResourceReflection::ResourceType::InputAttachment;
     }
 
     [[nodiscard]] RHIResource *GetResource() const
@@ -315,7 +326,9 @@ public:
         return bindings_;
     }
 
-    void Initialize();
+    // a `variant` compiles out the resources of the code its define disables, so only a shader's base variant warns
+    // about resources missing from the compiled shader
+    void Initialize(bool variant);
 
     void RegisterShaderResourceReflection(RHIShaderResourceBinding *binding, RHIShaderResourceReflection *decl);
 
@@ -450,8 +463,11 @@ protected:                                                                      
 class RHIShader : public RHIResource
 {
 public:
-    explicit RHIShader(const RHIShaderInfo *shader_info)
-        : RHIResource(shader_info->GetName()), shader_info_(shader_info)
+    // `variant` is the define the shader build compiles the variant with (shaders/CMakeLists.txt), empty for the base
+    // variant. every variant of a shader shares its RHIShaderInfo, and so its ResourceTable type.
+    RHIShader(const RHIShaderInfo *shader_info, std::string variant)
+        : RHIResource(variant.empty() ? shader_info->GetName() : shader_info->GetName() + "." + variant),
+          shader_info_(shader_info), variant_(std::move(variant))
     {
     }
 
@@ -465,10 +481,22 @@ public:
         return shader_info_;
     }
 
+    [[nodiscard]] bool IsVariant() const
+    {
+        return !variant_.empty();
+    }
+
+    // the path of the compiled variant without its extension
+    [[nodiscard]] std::string GetCompiledPath() const
+    {
+        return variant_.empty() ? shader_info_->GetPath() : shader_info_->GetPath() + "." + variant_;
+    }
+
     virtual void Load() = 0;
 
 protected:
     const RHIShaderInfo *shader_info_;
+    std::string variant_;
     bool loaded_ = false;
 };
 } // namespace sparkle

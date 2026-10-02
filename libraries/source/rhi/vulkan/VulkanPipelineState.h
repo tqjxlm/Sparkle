@@ -111,6 +111,11 @@ inline VkCompareOp GetDepthCompareOp(const RHIPipelineState::DepthState &depth_s
     }
 }
 
+// lavapipe resets its blend state, independent blend included, when it binds a pipeline without color attachments, and
+// later pipelines then apply slot 0's write mask to every slot. every pipeline and rendering declares at least slot 0,
+// unused (VK_FORMAT_UNDEFINED, a null view) when nothing attaches it.
+inline constexpr uint32_t MinColorAttachmentCount = 1;
+
 // color_formats backs the returned struct and must outlive it
 inline VkPipelineRenderingCreateInfo GetVkPipelineRenderingCreateInfo(
     const RHIAttachmentSignature &signature, std::array<VkFormat, MaxNumColorAttachments> &color_formats)
@@ -119,7 +124,7 @@ inline VkPipelineRenderingCreateInfo GetVkPipelineRenderingCreateInfo(
         return format == PixelFormat::Count ? VK_FORMAT_UNDEFINED : GetVkPixelFormat(format);
     };
 
-    uint32_t color_attachment_count = 0;
+    uint32_t color_attachment_count = MinColorAttachmentCount;
     for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
     {
         color_formats[slot] = get_format(signature.color_formats[slot]);
@@ -225,7 +230,7 @@ private:
     VkPipelineRasterizationStateCreateInfo rasterizer_;
     VkPipelineMultisampleStateCreateInfo multisampling_;
 
-    // shared by every color slot
+    // shared by every color slot the attachment signature does not mask
     VkPipelineColorBlendAttachmentState color_blend_attachment_;
     VkPipelineDepthStencilStateCreateInfo depth_stencil_;
 

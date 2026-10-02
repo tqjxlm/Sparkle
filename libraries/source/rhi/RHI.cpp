@@ -88,6 +88,8 @@ bool RHIContext::InitRHI(NativeView *inWindow, std::string &error)
 
 RHIResourceRef<RHISampler> RHIContext::GetSampler(RHISampler::SamplerAttribute attribute)
 {
+    attribute.enable_anisotropy = attribute.enable_anisotropy && config_.sampler_anisotropy;
+
     auto found = samplers_.find(attribute);
     if (found != samplers_.end())
     {

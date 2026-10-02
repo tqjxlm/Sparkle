@@ -23,17 +23,30 @@ class Scene;
 class UiManager;
 struct ThreadTaskQueue;
 
-// a named output the render thread writes to the screenshots directory: a screenshot or a render graph dump
+// a named output the render thread writes to the screenshots directory: a screenshot, a render graph dump, or both
 class ScreenshotRequest
 {
 public:
-    explicit ScreenshotRequest(std::string name) : name_(std::move(name))
+    explicit ScreenshotRequest(std::string name, bool capture_ui = false, bool dumps_graph = false)
+        : name_(std::move(name)), capture_ui_(capture_ui), dumps_graph_(dumps_graph)
     {
     }
 
     [[nodiscard]] const std::string &GetName() const
     {
         return name_;
+    }
+
+    // whether a screenshot shows the ui
+    [[nodiscard]] bool CapturesUi() const
+    {
+        return capture_ui_;
+    }
+
+    // whether a screenshot also dumps the render graph of the frame it reads back
+    [[nodiscard]] bool DumpsGraph() const
+    {
+        return dumps_graph_;
     }
 
     [[nodiscard]] bool IsCompleted() const
@@ -48,6 +61,8 @@ public:
 
 private:
     std::string name_;
+    bool capture_ui_;
+    bool dumps_graph_;
     std::atomic<bool> completed_{false};
 };
 
@@ -92,8 +107,11 @@ public:
     // called by main thread, run on render thread
     void NotifySceneLoaded();
 
-    // Called from main thread. Returns a request handle the caller can poll for completion.
-    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name);
+    // Called from main thread. Returns a request handle the caller can poll for completion. With `dump_graph`, the
+    // render graph of the frame the screenshot reads back is written to screenshots/<name>.json before it completes.
+    [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name,
+                                                                           bool capture_ui = false,
+                                                                           bool dump_graph = false);
 
     // Called from main thread. The next render graph the renderer executes is written to screenshots/<name>.json.
     [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestGraphDump(const std::string &name);

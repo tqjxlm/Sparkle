@@ -3,6 +3,7 @@
 #include "application/NativeView.h"
 #include "core/math/Utilities.h"
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/ColorSlot.h"
 #include "rhi/RHI.h"
 
 namespace sparkle
@@ -32,39 +33,68 @@ static constexpr RHISampler::SamplerAttribute BilinearSampler{
     .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
     .filtering_method_min = RHISampler::FilteringMethod::Linear,
     .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest,
+    .enable_anisotropy = false};
 
 ScreenQuadPass::ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, InputFilter input_filter,
                                bool to_back_buffer)
-    : PipelinePass(ctx), name_(std::move(name)), input_filter_(input_filter), to_back_buffer_(to_back_buffer)
+    : ScreenQuadPass(ctx, std::move(name), output_format, ColorSlot::Screen, input_filter, to_back_buffer)
 {
-    signature_.color_formats[0] = output_format;
+}
+
+ScreenQuadPass::ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, uint8_t output_slot,
+                               InputFilter input_filter, bool to_back_buffer)
+    : PipelinePass(ctx), name_(std::move(name)), output_slot_(output_slot), input_filter_(input_filter),
+      to_back_buffer_(to_back_buffer)
+{
+    signature_.color_formats[output_slot_] = output_format;
 }
 
 void ScreenQuadPass::InitRenderResources(const RenderConfig &)
 {
-    SetupPipeline();
     SetupVertices();
     SetupVertexShader();
+
+    pipeline_state_ = CreatePipeline(signature_);
     SetupPixelShader();
+    CompilePipeline(*pipeline_state_);
 
-    pipeline_state_->Compile();
-
-    BindVertexShaderResources();
     BindPixelShaderResources();
 
     draw_args_.index_count = 6;
 }
 
-void ScreenQuadPass::SetupPipeline()
+RHIResourceRef<RHIPipelineState> ScreenQuadPass::CreatePipeline(const RHIAttachmentSignature &signature) const
 {
-    pipeline_state_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Graphics, "ScreenQuadPipeline");
-    pipeline_state_->SetAttachmentSignature(signature_);
+    auto pipeline = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Graphics, "ScreenQuadPipeline");
+    pipeline->SetAttachmentSignature(signature);
 
     RHIPipelineState::DepthState depth_state;
     depth_state.write_depth = false;
     depth_state.test_state = RHIPipelineState::DepthTestState::Always;
-    pipeline_state_->SetDepthState(depth_state);
+    pipeline->SetDepthState(depth_state);
+
+    pipeline->SetIndexBuffer(index_buffer_);
+    pipeline->SetVertexBuffer(0, vertex_buffer_);
+
+    auto &vertex_delcaration = pipeline->GetVertexInputDeclaration();
+    vertex_delcaration.SetAttribute(0, 0, {RHIVertexFormat::R32G32B32Float, offsetof(ScreenVertex, position)});
+    vertex_delcaration.SetAttribute(1, 0, {RHIVertexFormat::R32G32Float, offsetof(ScreenVertex, uv)});
+
+    pipeline->SetShader<RHIShaderStage::Vertex>(vertex_shader_);
+    return pipeline;
+}
+
+void ScreenQuadPass::CompilePipeline(RHIPipelineState &pipeline) const
+{
+    pipeline.Compile();
+    pipeline.GetShaderResource<ScreenQuadVertexShader>()->ubo().BindResource(vs_ub_);
+}
+
+const RHIResourceRef<RHIPipelineState> &ScreenQuadPass::GetPipeline(const RGRasterContext & /*context*/,
+                                                                    RGTexture /*input*/) const
+{
+    return pipeline_state_;
 }
 
 void ScreenQuadPass::SetupVertices()
@@ -90,30 +120,11 @@ void ScreenQuadPass::SetupVertices()
                                "ScreenIndexBuffer");
         index_buffer_->UploadImmediate(Indices.data());
     }
-
-    pipeline_state_->SetIndexBuffer(index_buffer_);
-    pipeline_state_->SetVertexBuffer(0, vertex_buffer_);
-
-    auto &vertex_delcaration = pipeline_state_->GetVertexInputDeclaration();
-    vertex_delcaration.SetAttribute(0, 0, {RHIVertexFormat::R32G32B32Float, offsetof(ScreenVertex, position)});
-    vertex_delcaration.SetAttribute(1, 0, {RHIVertexFormat::R32G32Float, offsetof(ScreenVertex, uv)});
 }
 
 void ScreenQuadPass::SetupVertexShader()
 {
     vertex_shader_ = rhi_->CreateShader<ScreenQuadVertexShader>();
-    pipeline_state_->SetShader<RHIShaderStage::Vertex>(vertex_shader_);
-}
-
-void ScreenQuadPass::SetupPixelShader()
-{
-    pixel_shader_ = rhi_->CreateShader<ScreenQuadPixelShader>();
-    pipeline_state_->SetShader<RHIShaderStage::Pixel>(pixel_shader_);
-}
-
-void ScreenQuadPass::BindVertexShaderResources()
-{
-    auto *vs_resources = pipeline_state_->GetShaderResource<ScreenQuadVertexShader>();
 
     if (!vs_ub_)
     {
@@ -134,7 +145,12 @@ void ScreenQuadPass::BindVertexShaderResources()
 
         vs_ub_->UploadImmediate(&ubo);
     }
-    vs_resources->ubo().BindResource(vs_ub_);
+}
+
+void ScreenQuadPass::SetupPixelShader()
+{
+    pixel_shader_ = rhi_->CreateShader<ScreenQuadPixelShader>();
+    pipeline_state_->SetShader<RHIShaderStage::Pixel>(pixel_shader_);
 }
 
 // a pre-rotation by a quarter turn lays the input's x axis along the output's y axis
@@ -171,9 +187,9 @@ void ScreenQuadPass::AddTo(RenderGraph &graph, RGTexture input, RGTexture output
                           rhi_->SupportsLinearFiltering(graph.GetFormat(input));
     graph.AddRasterPass(name_, [this, input, output, bilinear](RGBuilder &builder) {
         SampleInput(builder, input, bilinear ? BilinearSampler : NearestSampler);
-        builder.ColorWrite(output, 0);
+        builder.ColorWrite(output, output_slot_);
         builder.FullyOverwrites();
-        return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
+        return [this, input](RGRasterContext &context) { context.DrawMesh(GetPipeline(context, input), draw_args_); };
     });
 }
 

@@ -508,9 +508,10 @@ const RGTexturePool &RenderFramework::GetGraphTexturePool() const
     return *graph_texture_pool_;
 }
 
-std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const std::string &name)
+std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const std::string &name, bool capture_ui,
+                                                                          bool dump_graph)
 {
-    auto request = std::make_shared<ScreenshotRequest>(name);
+    auto request = std::make_shared<ScreenshotRequest>(name, capture_ui, dump_graph);
     {
         std::scoped_lock<std::mutex> lock(screenshot_queue_mutex_);
         screenshot_queue_.push(request);
@@ -553,7 +554,15 @@ void RenderFramework::ProcessScreenshotRequest()
     }
 
     Log(Info, "Screenshot requested: {}", active_screenshot_->GetName());
-    renderer_->RequestSaveScreenshot(active_screenshot_->GetName(), false, [this]() {
+    // the next graph reads the screenshot back, and its dump is saved before the readback completes
+    if (active_screenshot_->DumpsGraph())
+    {
+        graph_dump_consumers_.emplace_back(
+            [name = active_screenshot_->GetName()](const std::shared_ptr<const nlohmann::json> &dump) {
+                SaveGraphDump(*dump, name);
+            });
+    }
+    renderer_->RequestSaveScreenshot(active_screenshot_->GetName(), active_screenshot_->CapturesUi(), [this]() {
         active_screenshot_->MarkCompleted();
         active_screenshot_.reset();
     });
@@ -636,15 +645,19 @@ void RenderFramework::DrawGraphUi()
 
     ImGui::SeparatorText("Passes");
 
-    if (ImGui::BeginTable("passes", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+    // a physical pass's GPU time shows on its first member, and why it ends on hovering any member
+    if (ImGui::BeginTable("passes", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
     {
         ImGui::TableSetupColumn("Pass");
         ImGui::TableSetupColumn("Kind");
+        ImGui::TableSetupColumn("Physical");
         ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        for (const auto &pass : graph_dump->at("passes"))
+        const auto &passes = graph_dump->at("passes");
+        for (auto index = 0u; index < passes.size(); index++)
         {
+            const auto &pass = passes.at(index);
             const bool culled = pass.at("culled").get<bool>();
 
             ImGui::TableNextRow();
@@ -659,17 +672,41 @@ void RenderFramework::DrawGraphUi()
             ImGui::TableNextColumn();
             if (culled)
             {
+                ImGui::TableNextColumn();
                 ImGui::TextWrapped("culled: %s", DumpString(pass, "cull_reason"));
+                ImGui::EndDisabled();
+                continue;
             }
-            else if (pass.contains("gpu_ms"))
+
+            const auto physical_index = pass.at("physical_pass").get<unsigned>();
+            const auto &physical = graph_dump->at("physical_passes").at(physical_index);
+            ImGui::Text("P%u", physical_index);
+            if (physical.contains("breaks"))
             {
-                ImGui::Text("%.3f", pass.at("gpu_ms").get<double>());
+                std::string breaks;
+                for (const auto &broken : physical.at("breaks"))
+                {
+                    breaks += (breaks.empty() ? "" : ", ") + broken.get<std::string>();
+                }
+                ImGui::SetItemTooltip("ends: %s", breaks.c_str());
+            }
+
+            ImGui::TableNextColumn();
+            if (physical.at("members").at(0).get<unsigned>() == index && physical.contains("gpu_ms"))
+            {
+                ImGui::Text("%.3f", physical.at("gpu_ms").get<double>());
             }
 
             ImGui::EndDisabled();
         }
 
         ImGui::EndTable();
+    }
+
+    ImGui::SeparatorText("Opportunities");
+    for (const auto &opportunity : graph_dump->at("opportunities"))
+    {
+        ImGui::BulletText("%s", opportunity.get_ref<const std::string &>().c_str());
     }
 
     ImGui::SeparatorText("Resources");

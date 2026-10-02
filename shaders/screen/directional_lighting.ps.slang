@@ -1,3 +1,4 @@
+#include "color_slot.h.slang"
 #include "debug.h.slang"
 #include "depth.h.slang"
 #include "directional_light.h.slang"
@@ -32,20 +33,19 @@
 [[vk::binding(7, 1)]] TextureCube ibl_specular;
 [[vk::binding(8, 1)]] SamplerState ibl_specular_sampler;
 
+// PIXEL_LOCAL reads the GBuffer and the depth copy the GBuffer pass wrote at this pixel (ColorSlot::GBufferPacked,
+// ColorSlot::DepthCopy)
+#ifdef PIXEL_LOCAL
+[[vk::binding(0, 2)]] [[vk::input_attachment_index(2)]] SubpassInput<uint4> gbuffer_texture;
+[[vk::binding(1, 2)]] [[vk::input_attachment_index(3)]] SubpassInput depth_texture;
+#else
 [[vk::binding(0, 2)]] Texture2D<uint4> gbuffer_texture;
 [[vk::binding(1, 2)]] Texture2D<float> depth_texture;
-[[vk::binding(2, 2)]] SamplerState depth_sampler;
+#endif
 
-[shader("fragment")] float4 shader_main(VSInterpolant vs_in) : SV_Target
+float4 Shade(VSInterpolant vs_in, uint4 gbuffer_sample, float depth)
 {
-    uint2 gbuffer_size;
-    gbuffer_texture.GetDimensions(gbuffer_size.x, gbuffer_size.y);
-    int2 gbuffer_pixel_coords = int2(vs_in.uv * gbuffer_size);
-    uint4 gbuffer_sample = gbuffer_texture.Load(int3(gbuffer_pixel_coords, 0));
-
     SurfaceAttributes surface = DecodeSurfaceFromGBuffer(gbuffer_sample);
-
-    float depth = depth_texture.Sample(depth_sampler, vs_in.uv).r;
 
     float3 world_pos = GetWorldPositionFromDepth(depth, vs_in.uv, view);
 
@@ -97,4 +97,16 @@
     }
 
     return float4(ambient + directional + surface.emissive, 1.0f);
+}
+
+[shader("fragment")] SceneColorOutput shader_main(VSInterpolant vs_in) {
+#ifdef PIXEL_LOCAL
+    uint4 gbuffer_sample = gbuffer_texture.SubpassLoad();
+    float depth = depth_texture.SubpassLoad().r;
+#else
+    int3 pixel = int3(int2(vs_in.position.xy), 0);
+    uint4 gbuffer_sample = gbuffer_texture.Load(pixel);
+    float depth = depth_texture.Load(pixel);
+#endif
+    return {Shade(vs_in, gbuffer_sample, depth)};
 }

@@ -8,6 +8,7 @@
 #include "rhi/RHI.h"
 
 #include <algorithm>
+#include <chrono>
 #include <iterator>
 #include <ranges>
 #include <unordered_map>
@@ -20,7 +21,11 @@ static constexpr RHIAccess ShaderAccess =
 // what copy passes record: copies and acceleration structure builds
 static constexpr RHIAccess CopyAccess = RHIAccess::CopySrc | RHIAccess::CopyDst | RHIAccess::AccelerationStructureBuild;
 static constexpr RHIAccess ReadAccess =
-    RHIAccess::DepthTest | RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::CopySrc;
+    RHIAccess::DepthTest | RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::CopySrc | RHIAccess::PixelLocalRead;
+// the usages of a transient whose contents may stay in tile memory
+static constexpr auto MemorylessUsages = RHIImage::ImageUsage::ColorAttachment |
+                                         RHIImage::ImageUsage::DepthStencilAttachment |
+                                         RHIImage::ImageUsage::InputAttachment;
 
 static bool KindAllows(RGPassKind kind, RHIAccess access)
 {
@@ -88,6 +93,7 @@ static RHIImage::ImageUsage GetImageUsage(RHIAccess access)
     add(RHIAccess::StorageRead | RHIAccess::StorageWrite, RHIImage::ImageUsage::UAV);
     add(RHIAccess::CopySrc, RHIImage::ImageUsage::TransferSrc);
     add(RHIAccess::CopyDst, RHIImage::ImageUsage::TransferDst);
+    add(RHIAccess::PixelLocalRead, RHIImage::ImageUsage::InputAttachment);
     return usages;
 }
 
@@ -115,6 +121,16 @@ static bool Overlaps(const RGSubresources &a, const RGSubresources &b)
 {
     return a.base_mip < b.base_mip + b.mip_count && b.base_mip < a.base_mip + a.mip_count &&
            a.base_layer < b.base_layer + b.layer_count && b.base_layer < a.base_layer + a.layer_count;
+}
+
+bool RenderGraph::Access::Overlaps(const Access &other) const
+{
+    return texture == other.texture && sparkle::Overlaps(subresources, other.subresources);
+}
+
+static Vector2UInt GetMipSize(uint32_t width, uint32_t height, unsigned mip)
+{
+    return {std::max(width >> mip, 1u), std::max(height >> mip, 1u)};
 }
 
 // for resolved counts
@@ -153,6 +169,8 @@ static RHIAccess GetBindingAccess(RHIShaderResourceReflection::ResourceType type
         return RHIAccess::StorageRead | RHIAccess::StorageWrite;
     case RHIShaderResourceReflection::ResourceType::AccelerationStructure:
         return RHIAccess::AccelerationStructureRead;
+    case RHIShaderResourceReflection::ResourceType::InputAttachment:
+        return RHIAccess::PixelLocalRead;
     default:
         return RHIAccess::None;
     }
@@ -174,6 +192,12 @@ template <typename Accesses, typename Resource, typename Member>
 static bool Declares(const Accesses &accesses, const Resource &resource, Member member)
 {
     return std::ranges::find(accesses, resource, member) != std::ranges::end(accesses);
+}
+
+// matches an access attaching the subresources of `access` at `slot`
+template <typename Access> static auto AttachmentOf(const Access &access, uint8_t slot)
+{
+    return [&access, slot](const Access &a) { return a.slot == slot && a.SameSubresources(access); };
 }
 
 // the resource behind a buffer or acceleration structure handle, which must name a resource of that kind
@@ -229,10 +253,21 @@ void RGBuilder::Declare(RGTextureRange texture, RHIResourceAccess access, RHIIma
                              .slot = slot,
                              .clear = std::move(clear),
                              .bindings = {},
+                             .sampled_bindings = {},
                              .barriers = {},
                              .states = {},
                              .load_reason = {},
-                             .store_reason = {}});
+                             .store_reason = {},
+                             .lowered_reason = {}});
+}
+
+void RGBuilder::PixelLocalRead(RGTextureRange texture, uint8_t slot)
+{
+    const auto &pass = graph_.passes_[pass_];
+    RGCheck(pass.kind == RGPassKind::Raster, "{} pass {} cannot read pixel-locally", Enum2Str(pass.kind), pass.name);
+    RGCheck(slot < MaxNumColorAttachments, "color slot {} out of range", slot);
+    DeclareShaderAccess(texture, RHIAccess::Sampled, RHIShaderStageMask::Pixel, RHIImageLayout::Read);
+    graph_.passes_[pass_].accesses.back().pixel_local_slot = slot;
 }
 
 void RGBuilder::DeclareShaderAccess(RGTextureRange texture, RHIAccess access, RHIShaderStageMask stages,
@@ -361,6 +396,11 @@ void RGBuilder::BindLastAccess(ImageBinding binding)
     graph_.passes_[pass_].accesses.back().bindings.push_back(std::move(binding));
 }
 
+void RGBuilder::BindLastAccessWhenSampled(ImageBinding binding)
+{
+    graph_.passes_[pass_].accesses.back().sampled_bindings.push_back(std::move(binding));
+}
+
 void RGBuilder::BindPlaceholder(const RHIResourceRef<RHIImage> &placeholder, ImageBinding binding)
 {
     graph_.passes_[pass_].placeholders.emplace_back(placeholder, std::move(binding));
@@ -417,9 +457,25 @@ RHICommandContext &RGPassContext::GetNativeContext() const
     return command_context_;
 }
 
+bool RGPassContext::IsPixelLocal(RGTexture texture) const
+{
+    const auto &pass = graph_.passes_[pass_];
+    const auto read = std::ranges::find_if(pass.accesses, [texture](const RenderGraph::Access &access) {
+        return access.texture == texture && access.pixel_local_slot.has_value();
+    });
+    RGCheck(read != pass.accesses.end(), "pass {} has no pixel-local read of {}", pass.name,
+            graph_.textures_[texture.index].name);
+    return read->IsPixelLocal();
+}
+
 RenderGraph::RenderGraph(RHIContext *rhi, RGTexturePool &pool, const RenderConfig &config)
     : rhi_(rhi), pool_(pool), resolution_(config.GetResolution()), cull_(config.render_graph_cull),
-      full_barriers_(config.render_graph_full_barriers)
+      merge_(config.render_graph_merge), memoryless_(config.render_graph_memoryless),
+      pixel_local_(config.render_graph_pixel_local && rhi->SupportsPixelLocalRead()),
+      full_barriers_(config.render_graph_full_barriers),
+      tile_budget_(config.render_graph_tile_budget > 0 ? std::optional(config.render_graph_tile_budget)
+                                                       : rhi->GetTileBudget()),
+      tile_budget_split_(config.render_graph_tile_budget_split)
 {
 }
 
@@ -574,6 +630,7 @@ void RenderGraph::Compile()
 
     Validate();
     Cull();
+    FormPhysicalPasses();
 
     pool_.BeginGraph();
     pool_serves_ = true;
@@ -592,8 +649,7 @@ void RenderGraph::Validate() const
     std::vector<bool> written(textures_.size(), false);
     for (const auto &pass : passes_)
     {
-        RGCheck(pass.kind != RGPassKind::Raster ||
-                    std::ranges::any_of(pass.accesses, [](const Access &access) { return access.slot != NoSlot; }),
+        RGCheck(pass.kind != RGPassKind::Raster || std::ranges::any_of(pass.accesses, &Access::IsAttachment),
                 "raster pass {} has no attachment", pass.name);
         RGCheck(pass.kind != RGPassKind::Compute || pass.compute_pass, "compute pass {} has no compute pass",
                 pass.name);
@@ -604,6 +660,9 @@ void RenderGraph::Validate() const
             RGCheck(texture.imported || written[access.texture.index] || !ReadsContents(access.access),
                     "pass {} reads {} before any pass writes it", pass.name, texture.name);
             written[access.texture.index] = written[access.texture.index] || access.access.HasWrite();
+            RGCheck(!access.pixel_local_slot || !Declares(pass.accesses, *access.pixel_local_slot, &Access::slot),
+                    "pass {} reads slot {} pixel-locally, which it writes", pass.name,
+                    access.pixel_local_slot.value_or(0));
         }
     }
 }
@@ -645,7 +704,289 @@ void RenderGraph::Cull()
     }
 }
 
-// transients whose lifetimes do not overlap share an image when format and extent match
+template <typename Matches>
+const RenderGraph::Access *RenderGraph::FindAccess(std::span<const uint32_t> members, const Matches &matches) const
+{
+    for (const auto member : members)
+    {
+        const auto &accesses = passes_[member].accesses;
+        if (const auto found = std::ranges::find_if(accesses, matches); found != accesses.end())
+        {
+            return &*found;
+        }
+    }
+    return nullptr;
+}
+
+Vector2UInt RenderGraph::GetAttachmentSize(const Access &attachment) const
+{
+    const auto &texture = textures_[attachment.texture.index];
+    return GetMipSize(texture.width, texture.height, attachment.subresources.base_mip);
+}
+
+// consecutive members attaching the same subresources at the same slots share a step, unless the later one reads
+// pixel-locally
+void RenderGraph::FormPhysicalPasses()
+{
+    // whether `a` attaches every subresource `b` attaches, at the same slot
+    const auto attaches_all_of = [](const Pass &a, const Pass &b) {
+        return std::ranges::all_of(
+            b.accesses | std::views::filter(&Access::IsAttachment), [&a](const Access &attachment) {
+                return std::ranges::any_of(a.accesses, AttachmentOf(attachment, attachment.slot));
+            });
+    };
+
+    for (auto index = 0u; index < passes_.size(); index++)
+    {
+        auto &pass = passes_[index];
+        if (!pass.live)
+        {
+            continue;
+        }
+
+        if (!physical_passes_.empty())
+        {
+            auto &current = physical_passes_.back();
+            current.breaks = FindBreaks(current, pass);
+            if (current.breaks.empty())
+            {
+                const auto &previous = passes_[current.members.back()];
+                pass.physical = previous.physical;
+                ResolvePixelLocalReads(index);
+                const bool reads_locally = std::ranges::any_of(pass.accesses, &Access::IsPixelLocal);
+                pass.step =
+                    previous.step +
+                    (attaches_all_of(previous, pass) && attaches_all_of(pass, previous) && !reads_locally ? 0 : 1);
+                current.members.push_back(index);
+                current.name += "+" + pass.name;
+                continue;
+            }
+        }
+
+        pass.physical = static_cast<uint32_t>(physical_passes_.size());
+        physical_passes_.push_back({.members = {index}, .name = pass.name, .breaks = {}, .attachments = {}});
+        ResolvePixelLocalReads(index);
+    }
+}
+
+bool RenderGraph::ReadsAttachment(const PhysicalPass &physical, const Access &access) const
+{
+    return access.pixel_local_slot &&
+           FindAccess(physical.members, AttachmentOf(access, *access.pixel_local_slot)) != nullptr;
+}
+
+// a read of what an earlier member attaches becomes PixelLocalRead in the LocalRead layout, which the attachment takes
+// for the whole physical pass. any other request stays Sampled, lowered for the reason the physical pass of the
+// texture's last writer ended: its rules (FindBreak) keep a writer at the slot read in the reader's physical pass.
+void RenderGraph::ResolvePixelLocalReads(uint32_t index)
+{
+    auto &pass = passes_[index];
+    auto &physical = physical_passes_[pass.physical];
+    for (auto &access :
+         pass.accesses | std::views::filter([](const Access &a) { return a.pixel_local_slot.has_value(); }))
+    {
+        if (ReadsAttachment(physical, access))
+        {
+            access.access.access = RHIAccess::PixelLocalRead;
+            access.layout = RHIImageLayout::LocalRead;
+            for (const auto member : physical.members)
+            {
+                for (auto &attachment : passes_[member].accesses)
+                {
+                    if (attachment.IsAttachment() && attachment.SameSubresources(access))
+                    {
+                        attachment.layout = RHIImageLayout::LocalRead;
+                    }
+                }
+            }
+            continue;
+        }
+
+        std::ranges::move(access.sampled_bindings, std::back_inserter(access.bindings));
+        access.sampled_bindings.clear();
+        const Pass *writer = nullptr;
+        for (auto earlier = index; earlier-- > 0 && !writer;)
+        {
+            const auto writes = [&access](const Access &a) { return a.access.HasWrite() && a.Overlaps(access); };
+            if (passes_[earlier].live && std::ranges::any_of(passes_[earlier].accesses, writes))
+            {
+                writer = &passes_[earlier];
+            }
+        }
+        if (!writer)
+        {
+            access.lowered_reason = "NoWriter";
+            continue;
+        }
+        const auto &ended = physical_passes_[writer->physical];
+        ASSERT_F(&ended != &physical, "pass {} reads {} in the physical pass of its writer, but not pixel-locally",
+                 pass.name, textures_[access.texture.index].name);
+        access.lowered_reason = ended.breaks.front().ToString(false);
+    }
+}
+
+std::string RGBreak::ToString(bool all_resources) const
+{
+    const auto count = all_resources ? resources.size() : std::min<size_t>(resources.size(), 1);
+    std::string named;
+    for (const auto &resource : resources | std::views::take(count))
+    {
+        named += (named.empty() ? "" : ", ") + resource;
+    }
+    return std::string(Enum2Str(reason)) + (named.empty() ? "" : "(" + named + ")");
+}
+
+// the rules keep every subresource of a physical pass in one layout, with one barrier at most, recorded before the
+// rendering, or inside it before a pixel-local read: members share slots and depth, and a shader access neither depends
+// on another access of the physical pass nor touches what it attaches, unless it reads an attachment pixel-locally at
+// its slot. a pass of another kind breaks only the kind rule.
+std::vector<RGBreak> RenderGraph::FindBreaks(const PhysicalPass &physical, const Pass &next) const
+{
+    std::vector<RGBreak> breaks;
+    const auto add = [&breaks](RGBreakReason reason, const std::string &resource) {
+        if (breaks.empty() || breaks.back().reason != reason)
+        {
+            breaks.push_back({.reason = reason, .resources = {}});
+        }
+        auto &resources = breaks.back().resources;
+        if (!resource.empty() && std::ranges::find(resources, resource) == resources.end())
+        {
+            resources.push_back(resource);
+        }
+    };
+
+    const auto &first = passes_[physical.members.front()];
+    if (first.kind == RGPassKind::External || next.kind == RGPassKind::External)
+    {
+        add(RGBreakReason::ExternalPass, {});
+        return breaks;
+    }
+    if (first.kind != RGPassKind::Raster || next.kind != RGPassKind::Raster)
+    {
+        add(RGBreakReason::NonRasterPass, {});
+        return breaks;
+    }
+    const auto size = [this](const Pass &pass) {
+        return GetAttachmentSize(*std::ranges::find_if(pass.accesses, &Access::IsAttachment));
+    };
+    if (size(first) != size(next))
+    {
+        add(RGBreakReason::TargetSizeMismatch, {});
+    }
+
+    // `local`: `a` reads pixel-locally what a member attaches at the slot it reads, so every access of the physical
+    // pass to that subresource is such an attachment or read
+    using Conflicts = bool (*)(const Access &, const Access &, bool local);
+    const std::array<std::pair<RGBreakReason, Conflicts>, 5> rules{{
+        {RGBreakReason::DifferentDepth,
+         [](const Access &a, const Access &m, bool) {
+             return a.slot == DepthSlot && m.slot == DepthSlot && !a.SameSubresources(m);
+         }},
+        {RGBreakReason::SlotConflict,
+         [](const Access &a, const Access &m, bool) {
+             const bool color_attachments = a.IsAttachment() && m.IsAttachment() && a.slot != DepthSlot &&
+                                            m.slot != DepthSlot && (a.slot == m.slot) != a.SameSubresources(m);
+             const bool read_elsewhere =
+                 a.pixel_local_slot && m.IsAttachment() && a.SameSubresources(m) && m.slot != *a.pixel_local_slot;
+             return color_attachments || read_elsewhere;
+         }},
+        {RGBreakReason::ClearInPass,
+         [](const Access &a, const Access &m, bool) { return a.clear && m.IsAttachment() && a.SameSubresources(m); }},
+        {RGBreakReason::NonLocalRead,
+         [](const Access &a, const Access &m, bool local) {
+             return !local && !a.IsAttachment() && a.Overlaps(m) &&
+                    (a.access.HasWrite() || m.access.HasWrite() || !m.access.Contains(a.access));
+         }},
+        {RGBreakReason::AttachmentReadInPass,
+         [](const Access &a, const Access &m, bool) { return a.IsAttachment() && !m.IsAttachment() && a.Overlaps(m); }},
+    }};
+
+    const auto members =
+        physical.members | std::views::transform([this](uint32_t member) -> const Pass & { return passes_[member]; });
+    for (const auto &[reason, conflicts] : rules)
+    {
+        for (const auto &member : members)
+        {
+            for (const auto &access : next.accesses)
+            {
+                const bool local = ReadsAttachment(physical, access);
+                if (std::ranges::any_of(member.accesses, [&conflicts, &access, local](const Access &m) {
+                        return conflicts(access, m, local);
+                    }))
+                {
+                    add(reason, textures_[access.texture.index].name);
+                }
+            }
+
+            // ray queries in another shader stage would need a second barrier
+            for (const auto &access : next.buffer_accesses)
+            {
+                if (reason == RGBreakReason::NonLocalRead &&
+                    std::ranges::any_of(member.buffer_accesses, [&access](const BufferAccess &m) {
+                        return m.buffer == access.buffer && !m.access.Contains(access.access);
+                    }))
+                {
+                    add(reason, buffers_[access.buffer].name);
+                }
+            }
+        }
+    }
+
+    if (tile_budget_split_ && tile_budget_ && GetColorBytesPerPixel(physical, &next) > *tile_budget_)
+    {
+        add(RGBreakReason::TileBudget, {});
+    }
+
+    if (!pixel_local_)
+    {
+        for (const auto &access : next.accesses)
+        {
+            if (ReadsAttachment(physical, access))
+            {
+                add(RGBreakReason::NoPixelLocalSupport, textures_[access.texture.index].name);
+            }
+        }
+    }
+
+    if (!merge_)
+    {
+        add(RGBreakReason::Disabled, {});
+    }
+    return breaks;
+}
+
+uint32_t RenderGraph::GetColorBytesPerPixel(const PhysicalPass &physical, const Pass *next) const
+{
+    std::vector<const Access *> attachments;
+    const auto add = [&attachments](const Pass &pass) {
+        for (const auto &access : pass.accesses)
+        {
+            if (access.IsAttachment() && access.slot != DepthSlot &&
+                std::ranges::none_of(attachments, [&access](const Access *a) { return a->SameSubresources(access); }))
+            {
+                attachments.push_back(&access);
+            }
+        }
+    };
+    for (const auto member : physical.members)
+    {
+        add(passes_[member]);
+    }
+    if (next)
+    {
+        add(*next);
+    }
+
+    uint32_t bytes = 0;
+    for (const auto *attachment : attachments)
+    {
+        bytes += GetPixelSize(GetFormat(attachment->texture));
+    }
+    return bytes;
+}
+
+// a transient only the attachments of one raster physical pass use is memoryless. transients whose lifetimes, in
+// physical passes, do not overlap share an image when format, extent and memorylessness match.
 void RenderGraph::ResolveTextures()
 {
     for (auto pass_index = 0u; pass_index < passes_.size(); pass_index++)
@@ -661,11 +1002,28 @@ void RenderGraph::ResolveTextures()
         }
     }
 
+    for (auto &texture : textures_)
+    {
+        const auto &lifetime = texture.lifetime;
+        texture.memoryless = memoryless_ && !texture.imported && lifetime.first &&
+                             passes_[*lifetime.first].kind == RGPassKind::Raster &&
+                             passes_[*lifetime.first].physical == passes_[lifetime.last].physical &&
+                             !(texture.usages & ~MemorylessUsages);
+    }
+
     struct Physical
     {
         const Texture *first;
         RHIImage::ImageUsage usages;
         uint32_t last_pass;
+        // a transient it backs is used before and at or after a member that reads pixel-locally
+        bool across_pixel_local_barrier;
+    };
+
+    const auto across_pixel_local_barrier = [this](const Texture &texture) {
+        return std::ranges::any_of(
+            std::views::iota(*texture.lifetime.first + 1, texture.lifetime.last + 1),
+            [this](uint32_t pass) { return std::ranges::any_of(passes_[pass].accesses, &Access::IsPixelLocal); });
     };
 
     std::vector<Physical> physicals;
@@ -681,33 +1039,48 @@ void RenderGraph::ResolveTextures()
                 continue;
             }
 
-            const auto found = std::ranges::find_if(physicals, [&texture, pass_index](const Physical &physical) {
+            const auto found = std::ranges::find_if(physicals, [this, &texture, pass_index](const Physical &physical) {
                 const auto &first = *physical.first;
-                return physical.last_pass < pass_index && first.desc.format == texture.desc.format &&
-                       first.width == texture.width && first.height == texture.height;
+                return passes_[physical.last_pass].physical < passes_[pass_index].physical &&
+                       first.desc.format == texture.desc.format && first.width == texture.width &&
+                       first.height == texture.height && first.memoryless == texture.memoryless;
             });
             if (found == physicals.end())
             {
                 texture.physical = static_cast<uint32_t>(physicals.size());
-                physicals.push_back({.first = &texture, .usages = texture.usages, .last_pass = texture.lifetime.last});
+                physicals.push_back({.first = &texture,
+                                     .usages = texture.usages,
+                                     .last_pass = texture.lifetime.last,
+                                     .across_pixel_local_barrier = across_pixel_local_barrier(texture)});
             }
             else
             {
                 texture.physical = static_cast<uint32_t>(found - physicals.begin());
                 found->usages = found->usages | texture.usages;
                 found->last_pass = texture.lifetime.last;
+                found->across_pixel_local_barrier =
+                    found->across_pixel_local_barrier || across_pixel_local_barrier(texture);
             }
         }
     }
 
+    // a memoryless transient gets an ordinary pooled image without memoryless storage for its format and usages, or
+    // when it lives across a pixel-local barrier that drops memoryless contents
     std::vector<RHIImage *> images;
     images.reserve(physicals.size());
     for (const auto &physical : physicals)
     {
         const auto &first = *physical.first;
-        images.push_back(pool_.Acquire(
-            {.format = first.desc.format, .width = first.width, .height = first.height, .usages = physical.usages},
-            first.name));
+        const bool memoryless =
+            first.memoryless && rhi_->SupportsMemorylessImage(first.desc.format, physical.usages) &&
+            (!physical.across_pixel_local_barrier || rhi_->KeepsMemorylessAcrossPixelLocalBarrier());
+        images.push_back(
+            pool_.Acquire({.format = first.desc.format,
+                           .width = first.width,
+                           .height = first.height,
+                           .usages = physical.usages,
+                           .memory_properties = memoryless ? RHIMemoryProperty::Memoryless : RHIMemoryProperty::None},
+                          first.name));
     }
 
     for (auto &texture : textures_)
@@ -795,7 +1168,8 @@ static std::optional<RHIMemoryBarrier> PlanMemoryBarrier(RHIResourceAccess &stat
 }
 
 // each access transitions its subresources from the states the previous accesses left, seeded from the tracked states.
-// writes to contents nobody may use again discard them.
+// writes to contents nobody may use again discard them. an attachment an earlier member of the physical pass attached
+// keeps its state without a barrier: rasterization order orders attachment accesses within a rendering.
 void RenderGraph::PlanBarriers()
 {
     // per physical image, the planned state of each subresource, layer by layer within a mip. transients sharing an
@@ -808,6 +1182,10 @@ void RenderGraph::PlanBarriers()
 
     for (auto &pass : passes_ | std::views::filter(&Pass::live))
     {
+        const auto &members = physical_passes_[pass.physical].members;
+        const std::span earlier(members.begin(),
+                                std::ranges::lower_bound(members, static_cast<uint32_t>(&pass - passes_.data())));
+
         for (auto &access : pass.buffer_accesses)
         {
             auto &state = buffer_states[access.buffer];
@@ -831,9 +1209,16 @@ void RenderGraph::PlanBarriers()
             const auto *writer = last_writer[access.texture.index];
             const bool uses_contents = UsesContents(access.access, access.clear.has_value(), pass.fully_overwrites);
             const bool discard = !uses_contents || (access.access.HasWrite() && writer == nullptr && !texture.imported);
-            PlanAccess(access, discard, image_states);
+            const bool attachment = access.IsAttachment();
+            if (const auto *attached = attachment ? FindAccess(earlier, AttachmentOf(access, access.slot)) : nullptr)
+            {
+                access.states = attached->states;
+            }
+            else
+            {
+                PlanAccess(access, discard, image_states);
+            }
 
-            const bool attachment = access.slot != NoSlot;
             if (access.access.HasWrite())
             {
                 last_writer[access.texture.index] = &pass;
@@ -941,23 +1326,27 @@ void RenderGraph::PlanAccess(Access &access, bool discard, std::vector<RHIImageS
         }
     }
 
-    ForEachSubresource(subresources, [&access, &state_of](unsigned mip, unsigned layer) {
-        access.states.push_back(state_of(mip, layer));
+    // the store op of the attachment a pixel-local read reads writes the image after the read
+    const RHIResourceAccess store{.access = access.IsPixelLocal() ? RHIAccess::ColorWrite : RHIAccess::None};
+    ForEachSubresource(subresources, [&access, &state_of, &store](unsigned mip, unsigned layer) {
+        auto &state = state_of(mip, layer);
+        state.access = state.access | store;
+        access.states.push_back(state);
     });
 }
 
-// an attachment is stored when the next live pass touching it uses its contents, or when it is imported
+// an attachment is stored when the next live pass after its physical pass touching it uses its contents, or when it is
+// imported
 void RenderGraph::InferStoreOps()
 {
-    for (auto pass_index = 0u; pass_index < passes_.size(); pass_index++)
+    for (auto &pass : passes_)
     {
-        auto &pass = passes_[pass_index];
         if (!pass.live || pass.kind != RGPassKind::Raster)
         {
             continue;
         }
 
-        for (auto &access : pass.accesses | std::views::filter([](const Access &a) { return a.slot != NoSlot; }))
+        for (auto &access : pass.accesses | std::views::filter(&Access::IsAttachment))
         {
             access.store_reason = "no later reader";
             if (textures_[access.texture.index].imported)
@@ -966,11 +1355,11 @@ void RenderGraph::InferStoreOps()
                 access.store_reason = "imported";
             }
 
-            for (const auto &later : passes_ | std::views::drop(pass_index + 1) | std::views::filter(&Pass::live))
+            const auto end = physical_passes_[pass.physical].members.back() + 1;
+            for (const auto &later : passes_ | std::views::drop(end) | std::views::filter(&Pass::live))
             {
-                const auto next = std::ranges::find_if(later.accesses, [&access](const Access &a) {
-                    return a.texture == access.texture && Overlaps(a.subresources, access.subresources);
-                });
+                const auto next =
+                    std::ranges::find_if(later.accesses, [&access](const Access &a) { return a.Overlaps(access); });
                 if (next == later.accesses.end())
                 {
                     continue;
@@ -994,39 +1383,82 @@ void RenderGraph::InferStoreOps()
 
 void RenderGraph::BuildRenderingInfos()
 {
-    for (auto &pass :
-         passes_ | std::views::filter([](const Pass &pass) { return pass.live && pass.kind == RGPassKind::Raster; }))
+    for (auto &physical : physical_passes_)
     {
-        auto &info = pass.rendering_info;
-        for (const auto &access : pass.accesses | std::views::filter([](const Access &a) { return a.slot != NoSlot; }))
+        if (passes_[physical.members.front()].kind != RGPassKind::Raster)
         {
-            const auto &texture = textures_[access.texture.index];
-            const auto mip = access.subresources.base_mip;
-            const auto layer = access.subresources.base_layer;
-            const auto width = std::max(texture.width >> mip, 1u);
-            const auto height = std::max(texture.height >> mip, 1u);
-            RGCheck(info.width == 0 || (info.width == width && info.height == height),
-                    "attachments of pass {} differ in size", pass.name);
-            info.width = width;
-            info.height = height;
-            if (access.slot == DepthSlot)
+            continue;
+        }
+
+        auto &info = physical.rendering_info;
+        for (const auto member : physical.members)
+        {
+            const auto &pass = passes_[member];
+            for (const auto &access : pass.accesses | std::views::filter(&Access::IsAttachment))
             {
-                info.depth_attachment = {.image = texture.image,
-                                         .mip_level = mip,
-                                         .array_layer = layer,
-                                         .load_op = access.load_op,
-                                         .store_op = access.store_op,
-                                         .clear_depth = access.clear ? access.clear->x() : 1.f};
+                const auto &texture = textures_[access.texture.index];
+                const auto mip = access.subresources.base_mip;
+                const auto layer = access.subresources.base_layer;
+                const auto size = GetAttachmentSize(access);
+                RGCheck(info.width == 0 || (info.width == size.x() && info.height == size.y()),
+                        "attachments of pass {} differ in size", pass.name);
+                info.width = size.x();
+                info.height = size.y();
+                const bool depth = access.slot == DepthSlot;
+                if (depth ? info.depth_attachment.image : info.color_attachments[access.slot].image)
+                {
+                    continue;
+                }
+                if (depth)
+                {
+                    info.depth_attachment = {.image = texture.image,
+                                             .mip_level = mip,
+                                             .array_layer = layer,
+                                             .load_op = access.load_op,
+                                             .store_op = access.store_op,
+                                             .clear_depth = access.clear ? access.clear->x() : 1.f};
+                }
+                else
+                {
+                    info.color_attachments[access.slot] = {.image = texture.image,
+                                                           .mip_level = mip,
+                                                           .array_layer = layer,
+                                                           .layout = access.layout,
+                                                           .load_op = access.load_op,
+                                                           .store_op = access.store_op,
+                                                           .clear_color =
+                                                               access.clear.value_or(Vector4(0.f, 0.f, 0.f, 1.f))};
+                }
+                RGCheck(!texture.memoryless ||
+                            (access.load_op != RHILoadOp::Load && access.store_op == RHIStoreOp::DontCare),
+                        "memoryless {} is loaded or stored", texture.name);
+                physical.attachments.push_back(&access);
             }
-            else
+        }
+
+        uint8_t color_slots = 0;
+        for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
+        {
+            if (info.color_attachments[slot].image)
             {
-                info.color_attachments[access.slot] = {.image = texture.image,
-                                                       .mip_level = mip,
-                                                       .array_layer = layer,
-                                                       .load_op = access.load_op,
-                                                       .store_op = access.store_op,
-                                                       .clear_color =
-                                                           access.clear.value_or(Vector4(0.f, 0.f, 0.f, 1.f))};
+                color_slots |= static_cast<uint8_t>(1u << slot);
+            }
+        }
+        for (const auto member : physical.members)
+        {
+            auto &pass = passes_[member];
+            pass.unwritten_color_slots = color_slots;
+            pass.depth_unused = info.depth_attachment.image != nullptr;
+            for (const auto &access : pass.accesses | std::views::filter(&Access::IsAttachment))
+            {
+                if (access.slot == DepthSlot)
+                {
+                    pass.depth_unused = false;
+                }
+                else
+                {
+                    pass.unwritten_color_slots &= static_cast<uint8_t>(~(1u << access.slot));
+                }
             }
         }
     }
@@ -1048,9 +1480,11 @@ static std::vector<RHIMemoryBarrier> WriteThrough(const BufferAccesses &accesses
     return barriers;
 }
 
-// the graph writes each pass's planned state through to the tracked state before recording the pass, so foreign code
-// and the next frame start from it. with full barriers, each pass also waits for every earlier command. right after the
-// last pass using a buffer the host reads, a barrier makes the buffer visible to the host.
+// the graph writes the planned states of a physical pass's members through to the tracked states before recording it,
+// so foreign code and the next frame start from them, and records their barriers in one batch before it, except those
+// of pixel-local reads, which it records inside the rendering right before their member. with full barriers, each
+// physical pass also waits for every earlier command. right after the last pass using a buffer the host reads, a
+// barrier makes the buffer visible to the host.
 void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *timers)
 {
     RGCheck(compiled_ && !executed_, "the graph executes once, after compiling");
@@ -1078,60 +1512,96 @@ void RenderGraph::Execute(RHICommandContext &command_context, RGPassTimers *time
 
     const RecordingScope recording{.command_context = command_context};
 
-    for (auto &pass : passes_ | std::views::filter(&Pass::live))
+    const auto record = [this, &command_context](Pass &pass) {
+        command_context.SetBindings(pass.bindings);
+        const auto start = std::chrono::steady_clock::now();
+        pass.record(command_context);
+        pass.cpu_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
+        CheckBindingsApplied(pass, command_context);
+        CheckBoundResourcesDeclared(pass, command_context);
+        command_context.SetBindings({});
+    };
+
+    for (auto &physical : physical_passes_)
     {
         std::vector<RHIImageBarrier> barriers;
-        for (const auto &access : pass.accesses)
+        std::vector<RHIMemoryBarrier> memory_barriers;
+        for (const auto member : physical.members)
         {
-            barriers.insert(barriers.end(), access.barriers.begin(), access.barriers.end());
-            auto *image = textures_[access.texture.index].image;
-            auto state = access.states.begin();
-            ForEachSubresource(access.subresources, [image, &state](unsigned mip, unsigned layer) {
-                image->SetState(*state++, mip, 1, layer, 1);
-            });
+            const auto &pass = passes_[member];
+            for (const auto &access : pass.accesses)
+            {
+                if (!access.IsPixelLocal())
+                {
+                    barriers.insert(barriers.end(), access.barriers.begin(), access.barriers.end());
+                }
+                auto *image = textures_[access.texture.index].image;
+                auto state = access.states.begin();
+                ForEachSubresource(access.subresources, [image, &state](unsigned mip, unsigned layer) {
+                    image->SetState(*state++, mip, 1, layer, 1);
+                });
+            }
+            std::ranges::copy(WriteThrough(pass.buffer_accesses, buffers_), std::back_inserter(memory_barriers));
         }
-        auto memory_barriers = WriteThrough(pass.buffer_accesses, buffers_);
         if (full_barriers_)
         {
             memory_barriers.push_back({.from = {.access = RHIAccess::Any}, .to = {.access = RHIAccess::Any}});
         }
 
-        command_context.SetBindings(pass.bindings);
+        auto &first = passes_[physical.members.front()];
         RHIPass *timed_pass = nullptr;
-        switch (pass.kind)
+        switch (first.kind)
         {
         case RGPassKind::Raster:
-            timed_pass = timers ? timers->Get(pass.name) : nullptr;
-            command_context.BeginRendering(pass.rendering_info, pass.name, timed_pass, barriers, memory_barriers);
-            pass.record(command_context);
+            timed_pass = timers ? timers->Get(physical.name) : nullptr;
+            command_context.BeginRendering(physical.rendering_info, physical.name, timed_pass, barriers,
+                                           memory_barriers);
+            for (const auto member : physical.members)
+            {
+                auto &pass = passes_[member];
+                std::optional<RHICommandContext::DebugLabelScope> label;
+                if (physical.members.size() > 1)
+                {
+                    label.emplace(command_context, pass.name);
+                }
+                std::vector<RHIImageBarrier> local_barriers;
+                for (const auto &access : pass.accesses | std::views::filter(&Access::IsPixelLocal))
+                {
+                    local_barriers.insert(local_barriers.end(), access.barriers.begin(), access.barriers.end());
+                }
+                command_context.PixelLocalBarrier(local_barriers);
+                command_context.SetUnusedAttachments(pass.unwritten_color_slots, pass.depth_unused);
+                record(pass);
+            }
             command_context.EndRendering();
             break;
         case RGPassKind::Compute:
-            timed_pass = pass.compute_pass.get();
-            command_context.BeginComputePass(pass.compute_pass, barriers, memory_barriers);
-            pass.record(command_context);
-            command_context.EndComputePass(pass.compute_pass);
+            timed_pass = first.compute_pass.get();
+            command_context.BeginComputePass(first.compute_pass, barriers, memory_barriers);
+            record(first);
+            command_context.EndComputePass(first.compute_pass);
             break;
         case RGPassKind::Copy:
         case RGPassKind::External: {
-            const RHICommandContext::DebugLabelScope label(command_context, pass.name);
+            const RHICommandContext::DebugLabelScope label(command_context, first.name);
             command_context.Barrier(barriers, memory_barriers);
-            pass.record(command_context);
+            record(first);
             break;
         }
         default:
-            UnImplemented(pass.kind);
+            UnImplemented(first.kind);
         }
-        CheckDeclaredStates(pass);
-        CheckBindingsApplied(pass, command_context);
-        CheckBoundResourcesDeclared(pass, command_context);
-        command_context.SetBindings({});
 
-        command_context.Barrier({}, WriteThrough(pass.host_reads, buffers_));
+        for (const auto member : physical.members)
+        {
+            auto &pass = passes_[member];
+            CheckDeclaredStates(pass);
+            command_context.Barrier({}, WriteThrough(pass.host_reads, buffers_));
+        }
 
         if (timed_pass)
         {
-            pass.gpu_ms = timed_pass->GetExecutionTime();
+            physical.gpu_ms = timed_pass->GetExecutionTime();
         }
     }
 }
@@ -1194,7 +1664,8 @@ void RenderGraph::CheckBindingDeclared(const Pass &pass, const RHIShaderResource
     const auto needed = GetBindingAccess(type);
 
     if (type == RHIShaderResourceReflection::ResourceType::Texture2D ||
-        type == RHIShaderResourceReflection::ResourceType::StorageImage2D)
+        type == RHIShaderResourceReflection::ResourceType::StorageImage2D ||
+        type == RHIShaderResourceReflection::ResourceType::InputAttachment)
     {
         const auto *view = static_cast<const RHIImageView *>(binding.GetResource());
         const auto texture = std::ranges::find(textures_, view->GetImage(), &Texture::image);
@@ -1224,11 +1695,20 @@ void RenderGraph::CheckBindingDeclared(const Pass &pass, const RHIShaderResource
     }
 }
 
-// a pass that transitions a declared image behind the graph's back would desync the plan from the tracked state
+// a pass that transitions a declared image behind the graph's back would desync the plan from the tracked state. the
+// image holds the state of the last access of its physical pass.
 void RenderGraph::CheckDeclaredStates(const Pass &pass) const
 {
+    const auto &members = physical_passes_[pass.physical].members;
+    const std::span later(std::ranges::upper_bound(members, static_cast<uint32_t>(&pass - passes_.data())),
+                          members.end());
     for (const auto &access : pass.accesses)
     {
+        if (FindAccess(later, [&access](const Access &a) { return a.Overlaps(access); }) != nullptr)
+        {
+            continue;
+        }
+
         const auto &texture = textures_[access.texture.index];
         auto planned = access.states.begin();
         ForEachSubresource(access.subresources, [&pass, &texture, &planned](unsigned mip, unsigned layer) {

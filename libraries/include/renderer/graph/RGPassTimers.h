@@ -9,9 +9,9 @@ namespace sparkle
 {
 class RHIContext;
 
-// the timed passes of render graph raster passes, by pass name. a graph lives one frame while a time arrives frames
-// after its pass records, so the owner of the graphs keeps them across frames. raster passes sharing a name share a
-// timer, which reports their last run.
+// the timed passes of render graph raster physical passes, by name (the member names joined by '+'). a graph lives one
+// frame while a time arrives frames after its physical pass records, so the owner of the graphs keeps them across
+// frames. physical passes sharing a name share a timer, which reports their last run.
 class RGPassTimers
 {
 public:
@@ -22,7 +22,7 @@ public:
 private:
     friend class RenderGraph;
 
-    // the timed pass of raster passes named `name`, created on first use
+    // the timed pass of raster physical passes named `name`, created on first use
     [[nodiscard]] RHIPass *Get(const std::string &name);
 
     RHIContext *rhi_;

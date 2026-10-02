@@ -101,6 +101,20 @@ public:
         return supports_astc_hdr_;
     }
 
+    // a lazily allocated memory type can back a 2D image of `format` and `usage` (MoltenVK backs no image it reads as
+    // an input attachment with one)
+    [[nodiscard]] bool SupportsLazilyAllocatedImage(VkFormat format, VkImageUsageFlags usage) const;
+
+    [[nodiscard]] bool SupportsDynamicRenderingLocalRead() const
+    {
+        return supports_dynamic_rendering_local_read_;
+    }
+
+    [[nodiscard]] bool KeepsMemorylessAcrossPixelLocalBarrier() const
+    {
+        return keeps_memoryless_across_pixel_local_barrier_;
+    }
+
     [[nodiscard]] bool CompressedImageBarriersNeedSync1() const
     {
         return compressed_image_barriers_need_sync1_;
@@ -231,6 +245,8 @@ private:
 
     bool enable_ray_tracing_ = false;
     bool supports_astc_hdr_ = false;
+    bool supports_dynamic_rendering_local_read_ = false;
+    bool keeps_memoryless_across_pixel_local_barrier_ = true;
     bool compressed_image_barriers_need_sync1_ = false;
     uint32_t timestamp_valid_bits_ = 0;
 

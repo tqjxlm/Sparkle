@@ -47,9 +47,28 @@ static ConfigValue<bool> config_manual_accumulation(
 static ConfigValue<bool> config_render_graph_cull("render_graph_cull",
                                                   "cull render graph passes whose outputs no live pass reads",
                                                   "renderer", true, true);
+static ConfigValue<bool> config_render_graph_merge(
+    "render_graph_merge", "merge consecutive render graph raster passes into one render pass where they allow it",
+    "renderer", true, true);
+static ConfigValue<bool> config_render_graph_memoryless(
+    "render_graph_memoryless",
+    "keep render graph transients that live within one render pass in tile memory where the device allows it",
+    "renderer", true, true);
+static ConfigValue<bool> config_render_graph_pixel_local(
+    "render_graph_pixel_local",
+    "let render graph passes read what an earlier pass of their render pass wrote at the same pixel, where the device "
+    "allows it; off samples it after the render pass instead",
+    "renderer", true, true);
 static ConfigValue<bool> config_render_graph_full_barriers(
     "render_graph_full_barriers",
     "debug: before each render graph pass, also wait for every access of the earlier passes", "renderer", false, true);
+static ConfigValue<uint32_t> config_render_graph_tile_budget(
+    "render_graph_tile_budget",
+    "color attachment bytes per pixel a render graph render pass keeps in tile memory; 0 = the device's", "renderer", 0,
+    true);
+static ConfigValue<bool> config_render_graph_tile_budget_split(
+    "render_graph_tile_budget_split", "split render graph render passes whose color attachments exceed the tile budget",
+    "renderer", false, true);
 static ConfigValue<std::string> config_render_graph_view(
     "render_graph_view", "render graph texture to show in place of the frame; empty = the frame", "renderer", "", true);
 
@@ -76,7 +95,12 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
     ConfigCollectionHelper::RegisterConfig(this, config_manual_accumulation, manual_accumulation);
     ConfigCollectionHelper::RegisterConfig(this, config_render_graph_cull, render_graph_cull);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_merge, render_graph_merge);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_memoryless, render_graph_memoryless);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_pixel_local, render_graph_pixel_local);
     ConfigCollectionHelper::RegisterConfig(this, config_render_graph_full_barriers, render_graph_full_barriers);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_tile_budget, render_graph_tile_budget);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_tile_budget_split, render_graph_tile_budget_split);
     ConfigCollectionHelper::RegisterConfig(this, config_render_graph_view, render_graph_view);
 
     AddUiGenerator([this] {

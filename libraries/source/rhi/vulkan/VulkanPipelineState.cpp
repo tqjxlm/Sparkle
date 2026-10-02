@@ -27,7 +27,7 @@ void VulkanPipelineState::SetupDescriptorSetLayouts()
         auto *shader_resources = GetResourceTable(stage);
 
         rhi_shader->SetupShaderReflection(shader_resources);
-        shader_resources->Initialize();
+        shader_resources->Initialize(shader->IsVariant());
 
         const auto &stage_resource_sets = shader_resources->GetResourceSets();
         combined_resource_sets_.resize(std::max(combined_resource_sets_.size(), stage_resource_sets.size()));
@@ -161,8 +161,22 @@ VkPipeline VulkanForwardPipelineState::CreatePipeline(const RHIAttachmentSignatu
     std::array<VkFormat, MaxNumColorAttachments> color_formats;
     const auto rendering_create_info = GetVkPipelineRenderingCreateInfo(signature, color_formats);
 
-    const std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments(
-        rendering_create_info.colorAttachmentCount, color_blend_attachment_);
+    std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments(rendering_create_info.colorAttachmentCount,
+                                                                             color_blend_attachment_);
+    for (auto slot = 0u; slot < color_blend_attachments.size(); slot++)
+    {
+        if (signature.unwritten_color_slots & (1u << slot))
+        {
+            color_blend_attachments[slot].colorWriteMask = 0;
+        }
+    }
+
+    auto depth_stencil = depth_stencil_;
+    if (signature.depth_unused)
+    {
+        depth_stencil.depthTestEnable = VK_FALSE;
+        depth_stencil.depthWriteEnable = VK_FALSE;
+    }
 
     VkPipelineColorBlendStateCreateInfo color_blending = {};
     color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -200,7 +214,7 @@ VkPipeline VulkanForwardPipelineState::CreatePipeline(const RHIAttachmentSignatu
     pipeline_info.pRasterizationState = &rasterizer_;
     pipeline_info.pMultisampleState = &multisampling;
     pipeline_info.pColorBlendState = &color_blending;
-    pipeline_info.pDepthStencilState = &depth_stencil_;
+    pipeline_info.pDepthStencilState = &depth_stencil;
     pipeline_info.pDynamicState = &dynamic_state;
     pipeline_info.layout = pipeline_layout_;
     pipeline_info.basePipelineHandle = VK_NULL_HANDLE;

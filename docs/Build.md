@@ -59,7 +59,7 @@ These libraries are managed by git submodules or CMake. They will be set up auto
 * [eigen](https://gitlab.com/libeigen/eigen.git)
 * [fast_float](https://github.com/fastfloat/fast_float.git)
 * [hash-library](https://github.com/lazy-eggplant/hash-library.git)
-* [imgui](https://github.com/ocornut/imgui.git)
+* [imgui](https://github.com/ocornut/imgui.git), from the [tqjxlm/imgui](https://github.com/tqjxlm/imgui.git) fork, whose Vulkan and Metal backends also draw inside renderings with several color attachments
 * [ios-cmake](https://github.com/leetal/ios-cmake.git)
 * [json](https://github.com/nlohmann/json.git)
 * [magic_enum](https://github.com/Neargye/magic_enum.git)

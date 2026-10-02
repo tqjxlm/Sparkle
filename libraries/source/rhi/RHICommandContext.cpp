@@ -33,7 +33,7 @@ void RHICommandContext::BeginRendering(const RHIRenderingInfo &info, const std::
         if (attachment.image)
         {
             AssertAttachmentLayout(name, attachment.image, attachment.mip_level, attachment.array_layer,
-                                   RHIImageLayout::ColorOutput);
+                                   attachment.layout);
         }
     }
     if (const auto &depth = info.depth_attachment; depth.image)
@@ -66,6 +66,15 @@ void RHICommandContext::EndRendering()
         rendering_timer_->End(*this);
         rendering_timer_ = nullptr;
     }
+}
+
+void RHICommandContext::SetUnusedAttachments(uint8_t unwritten_color_slots, bool depth_unused)
+{
+    ASSERT_F(rendering_, "SetUnusedAttachments outside a render pass");
+
+    attachment_signature_ = rendering_info_.GetSignature();
+    attachment_signature_.unwritten_color_slots = unwritten_color_slots;
+    attachment_signature_.depth_unused = depth_unused;
 }
 
 void RHICommandContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass,
@@ -108,6 +117,18 @@ void RHICommandContext::Barrier(std::span<const RHIImageBarrier> image_barriers,
     ASSERT_F(!rendering_, "Barrier inside render pass {}", rendering_name_);
 
     BarrierInternal(image_barriers, memory_barriers);
+}
+
+void RHICommandContext::PixelLocalBarrier(std::span<const RHIImageBarrier> image_barriers)
+{
+    if (image_barriers.empty())
+    {
+        return;
+    }
+
+    ASSERT_F(rendering_, "PixelLocalBarrier outside a render pass");
+
+    PixelLocalBarrierInternal(image_barriers);
 }
 
 void RHICommandContext::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)

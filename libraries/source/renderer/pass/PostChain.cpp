@@ -71,7 +71,7 @@ PostChain::PostChain(const RenderConfig &config, RHIContext *rhi, PixelFormat sc
 {
     if (!rhi_->IsHeadless())
     {
-        ui_pass_ = std::make_unique<UiPass>(rhi_, screen_format);
+        ui_pass_ = std::make_unique<UiPass>(rhi_);
     }
 
     present_pass_ =

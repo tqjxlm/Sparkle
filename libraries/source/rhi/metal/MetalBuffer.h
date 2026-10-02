@@ -46,6 +46,11 @@ private:
 
 inline MTLStorageMode GetMetalStorageMode(RHIMemoryProperty memory_property)
 {
+    if (memory_property & RHIMemoryProperty::Memoryless)
+    {
+        return MTLStorageModeMemoryless;
+    }
+
     if (memory_property & RHIMemoryProperty::DeviceLocal)
     {
         return MTLStorageModePrivate;

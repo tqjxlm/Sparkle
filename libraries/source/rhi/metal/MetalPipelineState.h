@@ -59,6 +59,7 @@ private:
 
     std::vector<std::pair<RHIAttachmentSignature, id<MTLRenderPipelineState>>> pipeline_states_;
     id<MTLDepthStencilState> depth_stencil_state_;
+    id<MTLDepthStencilState> unused_depth_stencil_state_;
 
     // two facts:
     // 1. buffer resources used by vertex shader take binding slot starting from 0
