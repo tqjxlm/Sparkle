@@ -59,7 +59,8 @@ These libraries are managed by git submodules or CMake. They will be set up auto
 * [eigen](https://gitlab.com/libeigen/eigen.git)
 * [fast_float](https://github.com/fastfloat/fast_float.git)
 * [hash-library](https://github.com/lazy-eggplant/hash-library.git)
-* [imgui](https://github.com/ocornut/imgui.git), from the [tqjxlm/imgui](https://github.com/tqjxlm/imgui.git) fork, whose Vulkan and Metal backends also draw inside renderings with several color attachments
+* [imgui](https://github.com/ocornut/imgui.git) v1.92.9b, from the [tqjxlm/imgui](https://github.com/tqjxlm/imgui.git) fork, whose Vulkan and Metal backends also draw inside renderings with several color attachments
+* [imgui_club](https://github.com/ocornut/imgui_club.git), for `imgui_threaded_rendering`'s texture queue, which hands ImGui's texture requests from the main thread to the render thread
 * [ios-cmake](https://github.com/leetal/ios-cmake.git)
 * [json](https://github.com/nlohmann/json.git)
 * [magic_enum](https://github.com/Neargye/magic_enum.git)
