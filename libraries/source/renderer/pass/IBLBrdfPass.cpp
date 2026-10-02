@@ -1,6 +1,6 @@
 #include "renderer/pass/IBLBrdfPass.h"
 
-#include "renderer/pass/ClearTexturePass.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
@@ -59,23 +59,12 @@ RHIResourceRef<RHIImage> IBLBrdfPass::CreateIBLMap(bool for_cooking, bool allow_
         output_attribute.usages |= RHIImage::ImageUsage::UAV;
     }
 
-    output_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                                .enable_anisotropy = false};
-
     return rhi_->CreateImage(output_attribute, "ibl_brdf_map");
 }
 
-void IBLBrdfPass::InitRenderResources(const RenderConfig &config)
+void IBLBrdfPass::InitRenderResources(const RenderConfig &)
 {
     PrepareForCooking();
-
-    clear_target_ = rhi_->CreateRenderTarget({}, ibl_image_, nullptr, "IBLClearPassRenderTarget");
-
-    clear_pass_ = PipelinePass::Create<ClearTexturePass>(config, rhi_, Vector4(0, 0, 0, 1),
-                                                         RHIImageLayout::StorageWrite, clear_target_);
 
     compute_shader_ = rhi_->CreateShader<IBLBrdfComputeShader>();
 
@@ -93,19 +82,14 @@ void IBLBrdfPass::InitRenderResources(const RenderConfig &config)
     auto *shader_resource = pipeline_state_->GetShaderResource<IBLBrdfComputeShader>();
     shader_resource->ubo().BindResource(cs_ub_);
 
-    shader_resource->out_texture().BindResource(ibl_image_->GetDefaultView(rhi_));
-
-    compute_pass_ = rhi_->CreateComputePass("IBLBrdfComputePass", false);
+    compute_pass_ = rhi_->CreateComputePass("IBLBrdfComputePass", true);
 }
 
-void IBLBrdfPass::CookOnTheFly(const RenderConfig &, unsigned samples_per_dispatch)
+void IBLBrdfPass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)
 {
     ASSERT(!IsReady());
 
-    if (sample_count_ == 0)
-    {
-        clear_pass_->Render();
-    }
+    const auto map = ImportCookingMap(graph, "IblBrdfCook");
 
     const auto remaining_samples = target_sample_count_ - sample_count_;
     const uint32_t batch_size = std::min(std::max(samples_per_dispatch, 1u), remaining_samples);
@@ -118,7 +102,11 @@ void IBLBrdfPass::CookOnTheFly(const RenderConfig &, unsigned samples_per_dispat
     };
     cs_ub_->Upload(rhi_, &ubo);
 
-    Render();
+    graph.AddComputePass("CookIblBrdf", compute_pass_, [this, map](RGBuilder &builder) {
+        builder.StorageReadWrite(map, &IBLBrdfComputeShader::ResourceTable::out_texture);
+        return [this, threads = Vector3UInt(ibl_image_->GetWidth(), ibl_image_->GetHeight(), 1u)](
+                   RGComputeContext &context) { context.DispatchCompute(pipeline_state_, threads, {16u, 16u, 1u}); };
+    });
 
     sample_count_ += batch_size;
 
@@ -132,15 +120,6 @@ void IBLBrdfPass::CookOnTheFly(const RenderConfig &, unsigned samples_per_dispat
         float progress = static_cast<float>(sample_count_) / static_cast<float>(target_sample_count_) * 100.f;
         Logger::LogToScreen("IBLBrdf", std::format("Caching ibl brdf: {:.1f}%", progress));
     }
-}
-
-void IBLBrdfPass::Render()
-{
-    rhi_->BeginComputePass(compute_pass_);
-
-    rhi_->DispatchCompute(pipeline_state_, {ibl_image_->GetWidth(), ibl_image_->GetHeight(), 1u}, {16u, 16u, 1u});
-
-    rhi_->EndComputePass(compute_pass_);
 }
 
 } // namespace sparkle

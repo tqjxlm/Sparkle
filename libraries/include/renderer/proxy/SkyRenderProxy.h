@@ -19,13 +19,18 @@ public:
         alignas(16) Vector3 color = Zeros;
     };
 
+    // what passes sample the sky map, and the environment maps the IBL cooks integrate, with
+    static constexpr RHISampler::SamplerAttribute SkyMapSampler{
+        .address_mode = RHISampler::SamplerAddressMode::Repeat,
+        .filtering_method_min = RHISampler::FilteringMethod::Linear,
+        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
+        .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
+
     explicit SkyRenderProxy(std::shared_ptr<const Image2DCube> sky_map);
 
     ~SkyRenderProxy() override;
 
 #pragma region RenderProxy interface
-
-    void Update(RHIContext *rhi, const CameraRenderProxy &camera, const RenderConfig &config) override;
 
     void InitRenderResources(RHIContext *rhi, const RenderConfig &config) override;
 

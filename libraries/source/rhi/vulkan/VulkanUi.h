@@ -6,6 +6,8 @@
 
 #include "rhi/RHIUiHandler.h"
 
+#include <optional>
+
 namespace sparkle
 {
 class VulkanUiHandler : public RHIUiHandler
@@ -15,18 +17,19 @@ public:
 
     ~VulkanUiHandler() override;
 
-    void BeginFrame() override;
+    void BeginFrame(const RHIRenderingInfo &info) override;
 
-    void Render() override;
-
-    void Init() override;
+    void Render(RHICommandContext &command_context) override;
 
 private:
     void CreateDescriptorPool();
 
+    // makes ImGui's main pipeline the one for `signature`
+    void CompilePipeline(const RHIAttachmentSignature &signature);
+
     VkDescriptorPool descriptor_pool_ = nullptr;
 
-    bool initialized_ = false;
+    std::optional<RHIAttachmentSignature> pipeline_signature_;
 };
 } // namespace sparkle
 

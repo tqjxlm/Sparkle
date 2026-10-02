@@ -159,12 +159,16 @@ void MetalTLAS::Build()
     auto *blas_descriptors =
         static_cast<MTLAccelerationStructureUserIDInstanceDescriptor *>(blas_descriptor_buffer_->Lock());
 
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    id<MTLAccelerationStructureCommandEncoder> command_encoder = [command_buffer accelerationStructureCommandEncoder];
+    auto *command_context = context->GetCommandContext();
+    ASSERT_F(command_context, "TLAS {} builds outside a command buffer", GetName());
+    command_context->AssertOutsidePass("BLAS build");
+    auto command_buffer = command_context->GetCommandBuffer();
 
+    id<MTLAccelerationStructureCommandEncoder> command_encoder = nil;
     id<MTLBuffer> compacted_size_buffer = nil;
     if (dirty_blas_count > 0)
     {
+        command_encoder = [command_buffer accelerationStructureCommandEncoder];
         compacted_size_buffer = [context->GetDevice() newBufferWithLength:sizeof(uint64_t) * dirty_blas_count
                                                                   options:MTLResourceStorageModeShared];
         if (!compacted_size_buffer)
@@ -200,10 +204,13 @@ void MetalTLAS::Build()
 
     blas_descriptor_buffer_->UnLock();
 
-    if (!built_blas.empty())
+    if (command_encoder)
     {
         [command_encoder endEncoding];
+    }
 
+    if (!built_blas.empty())
+    {
         auto build_command_buffer = command_buffer;
         context->SubmitCommandBuffer();
         [build_command_buffer waitUntilCompleted];
@@ -218,7 +225,7 @@ void MetalTLAS::Build()
         }
 
         context->BeginCommandBuffer();
-        command_buffer = context->GetCurrentCommandBuffer();
+        command_buffer = command_context->GetCommandBuffer();
         command_encoder = [command_buffer accelerationStructureCommandEncoder];
 
         const auto *compacted_sizes = static_cast<const uint64_t *>(compacted_size_buffer.contents);
@@ -262,8 +269,6 @@ void MetalTLAS::Build()
                                                                 static_cast<double>(source_bytes);
         Log(Info, "Metal BLAS compaction: {}/{} compacted, {} source bytes -> {} resident bytes ({:.1f}% saved)",
             compacted_count, built_blas.size(), source_bytes, resident_bytes, saved_percentage);
-
-        command_encoder = [command_buffer accelerationStructureCommandEncoder];
     }
 
     blas_array_ = [[NSMutableArray alloc] initWithCapacity:blas_count];
@@ -272,21 +277,53 @@ void MetalTLAS::Build()
         [blas_array_ addObject:instance.second->GetAccelerationStructure()];
     }
 
-    auto *tlas_descriptor = [MTLInstanceAccelerationStructureDescriptor descriptor];
+    UpdateDescriptor();
 
-    tlas_descriptor.instancedAccelerationStructures = blas_array_;
-    tlas_descriptor.instanceCount = blas_count;
-    tlas_descriptor.instanceDescriptorBuffer = RHICast<MetalBuffer>(blas_descriptor_buffer_)->GetResource();
-    tlas_descriptor.instanceDescriptorType = MTLAccelerationStructureInstanceDescriptorTypeUserID;
-    tlas_descriptor.usage = MTLAccelerationStructureUsageRefit;
-
-    // Create the instance acceleration structure that contains all instances in the scene.
-    tlas_ = NewAccelerationStructureWithDescriptor(tlas_descriptor, command_encoder, scratch_buffer_);
+    // the instance acceleration structure that contains all instances in the scene, built by RecordBuild
+    auto device = context->GetDevice();
+    MTLAccelerationStructureSizes accel_sizes = [device accelerationStructureSizesWithDescriptor:tlas_descriptor_];
+    tlas_ = [device newAccelerationStructureWithSize:accel_sizes.accelerationStructureSize];
+    ResizeScratchBuffer(scratch_buffer_, accel_sizes.buildScratchBufferSize);
     id_dirty_ = true;
 
-    [command_encoder endEncoding];
-
     SetDebugInfo(tlas_, GetName());
+
+    Stage(StagedBuild::Build);
+}
+
+void MetalTLAS::UpdateDescriptor()
+{
+    tlas_descriptor_ = [MTLInstanceAccelerationStructureDescriptor descriptor];
+
+    tlas_descriptor_.instancedAccelerationStructures = blas_array_;
+    tlas_descriptor_.instanceCount = blas_array_.count;
+    tlas_descriptor_.instanceDescriptorBuffer = RHICast<MetalBuffer>(blas_descriptor_buffer_)->GetResource();
+    tlas_descriptor_.instanceDescriptorType = MTLAccelerationStructureInstanceDescriptorTypeUserID;
+    tlas_descriptor_.usage = MTLAccelerationStructureUsageRefit;
+}
+
+void MetalTLAS::RecordBuildInternal(RHICommandContext &command_context, bool rebuild)
+{
+    id<MTLAccelerationStructureCommandEncoder> command_encoder =
+        [static_cast<MetalCommandContext &>(command_context).GetCommandBuffer() accelerationStructureCommandEncoder];
+
+    if (rebuild)
+    {
+        [command_encoder buildAccelerationStructure:tlas_
+                                         descriptor:tlas_descriptor_
+                                      scratchBuffer:scratch_buffer_
+                                scratchBufferOffset:0];
+    }
+    else
+    {
+        [command_encoder refitAccelerationStructure:tlas_
+                                         descriptor:tlas_descriptor_
+                                        destination:tlas_
+                                      scratchBuffer:scratch_buffer_
+                                scratchBufferOffset:0];
+    }
+
+    [command_encoder endEncoding];
 }
 
 void MetalTLAS::Bind(id<MTLCommandEncoder> encoder, RHIShaderStage stage, unsigned binding_point) const
@@ -359,10 +396,6 @@ void MetalTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
         }
     }
 
-    auto device = context->GetDevice();
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    id<MTLAccelerationStructureCommandEncoder> command_encoder = [command_buffer accelerationStructureCommandEncoder];
-
     auto *blas_descriptors =
         static_cast<MTLAccelerationStructureUserIDInstanceDescriptor *>(blas_descriptor_buffer_->Lock());
 
@@ -378,26 +411,13 @@ void MetalTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
 
     blas_descriptor_buffer_->UnLock();
 
-    auto *tlas_descriptor = [MTLInstanceAccelerationStructureDescriptor descriptor];
+    UpdateDescriptor();
 
-    tlas_descriptor.instancedAccelerationStructures = blas_array_;
-    tlas_descriptor.instanceCount = blas_array_.count;
-    tlas_descriptor.instanceDescriptorBuffer = RHICast<MetalBuffer>(blas_descriptor_buffer_)->GetResource();
-    tlas_descriptor.instanceDescriptorType = MTLAccelerationStructureInstanceDescriptorTypeUserID;
-    tlas_descriptor.usage = MTLAccelerationStructureUsageRefit;
-
-    // Query for the sizes needed to store and build the acceleration structure.
-    MTLAccelerationStructureSizes accel_sizes = [device accelerationStructureSizesWithDescriptor:tlas_descriptor];
-
+    MTLAccelerationStructureSizes accel_sizes =
+        [context->GetDevice() accelerationStructureSizesWithDescriptor:tlas_descriptor_];
     ResizeScratchBuffer(scratch_buffer_, accel_sizes.refitScratchBufferSize);
 
-    [command_encoder refitAccelerationStructure:tlas_
-                                     descriptor:tlas_descriptor
-                                    destination:tlas_
-                                  scratchBuffer:scratch_buffer_
-                            scratchBufferOffset:0];
-
-    [command_encoder endEncoding];
+    Stage(StagedBuild::Refit);
 }
 } // namespace sparkle
 

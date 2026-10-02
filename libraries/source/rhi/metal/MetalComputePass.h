@@ -6,10 +6,6 @@
 
 #include "MetalRHIInternal.h"
 
-#include "rhi/RHITimer.h"
-
-#include <vector>
-
 namespace sparkle
 {
 class MetalComputePass : public RHIComputePass
@@ -19,20 +15,10 @@ public:
 
     ~MetalComputePass() override = default;
 
-    void Begin();
-
-    void End();
-
-    [[nodiscard]] id<MTLComputeCommandEncoder> GetEncoder() const
-    {
-        return compute_encoder_;
-    }
+    // opens the pass's compute encoder on the command buffer
+    [[nodiscard]] id<MTLComputeCommandEncoder> Begin(id<MTLCommandBuffer> command_buffer);
 
 private:
-    id<MTLComputeCommandEncoder> compute_encoder_;
-
-    std::vector<RHIResourceRef<RHITimer>> timers_;
-
     MTLComputePassDescriptor *descriptor_;
 };
 } // namespace sparkle

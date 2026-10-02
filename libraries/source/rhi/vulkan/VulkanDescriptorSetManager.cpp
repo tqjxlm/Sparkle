@@ -64,8 +64,11 @@ static ShaderDescriptorSetInfo CollectDescriptorSetInfo(const RHIShaderResourceS
 
         binding.descriptorType = GetVulkanDescriptorType(shader_binding->GetType());
 
-        // ARM best practice suggests using stage_all for all cases
-        binding.stageFlags = VK_SHADER_STAGE_ALL;
+        // ARM best practice suggests using stage_all for all cases, but input attachments exist only in fragment
+        // shaders
+        binding.stageFlags = binding.descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT
+                                 ? VK_SHADER_STAGE_FRAGMENT_BIT
+                                 : VK_SHADER_STAGE_ALL;
     }
 
     return info;
@@ -104,7 +107,8 @@ static void CollectDescriptorUpdate(const RHIShaderResourceBinding *binding, uns
                 break;
             }
             case RHIShaderResourceReflection::ResourceType::Texture2D:
-            case RHIShaderResourceReflection::ResourceType::StorageImage2D: {
+            case RHIShaderResourceReflection::ResourceType::StorageImage2D:
+            case RHIShaderResourceReflection::ResourceType::InputAttachment: {
                 RHICast<VulkanImageView>(bound_resource)
                     ->WriteDescriptor(slot, descriptor_set, descriptor_type, out_set_write);
                 break;
@@ -250,21 +254,30 @@ VkDescriptorSet VulkanDescriptorSetManager::RequestDescriptorSet(uint32_t resour
 
 void VulkanDescriptorSetManager::ReleaseDescriptorSet(uint32_t resource_hash, uint32_t layout_hash)
 {
-    context->GetRHI()->EnqueueEndOfFrameTasks([this, resource_hash, layout_hash]() {
-        auto &cache = cache_[layout_hash];
-
-        ASSERT(cache.allocated_sets.contains(resource_hash));
-
-        auto index = cache.allocated_sets[resource_hash];
-        cache.all_sets[index].ref_count--;
-
-        // mark it as free
-        if (cache.all_sets[index].ref_count == 0)
-        {
-            cache.allocated_sets.erase(resource_hash);
-            cache.free_sets.push_back(index);
-        }
+    // the set is reused only after the GPU finishes every frame that may have bound it: the end-of-render task queued
+    // at the end of this frame runs once its frame slot's fence has signaled, max_frames_in_flight frames later
+    auto *rhi = context->GetRHI();
+    rhi->EnqueueEndOfFrameTasks([this, rhi, resource_hash, layout_hash]() {
+        rhi->EnqueueEndOfRenderTasks(
+            [this, resource_hash, layout_hash]() { ReturnDescriptorSet(resource_hash, layout_hash); });
     });
+}
+
+void VulkanDescriptorSetManager::ReturnDescriptorSet(uint32_t resource_hash, uint32_t layout_hash)
+{
+    auto &cache = cache_[layout_hash];
+
+    ASSERT(cache.allocated_sets.contains(resource_hash));
+
+    auto index = cache.allocated_sets[resource_hash];
+    cache.all_sets[index].ref_count--;
+
+    // mark it as free
+    if (cache.all_sets[index].ref_count == 0)
+    {
+        cache.allocated_sets.erase(resource_hash);
+        cache.free_sets.push_back(index);
+    }
 }
 
 VulkanDescriptorSetManager::~VulkanDescriptorSetManager()
@@ -305,6 +318,7 @@ void VulkanDescriptorSetManager::CreateDescriptorPool()
         {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = MaxTotalBindlessResources},
         {.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = MaxTotalBindlessResources},
         {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = MaxTotalBindlessResources},
+        {.type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, .descriptorCount = MaxTotalBindlessResources},
     };
 
     if (context->SupportsHardwareRayTracing())

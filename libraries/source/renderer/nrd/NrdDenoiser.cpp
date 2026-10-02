@@ -24,15 +24,10 @@ constexpr float HitDistA = 3.0f;
 constexpr float HitDistB = 0.1f;
 constexpr float HitDistC = 20.0f;
 
-void ToLayout(RHIImage *image, RHIImageLayout layout, RHIPipelineStage after, RHIPipelineStage before)
+void ToLayout(RHICommandContext &command_context, const RHIResourceRef<RHIImage> &image, RHIImageLayout layout,
+              RHIPipelineStage after, RHIPipelineStage before)
 {
-    image->Transition({.target_layout = layout, .after_stage = after, .before_stage = before});
-}
-
-void ToLayout(const RHIResourceRef<RHIImage> &image, RHIImageLayout layout, RHIPipelineStage after,
-              RHIPipelineStage before)
-{
-    ToLayout(image.get(), layout, after, before);
+    image->Transition(command_context, {.target_layout = layout, .after_stage = after, .before_stage = before});
 }
 
 void CopyMatrix(float (&dst)[16], const Mat4 &src)
@@ -118,7 +113,7 @@ NrdDenoiser::NrdDenoiser(RHIContext *rhi, const DenoiserDesc &desc)
     ASSERT(rhi_);
     ASSERT(desc.max_frames_in_flight > 0);
     SampleConfig();
-    Initialize();
+    Initialize(desc.accumulator_format);
 }
 
 void NrdDenoiser::SampleConfig()
@@ -145,10 +140,6 @@ RHIResourceRef<RHIImage> NrdDenoiser::CreateFullScreenTexture(PixelFormat format
     auto image = rhi_->CreateImage(
         RHIImage::Attribute{
             .format = format,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
             .width = input_size_.x(),
             .height = input_size_.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV,
@@ -158,12 +149,13 @@ RHIResourceRef<RHIImage> NrdDenoiser::CreateFullScreenTexture(PixelFormat format
         },
         name);
 
-    ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::Top, RHIPipelineStage::ComputeShader);
+    ToLayout(*rhi_->GetCommandContext(), image, RHIImageLayout::Read, RHIPipelineStage::Top,
+             RHIPipelineStage::ComputeShader);
 
     return image;
 }
 
-void NrdDenoiser::Initialize()
+void NrdDenoiser::Initialize(PixelFormat output_format)
 {
     // failures latch permanently (IsActive() -> false): they are deterministic, and retrying every
     // frame would re-run the full SPIRV->MSL pipeline compilation and leak nrd instances
@@ -261,6 +253,10 @@ void NrdDenoiser::Initialize()
     out_spec_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdOutSpec");
     validation_ = CreateFullScreenTexture(PixelFormat::RGBAFloat16, "NrdValidation");
 
+    // the accumulator's precision, so the final resolve can equal the accumulator bit-exactly
+    output_ = CreateFullScreenTexture(output_format, "NrdOutput");
+    output_history_ = CreateFullScreenTexture(output_format, "NrdOutputHistory");
+
     pack_ubo_ = rhi_->CreateBuffer({.size = sizeof(NrdPackShader::UniformBufferData),
                                     .usages = RHIBuffer::BufferUsage::UniformBuffer,
                                     .mem_properties = RHIMemoryProperty::None,
@@ -311,35 +307,25 @@ void NrdDenoiser::Initialize()
     enabled_resources_ready_ = true;
 }
 
-void NrdDenoiser::EnsureOutputResources(PixelFormat format)
+void NrdDenoiser::BindInputs(const RGPassContext &context, const DenoiserInputs &inputs)
 {
-    if (output_ && output_->GetAttributes().format == format)
-    {
-        return;
-    }
+    const auto view = [this, &context](RGTexture texture) { return context.GetImage(texture)->GetDefaultView(rhi_); };
 
-    output_ = CreateFullScreenTexture(format, "NrdOutput");
-    output_history_ = CreateFullScreenTexture(format, "NrdOutputHistory");
-    reset_history_ = true;
-}
-
-void NrdDenoiser::BindInputs(const DenoiserInputs &inputs)
-{
     auto *pack_resources = pack_pipeline_->GetShaderResource<NrdPackShader>();
-    pack_resources->gRadiance().BindResource(inputs.noisy_radiance_hit_distance->GetDefaultView(rhi_));
-    pack_resources->gRadianceSpecular().BindResource(inputs.noisy_specular_radiance_hit_distance->GetDefaultView(rhi_));
-    pack_resources->gNormalDepth().BindResource(inputs.normal_view_depth->GetDefaultView(rhi_));
-    pack_resources->gAlbedoObj().BindResource(inputs.albedo_object_id->GetDefaultView(rhi_));
-    pack_resources->gMotion().BindResource(inputs.motion_hit_metallic->GetDefaultView(rhi_));
-    pack_resources->gSpecAlbedo().BindResource(inputs.specular_albedo_roughness->GetDefaultView(rhi_));
+    pack_resources->gRadiance().BindResource(view(inputs.noisy_radiance_hit_distance));
+    pack_resources->gRadianceSpecular().BindResource(view(inputs.noisy_specular_radiance_hit_distance));
+    pack_resources->gNormalDepth().BindResource(view(inputs.normal_view_depth));
+    pack_resources->gAlbedoObj().BindResource(view(inputs.albedo_object_id));
+    pack_resources->gMotion().BindResource(view(inputs.motion_hit_metallic));
+    pack_resources->gSpecAlbedo().BindResource(view(inputs.specular_albedo_roughness));
 
     auto *resolve_resources = resolve_pipeline_->GetShaderResource<NrdResolveShader>();
-    resolve_resources->gRadiance().BindResource(inputs.noisy_radiance_hit_distance->GetDefaultView(rhi_));
-    resolve_resources->gAlbedoObj().BindResource(inputs.albedo_object_id->GetDefaultView(rhi_));
-    resolve_resources->gMotion().BindResource(inputs.motion_hit_metallic->GetDefaultView(rhi_));
-    resolve_resources->gSpecAlbedo().BindResource(inputs.specular_albedo_roughness->GetDefaultView(rhi_));
+    resolve_resources->gRadiance().BindResource(view(inputs.noisy_radiance_hit_distance));
+    resolve_resources->gAlbedoObj().BindResource(view(inputs.albedo_object_id));
+    resolve_resources->gMotion().BindResource(view(inputs.motion_hit_metallic));
+    resolve_resources->gSpecAlbedo().BindResource(view(inputs.specular_albedo_roughness));
     resolve_resources->outputImage().BindResource(output_->GetDefaultView(rhi_));
-    resolve_resources->sceneAccum().BindResource(inputs.accumulated_radiance->GetDefaultView(rhi_));
+    resolve_resources->sceneAccum().BindResource(view(inputs.accumulated_radiance));
     resolve_resources->outputHistory().BindResource(output_history_->GetDefaultView(rhi_));
 }
 
@@ -360,23 +346,32 @@ void NrdDenoiser::UpdateFrameData(const DenoiserFrameData &frame)
                     static_cast<float>(cumulated_samples_) < handoff.GetEnd();
 }
 
-bool NrdDenoiser::Encode(const DenoiserInputs &inputs)
+// NRD's pool, IN_* and OUT_* textures stay private to the pass and keep their own transitions
+RGTexture NrdDenoiser::AddTo(RenderGraph &graph, const DenoiserInputs &inputs)
 {
-    if (!enabled_resources_ready_)
-    {
-        return false;
-    }
+    ASSERT(enabled_resources_ready_);
 
-    ASSERT(inputs.noisy_radiance_hit_distance);
-    ASSERT(inputs.normal_view_depth);
-    ASSERT(inputs.albedo_object_id);
-    ASSERT(inputs.motion_hit_metallic);
-    ASSERT(inputs.noisy_specular_radiance_hit_distance);
-    ASSERT(inputs.specular_albedo_roughness);
-    ASSERT(inputs.accumulated_radiance);
+    const auto output = graph.Import("NrdOutput", output_);
+    const auto output_history = graph.Import("NrdOutputHistory", output_history_);
+    graph.AddExternalPass("Nrd", [this, inputs, output, output_history](RGBuilder &builder) {
+        for (const auto input : {inputs.noisy_radiance_hit_distance, inputs.normal_view_depth, inputs.albedo_object_id,
+                                 inputs.motion_hit_metallic, inputs.noisy_specular_radiance_hit_distance,
+                                 inputs.specular_albedo_roughness, inputs.accumulated_radiance})
+        {
+            builder.Sampled(input, RHIShaderStageMask::Compute);
+        }
+        builder.StorageWrite(output, RHIShaderStageMask::Compute);
+        builder.StorageReadWrite(output_history, RHIShaderStageMask::Compute);
+        return [this, inputs](RGExternalContext &context) { Encode(context, inputs); };
+    });
+    return output;
+}
 
-    EnsureOutputResources(inputs.accumulated_radiance->GetAttributes().format);
-    BindInputs(inputs);
+void NrdDenoiser::Encode(RGExternalContext &context, const DenoiserInputs &inputs)
+{
+    auto &command_context = context.GetCommandContext();
+
+    BindInputs(context, inputs);
 
     const auto &attr = output_->GetAttributes();
     const Vector3UInt dispatch{attr.width, attr.height, 1u};
@@ -422,21 +417,17 @@ bool NrdDenoiser::Encode(const DenoiserInputs &inputs)
 
     if (run_reblur)
     {
-        RenderReblur(inputs, dispatch, group);
+        RenderReblur(command_context, dispatch, group);
     }
 
-    // every sampled input, not just the ReBLUR outputs: on handoff frames the ReBLUR block (and its
-    // layout epilogues) is skipped entirely while the resolve still binds in_*/g_*
+    // every sampled private texture, not just the ReBLUR outputs: on handoff frames the ReBLUR block (and its
+    // layout epilogues) is skipped entirely while the resolve still binds in_*
     for (const auto &image :
-         {out_diff_.get(), out_spec_.get(), validation_.get(), in_mv_.get(), in_normal_roughness_.get(),
-          in_viewz_.get(), in_diff_.get(), in_spec_.get(), inputs.noisy_radiance_hit_distance, inputs.albedo_object_id,
-          inputs.motion_hit_metallic, inputs.specular_albedo_roughness})
+         {out_diff_, out_spec_, validation_, in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
-    ToLayout(output_, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
-    ToLayout(output_history_, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
-             RHIPipelineStage::ComputeShader);
 
     NrdResolveShader::UniformBufferData resolve_ubo{
         .resolution = Vector2UInt(attr.width, attr.height),
@@ -449,31 +440,24 @@ bool NrdDenoiser::Encode(const DenoiserInputs &inputs)
     };
     resolve_ubo_->Upload(rhi_, &resolve_ubo);
 
-    rhi_->BeginComputePass(resolve_pass_);
-    rhi_->DispatchCompute(resolve_pipeline_, dispatch, group);
-    rhi_->EndComputePass(resolve_pass_);
-
-    ToLayout(output_, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::PixelShader);
+    command_context.BeginComputePass(resolve_pass_);
+    command_context.DispatchCompute(resolve_pipeline_, dispatch, group);
+    command_context.EndComputePass(resolve_pass_);
 
     prev_view_matrix_ = view_matrix_;
     prev_projection_matrix_ = projection_matrix_;
     reset_history_ = false;
-    return true;
 }
 
-void NrdDenoiser::RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &dispatch, const Vector3UInt &group)
+void NrdDenoiser::RenderReblur(RHICommandContext &command_context, const Vector3UInt &dispatch,
+                               const Vector3UInt &group)
 {
     const auto &attr = output_->GetAttributes();
 
-    for (auto *image :
-         {inputs.noisy_radiance_hit_distance, inputs.noisy_specular_radiance_hit_distance, inputs.normal_view_depth,
-          inputs.albedo_object_id, inputs.motion_hit_metallic, inputs.specular_albedo_roughness})
-    {
-        ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
-    }
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     NrdPackShader::UniformBufferData pack_ubo{
@@ -486,18 +470,20 @@ void NrdDenoiser::RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &
     };
     pack_ubo_->Upload(rhi_, &pack_ubo);
 
-    rhi_->BeginComputePass(pack_pass_);
-    rhi_->DispatchCompute(pack_pipeline_, dispatch, group);
-    rhi_->EndComputePass(pack_pass_);
+    command_context.BeginComputePass(pack_pass_);
+    command_context.DispatchCompute(pack_pipeline_, dispatch, group);
+    command_context.EndComputePass(pack_pass_);
 
     // ReBLUR reads the freshly packed inputs and writes the OUT_* textures on its own encoder.
     for (const auto &image : {in_mv_, in_normal_roughness_, in_viewz_, in_diff_, in_spec_})
     {
-        ToLayout(image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::Read, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
     for (const auto &image : {out_diff_, out_spec_})
     {
-        ToLayout(image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader, RHIPipelineStage::ComputeShader);
+        ToLayout(command_context, image, RHIImageLayout::StorageWrite, RHIPipelineStage::ComputeShader,
+                 RHIPipelineStage::ComputeShader);
     }
 
     // NRD assumes D3D clip conventions (+Y up); undo the engine's Vulkan-style Y flip (proj(1,1) < 0)
@@ -639,8 +625,8 @@ void NrdDenoiser::RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &
         };
     }
 
-    rhi_->BeginComputePass(reblur_pass_);
-    backend_->RunDispatches(seam_dispatches_.data(), dispatch_count);
-    rhi_->EndComputePass(reblur_pass_);
+    command_context.BeginComputePass(reblur_pass_);
+    backend_->RunDispatches(command_context, seam_dispatches_.data(), dispatch_count);
+    command_context.EndComputePass(reblur_pass_);
 }
 } // namespace sparkle

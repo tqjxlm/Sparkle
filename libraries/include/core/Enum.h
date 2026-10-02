@@ -35,45 +35,45 @@ template <EnumType T> bool Str2Enum(const std::string &str, T &out_value)
 // NOLINTBEGIN(bugprone-macro-parentheses)
 
 #define RegisterEnumAsFlag(Flags)                                                                                      \
-    inline Flags operator|(Flags lhs, Flags rhs)                                                                       \
+    constexpr Flags operator|(Flags lhs, Flags rhs)                                                                    \
     {                                                                                                                  \
         using Underlying = std::underlying_type_t<Flags>;                                                              \
         return static_cast<Flags>(static_cast<Underlying>(lhs) | static_cast<Underlying>(rhs));                        \
     }                                                                                                                  \
                                                                                                                        \
-    inline bool operator&(Flags lhs, Flags rhs)                                                                        \
+    constexpr bool operator&(Flags lhs, Flags rhs)                                                                     \
     {                                                                                                                  \
         using Underlying = std::underlying_type_t<Flags>;                                                              \
         return static_cast<bool>(static_cast<Underlying>(lhs) & static_cast<Underlying>(rhs));                         \
     }                                                                                                                  \
                                                                                                                        \
-    inline Flags operator^(Flags lhs, Flags rhs)                                                                       \
+    constexpr Flags operator^(Flags lhs, Flags rhs)                                                                    \
     {                                                                                                                  \
         using Underlying = std::underlying_type_t<Flags>;                                                              \
         return static_cast<Flags>(static_cast<Underlying>(lhs) ^ static_cast<Underlying>(rhs));                        \
     }                                                                                                                  \
                                                                                                                        \
-    inline Flags operator~(Flags flag)                                                                                 \
+    constexpr Flags operator~(Flags flag)                                                                              \
     {                                                                                                                  \
         using Underlying = std::underlying_type_t<Flags>;                                                              \
         return static_cast<Flags>(~static_cast<Underlying>(flag));                                                     \
     }                                                                                                                  \
                                                                                                                        \
-    inline Flags &operator|=(Flags &lhs, Flags rhs)                                                                    \
+    constexpr Flags &operator|=(Flags &lhs, Flags rhs)                                                                 \
     {                                                                                                                  \
         using Underlying = std::underlying_type_t<Flags>;                                                              \
         lhs = static_cast<Flags>(static_cast<Underlying>(lhs) | static_cast<Underlying>(rhs));                         \
         return lhs;                                                                                                    \
     }                                                                                                                  \
                                                                                                                        \
-    inline Flags &operator&=(Flags &lhs, Flags rhs)                                                                    \
+    constexpr Flags &operator&=(Flags &lhs, Flags rhs)                                                                 \
     {                                                                                                                  \
         using Underlying = std::underlying_type_t<Flags>;                                                              \
         lhs = static_cast<Flags>(static_cast<Underlying>(lhs) & static_cast<Underlying>(rhs));                         \
         return lhs;                                                                                                    \
     }                                                                                                                  \
                                                                                                                        \
-    inline Flags &operator^=(Flags &lhs, Flags rhs)                                                                    \
+    constexpr Flags &operator^=(Flags &lhs, Flags rhs)                                                                 \
     {                                                                                                                  \
         using Underlying = std::underlying_type_t<Flags>;                                                              \
         lhs = static_cast<Flags>(static_cast<Underlying>(lhs) ^ static_cast<Underlying>(rhs));                         \

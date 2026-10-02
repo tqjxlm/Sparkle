@@ -2,10 +2,14 @@
 
 #include "core/math/Types.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/graph/RGPassTimers.h"
+#include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/PostChain.h"
 #include "rhi/RHIImage.h"
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace sparkle
@@ -13,11 +17,11 @@ namespace sparkle
 class SceneRenderProxy;
 class RHIContext;
 class NativeView;
-class RHIRenderTarget;
 struct AppConfig;
 class CameraRenderProxy;
 class MaterialRenderProxy;
 class MeshRenderProxy;
+class RGTexturePool;
 
 // A renderer performs the following functionalities:
 // 1. process a scene of geometries
@@ -28,13 +32,16 @@ class MeshRenderProxy;
 class Renderer
 {
 public:
-    Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy);
+    Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
+             RGTexturePool &graph_texture_pool);
 
-    virtual ~Renderer() = default;
+    virtual ~Renderer();
 
     virtual void InitRenderResources() = 0;
 
-    virtual void Render() = 0;
+    // builds the frame's graph, its scene passes (BuildGraph) followed by the post chain, then compiles and records it.
+    // returns the graph's dump when `dump`, otherwise null.
+    [[nodiscard]] std::shared_ptr<const nlohmann::json> Render(bool dump);
 
     [[nodiscard]] virtual RenderConfig::Pipeline GetRenderMode() const = 0;
 
@@ -68,7 +75,8 @@ public:
     [[nodiscard]] virtual bool IsReadyForAutoScreenshot() const;
 
     static std::unique_ptr<Renderer> CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                                                    SceneRenderProxy *scene_render_proxy);
+                                                    SceneRenderProxy *scene_render_proxy,
+                                                    RGTexturePool &graph_texture_pool);
 
     void SetDebugPoint(float x, float y)
     {
@@ -84,9 +92,11 @@ public:
 protected:
     virtual void Update() = 0;
 
-    // return true if readback is performed
-    [[nodiscard]] bool ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, bool capture_ui,
-                                                      RHIPipelineStage after_stage);
+    // adds the frame's passes before the post chain, returning the texture they leave the scene in
+    [[nodiscard]] virtual RGTexture BuildGraph(RenderGraph &graph) = 0;
+
+    // creates the post chain, whose Screen transient is of `screen_format`
+    void InitPostChain(PixelFormat screen_format, PostChain::ScreenPass screen_pass);
 
     RHIContext *rhi_;
     SceneRenderProxy *scene_render_proxy_;
@@ -101,9 +111,12 @@ protected:
     std::atomic<int32_t> pending_async_tasks_{0};
 
 private:
-    std::string screenshot_file_path_;
-    bool screenshot_requested_ = false;
-    bool screenshot_capture_ui_ = false;
-    ScreenshotCallback screenshot_completion_;
+    // images behind the transients of the renderer's graphs, kept across frames and renderers
+    RGTexturePool &graph_texture_pool_;
+
+    std::unique_ptr<PostChain> post_chain_;
+
+    // times the raster passes of the renderer's graphs across frames
+    RGPassTimers graph_pass_timers_;
 };
 } // namespace sparkle

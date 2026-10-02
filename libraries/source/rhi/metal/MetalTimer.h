@@ -6,28 +6,46 @@
 
 #include "MetalRHIInternal.h"
 
+#include <array>
 #include <atomic>
 
 namespace sparkle
 {
-// MTLCounterSampleBuffer timing. Apple GPUs only sample timestamps at encoder boundaries, so a
-// Metal timer measures one whole pass: AttachTo the pass descriptor before creating its encoder,
-// then bracket with Begin/End; the samples themselves are taken by the GPU at encoder start/end.
+// MTLCounterSampleBuffer timing. Apple GPUs only sample timestamps at stage boundaries, so a Metal timer measures one
+// whole pass: AttachTo the pass descriptor before creating its encoder, then bracket with Begin/End; the samples
+// themselves are taken by the GPU where the encoder's stages start and end. Runs of a same-named pass in one command
+// buffer share the samples: a stage that ran in an earlier run but not in the last still counts as written, so the pass
+// reports a span over both runs, or the earlier run's time.
 class MetalTimer : public RHITimer
 {
 public:
     explicit MetalTimer(const std::string &name);
 
-    void Begin() override;
+    // the device has a timestamp counter set that it samples at stage boundaries
+    static bool IsSupported(id<MTLDevice> device);
 
-    void End() override;
+    void Begin(RHICommandContext &command_context) override;
+
+    void End(RHICommandContext &command_context) override;
 
     void TryGetResult() override;
 
-    void AttachTo(MTLComputePassDescriptor *descriptor) const;
+    void AttachTo(MTLComputePassDescriptor *descriptor);
+
+    void AttachTo(MTLRenderPassDescriptor *descriptor);
 
 private:
+    // a render pass samples the start and end of its vertex and fragment stages
+    static constexpr NSUInteger MaxSampleCount = 4;
+
     id<MTLCounterSampleBuffer> counter_sample_buffer_ = nil;
+    // the command buffer whose completion resolves the samples. every run in it writes the same samples, so they hold
+    // its last run and one resolve serves them all
+    __weak id<MTLCommandBuffer> resolving_command_buffer_ = nil;
+    // samples of the attached pass: a start and an end per stage
+    NSUInteger sample_count_ = 0;
+    // the samples of the last resolve, which a stage that does not run leaves in the buffer
+    std::array<uint64_t, MaxSampleCount> previous_samples_{};
     std::atomic<bool> resolved_ = false;
     std::atomic<float> resolved_time_ms_ = 0.f;
 };

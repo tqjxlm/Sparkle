@@ -15,42 +15,35 @@ public:
 
     bool InitRHI(NativeView *inWindow, std::string &error) override;
     void InitRenderResources() override;
+    [[nodiscard]] RHIResourceRef<RHIImage> GetBackBuffer() const override;
     void WaitForDeviceIdle() override;
     void CaptureNextFrames(int count) override;
 
     bool SupportsHardwareRayTracing() override;
 
+    bool SupportsPassTimestamps() override;
+
+    bool SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages) override;
+
+    bool SupportsPixelLocalRead() override;
+
+    bool KeepsMemorylessAcrossPixelLocalBarrier() override;
+
+    std::optional<uint32_t> GetTileBudget() override;
+
     bool SupportsSampledFormat(PixelFormat format) override;
+
+    bool SupportsLinearFiltering(PixelFormat format) override;
 
     bool HasPhysicalGpu() override
     {
         return true;
     }
 
-    void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
 
     bool RecreateSurface() override;
     void RecreateSwapChain() override;
-    void NextSubpass() override;
-
-    void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
-    void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                         Vector3UInt thread_per_group) override;
-
-    RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                 const RHIResourceRef<RHIImage> &depth_image,
-                                                                 const std::string &name) override;
-
-    RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                       const RHIRenderTarget::ColorImageArray &color_images,
-                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                       const std::string &name) override;
-
-    RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                   const RHIResourceRef<RHIRenderTarget> &rt,
-                                                   const std::string &name) override;
-
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
 
@@ -79,15 +72,13 @@ protected:
     [[nodiscard]] bool BeginFrameInternal() override;
     void EndFrameInternal() override;
 
-    void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
-    void EndRenderPassInternal() override;
-
-    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-
     void CleanupInternal() override;
 
-    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
+    RHICommandContext *GetCommandContextInternal() override;
+
+    RHICommandContext &BeginCommandBufferInternal() override;
+
+    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info, std::string variant) override;
 };
 } // namespace sparkle
 #endif

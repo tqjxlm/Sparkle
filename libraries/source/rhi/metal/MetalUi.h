@@ -15,11 +15,9 @@ public:
 
     ~MetalUiHandler() override;
 
-    void Render() override;
+    void Render(RHICommandContext &command_context) override;
 
-    void BeginFrame() override;
-
-    void Init() override;
+    void BeginFrame(const RHIRenderingInfo &info) override;
 };
 } // namespace sparkle
 

@@ -4,14 +4,11 @@
 
 #include "VulkanBuffer.h"
 #include "VulkanCommon.h"
-#include "VulkanComputePass.h"
 #include "VulkanContext.h"
 #include "VulkanImage.h"
 #include "VulkanNrdBackend.h"
 #include "VulkanPipelineState.h"
 #include "VulkanRayTracing.h"
-#include "VulkanRenderPass.h"
-#include "VulkanRenderTarget.h"
 #include "VulkanResourceArray.h"
 #include "VulkanShader.h"
 #include "VulkanSwapChain.h"
@@ -25,8 +22,6 @@
 namespace sparkle
 {
 constexpr unsigned HeadlessFramesInFlight = 2;
-
-static std::vector<RHIResourceWeakRef<VulkanRenderPass>> render_passes;
 
 void VulkanRHI::WaitForDeviceIdle()
 {
@@ -53,7 +48,7 @@ bool VulkanRHI::BeginFrameInternal()
         return false;
     }
 
-    if (GetConfig().measure_gpu_time)
+    if (GetConfig().measure_gpu_time && !frame_timers_.empty())
     {
         auto frame_index = GetFrameIndex();
         if (frame_timers_[frame_index]->GetStatus() != RHITimer::Status::Inactive)
@@ -61,7 +56,7 @@ bool VulkanRHI::BeginFrameInternal()
             frame_stats_[frame_index].elapsed_time_ms = frame_timers_[frame_index]->GetTime();
         }
 
-        frame_timers_[frame_index]->Begin();
+        frame_timers_[frame_index]->Begin(*context->GetCommandContext());
     }
 
     return true;
@@ -69,9 +64,9 @@ bool VulkanRHI::BeginFrameInternal()
 
 void VulkanRHI::EndFrameInternal()
 {
-    if (GetConfig().measure_gpu_time)
+    if (GetConfig().measure_gpu_time && !frame_timers_.empty())
     {
-        frame_timers_[GetFrameIndex()]->End();
+        frame_timers_[GetFrameIndex()]->End(*context->GetCommandContext());
     }
 
     auto result = context->EndFrame();
@@ -151,9 +146,12 @@ void VulkanRHI::InitRenderResources()
 
     context->InitRenderResources();
 
-    for (unsigned i = 0; i < GetMaxFramesInFlight(); i++)
+    if (SupportsPassTimestamps())
     {
-        frame_timers_.emplace_back(CreateTimer("FrameTimer"));
+        for (unsigned i = 0; i < GetMaxFramesInFlight(); i++)
+        {
+            frame_timers_.emplace_back(CreateTimer("FrameTimer"));
+        }
     }
 }
 
@@ -167,6 +165,7 @@ void VulkanRHI::ReleaseRenderResources()
     RHIContext::ReleaseRenderResources();
 
     frame_timers_.clear();
+    headless_back_buffer_ = nullptr;
 
     context->ReleaseRenderResources();
 }
@@ -176,11 +175,63 @@ bool VulkanRHI::SupportsHardwareRayTracing()
     return context->SupportsHardwareRayTracing();
 }
 
+bool VulkanRHI::SupportsPassTimestamps()
+{
+    return context->GetTimestampValidBits() > 0;
+}
+
+bool VulkanRHI::SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages)
+{
+    return context->SupportsLazilyAllocatedImage(GetVkPixelFormat(format),
+                                                 GetVkImageUsage(usages) | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
+}
+
+bool VulkanRHI::SupportsPixelLocalRead()
+{
+    return context->SupportsDynamicRenderingLocalRead();
+}
+
+bool VulkanRHI::KeepsMemorylessAcrossPixelLocalBarrier()
+{
+    return context->KeepsMemorylessAcrossPixelLocalBarrier();
+}
+
+// Arm GPU datasheets: 256 bits of tile color storage per pixel at the full tile size from Mali-G72 on. other vendors
+// publish no per-pixel limit.
+std::optional<uint32_t> VulkanRHI::GetTileBudget()
+{
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &properties);
+    const std::string_view name(properties.deviceName);
+    if (name.find("Mali") != std::string_view::npos || name.find("Immortalis") != std::string_view::npos)
+    {
+        return 32;
+    }
+    return std::nullopt;
+}
+
+std::optional<unsigned> VulkanRHI::GetValidationErrorCount() const
+{
+    return context->GetValidationErrorCount();
+}
+
+bool VulkanRHI::IsSyncValidationActive() const
+{
+    return context->IsSyncValidationActive();
+}
+
 bool VulkanRHI::HasPhysicalGpu()
 {
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(context->GetPhysicalDevice(), &properties);
     return properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU;
+}
+
+static VkFormatFeatureFlags GetOptimalTilingFeatures(PixelFormat format)
+{
+    VkFormatProperties properties;
+    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
+    return properties.optimalTilingFeatures;
 }
 
 bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
@@ -203,13 +254,15 @@ bool VulkanRHI::SupportsSampledFormat(PixelFormat format)
         }
     }
 
-    VkFormatProperties properties;
-    vkGetPhysicalDeviceFormatProperties(context->GetPhysicalDevice(), GetVkPixelFormat(format), &properties);
-
     constexpr VkFormatFeatureFlags Required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
                                               VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
                                               VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-    return (properties.optimalTilingFeatures & Required) == Required;
+    return (GetOptimalTilingFeatures(format) & Required) == Required;
+}
+
+bool VulkanRHI::SupportsLinearFiltering(PixelFormat format)
+{
+    return (GetOptimalTilingFeatures(format) & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
 }
 
 uint32_t VulkanRHI::GetMinBufferOffsetAlignment() const
@@ -243,25 +296,9 @@ void VulkanRHI::RecreateSwapChain()
 
     ReleaseRenderResources();
 
-    CreateBackBufferRenderTarget();
+    CreateBackBuffer();
 
     InitRenderResources();
-
-    for (const auto &render_pass_ptr : render_passes)
-    {
-        if (render_pass_ptr.expired())
-        {
-            continue;
-        }
-
-        auto render_pass = render_pass_ptr.lock();
-
-        if (render_pass->RequireBackBuffer())
-        {
-            render_pass->Cleanup();
-            render_pass->Init(back_buffer_rt_);
-        }
-    }
 }
 
 bool VulkanRHI::RecreateSurface()
@@ -269,27 +306,9 @@ bool VulkanRHI::RecreateSurface()
     return context->RecreateSurface();
 }
 
-static auto CreateBackBufferDepth(VkExtent2D extent)
+void VulkanRHI::CreateBackBuffer()
 {
-    auto depth_format = FindDepthFormat(context->GetPhysicalDevice());
-
-    RHIImage::Attribute attribute;
-    attribute.width = extent.width;
-    attribute.height = extent.height;
-    attribute.mip_levels = 1;
-    attribute.msaa_samples = 1;
-    attribute.usages = RHIImage::ImageUsage::DepthStencilAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-
-    return context->GetRHI()->CreateResource<VulkanImage>(attribute, depth_format, "BackBufferDepth");
-}
-
-void VulkanRHI::CreateBackBufferRenderTarget()
-{
-    ASSERT(!back_buffer_rt_);
+    ASSERT(!headless_back_buffer_);
 
     if (IsHeadless())
     {
@@ -298,36 +317,37 @@ void VulkanRHI::CreateBackBufferRenderTarget()
         GetHardwareInterface()->GetFrameBufferSize(width, height);
         ASSERT_F(width > 0 && height > 0, "Invalid headless render size [{}, {}]", width, height);
 
-        VkExtent2D extent{.width = static_cast<uint32_t>(width), .height = static_cast<uint32_t>(height)};
         SetMaxFramesInFlight(HeadlessFramesInFlight);
 
-        RHIImage::Attribute color_attribute;
-        color_attribute.format = PixelFormat::B8G8R8A8Srgb;
-        color_attribute.width = extent.width;
-        color_attribute.height = extent.height;
-        color_attribute.mip_levels = 1;
-        color_attribute.msaa_samples = 1;
-        color_attribute.usages = RHIImage::ImageUsage::ColorAttachment;
-        color_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                   .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                                   .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                                   .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+        RHIImage::Attribute attribute;
+        attribute.format = PixelFormat::B8G8R8A8Srgb;
+        attribute.width = static_cast<uint32_t>(width);
+        attribute.height = static_cast<uint32_t>(height);
+        attribute.mip_levels = 1;
+        attribute.msaa_samples = 1;
+        attribute.usages = RHIImage::ImageUsage::ColorAttachment;
 
-        auto color_image = CreateImage(color_attribute, "HeadlessBackBufferColor");
-        auto depth_image = CreateBackBufferDepth(extent);
-
-        RHIRenderTarget::ColorImageArray color_images{};
-        color_images[0] = color_image;
-        back_buffer_rt_ = CreateRenderTarget({}, color_images, depth_image, "HeadlessBackBufferRT");
+        headless_back_buffer_ = CreateImage(attribute, "HeadlessBackBuffer");
     }
     else
     {
         context->RecreateSwapChain();
-        back_buffer_rt_ = CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetSwapChain()->GetExtent()),
-                                                       "BackBufferRT");
     }
 
     back_buffer_dirty_ = true;
+}
+
+RHIResourceRef<RHIImage> VulkanRHI::GetBackBuffer() const
+{
+    if (IsHeadless())
+    {
+        ASSERT_F(headless_back_buffer_, "Back buffer not initialized");
+        return headless_back_buffer_;
+    }
+
+    const auto *swap_chain = context->GetSwapChain();
+    ASSERT_F(swap_chain, "Back buffer not initialized");
+    return swap_chain->GetImage(swap_chain->GetCurrentImageIndex());
 }
 
 RHIResourceRef<RHIBuffer> VulkanRHI::CreateBuffer(const RHIBuffer::Attribute &attribute, const std::string &name)
@@ -335,14 +355,20 @@ RHIResourceRef<RHIBuffer> VulkanRHI::CreateBuffer(const RHIBuffer::Attribute &at
     return CreateResource<VulkanBuffer>(attribute, name);
 }
 
-void VulkanRHI::BeginCommandBuffer()
+RHICommandContext &VulkanRHI::BeginCommandBufferInternal()
 {
     context->BeginCommandBuffer();
-};
+    return *context->GetCommandContext();
+}
 
 void VulkanRHI::SubmitCommandBuffer()
 {
     context->SubmitCommandBuffer();
+}
+
+RHICommandContext *VulkanRHI::GetCommandContextInternal()
+{
+    return context->GetCommandContext();
 }
 
 RHIResourceRef<RHIImage> VulkanRHI::CreateImage(const RHIImage::Attribute &attributes, const std::string &name)
@@ -378,33 +404,9 @@ RHIResourceRef<RHISampler> VulkanRHI::CreateSampler(RHISampler::SamplerAttribute
     return CreateResource<VulkanSampler>(attribute, name);
 }
 
-RHIResourceRef<RHIRenderTarget> VulkanRHI::CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                        const RHIResourceRef<RHIImage> &depth_image,
-                                                                        const std::string &name)
+RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info, std::string variant)
 {
-    return CreateResource<VulkanRenderTarget>(attribute, depth_image, name);
-}
-
-RHIResourceRef<RHIRenderTarget> VulkanRHI::CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                              const RHIRenderTarget::ColorImageArray &color_images,
-                                                              const RHIResourceRef<RHIImage> &depth_image,
-                                                              const std::string &name)
-{
-    return CreateResource<VulkanRenderTarget>(attribute, color_images, depth_image, name);
-}
-
-RHIResourceRef<RHIRenderPass> VulkanRHI::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                          const RHIResourceRef<RHIRenderTarget> &rt,
-                                                          const std::string &name)
-{
-    auto render_pass = CreateResource<VulkanRenderPass>(attribute, rt, name);
-    render_passes.emplace_back(render_pass);
-    return render_pass;
-}
-
-RHIResourceRef<RHIShader> VulkanRHI::CreateShader(const RHIShaderInfo *shader_info)
-{
-    return CreateResource<VulkanShader>(shader_info);
+    return CreateResource<VulkanShader>(shader_info, std::move(variant));
 }
 
 RHIResourceRef<RHIPipelineState> VulkanRHI::CreatePipelineState(RHIPipelineState::PipelineType type,
@@ -421,58 +423,6 @@ RHIResourceRef<RHIPipelineState> VulkanRHI::CreatePipelineState(RHIPipelineState
     }
 }
 
-void VulkanRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
-{
-    if (!pipeline_state)
-    {
-        return;
-    }
-
-    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
-
-    const auto &rhi_pipeline = RHICast<VulkanForwardPipelineState>(pipeline_state);
-    VkPipeline pipeline = rhi_pipeline->GetPipeline();
-
-    context->BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-
-    rhi_pipeline->SetViewportAndScissor();
-    rhi_pipeline->BindBuffers();
-    rhi_pipeline->BindDescriptorSets();
-
-    vkCmdDrawIndexed(command_buffer, draw_args.index_count, draw_args.instance_count, draw_args.first_index,
-                     static_cast<int>(draw_args.first_vertex), draw_args.first_instance);
-}
-
-void VulkanRHI::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                                Vector3UInt thread_per_group)
-{
-    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
-
-    auto *compute_pipeline = RHICast<VulkanComputePipelineState>(pipeline);
-
-    context->BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline->GetPipeline());
-
-    compute_pipeline->BindDescriptorSets();
-
-    unsigned group_count_x = utilities::DivideAndRoundUp(total_threads.x(), thread_per_group.x());
-    unsigned group_count_y = utilities::DivideAndRoundUp(total_threads.y(), thread_per_group.y());
-    unsigned group_count_z = utilities::DivideAndRoundUp(total_threads.z(), thread_per_group.z());
-
-    vkCmdDispatch(command_buffer, group_count_x, group_count_y, group_count_z);
-}
-
-void VulkanRHI::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
-{
-    auto *rhi_render_pass = RHICast<VulkanRenderPass>(pass);
-    rhi_render_pass->Begin();
-}
-
-void VulkanRHI::EndRenderPassInternal()
-{
-    auto *rhi_render_pass = RHICast<VulkanRenderPass>(current_render_pass_);
-    rhi_render_pass->End();
-}
-
 RHIResourceRef<RHIResourceArray> VulkanRHI::CreateResourceArray(RHIShaderResourceReflection::ResourceType type,
                                                                 unsigned int capacity, const std::string &name)
 {
@@ -486,19 +436,7 @@ RHIResourceRef<RHITimer> VulkanRHI::CreateTimer(const std::string &name)
 
 RHIResourceRef<RHIComputePass> VulkanRHI::CreateComputePass(const std::string &name, bool need_timestamp)
 {
-    return CreateResource<VulkanComputePass>(this, need_timestamp, name);
-}
-
-void VulkanRHI::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    auto *rhi_compute_pass = RHICast<VulkanComputePass>(pass);
-    rhi_compute_pass->Begin();
-}
-
-void VulkanRHI::EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    auto *rhi_compute_pass = RHICast<VulkanComputePass>(pass);
-    rhi_compute_pass->End();
+    return CreateResource<RHIComputePass>(this, need_timestamp, name);
 }
 } // namespace sparkle
 

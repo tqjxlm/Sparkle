@@ -6,26 +6,8 @@
 
 namespace sparkle
 {
-class MetalRenderPass : public RHIRenderPass
-{
-public:
-    MetalRenderPass(const Attribute &attribute, const RHIResourceRef<RHIRenderTarget> &rt, const std::string &name);
-
-    void Begin();
-
-    void End();
-
-    id<MTLRenderCommandEncoder> GetRenderEncoder()
-    {
-        return render_encoder_;
-    }
-
-    [[nodiscard]] MTLRenderPassDescriptor *GetDescriptor() const;
-
-private:
-    id<MTLRenderCommandEncoder> render_encoder_;
-    MTLRenderPassDescriptor *descriptor_;
-};
+// lowers an RHIRenderingInfo into a new render pass descriptor
+[[nodiscard]] MTLRenderPassDescriptor *CreateMetalRenderPassDescriptor(const RHIRenderingInfo &info);
 } // namespace sparkle
 
 #endif

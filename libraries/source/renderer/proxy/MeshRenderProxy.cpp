@@ -274,11 +274,6 @@ void MeshRenderProxy::InitRenderResources(RHIContext *rhi, const RenderConfig &c
     }
 }
 
-void MeshRenderProxy::Render(RHIContext *rhi, const RHIResourceRef<RHIPipelineState> &pipeline_state) const
-{
-    rhi->DrawMesh(pipeline_state, draw_args_);
-}
-
 void MeshRenderProxy::UpdateMatrix(RHIContext *rhi)
 {
     ASSERT(ubo_);

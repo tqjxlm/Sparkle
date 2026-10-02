@@ -328,46 +328,41 @@ void VulkanNrdBackend::AllocateResources(uint32_t width, uint32_t height, const 
         transient_count, sampler_count, constant_buffer_size, width, height);
 }
 
-void VulkanNrdBackend::InitializePoolLayouts(VkCommandBuffer command_buffer)
+void VulkanNrdBackend::InitializePoolLayouts(VulkanCommandContext &command_context)
 {
-    std::vector<VkImageMemoryBarrier> barriers;
+    const RHIResourceAccess dispatch_access{.access =
+                                                RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::StorageWrite,
+                                            .stages = RHIShaderStageMask::Compute};
+    std::vector<VkImageMemoryBarrier2> barriers;
     barriers.reserve(permanent_pool_.size() + transient_pool_.size());
     for (const auto *pool : {&permanent_pool_, &transient_pool_})
     {
         for (const auto &image : *pool)
         {
-            VkImageMemoryBarrier barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image = image.image;
-            barrier.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                                        .baseMipLevel = 0,
-                                        .levelCount = 1,
-                                        .baseArrayLayer = 0,
-                                        .layerCount = 1};
-            barrier.srcAccessMask = 0;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-            barriers.push_back(barrier);
+            barriers.push_back(VulkanCommandContext::GetVkImageBarrier(image.image,
+                                                                       {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                                        .baseMipLevel = 0,
+                                                                        .levelCount = 1,
+                                                                        .baseArrayLayer = 0,
+                                                                        .layerCount = 1},
+                                                                       {}, dispatch_access, RHIImageLayout::Undefined,
+                                                                       RHIImageLayout::General));
         }
     }
-
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-                         nullptr, 0, nullptr, static_cast<uint32_t>(barriers.size()), barriers.data());
+    command_context.RecordBarriers(barriers, {});
 
     pool_layouts_initialized_ = true;
 }
 
-void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
+void VulkanNrdBackend::RunDispatches(RHICommandContext &command_context, const Dispatch *dispatches, uint32_t count)
 {
     auto *rhi = context->GetRHI();
-    VkCommandBuffer command_buffer = context->GetCurrentCommandBuffer();
+    auto &vulkan_context = static_cast<VulkanCommandContext &>(command_context);
+    VkCommandBuffer command_buffer = vulkan_context.GetCommandBuffer();
 
     if (!pool_layouts_initialized_)
     {
-        InitializePoolLayouts(command_buffer);
+        InitializePoolLayouts(vulkan_context);
     }
 
     VkDescriptorPool descriptor_pool = descriptor_pools_[rhi->GetFrameIndex()];
@@ -380,12 +375,11 @@ void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
 
         if (d > 0)
         {
-            VkMemoryBarrier barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+            const RHIMemoryBarrier barrier{
+                .from = {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute},
+                .to = {.access = RHIAccess::Sampled | RHIAccess::StorageRead | RHIAccess::StorageWrite,
+                       .stages = RHIShaderStageMask::Compute}};
+            vulkan_context.Barrier(barrier);
         }
 
         std::vector<VkDescriptorSet> descriptor_sets(pipeline.set_layouts.size());
@@ -463,6 +457,7 @@ void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
                 break;
             case DispatchResource::Source::User: {
                 resource.user_image->Transition(
+                    command_context,
                     {.target_layout = resource.is_uav ? RHIImageLayout::StorageWrite : RHIImageLayout::Read,
                      .after_stage = RHIPipelineStage::ComputeShader,
                      .before_stage = RHIPipelineStage::ComputeShader});
@@ -487,9 +482,8 @@ void VulkanNrdBackend::RunDispatches(const Dispatch *dispatches, uint32_t count)
 
         vkUpdateDescriptorSets(context->GetDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-        context->BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pso);
-        context->BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline_layout, 0, descriptor_sets.data(),
-                                    static_cast<uint32_t>(descriptor_sets.size()));
+        vulkan_context.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pso);
+        vulkan_context.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline_layout, 0, descriptor_sets);
         vkCmdDispatch(command_buffer, dispatch.grid_width, dispatch.grid_height, 1);
     }
 }

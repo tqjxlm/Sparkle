@@ -1,7 +1,7 @@
 #include "renderer/pass/IBLPass.h"
 
 #include "io/TextureCompression.h"
-#include "renderer/pass/ClearTexturePass.h" // IWYU pragma: keep
+#include "renderer/graph/RenderGraph.h"
 #include "rhi/RHI.h"
 
 #include <cstring>
@@ -23,17 +23,17 @@ void IBLPass::Finalize()
     // leaves regions of the readback image unwritten (garbage fp16 texels)
     auto fp16_image = CreateIBLMap(false, true, PixelFormat::RGBAFloat16);
 
-    rhi_->BeginCommandBuffer();
+    auto &command_context = rhi_->BeginCommandBuffer();
 
-    cooked_ibl_image->Transition({.target_layout = RHIImageLayout::TransferSrc,
-                                  .after_stage = RHIPipelineStage::ComputeShader,
-                                  .before_stage = RHIPipelineStage::Transfer});
+    cooked_ibl_image->Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                                   .after_stage = RHIPipelineStage::ComputeShader,
+                                                   .before_stage = RHIPipelineStage::Transfer});
 
-    fp16_image->Transition({.target_layout = RHIImageLayout::TransferDst,
-                            .after_stage = RHIPipelineStage::Top,
-                            .before_stage = RHIPipelineStage::Transfer});
+    fp16_image->Transition(command_context, {.target_layout = RHIImageLayout::TransferDst,
+                                             .after_stage = RHIPipelineStage::Top,
+                                             .before_stage = RHIPipelineStage::Transfer});
 
-    cooked_ibl_image->BlitToImage(fp16_image, RHISampler::FilteringMethod::Nearest);
+    command_context.BlitImage(cooked_ibl_image.get(), fp16_image.get(), RHISampler::FilteringMethod::Nearest);
 
     rhi_->SubmitCommandBuffer();
 
@@ -53,13 +53,36 @@ void IBLPass::Finalize()
         ibl_image_->GetHeight(), ibl_image_->GetAttributes().mip_levels));
 }
 
+RGTexture IBLPass::ImportCookingMap(RenderGraph &graph, const std::string &name)
+{
+    const auto map = graph.Import(name, ibl_image_);
+    if (cleared_)
+    {
+        return map;
+    }
+
+    cleared_ = true;
+    for (uint8_t mip = 0; mip < ibl_image_->GetAttributes().mip_levels; mip++)
+    {
+        for (auto layer = 0u; layer < ibl_image_->GetArrayLayerCount(); layer++)
+        {
+            graph.AddRasterPass("Clear" + name,
+                                [subresource = map.Subresource(mip, static_cast<uint8_t>(layer))](RGBuilder &builder) {
+                                    builder.ColorWrite(subresource, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                                    return [](RGRasterContext &) {};
+                                });
+        }
+    }
+    return map;
+}
+
 void IBLPass::PrepareForCooking()
 {
     ASSERT(!is_ready_ && !ibl_image_);
     ibl_image_ = CreateIBLMap(true, true, PixelFormat::RGBAFloat16);
 }
 
-RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &payload)
+RHIResourceRef<RHIImage> IBLPass::MakeIblResource(RHICommandContext &command_context, const std::vector<char> &payload)
 {
     if (payload.size() < sizeof(TextureCompression::PayloadHeader))
     {
@@ -86,7 +109,7 @@ RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &paylo
         {
             return nullptr;
         }
-        image->Upload(reinterpret_cast<const uint8_t *>(payload.data()) + sizeof(header));
+        image->Upload(command_context, reinterpret_cast<const uint8_t *>(payload.data()) + sizeof(header));
         return image;
     }
 
@@ -96,15 +119,15 @@ RHIResourceRef<RHIImage> IBLPass::MakeIblResource(const std::vector<char> &paylo
     {
         return nullptr;
     }
-    image->Upload(fp16_bytes.data());
+    image->Upload(command_context, fp16_bytes.data());
     return image;
 }
 
-bool IBLPass::ApplyArtifact(const std::vector<char> &payload)
+bool IBLPass::ApplyArtifact(RHICommandContext &command_context, const std::vector<char> &payload)
 {
     ASSERT(!is_ready_);
 
-    ibl_image_ = MakeIblResource(payload);
+    ibl_image_ = MakeIblResource(command_context, payload);
     if (!ibl_image_)
     {
         return false;

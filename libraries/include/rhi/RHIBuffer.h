@@ -3,6 +3,7 @@
 #include "rhi/RHIResource.h"
 
 #include "core/Exception.h"
+#include "rhi/RHIBarrier.h"
 #include "rhi/RHIMemory.h"
 
 #include <map>
@@ -11,7 +12,6 @@ namespace sparkle
 {
 class RHIDynamicBuffer;
 class RHIBuffer;
-class RHIImage;
 
 class RHIBufferSubAllocation
 {
@@ -136,11 +136,9 @@ public:
     // async upload that happens on the GPU
     // it does not block resources and avoids writing to resources in use
     // the cost is higher memory footprint
+    // a dynamic buffer is written on the host. any other buffer records a staging copy into the open command buffer
+    // (see RHIContext::GetCommandContext), so a graph pass must not upload it
     void Upload(RHIContext *rhi, const void *data);
-
-    virtual void CopyToBuffer(const RHIBuffer *buffer) const = 0;
-
-    virtual void CopyToImage(const RHIImage *image) const = 0;
 
     virtual void *Lock() = 0;
 
@@ -153,8 +151,15 @@ public:
                       sizeof(T));
     }
 
+    // records a dispatch into the open command buffer (see RHIContext::GetCommandContext)
     void PartialUpdate(RHIContext *rhi, const uint8_t *data, const std::vector<uint32_t> &indices,
                        uint32_t element_count, uint32_t element_size);
+
+    // the accesses the next barrier on this resource must wait for
+    [[nodiscard]] RHITrackedAccess &GetTracked()
+    {
+        return tracked_;
+    }
 
 protected:
     Attribute attribute_;
@@ -163,6 +168,15 @@ protected:
     RHIBufferSubAllocation dynamic_allocation_;
 
     uint8_t *mapped_address_ = nullptr;
+
+private:
+    [[nodiscard]] RHIResourceAccess GetUsageAccess() const;
+
+    // barriers before and after `access`, against every access the usages allow: for a write whose earlier accesses and
+    // later consumers are unknown
+    [[nodiscard]] std::pair<RHIMemoryBarrier, RHIMemoryBarrier> GetUsageBarriers(const RHIResourceAccess &access) const;
+
+    RHITrackedAccess tracked_;
 };
 
 RegisterEnumAsFlag(RHIBuffer::BufferUsage);

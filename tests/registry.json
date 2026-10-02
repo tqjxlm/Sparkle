@@ -48,9 +48,33 @@
         }
     },
     {
+        "name": "forward_render_static_sampled",
+        "test_case": "screenshot",
+        "description": "The forward still frame with render_graph_pixel_local off, so tone mapping samples the scene color after the physical pass that writes it instead of reading it pixel-locally, FLIP-compared against the same ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--render_graph_pixel_local", "false"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "forward"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "deferred_render_static_sampled",
+        "test_case": "screenshot",
+        "description": "The deferred still frame with render_graph_pixel_local off, so tone mapping samples the scene color after the physical pass that writes it instead of reading it pixel-locally, FLIP-compared against the same ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--render_graph_pixel_local", "false"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "deferred"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
         "name": "gpu_render_static",
         "test_case": "screenshot",
-        "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Needs hardware ray tracing, which no hosted runner exposes, so it stays local-only.",
+        "description": "Still frame on the gpu path-tracing pipeline, FLIP-compared against the published ground truth. Converging it is too slow on the software-rendering runners, so it stays local-only; gpu_render_static_64spp gates a partly converged frame in CI.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu"],
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
@@ -70,6 +94,67 @@
             "args": ["--framework", "{framework}", "--pipeline", "cpu"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
+    },
+    {
+        "name": "cpu_render_static_64spp",
+        "test_case": "screenshot",
+        "description": "Still frame on the cpu path-tracing pipeline after 64 samples per pixel, FLIP-compared against the published ground truth. The ground truth is converged, so the gate allows for the remaining sampling noise.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--max_spp", "64"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "cpu", "--flip_threshold", "0.1"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "gpu_render_static_64spp",
+        "test_case": "screenshot",
+        "description": "Still frame on the gpu path-tracing pipeline after 64 samples per pixel, FLIP-compared against the published ground truth. The ground truth is converged, so the gate allows for the remaining sampling noise. Without ray query support the pipeline falls back to forward.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--max_spp", "64"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "gpu", "--flip_threshold", "0.1"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "forward_sync_validation",
+        "test_case": "screenshot",
+        "description": "Forward still frame under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case.",
+        "app_args": ["--pipeline", "forward", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "deferred_sync_validation",
+        "test_case": "screenshot",
+        "description": "Deferred still frame under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case.",
+        "app_args": ["--pipeline", "deferred", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "gpu_sync_validation",
+        "test_case": "screenshot",
+        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward, which the evaluator rejects.",
+        "app_args": ["--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/rendering/effective_pipeline_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "Gpu"]
+        }
+    },
+    {
+        "name": "cpu_sync_validation",
+        "test_case": "screenshot",
+        "description": "One cpu path-traced sample under the Vulkan validation layer with synchronization validation, covering the cpu render graph's upload, screenshot readback and present; any validation error, or a missing layer, fails the case.",
+        "app_args": ["--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "sync_validation_hazard",
+        "test_case": "sync_validation_hazard",
+        "description": "Records two copies into one buffer with no barrier between them and expects synchronization validation to report the write-after-write, proving the sync validation cases can fail."
     },
     {
         "name": "camera_nudge_return",
@@ -153,11 +238,6 @@
         "description": "Scene async failure propagation for a missing authored sky resource."
     },
     {
-        "name": "render_target_pool",
-        "test_case": "render_target_pool",
-        "description": "RHIRenderTargetPool reuse and release semantics on the render thread."
-    },
-    {
         "name": "dynamic_buffer_reuse",
         "test_case": "dynamic_buffer_reuse",
         "description": "Staged buffer uploads, dynamic suballocation capacity, reuse, and adjacent free-range coalescing."
@@ -169,9 +249,143 @@
         "app_args": ["--validation", "true"]
     },
     {
+        "name": "pass_timestamps",
+        "test_case": "pass_timestamps",
+        "description": "Opt-in rendering GPU timestamps report a time once their frame slot returns, a pass recorded twice reporting its last run, and nothing without device support."
+    },
+    {
+        "name": "render_graph_compile",
+        "test_case": "render_graph_compile",
+        "description": "Synthetic render graphs: culling, transient image reuse within and across frames, physical passes with every break reason, barriers seeded from tracked state, load/store inference, write masks of merged passes, mip runs, acceleration structure builds, the dump, draws binding their declared textures or a placeholder and native recording, then executed and read back."
+    },
+    {
+        "name": "render_graph_sync_validation",
+        "test_case": "render_graph_compile",
+        "description": "render_graph_compile under Vulkan synchronization validation, so every planned barrier batch must order the accesses it separates.",
+        "app_args": ["--validation", "true", "--validate_sync", "true"]
+    },
+    {
+        "name": "render_graph_errors",
+        "test_case": "render_graph_errors",
+        "description": "One mistake per render graph error, with errors thrown instead of aborting: declarations, imports, compile-time checks, and recording checks including bindings no pipeline has and graph resources a pipeline holds that the pass did not declare. Each must fail with its expected message."
+    },
+    {
+        "name": "render_graph_pass_timing",
+        "test_case": "render_graph_pass_timing",
+        "description": "Render graph compute and merged raster physical passes dump their GPU time once their frame slot returns, and none without device support."
+    },
+    {
+        "name": "render_graph_merge_parity",
+        "test_case": "render_graph_merge_parity",
+        "description": "A forward frame with render_graph_merge, render_graph_memoryless and render_graph_pixel_local on, one with memoryless off, one with pixel-local reads off and one with merging off, switched at runtime, must be bit-identical; only the first three graphs merge passes, only the first and third may have memoryless transients and only the first two read pixel-locally.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "forward"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "render_graph_merge_parity_sync_validation",
+        "test_case": "render_graph_merge_parity",
+        "description": "render_graph_merge_parity under Vulkan synchronization validation, so the barriers of every frame it captures must order every access.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "forward", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "render_graph_merge_parity_deferred",
+        "test_case": "render_graph_merge_parity",
+        "description": "render_graph_merge_parity on a deferred frame, whose GBuffer, lighting, sky box and tone mapping share one physical pass only with pixel-local reads.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "deferred"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "render_graph_merge_parity_deferred_sync_validation",
+        "test_case": "render_graph_merge_parity",
+        "description": "render_graph_merge_parity_deferred under Vulkan synchronization validation.",
+        "app_args": ["--clear_screenshots", "true", "--sampler_anisotropy", "false", "--pipeline", "deferred", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"]
+    },
+    {
+        "name": "cpu_graph_shape",
+        "test_case": "render_graph_dump",
+        "description": "The cpu pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "cpu", "--page", "cpu_graph_shape"]
+        }
+    },
+    {
+        "name": "gpu_graph_shape",
+        "test_case": "render_graph_dump_accumulating",
+        "description": "The gpu pipeline's render graph of a frame that traces samples into the accumulator (passes, accesses, barriers, load/store, resources), compared against its golden graph shape. Needs ray query support; without it the pipeline falls back to forward, whose graph differs from the golden.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "gpu", "--page", "gpu_graph_shape"]
+        }
+    },
+    {
+        "name": "forward_graph_shape",
+        "test_case": "render_graph_dump",
+        "description": "The forward pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "forward", "--page", "forward_graph_shape"]
+        }
+    },
+    {
+        "name": "forward_graph_shape_no_merge",
+        "test_case": "render_graph_dump",
+        "description": "The forward pipeline's render graph of a still frame with render_graph_merge off, where every live pass is its own physical pass, compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--render_graph_merge", "false", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "forward_no_merge", "--page", "forward_graph_shape_no_merge"]
+        }
+    },
+    {
+        "name": "forward_graph_shape_halfres",
+        "test_case": "render_graph_dump",
+        "description": "The forward pipeline's render graph of a still frame at render_scale 0.5, where tone mapping upsamples the scene color and so samples it after the physical pass that writes it, compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--render_scale", "0.5", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "forward_halfres", "--page", "forward_graph_shape_halfres"]
+        }
+    },
+    {
+        "name": "deferred_graph_shape",
+        "test_case": "render_graph_dump",
+        "description": "The deferred pipeline's render graph of a still frame (passes, accesses, barriers, load/store, resources), compared against its golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "deferred", "--page", "deferred_graph_shape"]
+        }
+    },
+    {
+        "name": "deferred_graph_view_shape",
+        "test_case": "render_graph_dump",
+        "description": "The deferred pipeline's render graph while render_graph_view shows the scene depth: the depth is drawn into the screen in place of tone mapping, and the passes that only fed the scene color are culled.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "SceneDepth"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "deferred_view", "--page", "deferred_graph_view_shape"]
+        }
+    },
+    {
+        "name": "deferred_graph_view_fallback",
+        "test_case": "render_graph_dump",
+        "description": "render_graph_view naming a texture the post chain cannot sample (the integer GBufferPacked) falls back to the normal frame: the deferred golden graph shape.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "320", "--height", "180", "--render_graph_view", "GBufferPacked"],
+        "evaluator": {
+            "script": "tests/render_graph/graph_shape_test.py",
+            "args": ["--framework", "{framework}", "--golden", "deferred", "--page", "deferred_graph_view_fallback"]
+        }
+    },
+    {
         "name": "pipeline_switch_pool",
         "test_case": "pipeline_switch_pool",
-        "description": "Runtime pipeline switch and pooled render-target reuse."
+        "description": "Runtime pipeline switch and graph texture pool reuse."
     },
     {
         "name": "ibl_parity",

@@ -60,6 +60,17 @@ class RegistryTest(unittest.TestCase):
                     os.path.isfile(os.path.join(PROJECT_ROOT, evaluator["script"])),
                     f"{case['name']}: {evaluator['script']}")
 
+    def test_graph_shape_goldens_exist(self):
+        for case in REGISTRY:
+            evaluator = case.get("evaluator")
+            if not evaluator or evaluator["script"] != "tests/render_graph/graph_shape_test.py":
+                continue
+            args = evaluator["args"]
+            golden = args[args.index("--golden") + 1]
+            self.assertTrue(
+                os.path.isfile(os.path.join(PROJECT_ROOT, "tests", "render_graph", "golden", f"{golden}.txt")),
+                f"{case['name']}: golden {golden}")
+
 
 class CoverageTest(unittest.TestCase):
 

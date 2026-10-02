@@ -58,7 +58,7 @@ void VulkanResourceArray::OnResourceUpdate()
 }
 
 void VulkanResourceArray::WriteDescriptorForDirtyResource(uint32_t slot, VkDescriptorSet descriptor_set,
-                                                          std::vector<VkWriteDescriptorSet> &out_set_write)
+                                                          std::vector<VkWriteDescriptorSet> &out_set_write) const
 {
     auto descriptor_type = GetVulkanDescriptorType(type_);
     switch (type_)
@@ -94,8 +94,6 @@ void VulkanResourceArray::WriteDescriptorForDirtyResource(uint32_t slot, VkDescr
         UnImplemented(type_);
         break;
     }
-
-    dirty_resource_indices_.clear();
 }
 } // namespace sparkle
 

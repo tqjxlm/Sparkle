@@ -21,7 +21,7 @@ public:
             return Result::Pending;
         }
 
-        if (failed_.load(std::memory_order_acquire))
+        if (HasFailed())
         {
             return Result::Fail;
         }
@@ -125,9 +125,10 @@ private:
         auto target = rhi->CreateBuffer(target_attribute, "StandaloneUploadTarget");
         auto readback = rhi->CreateBuffer(readback_attribute, "StandaloneUploadReadback");
 
-        rhi->BeginCommandBuffer();
+        auto &command_context = rhi->BeginCommandBuffer();
         target->Upload(rhi, Data.data());
-        target->CopyToBuffer(readback.get());
+        command_context.CopyBuffer(target.get(), readback.get());
+        command_context.Barrier({.from = {.access = RHIAccess::CopyDst}, .to = {.access = RHIAccess::HostRead}});
         rhi->SubmitCommandBuffer();
         rhi->WaitForDeviceIdle();
 
@@ -146,24 +147,10 @@ private:
         });
     }
 
-    void Expect(bool condition, const std::string &what)
-    {
-        if (condition)
-        {
-            Log(Info, "{}: OK - {}", GetName(), what);
-        }
-        else
-        {
-            Log(Error, "{}: FAILED - {}", GetName(), what);
-            failed_.store(true, std::memory_order_release);
-        }
-    }
-
     Stage stage_ = Stage::ReleaseAdjacentAllocations;
     uint32_t wait_until_frame_ = 0;
     uint32_t pool_capacity_ = 0;
     std::atomic<bool> task_pending_{false};
-    std::atomic<bool> failed_{false};
 };
 
 static TestCaseRegistrar<DynamicBufferReuseTest> dynamic_buffer_reuse_test_registrar("dynamic_buffer_reuse");

@@ -1,6 +1,7 @@
 #include "renderer/pass/IBLDiffusePass.h"
 
-#include "renderer/pass/ClearTexturePass.h"
+#include "renderer/graph/RenderGraph.h"
+#include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/IblSettings.h"
 #include "rhi/RHI.h"
 
@@ -65,12 +66,6 @@ RHIResourceRef<RHIImage> IBLDiffusePass::CreateIBLMap(bool for_cooking, bool all
 
     output_attribute.type = RHIImage::ImageType::Image2DCube;
 
-    output_attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                                .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                                .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                                .enable_anisotropy = false};
-
     return rhi_->CreateImage(output_attribute, env_map_->GetName() + "_diffuse");
 }
 
@@ -93,31 +88,16 @@ void IBLDiffusePass::InitRenderResources(const RenderConfig &)
 
     auto *shader_resource = pipeline_state_->GetShaderResource<IBLDiffuseMapComputeShader>();
     shader_resource->ubo().BindResource(cs_ub_);
-    shader_resource->env_map().BindResource(env_map_->GetDefaultView(rhi_));
-    shader_resource->env_map_sampler().BindResource(env_map_->GetSampler());
 
-    shader_resource->out_cube_map().BindResource(ibl_image_->GetView(
-        rhi_, RHIImageView::Attribute{.type = RHIImageView::ImageViewType::Image2DArray, .array_layer_count = 6}));
-
-    compute_pass_ = rhi_->CreateComputePass("IBLDiffuseComputePass", false);
+    compute_pass_ = rhi_->CreateComputePass("IBLDiffuseComputePass", true);
 }
 
-void IBLDiffusePass::CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch)
+void IBLDiffusePass::AddTo(RenderGraph &graph, unsigned samples_per_dispatch)
 {
     ASSERT(!IsReady());
 
-    if (sample_count_ == 0)
-    {
-        for (uint8_t face = 0u; face < 6; face++)
-        {
-            clear_target_ =
-                rhi_->CreateRenderTarget({.array_layer = face}, ibl_image_, nullptr, "IBLClearPassRenderTarget");
-
-            clear_pass_ = PipelinePass::Create<ClearTexturePass>(config, rhi_, Vector4(0, 0, 0, 1),
-                                                                 RHIImageLayout::StorageWrite, clear_target_);
-            clear_pass_->Render();
-        }
-    }
+    const auto env_map = graph.Import("SkyMap", env_map_);
+    const auto map = ImportCookingMap(graph, "IblDiffuseCook");
 
     const auto remaining_samples = target_sample_count_ - sample_count_;
     const uint32_t batch_size = std::min(std::max(samples_per_dispatch, 1u), remaining_samples);
@@ -131,7 +111,13 @@ void IBLDiffusePass::CookOnTheFly(const RenderConfig &config, unsigned samples_p
     };
     cs_ub_->Upload(rhi_, &ubo);
 
-    Render();
+    graph.AddComputePass("CookIblDiffuse", compute_pass_, [this, env_map, map](RGBuilder &builder) {
+        using Table = IBLDiffuseMapComputeShader::ResourceTable;
+        builder.Sampled(env_map, &Table::env_map, &Table::env_map_sampler, SkyRenderProxy::SkyMapSampler);
+        builder.StorageReadWrite(map, &Table::out_cube_map);
+        return [this, threads = Vector3UInt(ibl_image_->GetWidth(), ibl_image_->GetHeight(), 6u)](
+                   RGComputeContext &context) { context.DispatchCompute(pipeline_state_, threads, {16u, 16u, 1u}); };
+    });
 
     sample_count_ += batch_size;
 
@@ -145,15 +131,6 @@ void IBLDiffusePass::CookOnTheFly(const RenderConfig &config, unsigned samples_p
         float progress = static_cast<float>(sample_count_) / static_cast<float>(target_sample_count_) * 100.f;
         Logger::LogToScreen("IBLDiffuse", std::format("Caching ibl diffuse: {:.1f}%", progress));
     }
-}
-
-void IBLDiffusePass::Render()
-{
-    rhi_->BeginComputePass(compute_pass_);
-
-    rhi_->DispatchCompute(pipeline_state_, {ibl_image_->GetWidth(), ibl_image_->GetHeight(), 6u}, {16u, 16u, 1u});
-
-    rhi_->EndComputePass(compute_pass_);
 }
 
 } // namespace sparkle

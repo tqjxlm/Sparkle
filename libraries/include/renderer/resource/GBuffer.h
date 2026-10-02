@@ -1,21 +1,11 @@
 #pragma once
 
-#include "rhi/RHIImage.h"
-#include "rhi/RHIRenderTarget.h"
+#include "core/math/Types.h"
+
+#include <vector>
 
 namespace sparkle
 {
-struct GBuffer
-{
-    RHIResourceRef<RHIImage> packed_texture;
-
-    RHIRenderTarget::ColorImageArray images;
-
-    void InitRenderResources(RHIContext *rhi, const Vector2UInt &image_size);
-
-    void Transition(const RHIImage::TransitionRequest &request) const;
-};
-
 struct CPUGBuffer
 {
     // holds one frame's color output. alpha channel: whether this pixel is valid

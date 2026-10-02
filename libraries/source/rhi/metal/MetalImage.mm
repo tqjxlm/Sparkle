@@ -16,8 +16,7 @@ static MTLTextureUsage GetMetalTextureUsage(RHIImage::ImageUsage usage)
 {
     NSUInteger metal_usage = MTLTextureUsageUnknown;
 
-    if (usage & RHIImage::ImageUsage::ColorAttachment || usage & RHIImage::ImageUsage::DepthStencilAttachment ||
-        usage & RHIImage::ImageUsage::TransientAttachment)
+    if (usage & RHIImage::ImageUsage::ColorAttachment || usage & RHIImage::ImageUsage::DepthStencilAttachment)
     {
         metal_usage |= MTLTextureUsageRenderTarget;
     }
@@ -164,16 +163,12 @@ MetalImage::MetalImage(const Attribute &attributes, const std::string &name) : R
     SetDebugInfo(texture_, GetName());
 
     ASSERT_F(texture_, "Failed to created texture {}", name);
-
-    CreateSamplerIfNeeded();
 }
 
 MetalImage::MetalImage(const Attribute &attributes, id<MTLTexture> texture, const std::string &name)
     : RHIImage(attributes, name)
 {
     texture_ = texture;
-
-    CreateSamplerIfNeeded();
 }
 
 // private textures cannot use replaceRegion; stage the payload in a shared buffer and
@@ -219,7 +214,7 @@ void MetalImage::UploadStaged(const uint8_t *data)
     }
 }
 
-void MetalImage::Upload(const uint8_t *data)
+void MetalImage::Upload(RHICommandContext & /*command_context*/, const uint8_t *data)
 {
     if (texture_.storageMode == MTLStorageModePrivate)
     {
@@ -251,7 +246,7 @@ void MetalImage::Upload(const uint8_t *data)
     }
 }
 
-void MetalImage::UploadFaces(std::array<const uint8_t *, 6> data)
+void MetalImage::UploadFaces(RHICommandContext & /*command_context*/, std::array<const uint8_t *, 6> data)
 {
     ASSERT(attributes_.type == RHIImage::ImageType::Image2DCube);
 
@@ -294,40 +289,13 @@ void MetalImage::UploadFaces(std::array<const uint8_t *, 6> data)
     }
 }
 
-void MetalImage::CopyToImage(const RHIImage *image) const
-{
-    const auto *dst_image = RHICast<MetalImage>(image);
-
-    auto dst_texture = dst_image->GetResource();
-
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
-
-    [command_encoder copyFromTexture:texture_ toTexture:dst_texture];
-
-    [command_encoder endEncoding];
-}
-
-void MetalImage::GenerateMips()
-{
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
-
-    [command_encoder generateMipmapsForTexture:texture_];
-
-    [command_encoder endEncoding];
-}
-
-void MetalImage::CopyToBuffer(const RHIBuffer *buffer) const
+void MetalImage::CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const
 {
     // copy to dynamic buffer is not supported for now
     ASSERT(!buffer->IsDynamic());
 
     const auto *dst_buffer = RHICast<MetalBuffer>(buffer);
     auto dst_offset = dst_buffer->GetOffset(UINT_MAX);
-
-    auto command_buffer = context->GetCurrentCommandBuffer();
-    auto command_encoder = [command_buffer blitCommandEncoder];
 
     uint32_t copied_bytes = 0;
 
@@ -338,30 +306,26 @@ void MetalImage::CopyToBuffer(const RHIBuffer *buffer) const
     {
         for (auto layer = 0u; layer < num_layers; layer++)
         {
-            [command_encoder copyFromTexture:texture_
-                                 sourceSlice:layer
-                                 sourceLevel:mip_level
-                                sourceOrigin:{0, 0, 0}
-                                  sourceSize:{GetWidth(mip_level), GetHeight(mip_level), 1}
-                                    toBuffer:dst_buffer->GetResource()
-                           destinationOffset:(dst_offset + copied_bytes)
-                      destinationBytesPerRow:GetBytesPerRow(mip_level)
-                    destinationBytesPerImage:0];
+            [encoder copyFromTexture:texture_
+                             sourceSlice:layer
+                             sourceLevel:mip_level
+                            sourceOrigin:{0, 0, 0}
+                              sourceSize:{GetWidth(mip_level), GetHeight(mip_level), 1}
+                                toBuffer:dst_buffer->GetResource()
+                       destinationOffset:(dst_offset + copied_bytes)
+                  destinationBytesPerRow:GetBytesPerRow(mip_level)
+                destinationBytesPerImage:0];
 
             copied_bytes += GetStorageSize(mip_level);
         }
     }
-
-    [command_encoder endEncoding];
 }
 
-void MetalImage::BlitToImage(const RHIImage *image, RHISampler::FilteringMethod) const
+void MetalImage::BlitToImage(id<MTLCommandBuffer> command_buffer, const RHIImage *image) const
 {
     const auto *dst_image = RHICast<MetalImage>(image);
 
     auto dst_texture = dst_image->GetResource();
-
-    auto command_buffer = context->GetCurrentCommandBuffer();
 
     unsigned num_layers = attributes_.type == RHIImage::ImageType::Image2DCube ? 6 : 1;
 
@@ -388,14 +352,6 @@ void MetalImage::BlitToImage(const RHIImage *image, RHISampler::FilteringMethod)
                                  destinationTexture:dest_view];
             }
         }
-    }
-}
-
-void MetalImage::CreateSamplerIfNeeded()
-{
-    if (attributes_.usages & RHIImage::ImageUsage::Texture)
-    {
-        sampler_ = context->GetRHI()->GetSampler(attributes_.sampler);
     }
 }
 
@@ -433,6 +389,14 @@ void MetalImage::SetImage(id<MTLTexture> texture)
 MetalImageView::MetalImageView(Attribute attribute, RHIImage *image) : RHIImageView(attribute, image)
 {
     auto *metal_image = RHICast<MetalImage>(image);
+
+    // Metal cannot view a memoryless texture. only framebuffer fetches read one, without a binding, so the texture
+    // stands for its views
+    if (metal_image->GetAttributes().memory_properties & RHIMemoryProperty::Memoryless)
+    {
+        view_ = metal_image->GetResource();
+        return;
+    }
 
     view_ = [metal_image->GetResource()
         newTextureViewWithPixelFormat:GetMetalPixelFormat(metal_image->GetAttributes().format)

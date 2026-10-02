@@ -24,7 +24,7 @@ namespace sparkle
 class RHIContext;
 
 // NVIDIA NRD (ReBLUR_DIFFUSE_SPECULAR) denoiser for the GPU path tracer. The provider-neutral
-// path-tracing inputs are borrowed for each Encode call; this class owns only NRD resources.
+// path-tracing inputs are borrowed for each frame's pass; this class owns only NRD resources.
 class NrdDenoiser final : public Denoiser
 {
 public:
@@ -54,7 +54,7 @@ public:
 
     void UpdateFrameData(const DenoiserFrameData &frame) override;
 
-    bool Encode(const DenoiserInputs &inputs) override;
+    [[nodiscard]] RGTexture AddTo(RenderGraph &graph, const DenoiserInputs &inputs) override;
 
 private:
     struct ConfigSnapshot
@@ -65,15 +65,15 @@ private:
 
     void SampleConfig();
 
-    void Initialize();
+    void Initialize(PixelFormat output_format);
 
-    void EnsureOutputResources(PixelFormat format);
-
-    void BindInputs(const DenoiserInputs &inputs);
+    void BindInputs(const RGPassContext &context, const DenoiserInputs &inputs);
 
     [[nodiscard]] RHIResourceRef<RHIImage> CreateFullScreenTexture(PixelFormat format, const std::string &name) const;
 
-    void RenderReblur(const DenoiserInputs &inputs, const Vector3UInt &dispatch, const Vector3UInt &group);
+    void Encode(RGExternalContext &context, const DenoiserInputs &inputs);
+
+    void RenderReblur(RHICommandContext &command_context, const Vector3UInt &dispatch, const Vector3UInt &group);
 
     RHIContext *rhi_;
     Vector2UInt input_size_;

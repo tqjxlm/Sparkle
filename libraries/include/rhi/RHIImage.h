@@ -4,6 +4,7 @@
 
 #include "core/Hash.h"
 #include "io/ImageTypes.h"
+#include "rhi/RHIBarrier.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIImageView.h"
 #include "rhi/RHIMemory.h"
@@ -14,29 +15,12 @@
 
 namespace sparkle
 {
-enum class RHIImageLayout : uint8_t
-{
-    Undefined,
-    General,
-    Read,
-    StorageWrite,
-    ColorOutput,
-    DepthStencilOutput,
-    TransferSrc,
-    TransferDst,
-    PreInitialized,
-    Present,
-};
+class RHICommandContext;
 
 enum class RHIPipelineStage : uint8_t
 {
     Top,
-    DrawIndirect,
-    VertexInput,
-    VertexShader,
     PixelShader,
-    EarlyZ,
-    LateZ,
     ColorOutput,
     ComputeShader,
     Transfer,
@@ -127,7 +111,8 @@ public:
         UAV = 1u << 4,
         ColorAttachment = 1u << 5,
         DepthStencilAttachment = 1u << 6,
-        TransientAttachment = 1u << 7,
+        // read pixel-locally by draws of a rendering it is a color attachment of
+        InputAttachment = 1u << 7,
     };
 
     enum class ImageType : uint8_t
@@ -139,7 +124,6 @@ public:
     struct Attribute
     {
         PixelFormat format = PixelFormat::Count;
-        RHISampler::SamplerAttribute sampler;
         uint32_t width = 1;
         uint32_t height = 1;
         RHIImage::ImageUsage usages = RHIImage::ImageUsage::Undefined;
@@ -157,7 +141,6 @@ public:
         {
             uint32_t hash = 0;
             HashCombine(hash, format);
-            HashCombine(hash, sampler.GetHash());
             HashCombine(hash, usages);
             HashCombine(hash, memory_properties);
             HashCombine(hash, type);
@@ -165,10 +148,13 @@ public:
         }
     };
 
+    // a read already covered by the tracked reads in the same layout emits nothing; otherwise the barrier waits for the
+    // tracked last access of each subresource plus the write after_stage implies.
     struct TransitionRequest
     {
         RHIImageLayout target_layout;
         RHIPipelineStage after_stage;
+        // the shader stage that samples or stores the image next; Top and Bottom stand for every shader stage
         RHIPipelineStage before_stage;
         // A zero count transitions every remaining subresource in that dimension.
         unsigned base_mip = 0;
@@ -178,11 +164,6 @@ public:
     };
 
     RHIImage(const Attribute &attributes, const std::string &name);
-
-    [[nodiscard]] RHIResourceRef<RHISampler> GetSampler() const
-    {
-        return sampler_;
-    }
 
     [[nodiscard]] RHIResourceRef<RHIImageView> GetView(RHIContext *rhi, const RHIImageView::Attribute &attribute);
 
@@ -197,19 +178,12 @@ public:
 
 #pragma region RHIImage Interface
 
-    virtual void Transition(const TransitionRequest &request) = 0;
+    // records the barriers TrackTransition returns into `command_context`
+    void Transition(RHICommandContext &command_context, const TransitionRequest &request);
 
-    virtual void Upload(const uint8_t *data) = 0;
+    virtual void Upload(RHICommandContext &command_context, const uint8_t *data) = 0;
 
-    virtual void UploadFaces(std::array<const uint8_t *, 6> data) = 0;
-
-    virtual void CopyToBuffer(const RHIBuffer *buffer) const = 0;
-
-    virtual void CopyToImage(const RHIImage *image) const = 0;
-
-    virtual void BlitToImage(const RHIImage *image, RHISampler::FilteringMethod filter) const = 0;
-
-    virtual void GenerateMips() = 0;
+    virtual void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) = 0;
 
 #pragma endregion
 
@@ -291,19 +265,24 @@ public:
 
 #pragma endregion
 
-#pragma region Layout
+#pragma region State
 
     [[nodiscard]] RHIImageLayout GetCurrentLayout(unsigned mip_level, unsigned array_layer) const
+    {
+        return GetState(mip_level, array_layer).layout;
+    }
+
+    [[nodiscard]] RHIImageState GetState(unsigned mip_level, unsigned array_layer) const
     {
         ASSERT(mip_level < attributes_.mip_levels);
         ASSERT(array_layer < GetArrayLayerCount());
 
-        return current_layout_[mip_level * GetArrayLayerCount() + array_layer];
+        return subresource_states_[mip_level * GetArrayLayerCount() + array_layer];
     }
 
-    // CAUTION: normally this should not be used. use RHIImage::Transition instead unless you know what you are doing.
-    void SetCurrentLayout(RHIImageLayout layout, unsigned base_mip, unsigned mip_count, unsigned base_array_layer,
-                          unsigned array_layer_count)
+    // sets the tracked state of a subresource range without recording anything
+    void SetState(const RHIImageState &state, unsigned base_mip, unsigned mip_count, unsigned base_array_layer,
+                  unsigned array_layer_count)
     {
         ASSERT(mip_count > 0 && base_mip + mip_count <= attributes_.mip_levels);
         ASSERT(array_layer_count > 0 && base_array_layer + array_layer_count <= GetArrayLayerCount());
@@ -312,22 +291,23 @@ public:
         {
             for (auto layer = base_array_layer; layer < base_array_layer + array_layer_count; layer++)
             {
-                current_layout_[mip * GetArrayLayerCount() + layer] = layout;
+                subresource_states_[mip * GetArrayLayerCount() + layer] = state;
             }
         }
     }
+
+    // records the transition in the tracked state and returns the barriers it needs
+    [[nodiscard]] std::vector<RHIImageBarrier> TrackTransition(const TransitionRequest &request);
 
 #pragma endregion
 
 protected:
     Attribute attributes_;
 
-    RHIResourceRef<RHISampler> sampler_;
-
     std::unordered_map<RHIImageView::Attribute, RHIResourceRef<RHIImageView>> image_views_;
 
 private:
-    std::vector<RHIImageLayout> current_layout_;
+    std::vector<RHIImageState> subresource_states_;
     uint32_t bindless_id_ = UINT32_MAX;
 };
 

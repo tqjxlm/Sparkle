@@ -9,8 +9,6 @@
 #include "MetalNrdBackend.h"
 #include "MetalPipelineState.h"
 #include "MetalRayTracing.h"
-#include "MetalRenderPass.h"
-#include "MetalRenderTarget.h"
 #include "MetalResourceArray.h"
 #include "MetalShader.h"
 #include "MetalTimer.h"
@@ -20,21 +18,6 @@
 
 namespace sparkle
 {
-static MTLPrimitiveType GetMetalPrimitiveType(RHIPipelineState::PolygonMode mode)
-{
-    switch (mode)
-    {
-    case RHIPipelineState::PolygonMode::Fill:
-        return MTLPrimitiveTypeTriangle;
-    case RHIPipelineState::PolygonMode::Line:
-        return MTLPrimitiveTypeLine;
-    case RHIPipelineState::PolygonMode::Point:
-        return MTLPrimitiveTypePoint;
-    default:
-        UnImplemented(mode);
-    }
-}
-
 bool MetalRHI::InitRHI(NativeView *inWindow, std::string &error)
 {
     @autoreleasepool
@@ -66,30 +49,14 @@ bool MetalRHI::InitRHI(NativeView *inWindow, std::string &error)
     }
 }
 
-static auto CreateBackBufferDepth(CGSize extent)
-{
-    RHIImage::Attribute attribute;
-    attribute.width = extent.width;
-    attribute.height = extent.height;
-    attribute.mip_levels = 1;
-    attribute.msaa_samples = 1;
-    attribute.format = PixelFormat::D32;
-    attribute.usages = RHIImage::ImageUsage::DepthStencilAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
-    attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
-
-    return context->GetRHI()->CreateResource<MetalImage>(attribute, "BackBufferDepth");
-}
-
 void MetalRHI::InitRenderResources()
 {
     context->CreateBackBuffer();
+}
 
-    auto rt_name = IsHeadless() ? "HeadlessBackBufferRT" : "BackBufferRT";
-    back_buffer_rt_ = CreateBackBufferRenderTarget({}, CreateBackBufferDepth(context->GetDrawableSize()), rt_name);
+RHIResourceRef<RHIImage> MetalRHI::GetBackBuffer() const
+{
+    return context->GetBackBufferColor();
 }
 
 void MetalRHI::CleanupInternal()
@@ -113,6 +80,57 @@ bool MetalRHI::SupportsHardwareRayTracing()
 #endif
 #endif
     return context->GetDevice().supportsRaytracing;
+}
+
+bool MetalRHI::SupportsPassTimestamps()
+{
+    return context->SupportsPassTimestamps();
+}
+
+// memoryless storage exists only on Apple family GPUs; the simulator creates depth textures only in private storage
+bool MetalRHI::SupportsMemorylessImage(PixelFormat /*format*/, RHIImage::ImageUsage /*usages*/)
+{
+#if TARGET_OS_SIMULATOR
+    return false;
+#else
+    return [context->GetDevice() supportsFamily:MTLGPUFamilyApple1];
+#endif
+}
+
+// framebuffer fetch (programmable blending) exists only on Apple family GPUs; the simulator rejects reading a render
+// target
+bool MetalRHI::SupportsPixelLocalRead()
+{
+#if TARGET_OS_SIMULATOR
+    return false;
+#else
+    return [context->GetDevice() supportsFamily:MTLGPUFamilyApple1];
+#endif
+}
+
+// a pixel-local barrier records nothing
+bool MetalRHI::KeepsMemorylessAcrossPixelLocalBarrier()
+{
+    return true;
+}
+
+// Metal feature set tables: the maximum implicit image block size per pixel when using multiple color render targets
+std::optional<uint32_t> MetalRHI::GetTileBudget()
+{
+    id<MTLDevice> device = context->GetDevice();
+    if ([device supportsFamily:MTLGPUFamilyApple7])
+    {
+        return 128;
+    }
+    if ([device supportsFamily:MTLGPUFamilyApple4])
+    {
+        return 64;
+    }
+    if ([device supportsFamily:MTLGPUFamilyApple2])
+    {
+        return 32;
+    }
+    return std::nullopt;
 }
 
 bool MetalRHI::SupportsSampledFormat(PixelFormat format)
@@ -139,6 +157,27 @@ bool MetalRHI::SupportsSampledFormat(PixelFormat format)
     }
 }
 
+// Metal feature set tables: 32-bit float color formats and Depth32Float filter on Apple9 and later, and elsewhere only
+// where the device reports supports32BitFloatFiltering; integer formats never filter. Depth24Unorm_Stencil8 exists only
+// on some Mac GPUs and is treated as unfilterable.
+bool MetalRHI::SupportsLinearFiltering(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::R32UInt:
+    case PixelFormat::RGBAUInt32:
+    case PixelFormat::D24S8:
+        return false;
+    case PixelFormat::R32Float:
+    case PixelFormat::RGBAFloat:
+    case PixelFormat::D32:
+        return [context->GetDevice() supportsFamily:MTLGPUFamilyApple9] ||
+               context->GetDevice().supports32BitFloatFiltering;
+    default:
+        return SupportsSampledFormat(format);
+    }
+}
+
 bool MetalRHI::BeginFrameInternal()
 {
     context->BeginFrame();
@@ -150,7 +189,9 @@ void MetalRHI::EndFrameInternal()
     if (GetConfig().measure_gpu_time)
     {
         auto frame_index = GetFrameIndex();
-        [context->GetCurrentCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
+        auto *command_context = context->GetCommandContext();
+        ASSERT_F(command_context, "the frame ends outside its command buffer");
+        [command_context->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
           frame_stats_[frame_index].elapsed_time_ms = (command_buffer.GPUEndTime - command_buffer.GPUStartTime) * 1e3f;
         }];
     }
@@ -163,9 +204,15 @@ void MetalRHI::SubmitCommandBuffer()
     context->SubmitCommandBuffer();
 }
 
-void MetalRHI::BeginCommandBuffer()
+RHICommandContext &MetalRHI::BeginCommandBufferInternal()
 {
     context->BeginCommandBuffer();
+    return *context->GetCommandContext();
+}
+
+RHICommandContext *MetalRHI::GetCommandContextInternal()
+{
+    return context->GetCommandContext();
 }
 
 bool MetalRHI::RecreateSurface()
@@ -179,74 +226,9 @@ void MetalRHI::RecreateSwapChain()
     UnImplemented();
 }
 
-void MetalRHI::NextSubpass()
+RHIResourceRef<RHIShader> MetalRHI::CreateShader(const RHIShaderInfo *shader_info, std::string variant)
 {
-    UnImplemented();
-}
-
-void MetalRHI::DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args)
-{
-    auto *pso = RHICast<MetalGraphicsPipeline>(pipeline_state);
-    auto *pass = RHICast<MetalRenderPass>(current_render_pass_);
-    auto encoder = pass->GetRenderEncoder();
-
-    auto index_buffer = RHICast<MetalBuffer>(pso->GetIndexBuffer())->GetResource();
-
-    pso->Bind(encoder);
-
-    [encoder drawIndexedPrimitives:GetMetalPrimitiveType(pipeline_state->GetRasterizationState().polygon_mode)
-                        indexCount:draw_args.index_count
-                         indexType:MTLIndexTypeUInt32
-                       indexBuffer:index_buffer
-                 indexBufferOffset:draw_args.first_index
-                     instanceCount:draw_args.instance_count
-                        baseVertex:draw_args.first_vertex
-                      baseInstance:draw_args.first_instance];
-}
-
-void MetalRHI::DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                               Vector3UInt thread_per_group)
-{
-    auto *pass = RHICast<MetalComputePass>(current_compute_pass_);
-    ASSERT(pass);
-
-    auto *pso = RHICast<MetalComputePipeline>(pipeline);
-
-    auto encoder = pass->GetEncoder();
-
-    pso->Bind(encoder);
-
-    MTLSize grid_size = MTLSizeMake(total_threads.x(), total_threads.y(), total_threads.z());
-    MTLSize threadgroup_size = MTLSizeMake(thread_per_group.x(), thread_per_group.y(), thread_per_group.z());
-
-    [encoder dispatchThreads:grid_size threadsPerThreadgroup:threadgroup_size];
-}
-
-RHIResourceRef<RHIRenderTarget> MetalRHI::CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                                       const std::string &name)
-{
-    return CreateResource<MetalRenderTarget>(attribute, depth_image, name);
-}
-
-RHIResourceRef<RHIRenderTarget> MetalRHI::CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                             const RHIRenderTarget::ColorImageArray &color_images,
-                                                             const RHIResourceRef<RHIImage> &depth_image,
-                                                             const std::string &name)
-{
-    return CreateResource<MetalRenderTarget>(attribute, color_images, depth_image, name);
-}
-
-RHIResourceRef<RHIRenderPass> MetalRHI::CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                         const RHIResourceRef<RHIRenderTarget> &rt,
-                                                         const std::string &name)
-{
-    return CreateResource<MetalRenderPass>(attribute, rt, name);
-}
-
-RHIResourceRef<RHIShader> MetalRHI::CreateShader(const RHIShaderInfo *shader_info)
-{
-    return CreateResource<MetalShader>(shader_info);
+    return CreateResource<MetalShader>(shader_info, std::move(variant));
 }
 
 RHIResourceRef<RHIPipelineState> MetalRHI::CreatePipelineState(RHIPipelineState::PipelineType type,
@@ -299,16 +281,6 @@ std::unique_ptr<RHINrdBackend> MetalRHI::CreateNrdBackend()
     return std::make_unique<MetalNrdBackend>(context->GetDevice());
 }
 
-void MetalRHI::BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass)
-{
-    RHICast<MetalRenderPass>(pass)->Begin();
-}
-
-void MetalRHI::EndRenderPassInternal()
-{
-    RHICast<MetalRenderPass>(current_render_pass_)->End();
-}
-
 RHIResourceRef<RHIUiHandler> MetalRHI::CreateUiHandler()
 {
     return CreateResource<MetalUiHandler>();
@@ -333,16 +305,6 @@ RHIResourceRef<RHITimer> MetalRHI::CreateTimer(const std::string &name)
 RHIResourceRef<RHIComputePass> MetalRHI::CreateComputePass(const std::string &name, bool need_timestamp)
 {
     return CreateResource<MetalComputePass>(this, need_timestamp, name);
-}
-
-void MetalRHI::BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    RHICast<MetalComputePass>(pass)->Begin();
-}
-
-void MetalRHI::EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass)
-{
-    RHICast<MetalComputePass>(pass)->End();
 }
 } // namespace sparkle
 

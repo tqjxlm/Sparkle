@@ -1,0 +1,39 @@
+DirectionalShadow: culled (unread outputs: ShadowMap)
+GBuffer: Raster
+  access GBufferPacked ColorWrite clear
+  access DepthCopy ColorWrite clear
+  access SceneDepth DepthWrite clear
+  barrier GBufferPacked Undefined->ColorOutput [ColorWrite -> ColorWrite]
+  barrier DepthCopy Undefined->ColorOutput [ColorWrite -> ColorWrite]
+  barrier SceneDepth Undefined->DepthStencilOutput [Sampled(Pixel) -> DepthWrite]
+physical GBuffer, break NonLocalRead(SceneDepth)
+  attachment GBufferPacked slot 2: Clear (clear) / DontCare (no later reader)
+  attachment DepthCopy slot 3: Clear (clear) / DontCare (no later reader)
+  attachment SceneDepth slot depth: Clear (clear) / Store (read by GraphView)
+Lighting: culled (unread outputs: SceneColor)
+SkyBox: culled (unread outputs: SceneColor)
+GraphView: Raster
+  access SceneDepth Sampled(Pixel)
+  access Screen ColorWrite
+  barrier SceneDepth DepthStencilOutput->Read [DepthWrite -> Sampled(Pixel)]
+  barrier Screen Undefined->ColorOutput [Sampled(Pixel) -> ColorWrite]
+physical GraphView, break SlotConflict(BackBuffer), NonLocalRead(Screen)
+  attachment Screen slot 0: DontCare (fully overwritten) / Store (read by Present)
+Present: Raster
+  access Screen Sampled(Pixel)
+  access BackBuffer ColorWrite
+  barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+physical Present
+  attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
+ShadowMap: Transient D32 Absolute 1024x1024, no image
+IblBrdf: Imported
+IblDiffuse: Imported
+IblSpecular: Imported
+SceneDepth: Transient D32 Scene, physical 2, GBuffer..GraphView, Texture|DepthStencilAttachment
+GBufferPacked: Transient RGBAUInt32 Scene, physical 0, memoryless, GBuffer..GBuffer, ColorAttachment
+DepthCopy: Transient R32Float Scene, physical 1, memoryless, GBuffer..GBuffer, ColorAttachment
+SceneColor: Transient RGBAFloat16 Scene, no image
+SkyMap: Imported
+Screen: Transient B8G8R8A8Srgb Output, physical 3, GraphView..Present, Texture|ColorAttachment
+BackBuffer: Imported, Present..Present, ColorAttachment

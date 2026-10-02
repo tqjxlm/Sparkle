@@ -24,6 +24,18 @@ def get_screenshot_dir(framework):
     raise ValueError(f"Unsupported framework: {framework}")
 
 
+def get_logs_dir(framework):
+    """The app logs sit next to the screenshots on every framework."""
+    return os.path.join(os.path.dirname(get_screenshot_dir(framework)), "logs")
+
+
+def get_captures_dir(framework):
+    """Later cases wipe the top-level screenshots; files in this subdirectory survive into the CI artifacts."""
+    path = os.path.join(get_screenshot_dir(framework), "captures")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 def find_screenshot(framework):
     path = os.path.join(get_screenshot_dir(framework), "screenshot.png")
     if not os.path.isfile(path):

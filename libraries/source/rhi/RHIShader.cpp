@@ -13,7 +13,7 @@ void RHIShaderResourceTable::RegisterShaderResourceReflection(RHIShaderResourceB
     bindings_.push_back(binding);
 }
 
-void RHIShaderResourceTable::Initialize()
+void RHIShaderResourceTable::Initialize(bool variant)
 {
     // should not happen twice
     ASSERT(!initialized_);
@@ -26,9 +26,13 @@ void RHIShaderResourceTable::Initialize()
         auto slot = decl->slot;
         if (set == UINT_MAX || slot == UINT_MAX)
         {
-            // reflection could not locate this resource in the compiled shader (e.g. optimized out)
-            Log(Warn, "shader resource {} is not found in the compiled shader. it may have been optimized out.",
-                decl->name);
+            // reflection could not locate this resource in the compiled shader (e.g. optimized out), or it is a
+            // framebuffer fetch
+            if (!variant && decl->type != RHIShaderResourceReflection::ResourceType::InputAttachment)
+            {
+                Log(Warn, "shader resource {} is not found in the compiled shader. it may have been optimized out.",
+                    decl->name);
+            }
             continue;
         }
         if (resource_sets_.size() < set + 1)
@@ -116,7 +120,12 @@ void RHIShaderResourceBinding::BindResource(RHIResource *resource, bool rebind)
              resource->GetId(), resource->GetName());
 #endif
 
-    if (resource_ != resource || rebind)
+    // ids, unlike addresses, are never reused, so a new resource at a freed one's address still dirties the set
+    const auto resource_id = resource ? std::optional(resource->GetId()) : std::nullopt;
+    // a framebuffer fetch reads the attachment without a binding
+    const bool fetched =
+        parent_set_ == nullptr && decl_->type == RHIShaderResourceReflection::ResourceType::InputAttachment;
+    if ((resource_id_ != resource_id || rebind) && !fetched)
     {
         if (!parent_set_)
         {
@@ -130,5 +139,6 @@ void RHIShaderResourceBinding::BindResource(RHIResource *resource, bool rebind)
     }
 
     resource_ = resource;
+    resource_id_ = resource_id;
 }
 } // namespace sparkle

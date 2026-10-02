@@ -6,8 +6,7 @@
 #include "core/math/Ray.h"
 #include "core/math/Sampler.h"
 #include "core/task/TaskManager.h"
-#include "renderer/pass/ScreenQuadPass.h"
-#include "renderer/pass/UiPass.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/PrimitiveRenderProxy.h"
@@ -20,8 +19,8 @@
 namespace sparkle
 {
 CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                         SceneRenderProxy *scene_render_proxy)
-    : Renderer(render_config, rhi_context, scene_render_proxy),
+                         SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
+    : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool),
       output_image_(resolution_.scene.x(), resolution_.scene.y(), PixelFormat::RGBAFloat16)
 {
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Cpu);
@@ -47,53 +46,8 @@ void CPURenderer::InitRenderResources()
                                         .is_dynamic = true},
                                        "RayTracingOutputBuffer");
 
-    auto color_buffer_attribute = [this](const Vector2UInt &size, RHIImage::ImageUsage usages) {
-        return RHIImage::Attribute{
-            .format = output_image_.GetFormat(),
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
-                        .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Linear},
-            .width = size.x(),
-            .height = size.y(),
-            .usages = usages,
-            .msaa_samples = static_cast<uint8_t>(rhi_->GetConfig().msaa_samples),
-        };
-    };
-
-    screen_texture_ = rhi_->CreateImage(
-        color_buffer_attribute(resolution_.scene, RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst |
-                                                      RHIImage::ImageUsage::ColorAttachment |
-                                                      RHIImage::ImageUsage::TransferSrc),
-        "CpuPipelineColorBuffer");
-
-    screen_rt_ = rhi_->CreateRenderTarget({}, screen_texture_, nullptr, "CpuPipelineRenderTarget");
-
-    if (resolution_.NeedUpsample())
-    {
-        composite_texture_ =
-            rhi_->CreateImage(color_buffer_attribute(resolution_.output, RHIImage::ImageUsage::Texture |
-                                                                             RHIImage::ImageUsage::ColorAttachment |
-                                                                             RHIImage::ImageUsage::TransferSrc),
-                              "CpuPipelineCompositeBuffer");
-
-        composite_rt_ = rhi_->CreateRenderTarget({}, composite_texture_, nullptr, "CpuPipelineCompositeRenderTarget");
-
-        upsample_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, screen_texture_, composite_rt_);
-    }
-    else
-    {
-        composite_texture_ = screen_texture_;
-        composite_rt_ = screen_rt_;
-    }
-
-    screen_quad_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, composite_texture_,
-                                                             rhi_->GetBackBufferRenderTarget());
-
-    if (!rhi_->IsHeadless())
-    {
-        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, composite_rt_);
-    }
+    InitPostChain(output_image_.GetFormat(),
+                  resolution_.NeedUpsample() ? PostChain::ScreenPass::Upsample : PostChain::ScreenPass::None);
 
     gbuffer_.Resize(resolution_.scene.x(), resolution_.scene.y());
     ping_pong_buffer_.resize(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
@@ -104,21 +58,9 @@ void CPURenderer::InitRenderResources()
     actual_sample_per_pixel_ = sub_pixel_count_ * sub_pixel_count_;
 }
 
-void CPURenderer::Update()
+RGTexture CPURenderer::BuildGraph(RenderGraph &graph)
 {
-    PROFILE_SCOPE("CPURenderer::Update");
-
-    screen_quad_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
-    if (ui_pass_)
-    {
-        ui_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-    }
-}
-
-void CPURenderer::Render()
-{
-    PROFILE_SCOPE("CPURenderer::Render");
+    PROFILE_SCOPE("CPURenderer::BuildGraph");
 
     // re-fetch every frame: a loaded scene may bring its own main camera and replace the proxy
     camera_ = scene_render_proxy_->GetCamera();
@@ -149,62 +91,25 @@ void CPURenderer::Render()
         ToneMappingPass(output_image_);
     }
 
-    // GPU workload: copy the image to a texture
-    {
-        image_buffer_->Upload(rhi_, output_image_.GetRawData());
-
-        screen_texture_->Transition({.target_layout = RHIImageLayout::TransferDst,
-                                     .after_stage = RHIPipelineStage::Top,
-                                     .before_stage = RHIPipelineStage::Transfer});
-
-        image_buffer_->CopyToImage(screen_texture_.get());
-    }
-
-    // the stage that last wrote composite_texture_, driving downstream transitions
-    auto composite_stage = RHIPipelineStage::Transfer;
-
-    if (upsample_pass_)
-    {
-        screen_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                     .after_stage = RHIPipelineStage::Transfer,
-                                     .before_stage = RHIPipelineStage::PixelShader});
-
-        upsample_pass_->Render();
-
-        composite_stage = RHIPipelineStage::ColorOutput;
-    }
-
-    if (ReadbackFinalOutputIfRequested(composite_rt_.get(), false, composite_stage))
-    {
-        composite_stage = RHIPipelineStage::Transfer;
-    }
-
-    // post process: ui
-    if (render_config_.render_ui && ui_pass_)
-    {
-        composite_texture_->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                        .after_stage = composite_stage,
-                                        .before_stage = RHIPipelineStage::ColorOutput});
-        ui_pass_->Render();
-
-        composite_stage = RHIPipelineStage::ColorOutput;
-        if (ReadbackFinalOutputIfRequested(composite_rt_.get(), true, RHIPipelineStage::ColorOutput))
-        {
-            composite_stage = RHIPipelineStage::Transfer;
-        }
-    }
-
-    composite_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = composite_stage,
-                                    .before_stage = RHIPipelineStage::PixelShader});
-
-    // screen pass: render it on a screen quad
-    {
-        screen_quad_pass_->Render();
-    }
+    image_buffer_->Upload(rhi_, output_image_.GetRawData());
 
     dispatched_sample_count_ += actual_sample_per_pixel_;
     camera_->AccumulateSample(actual_sample_per_pixel_);
+
+    const auto scene_color =
+        graph.CreateTexture("SceneColor", {.format = output_image_.GetFormat(), .size_class = RGSizeClass::Scene});
+    const auto host_scene_color = graph.Import("HostSceneColor", image_buffer_);
+
+    graph.AddCopyPass("Upload", [scene_color, host_scene_color](RGBuilder &builder) {
+        builder.CopySrc(host_scene_color);
+        builder.CopyDst(scene_color);
+        builder.FullyOverwrites();
+        return [scene_color, host_scene_color](RGCopyContext &context) {
+            context.CopyFromBuffer(host_scene_color, scene_color);
+        };
+    });
+
+    return scene_color;
 }
 
 namespace

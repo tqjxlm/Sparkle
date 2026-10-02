@@ -1,8 +1,8 @@
 #include "renderer/renderer/Renderer.h"
 
-#include "core/Path.h"
+#include "core/Profiler.h"
 #include "core/ThreadManager.h"
-#include "io/Image.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/renderer/CPURenderer.h"
 #include "renderer/renderer/DeferredRenderer.h"
@@ -10,12 +10,15 @@
 #include "renderer/renderer/GPURenderer.h"
 #include "rhi/RHI.h"
 
-#include <filesystem>
+#include <nlohmann/json.hpp>
+
+#include <utility>
 
 namespace sparkle
 {
 std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                                                   SceneRenderProxy *scene_render_proxy)
+                                                   SceneRenderProxy *scene_render_proxy,
+                                                   RGTexturePool &graph_texture_pool)
 {
     ASSERT(ThreadManager::IsInRenderThread());
 
@@ -24,16 +27,18 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
     switch (render_config.pipeline)
     {
     case RenderConfig::Pipeline::Cpu:
-        renderer = std::make_unique<CPURenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer = std::make_unique<CPURenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     case RenderConfig::Pipeline::Gpu:
-        renderer = std::make_unique<GPURenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer = std::make_unique<GPURenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     case RenderConfig::Pipeline::Forward:
-        renderer = std::make_unique<ForwardRenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer =
+            std::make_unique<ForwardRenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     case RenderConfig::Pipeline::Deferred:
-        renderer = std::make_unique<DeferredRenderer>(render_config, rhi_context, scene_render_proxy);
+        renderer =
+            std::make_unique<DeferredRenderer>(render_config, rhi_context, scene_render_proxy, graph_texture_pool);
         break;
     default:
         UnImplemented(render_config.pipeline);
@@ -52,9 +57,10 @@ std::unique_ptr<Renderer> Renderer::CreateRenderer(const RenderConfig &render_co
     return renderer;
 }
 
-Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy)
+Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
+                   RGTexturePool &graph_texture_pool)
     : rhi_(rhi_context), scene_render_proxy_(scene_render_proxy), resolution_(render_config.GetResolution()),
-      render_config_(render_config)
+      render_config_(render_config), graph_texture_pool_(graph_texture_pool), graph_pass_timers_(rhi_context)
 {
     Log(Info, "View size [{}, {}]", resolution_.output.x(), resolution_.output.y());
 
@@ -65,11 +71,15 @@ Renderer::Renderer(const RenderConfig &render_config, RHIContext *rhi_context, S
     }
 }
 
+Renderer::~Renderer() = default;
+
 void Renderer::Tick()
 {
     scene_render_proxy_->Update(rhi_, *scene_render_proxy_->GetCamera(), render_config_);
 
     Update();
+
+    post_chain_->UpdateFrameData(scene_render_proxy_);
 
     scene_render_proxy_->EndUpdate(rhi_);
 }
@@ -93,89 +103,29 @@ bool Renderer::IsReadyForAutoScreenshot() const
 void Renderer::RequestSaveScreenshot(const std::string &file_path, bool capture_ui,
                                      Renderer::ScreenshotCallback on_complete)
 {
-    ASSERT(ThreadManager::IsInRenderThread());
-    ASSERT(!file_path.empty());
-
-    std::filesystem::path screenshot_path = std::filesystem::path("screenshots") / file_path;
-    screenshot_path.replace_extension(".png");
-
-    screenshot_file_path_ = screenshot_path.string();
-    screenshot_requested_ = true;
-    screenshot_capture_ui_ = capture_ui;
-    screenshot_completion_ = std::move(on_complete);
+    post_chain_->RequestScreenshot(file_path, capture_ui, std::move(on_complete));
 }
 
-bool Renderer::ReadbackFinalOutputIfRequested(RHIRenderTarget *final_output, bool capture_ui,
-                                              RHIPipelineStage after_stage)
+void Renderer::InitPostChain(PixelFormat screen_format, PostChain::ScreenPass screen_pass)
 {
+    post_chain_ = std::make_unique<PostChain>(render_config_, rhi_, screen_format, screen_pass);
+}
+
+std::shared_ptr<const nlohmann::json> Renderer::Render(bool dump)
+{
+    PROFILE_SCOPE("Renderer::Render");
+
     ASSERT(ThreadManager::IsInRenderThread());
-    ASSERT(final_output);
 
-    if (!screenshot_requested_)
-    {
-        return false;
-    }
+    RenderGraph graph(rhi_, graph_texture_pool_, render_config_);
 
-    if (screenshot_capture_ui_ != capture_ui)
-    {
-        return false;
-    }
+    const auto scene = BuildGraph(graph);
 
-    screenshot_requested_ = false;
-    screenshot_capture_ui_ = false;
-    auto output_path = screenshot_file_path_;
-    screenshot_file_path_.clear();
-    auto completion = std::move(screenshot_completion_);
+    post_chain_->AddTo(graph, scene);
 
-    // just assume color image 0 is the final output.
-    auto color_image = final_output->GetColorImage(0);
+    graph.Compile();
+    graph.Execute(*rhi_->GetCommandContext(), &graph_pass_timers_);
 
-    ASSERT(color_image);
-
-    auto staging_buffer =
-        rhi_->CreateBuffer({.size = color_image->GetStorageSize(),
-                            .usages = RHIBuffer::BufferUsage::TransferDst,
-                            .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
-                            .is_dynamic = false},
-                           "ScreenshotReadbackStagingBuffer");
-
-    color_image->Transition({.target_layout = RHIImageLayout::TransferSrc,
-                             .after_stage = after_stage,
-                             .before_stage = RHIPipelineStage::Transfer});
-
-    color_image->CopyToBuffer(staging_buffer);
-
-    // we do not transition the image back. only the caller knows what to do with the image.
-
-    const auto width = color_image->GetWidth();
-    const auto height = color_image->GetHeight();
-    const auto format = color_image->GetAttributes().format;
-    auto *rhi = rhi_;
-
-    rhi_->EnqueueEndOfFrameTasks(
-        [rhi, staging_buffer, width, height, format, output_path, on_complete = std::move(completion)]() {
-            rhi->WaitForDeviceIdle();
-
-            const auto *raw_data = reinterpret_cast<const uint8_t *>(staging_buffer->Lock());
-            auto screenshot = Image2D::CreateFromRawPixels(raw_data, width, height, format);
-            staging_buffer->UnLock();
-            bool success = screenshot.WriteToFile(Path::External(output_path));
-
-            if (success)
-            {
-                Log(Info, "Screenshot saved to {}", output_path);
-            }
-            else
-            {
-                Log(Error, "Failed to save screenshot to {}", output_path);
-            }
-
-            if (on_complete)
-            {
-                on_complete();
-            }
-        });
-
-    return true;
+    return dump ? std::make_shared<const nlohmann::json>(graph.Dump()) : nullptr;
 }
 } // namespace sparkle

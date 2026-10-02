@@ -100,9 +100,9 @@ def strip_compute_derivatives(spirv):
 
 
 def downgrade_spirv_to_1_4(spirv, validator):
-    """DXC's vulkan1.2 target stamps SPIR-V 1.5, but the engine's Vulkan 1.1 instance +
-    VK_KHR_spirv_1_4 accepts at most 1.4. NRD's shaders use no 1.5-only features, so rewriting the
-    version word suffices; spirv-val proves it per module when the Vulkan SDK is available."""
+    """DXC's vulkan1.2 target stamps SPIR-V 1.5; the cook emits 1.4. NRD's shaders use no 1.5-only
+    features, so rewriting the version word suffices; spirv-val proves it per module when the Vulkan
+    SDK is available."""
     version = struct.unpack_from("<I", spirv, 4)[0]
     if version <= SPIRV_VERSION_1_4:
         return spirv

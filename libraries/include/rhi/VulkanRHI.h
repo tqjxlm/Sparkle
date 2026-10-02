@@ -42,7 +42,9 @@ class VulkanRHI final : public RHIContext
 public:
     using RHIContext::RHIContext;
     ~VulkanRHI() override = default;
-    void CreateBackBufferRenderTarget();
+    void CreateBackBuffer();
+
+    [[nodiscard]] RHIResourceRef<RHIImage> GetBackBuffer() const override;
 
     bool InitRHI(NativeView *inWindow, std::string &error) override;
     void InitRenderResources() override;
@@ -53,37 +55,29 @@ public:
 
     bool SupportsHardwareRayTracing() override;
 
+    bool SupportsPassTimestamps() override;
+
+    bool SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages) override;
+
+    bool SupportsPixelLocalRead() override;
+
+    bool KeepsMemorylessAcrossPixelLocalBarrier() override;
+
+    std::optional<uint32_t> GetTileBudget() override;
+
     bool HasPhysicalGpu() override;
 
     bool SupportsSampledFormat(PixelFormat format) override;
 
+    bool SupportsLinearFiltering(PixelFormat format) override;
+
+    [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const override;
+
+    [[nodiscard]] bool IsSyncValidationActive() const override;
+
     [[nodiscard]] uint32_t GetMinBufferOffsetAlignment() const override;
 
-    void BeginCommandBuffer() override;
     void SubmitCommandBuffer() override;
-
-    void NextSubpass() override
-    {
-        UnImplemented();
-    }
-
-    void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) override;
-
-    void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                         Vector3UInt thread_per_group) override;
-
-    RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                 const RHIResourceRef<RHIImage> &depth_image,
-                                                                 const std::string &name) override;
-
-    RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                       const RHIRenderTarget::ColorImageArray &color_images,
-                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                       const std::string &name) override;
-
-    RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                   const RHIResourceRef<RHIRenderTarget> &rt,
-                                                   const std::string &name) override;
 
     RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                          const std::string &name) override;
@@ -117,21 +111,20 @@ protected:
     [[nodiscard]] bool BeginFrameInternal() override;
     void EndFrameInternal() override;
 
-    void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) override;
-    void EndRenderPassInternal() override;
-
-    void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-
-    void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) override;
-
     void CleanupInternal() override;
+
+    RHICommandContext *GetCommandContextInternal() override;
+
+    RHICommandContext &BeginCommandBufferInternal() override;
 
     RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute, const std::string &name) override;
 
-    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) override;
+    RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info, std::string variant) override;
 
 private:
     std::vector<RHIResourceRef<RHITimer>> frame_timers_;
+    // a windowed back buffer is the swap chain's
+    RHIResourceRef<RHIImage> headless_back_buffer_;
 };
 } // namespace sparkle
 

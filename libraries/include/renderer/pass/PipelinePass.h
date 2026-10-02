@@ -9,13 +9,10 @@ struct RenderConfig;
 class SceneRenderProxy;
 
 // a pipeline pass manages a series of draw calls with the same type of primitives
-// it highly overlaps with the scope of RHIRenderPass, but can be narrower
-// i.e. several PipelinePass may exist in one RHIRenderPass
 class PipelinePass
 {
 public:
     virtual void InitRenderResources(const RenderConfig &config) = 0;
-    virtual void Render() = 0;
     virtual ~PipelinePass() = default;
 
     template <class T, typename... Args>

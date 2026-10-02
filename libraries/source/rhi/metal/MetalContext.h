@@ -2,6 +2,7 @@
 
 #if FRAMEWORK_APPLE
 
+#include "MetalCommandContext.h"
 #include "MetalImage.h"
 #include "MetalRHIInternal.h"
 #import "apple/MetalView.h"
@@ -19,9 +20,16 @@ public:
         return device_;
     }
 
-    [[nodiscard]] id<MTLCommandBuffer> GetCurrentCommandBuffer() const
+    // see MetalTimer::IsSupported
+    [[nodiscard]] bool SupportsPassTimestamps() const
     {
-        return current_command_buffer_;
+        return supports_pass_timestamps_;
+    }
+
+    // see RHIContext::GetCommandContext
+    [[nodiscard]] MetalCommandContext *GetCommandContext()
+    {
+        return IsInCommandBuffer() ? &command_context_ : nullptr;
     }
 
     // a one-off command buffer independent of the frame's, for synchronous transfers
@@ -37,7 +45,7 @@ public:
 
     [[nodiscard]] bool IsInCommandBuffer() const
     {
-        return current_command_buffer_ != nullptr;
+        return command_context_.GetCommandBuffer() != nil;
     }
 
     [[nodiscard]] MetalView *GetView() const
@@ -86,11 +94,12 @@ public:
 
 private:
     id<MTLDevice> device_;
+    bool supports_pass_timestamps_;
     id<MTLCommandQueue> command_queue_;
     MetalView *view_;
     MetalRHI *rhi_;
     id<CAMetalDrawable> current_drawable_;
-    id<MTLCommandBuffer> current_command_buffer_;
+    MetalCommandContext command_context_;
     id<MTLCommandBuffer> last_command_buffer_;
 
     dispatch_semaphore_t frame_throttle_semaphore_ = nullptr;

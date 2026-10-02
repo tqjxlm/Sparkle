@@ -5,10 +5,14 @@
 #include "core/math/Types.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHIPIpelineState.h"
-#include "rhi/RHIRenderTarget.h"
 
 namespace sparkle
 {
+class RenderGraph;
+class RGBuilder;
+class RGRasterContext;
+struct RGTexture;
+
 class ScreenQuadVertexShader : public RHIShaderInfo
 {
     REGISTGER_SHADER(ScreenQuadVertexShader, RHIShaderStage::Vertex, "shaders/screen/screen.vs.slang", "shader_main")
@@ -35,66 +39,91 @@ public:
         Vector2 uv;
     };
 
-    ScreenQuadPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &input,
-                   const RHIResourceRef<RHIRenderTarget> &target)
-        : PipelinePass(ctx), source_texture_(input), target_(target)
+    // how AddTo samples its input, always with edge clamping
+    enum class InputFilter : uint8_t
     {
-        ASSERT(target_);
-    }
+        Nearest,
+        // bilinear when the input's size differs from the output's and the device filters the input's format
+        // linearly, otherwise nearest
+        Bilinear,
+        // as Bilinear, but nearest also when the output's size is an integer multiple of the input's in both axes
+        NearestAtIntegerScale,
+    };
 
-    ScreenQuadPass(RHIContext *ctx, const RHIResourceRef<RHIImage> &input) : PipelinePass(ctx), source_texture_(input)
-    {
-    }
+    // draws through AddTo, as the graph pass `name`, into a color attachment of `output_format` at ColorSlot::Screen.
+    // `to_back_buffer` applies the window's pre-rotation, and the filter compares the output's size along the rotated
+    // axes.
+    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, InputFilter input_filter,
+                   bool to_back_buffer = false);
 
-    void Render() override;
+    // adds a Raster pass drawing `input`, sampled as the pass's InputFilter chooses, over all of `output`
+    void AddTo(RenderGraph &graph, RGTexture input, RGTexture output) const;
 
     void InitRenderResources(const RenderConfig &config) override;
 
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
-    [[nodiscard]] RHIResourceRef<RHIRenderPass> GetRenderPass() const
-    {
-        return pass_;
-    }
-
-    // Re-point the pass at a different source image and re-bind (e.g. switching the tone-mapping input
-    // between the raw scene texture and the denoised output when the denoiser is toggled at runtime).
-    // Must be called after InitRenderResources, on the render thread.
-    void SetInput(const RHIResourceRef<RHIImage> &input)
-    {
-        if (source_texture_.get() == input.get())
-        {
-            return;
-        }
-        source_texture_ = input;
-        BindPixelShaderResources();
-    }
-
 protected:
-    virtual void SetupRenderPass();
-    virtual void SetupPipeline();
-    virtual void SetupVertices();
-    virtual void SetupVertexShader();
+    // as above, for a pixel shader that writes `output_slot`
+    ScreenQuadPass(RHIContext *ctx, std::string name, PixelFormat output_format, uint8_t output_slot,
+                   InputFilter input_filter, bool to_back_buffer = false);
+
+    static constexpr RHISampler::SamplerAttribute NearestSampler{
+        .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest,
+        .enable_anisotropy = false};
+
+    // sets the pixel shader of pipeline_state_, before it compiles
     virtual void SetupPixelShader();
-    virtual void CompilePipeline();
-    virtual void BindVertexShaderResources();
-    virtual void BindPixelShaderResources();
+
+    // binds what the pixel shader reads beyond the graph's bindings
+    virtual void BindPixelShaderResources()
+    {
+    }
+
+    // declares the pass's input, bound to the pixel shader's texture, and binds `sampler` to its sampler
+    virtual void SampleInput(RGBuilder &builder, RGTexture input, const RHISampler::SamplerAttribute &sampler) const;
+
+    // the pipeline the pass draws `input` with: pipeline_state_
+    [[nodiscard]] virtual const RHIResourceRef<RHIPipelineState> &GetPipeline(const RGRasterContext &context,
+                                                                              RGTexture input) const;
+
+    // a pipeline drawing the quad against `signature` without a pixel shader, which CompilePipeline compiles once it
+    // has one
+    [[nodiscard]] RHIResourceRef<RHIPipelineState> CreatePipeline(const RHIAttachmentSignature &signature) const;
+
+    // compiles a pipeline of CreatePipeline and binds the vertex shader's resources
+    void CompilePipeline(RHIPipelineState &pipeline) const;
+
+    [[nodiscard]] const RHIAttachmentSignature &GetSignature() const
+    {
+        return signature_;
+    }
 
     const static std::array<ScreenVertex, 4> Vertices;
     const static std::array<uint32_t, 6> Indices;
-
-    RHIResourceRef<RHIImage> source_texture_;
-    RHIResourceRef<RHIRenderTarget> target_;
 
     RHIResourceRef<RHIBuffer> vertex_buffer_;
     RHIResourceRef<RHIBuffer> index_buffer_;
 
     RHIResourceRef<RHIPipelineState> pipeline_state_;
-    RHIResourceRef<RHIRenderPass> pass_;
 
     RHIResourceRef<RHIBuffer> vs_ub_;
     RHIResourceRef<RHIBuffer> ps_ub_;
 
     DrawArgs draw_args_;
+
+    std::string name_;
+
+private:
+    void SetupVertices();
+    void SetupVertexShader();
+
+    RHIAttachmentSignature signature_;
+    uint8_t output_slot_;
+    InputFilter input_filter_;
+    bool to_back_buffer_ = false;
 };
 } // namespace sparkle

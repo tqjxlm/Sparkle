@@ -2,6 +2,7 @@
 
 #include "../shader/MeshPassVertexShader.h"
 #include "renderer/RenderConfig.h"
+#include "renderer/pass/ColorSlot.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/MeshRenderProxy.h"
@@ -42,31 +43,24 @@ public:
         metallic_roughness_texture().BindResource(material_proxy->GetMetallicRoughnessTexture()->GetDefaultView(rhi));
         emissive_texture().BindResource(material_proxy->GetEmissiveTexture()->GetDefaultView(rhi));
 
-        material_texture_sampler().BindResource(material_proxy->GetBaseColorTexture()->GetSampler());
+        material_texture_sampler().BindResource(rhi->GetSampler(MeshPass::MaterialTextureSampler));
     }
 
     END_SHADER_RESOURCE_TABLE
 };
 
-GBufferPass::GBufferPass(RHIContext *ctx, SceneRenderProxy *scene_proxy,
-                         RHIRenderTarget::ColorImageArray gbuffer_images, const RHIResourceRef<RHIImage> &scene_depth)
-    : MeshPass(ctx, scene_proxy), scene_depth_(scene_depth), gbuffer_images_(std::move(gbuffer_images))
+GBufferPass::GBufferPass(RHIContext *ctx, SceneRenderProxy *scene_proxy, PixelFormat depth_format)
+    : MeshPass(ctx, scene_proxy)
 {
+    signature_.color_formats[ColorSlot::GBufferPacked] = PackedDesc.format;
+    signature_.color_formats[ColorSlot::DepthCopy] = DepthCopyDesc.format;
+    signature_.depth_format = depth_format;
 }
 
 void GBufferPass::InitRenderResources(const RenderConfig &)
 {
     vertex_shader_ = rhi_->CreateShader<StandardVertexShader>();
     pixel_shader_ = rhi_->CreateShader<GBufferPassPixelShader>();
-
-    render_target_ = rhi_->CreateRenderTarget({}, gbuffer_images_, scene_depth_, "GBufferPassRT");
-
-    RHIRenderPass::Attribute pass_attribute;
-    pass_attribute.color_load_op = RHIRenderPass::LoadOp::Clear;
-    pass_attribute.depth_load_op = RHIRenderPass::LoadOp::Clear;
-    pass_attribute.depth_store_op = RHIRenderPass::StoreOp::Store;
-
-    pass_ = rhi_->CreateRenderPass(pass_attribute, render_target_, "GBufferPass");
 }
 
 void GBufferPass::SetupVertices(const RHIResourceRef<RHIPipelineState> &pso, MeshRenderProxy *mesh_proxy)
@@ -121,7 +115,7 @@ void GBufferPass::HandleNewPrimitive(uint32_t primitive_id)
 
     auto &pso = pipeline_states_[primitive_id];
 
-    pso->SetRenderPass(pass_);
+    pso->SetAttachmentSignature(signature_);
 
     SetupVertexShader(pso);
     SetupPixelShader(pso);
@@ -136,12 +130,16 @@ void GBufferPass::HandleUpdatedPrimitive([[maybe_unused]] uint32_t primitive_id)
 {
 }
 
-void GBufferPass::Render()
+GBufferPass::Textures GBufferPass::AddTo(RenderGraph &graph, RGTexture scene_depth) const
 {
-    rhi_->BeginRenderPass(pass_);
-
-    MeshPass::Render();
-
-    rhi_->EndRenderPass();
+    const Textures gbuffer{.packed = graph.CreateTexture("GBufferPacked", PackedDesc),
+                           .depth_copy = graph.CreateTexture("DepthCopy", DepthCopyDesc)};
+    graph.AddRasterPass("GBuffer", [this, gbuffer, scene_depth](RGBuilder &builder) {
+        builder.ColorWrite(gbuffer.packed, ColorSlot::GBufferPacked, Vector4(0.f, 0.f, 0.f, 1.f));
+        builder.ColorWrite(gbuffer.depth_copy, ColorSlot::DepthCopy, Vector4(1.f, 0.f, 0.f, 0.f));
+        builder.DepthWrite(scene_depth, 1.f);
+        return [this](RGRasterContext &context) { DrawPrimitives(context); };
+    });
+    return gbuffer;
 }
 } // namespace sparkle

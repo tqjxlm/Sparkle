@@ -55,6 +55,8 @@ void RHIContext::Cleanup()
 {
     ReleaseRenderResources();
 
+    ui_handler_instance_ = nullptr;
+
     samplers_.clear();
     dummy_textures_.clear();
 
@@ -88,6 +90,8 @@ bool RHIContext::InitRHI(NativeView *inWindow, std::string &error)
 
 RHIResourceRef<RHISampler> RHIContext::GetSampler(RHISampler::SamplerAttribute attribute)
 {
+    attribute.enable_anisotropy = attribute.enable_anisotropy && config_.sampler_anisotropy;
+
     auto found = samplers_.find(attribute);
     if (found != samplers_.end())
     {
@@ -98,6 +102,11 @@ RHIResourceRef<RHISampler> RHIContext::GetSampler(RHISampler::SamplerAttribute a
     samplers_.insert_or_assign(attribute, sampler);
 
     return sampler;
+}
+
+RHIResourceRef<RHIPass> RHIContext::CreateRenderPass(const std::string &name, bool need_timestamp)
+{
+    return CreateResource<RHIPass>(this, need_timestamp, name);
 }
 
 RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const std::string &name)
@@ -120,16 +129,9 @@ RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const s
     attribute.height = upload_image->GetHeight();
     attribute.mip_levels = static_cast<uint8_t>(upload_image->GetMipCount());
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
-    // the raster passes bind one sampler for a whole material, so the LOD range must
-    // not derive from any single image's mip count
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
-                         .max_lod = RHISampler::SamplerAttribute::UnclampedLod};
 
     auto rhi_image = CreateImage(attribute, name);
-    rhi_image->Upload(upload_image->GetRawData());
+    rhi_image->Upload(*GetCommandContext(), upload_image->GetRawData());
 
     return rhi_image;
 }
@@ -164,10 +166,6 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
     attribute.height = image->GetHeight();
     attribute.usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::TransferDst;
     attribute.type = RHIImage::ImageType::Image2DCube;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
 
     auto rhi_image = CreateImage(attribute, name);
 
@@ -176,7 +174,7 @@ RHIResourceRef<RHIImage> RHIContext::CreateTextureCube(const Image2DCube *image,
     {
         data[i] = upload_faces[i]->GetRawData();
     }
-    rhi_image->UploadFaces(data);
+    rhi_image->UploadFaces(*GetCommandContext(), data);
 
     return rhi_image;
 }
@@ -255,27 +253,18 @@ void RHIContext::EndFrame()
     frame_index_ = (frame_index_ + 1) % max_frames_in_flight_;
 
     total_frame_++;
-
-    render_target_pool_.Tick(total_frame_);
 }
 
-void RHIContext::EndRenderPass()
+RHICommandContext &RHIContext::BeginCommandBuffer()
 {
-    ASSERT_F(current_render_pass_ != nullptr, "No active render pass!");
-
-    EndRenderPassInternal();
-
-    current_render_pass_ = nullptr;
+    ASSERT_F(!frame_active_, "BeginCommandBuffer inside a frame; record through the frame's context");
+    return BeginCommandBufferInternal();
 }
 
-void RHIContext::BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
+RHICommandContext *RHIContext::GetCommandContext()
 {
-    ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
-    ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
-
-    current_render_pass_ = pass;
-
-    BeginRenderPassInternal(pass);
+    ASSERT_F(!executing_graph_, "a graph pass records through its pass context, not RHIContext::GetCommandContext");
+    return GetCommandContextInternal();
 }
 
 void RHIContext::RecreateBuffer(RHIBuffer::Attribute attribute, const std::string &name,
@@ -311,25 +300,6 @@ RHIResourceRef<RHIBuffer> RHIContext::CreateUploadStagingBuffer(size_t size)
                                    .dynamic_buffer_capacity = UploadStagingBufferCapacity};
     attribute.is_dynamic = frame_active_ && buffer_manager_->CanSubAllocateDynamicBuffer(attribute);
     return CreateBuffer(attribute, "UploadStagingBuffer");
-}
-
-void RHIContext::BeginComputePass(const RHIResourceRef<RHIComputePass> &pass)
-{
-    ASSERT_F(current_compute_pass_ == nullptr, "Previous compute pass not ended {}", current_compute_pass_->GetName());
-    ASSERT_F(current_render_pass_ == nullptr, "Previous render pass not ended {}", current_render_pass_->GetName());
-
-    current_compute_pass_ = pass;
-
-    BeginComputePassInternal(pass);
-}
-
-void RHIContext::EndComputePass(const RHIResourceRef<RHIComputePass> &pass)
-{
-    ASSERT(current_compute_pass_ == pass);
-
-    current_compute_pass_ = nullptr;
-
-    EndComputePassInternal(pass);
 }
 
 void RHIContext::DeferResourceDeletion(RHIResource *resource)
@@ -436,10 +406,6 @@ void RHIContext::FlushDeferredDeletions()
 
     is_deleting_deferred_resources_ = false;
 
-    // a flush is always preceded by WaitForDeviceIdle, so free pooled render targets can be
-    // reused right away instead of waiting out the frames-in-flight delay
-    render_target_pool_.NotifyDeviceIdle();
-
 #ifndef NDEBUG
     // After flushing all deferred deletions (always preceded by WaitForDeviceIdle),
     // no valid code should reference old resources. Clear the set to prevent
@@ -454,15 +420,11 @@ void RHIContext::ReleaseRenderResources()
 
     WaitForDeviceIdle();
 
-    back_buffer_rt_ = nullptr;
-    current_render_pass_ = nullptr;
-    ui_handler_instance_ = nullptr;
-
-    render_target_pool_.Clear();
-
     // deliberately NOT the sampler/dummy-texture caches: this also runs mid-session (swap chain
     // recreation on rotation, surface loss), where live pipelines still bind those resources
     // through raw pointers. they are released in Cleanup only.
+    // nor the ui handler: its texture queue cannot hand ImGui's textures back to the backend while the main thread
+    // runs ImGui, and its backend depends on no surface.
 }
 
 RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute attribute)
@@ -483,7 +445,8 @@ RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute
     // a dummy never gets per-use transitions, so it rests in the one layout that satisfies all
     // bindings it can appear in: General when it can be bound as storage, Read otherwise
     const bool has_uav_usage = attribute.usages & RHIImage::ImageUsage::UAV;
-    texture->Transition({.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
+    texture->Transition(*GetCommandContext(),
+                        {.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
                          .after_stage = RHIPipelineStage::Top,
                          .before_stage = RHIPipelineStage::Bottom});
     dummy_textures_.emplace(hash, texture);

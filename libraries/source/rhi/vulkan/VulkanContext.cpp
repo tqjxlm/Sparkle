@@ -9,11 +9,8 @@
 #include "VulkanSwapChain.h"
 #include "application/NativeView.h"
 
-#if PLATFORM_MACOS
-#include "core/math/Utilities.h"
-#endif
-
 #include <algorithm>
+#include <format>
 #include <unordered_set>
 
 namespace sparkle
@@ -41,15 +38,21 @@ static VkResult CreateDebugUtilsMessengerExt(VkInstance instance, const VkDebugU
 }
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                                                    VkDebugUtilsMessageTypeFlagsEXT /*messageType*/,
+                                                    VkDebugUtilsMessageTypeFlagsEXT messageType,
                                                     const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, // NOLINT
-                                                    void * /*pUserData*/)
+                                                    void *pUserData)
 {
-
-    if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
-        // Message is important enough to show
-        Log(Warn, "validation error! {}", pCallbackData->pMessage);
+        if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT)
+        {
+            static_cast<std::atomic<unsigned> *>(pUserData)->fetch_add(1, std::memory_order_relaxed);
+        }
+        Log(Error, "validation error! {}", pCallbackData->pMessage);
+    }
+    else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    {
+        Log(Warn, "validation warning! {}", pCallbackData->pMessage);
     }
 
 #ifndef NDEBUG
@@ -62,7 +65,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityF
     return VK_FALSE;
 }
 
-static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo)
+static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo,
+                                             std::atomic<unsigned> &error_count)
 {
     createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -73,6 +77,7 @@ static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT 
                              VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = DebugCallback;
+    createInfo.pUserData = &error_count;
 }
 
 static void DestroyDebugUtilsMessengerExt(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger,
@@ -104,19 +109,6 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
         {
             device_extensions.push_back("VK_KHR_portability_subset");
         }
-
-        if (strcmp(extension.extensionName, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0)
-        {
-            device_extensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
-        }
-
-        // validation workaround: slang emits StorageImageReadWithoutFormat, which validation accepts via
-        // the equivalent device feature, VK_VERSION_1_3, or this extension. enable it where available so
-        // devices lacking the feature (e.g. Adreno) still pass; devices lacking the extension use the feature.
-        if (strcmp(extension.extensionName, VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) == 0)
-        {
-            device_extensions.push_back(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME);
-        }
     }
 
     std::unordered_set<std::string> required_extensions(device_extensions.begin(), device_extensions.end());
@@ -139,28 +131,26 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     return all_extension_good;
 }
 
-static bool DeviceSupportsAstcHdr(VkPhysicalDevice device)
+static bool HasDeviceExtension(VkPhysicalDevice device, std::string_view name)
 {
     uint32_t extension_count = 0;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
     std::vector<VkExtensionProperties> extensions(extension_count);
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, extensions.data());
-
-    const bool has_extension = std::ranges::any_of(extensions, [](const auto &extension) {
-        return strcmp(extension.extensionName, VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME) == 0;
+    return std::ranges::any_of(extensions, [name](const VkExtensionProperties &extension) {
+        return std::string_view(extension.extensionName) == name;
     });
-    if (!has_extension)
-    {
-        return false;
-    }
+}
 
-    VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT astc_hdr_features{};
-    astc_hdr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES_EXT;
+template <class T> static T QueryDeviceFeatures(VkPhysicalDevice device, VkStructureType type)
+{
+    T features{};
+    features.sType = type;
     VkPhysicalDeviceFeatures2 device_features{};
     device_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    device_features.pNext = &astc_hdr_features;
+    device_features.pNext = &features;
     vkGetPhysicalDeviceFeatures2(device, &device_features);
-    return astc_hdr_features.textureCompressionASTC_HDR == VK_TRUE;
+    return features;
 }
 
 static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
@@ -202,6 +192,8 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     VkPhysicalDeviceFeatures device_features;
     vkGetPhysicalDeviceFeatures(device, &device_features);
 
+    const bool api_version_supported = device_properties.apiVersion >= ApiVersion;
+
     QueueFamilyIndices const indices = FindQueueFamilies(device, surface);
 
     bool const extensions_supported = CheckDeviceExtensionSupport(device, deviceExtensions);
@@ -215,7 +207,13 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
 
     bool is_suitable = false;
     std::string fail_reason;
-    if (!indices.IsComplete())
+    if (!api_version_supported)
+    {
+        fail_reason = std::format("Vulkan {}.{} required, device supports {}.{}", VK_API_VERSION_MAJOR(ApiVersion),
+                                  VK_API_VERSION_MINOR(ApiVersion), VK_API_VERSION_MAJOR(device_properties.apiVersion),
+                                  VK_API_VERSION_MINOR(device_properties.apiVersion));
+    }
+    else if (!indices.IsComplete())
     {
         fail_reason = "Queue family incomplete";
     }
@@ -231,6 +229,10 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     {
         fail_reason = "Anisotropy sampling not supported";
     }
+    else if (device_features.independentBlend == 0)
+    {
+        fail_reason = "Independent blend not supported";
+    }
     else
     {
         is_suitable = true;
@@ -239,12 +241,6 @@ static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std:
     if (is_suitable)
     {
         Log(Info, "Checking device [{}]: OK!", device_properties.deviceName);
-
-        Log(Info, "enabled device extensions:");
-        for (const auto &extension : deviceExtensions)
-        {
-            Log(Info, "\t{}", extension);
-        }
     }
     else
     {
@@ -274,7 +270,7 @@ void VulkanContext::SetupDebugMessenger()
     }
 
     VkDebugUtilsMessengerCreateInfoEXT create_info;
-    PopulateDebugMessengerCreateInfo(create_info);
+    PopulateDebugMessengerCreateInfo(create_info, validation_error_count_);
 
     CHECK_VK_ERROR(CreateDebugUtilsMessengerExt(instance_, &create_info, nullptr, &debug_messenger_));
 }
@@ -309,7 +305,7 @@ bool VulkanContext::Init()
     SetupMemoryAllocator();
     CreateCommandPool();
     descriptor_set_manager_->Init();
-    rhi_->CreateBackBufferRenderTarget();
+    rhi_->CreateBackBuffer();
 
     return true;
 }
@@ -339,6 +335,8 @@ void VulkanContext::Cleanup()
 
 void VulkanContext::ReleaseRenderResources()
 {
+    ASSERT_F(command_context_ != &frame_command_context_, "render resources are released inside a frame");
+
     if (!command_buffers_.empty())
     {
         vkFreeCommandBuffers(device_, command_pool_, static_cast<uint32_t>(command_buffers_.size()),
@@ -427,15 +425,7 @@ bool VulkanContext::BeginFrame()
         CHECK_VK_ERROR(vkWaitForFences(device_, 1, &queue_finish_fences_[frame_index], VK_TRUE, UINT64_MAX));
         CHECK_VK_ERROR(vkResetFences(device_, 1, &queue_finish_fences_[frame_index]));
 
-        VkCommandBufferBeginInfo begin_info{};
-        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags = 0;
-        begin_info.pInheritanceInfo = nullptr;
-
-        CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
-        ResetCommandState();
-
-        current_command_buffer_ = command_buffers_[frame_index];
+        BeginFrameCommandBuffer(frame_index);
         return true;
     }
 
@@ -449,14 +439,14 @@ bool VulkanContext::BeginFrame()
 
     while (true)
     {
-        // Find an available acquire semaphore (not currently in use)
+        // only a successful acquire signals its semaphore, so only it moves on to the next one
         VkSemaphore acquire_semaphore = image_acquire_semaphores_per_image_[next_acquire_semaphore_index_];
-        next_acquire_semaphore_index_ =
-            (next_acquire_semaphore_index_ + 1) % image_acquire_semaphores_per_image_.size();
 
         const auto acquire_result = swap_chain_->AcquireImage(acquire_semaphore);
         if (acquire_result == VK_SUCCESS || acquire_result == VK_SUBOPTIMAL_KHR)
         {
+            next_acquire_semaphore_index_ =
+                (next_acquire_semaphore_index_ + 1) % image_acquire_semaphores_per_image_.size();
             // Store which semaphore we're using for this frame
             acquire_semaphores_in_use_[frame_index] = acquire_semaphore;
             break;
@@ -495,16 +485,38 @@ bool VulkanContext::BeginFrame()
     }
     queue_finish_fences_for_image_[image_index] = queue_finish_fences_[frame_index];
 
+    BeginFrameCommandBuffer(frame_index);
+    return true;
+}
+
+void VulkanContext::BeginFrameCommandBuffer(unsigned frame_index)
+{
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = 0;
     begin_info.pInheritanceInfo = nullptr;
 
     CHECK_VK_ERROR(vkBeginCommandBuffer(command_buffers_[frame_index], &begin_info));
-    ResetCommandState();
 
-    current_command_buffer_ = command_buffers_[frame_index];
-    return true;
+    frame_command_context_.Begin(command_buffers_[frame_index]);
+    command_context_ = &frame_command_context_;
+}
+
+VkCommandBuffer VulkanContext::EndFrameCommandBuffer()
+{
+    VkCommandBuffer command_buffer = frame_command_context_.GetCommandBuffer();
+    frame_command_context_.End();
+    command_context_ = nullptr;
+    CHECK_VK_ERROR(vkEndCommandBuffer(command_buffer));
+    return command_buffer;
+}
+
+void VulkanContext::ReleaseFinishedCommandBufferResources()
+{
+    while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
+    {
+        pending_command_buffer_resources_.pop();
+    }
 }
 
 VkResult VulkanContext::EndFrame()
@@ -513,21 +525,16 @@ VkResult VulkanContext::EndFrame()
 
     if (rhi_->IsHeadless())
     {
-        CHECK_VK_ERROR(vkEndCommandBuffer(current_command_buffer_));
+        VkCommandBuffer command_buffer = EndFrameCommandBuffer();
 
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers = &current_command_buffer_;
+        submit_info.pCommandBuffers = &command_buffer;
 
         CHECK_VK_ERROR(vkQueueSubmit(graphics_queue_, 1, &submit_info, queue_finish_fences_[frame_index]));
 
-        current_command_buffer_ = nullptr;
-
-        while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
-        {
-            pending_command_buffer_resources_.pop();
-        }
+        ReleaseFinishedCommandBufferResources();
 
         return VK_SUCCESS;
     }
@@ -535,11 +542,11 @@ VkResult VulkanContext::EndFrame()
     auto image_index = swap_chain_->GetCurrentImageIndex();
     auto back_buffer_color = swap_chain_->GetImage(image_index);
 
-    back_buffer_color->TransitionLayout(current_command_buffer_, {.target_layout = RHIImageLayout::Present,
-                                                                  .after_stage = RHIPipelineStage::ColorOutput,
-                                                                  .before_stage = RHIPipelineStage::Bottom});
+    back_buffer_color->Transition(frame_command_context_, {.target_layout = RHIImageLayout::Present,
+                                                           .after_stage = RHIPipelineStage::ColorOutput,
+                                                           .before_stage = RHIPipelineStage::Bottom});
 
-    CHECK_VK_ERROR(vkEndCommandBuffer(current_command_buffer_));
+    VkCommandBuffer command_buffer = EndFrameCommandBuffer();
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -547,13 +554,13 @@ VkResult VulkanContext::EndFrame()
     // Color output should wait for the swap chain image to be ready
     // Commands before that are free to fire
     VkSemaphore wait_semaphores[] = {acquire_semaphores_in_use_[frame_index]};
-    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkPipelineStageFlags wait_stages[] = {static_cast<VkPipelineStageFlags>(AcquireWaitStage)};
     submit_info.waitSemaphoreCount = 1;
     submit_info.pWaitSemaphores = wait_semaphores;
     submit_info.pWaitDstStageMask = wait_stages;
 
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &current_command_buffer_;
+    submit_info.pCommandBuffers = &command_buffer;
 
     // Use per-image semaphore for signaling to avoid conflicts with vsync
     VkSemaphore signal_semaphores[] = {commands_finish_semaphores_per_image_[image_index]};
@@ -578,12 +585,7 @@ VkResult VulkanContext::EndFrame()
 
     const VkResult result = vkQueuePresentKHR(present_queue_, &present_info);
 
-    current_command_buffer_ = nullptr;
-
-    while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
-    {
-        pending_command_buffer_resources_.pop();
-    }
+    ReleaseFinishedCommandBufferResources();
 
     return result;
 }
@@ -694,33 +696,31 @@ bool VulkanContext::CheckInstanceExtensionSupport()
 
 void VulkanContext::BeginCommandBuffer()
 {
-    if (current_command_buffer_ != nullptr)
+    if (command_context_ != nullptr)
     {
         return;
     }
 
-    ASSERT_F(temporary_command_buffer_ == nullptr,
-             "A temporary command buffer is active, should not begin another one");
+    ASSERT_F(!temporary_command_buffer_, "A temporary command buffer is active, should not begin another one");
 
     // resources released in this scope land in the current frame slot's deferred-deletion
     // bucket, which empties at the next BeginFrame regardless of this scope's own fence;
     // block that frame on the fence so the deletions stay safe
-    temporary_command_buffer_ = new OneShotCommandBufferScope(false, true);
-    current_command_buffer_ = temporary_command_buffer_->GetCommandBuffer();
+    temporary_command_buffer_.emplace(true);
+    command_context_ = &temporary_command_buffer_->GetCommandContext();
 }
 
 void VulkanContext::SubmitCommandBuffer()
 {
-    if (current_command_buffer_ == nullptr)
+    if (command_context_ == nullptr)
     {
         return;
     }
 
-    ASSERT_F(temporary_command_buffer_ != nullptr, "No active command buffer to submit");
+    ASSERT_F(temporary_command_buffer_, "No active command buffer to submit");
 
-    current_command_buffer_ = nullptr;
-    delete temporary_command_buffer_;
-    temporary_command_buffer_ = nullptr;
+    command_context_ = nullptr;
+    temporary_command_buffer_.reset();
 }
 
 void VulkanContext::SetupMemoryAllocator()
@@ -771,11 +771,6 @@ bool VulkanContext::PickPhysicalDevice()
         {
             physical_device_ = device;
             enable_ray_tracing_ = can_enable_ray_tracing;
-            supports_astc_hdr_ = DeviceSupportsAstcHdr(device);
-            if (supports_astc_hdr_)
-            {
-                device_extensions_.push_back(VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME);
-            }
 
             VkPhysicalDeviceProperties device_properties;
             vkGetPhysicalDeviceProperties(physical_device_, &device_properties);
@@ -785,14 +780,8 @@ bool VulkanContext::PickPhysicalDevice()
                           static_cast<uint32_t>(device_properties.limits.minStorageBufferOffsetAlignment)});
 
             QuerySubgroupQuadSupport();
-
-            auto max_msaa_count = GetMaxUsableSampleCount();
-
-            msaa_samples_ = std::min(rhi_->GetConfig().msaa_samples, max_msaa_count);
-            if (msaa_samples_ > 1)
-            {
-                Log(Info, "MSAA enabled: {}", msaa_samples_);
-            }
+            QueryTimestampSupport();
+            QueryOptionalDeviceFeatures();
 
             break;
         }
@@ -832,32 +821,42 @@ bool VulkanContext::CreateInstance()
     create_info.pApplicationInfo = &app_info;
     create_info.enabledExtensionCount = static_cast<uint32_t>(instance_extensions_.size());
     create_info.ppEnabledExtensionNames = instance_extensions_.data();
+
+    std::vector<VkLayerSettingEXT> layer_settings;
+
 #if PLATFORM_MACOS
-#if VK_KHR_portability_enumeration
     create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
 
     const int use_metal_argument_buffers = 1;
+    layer_settings.push_back({"MoltenVK", "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", VK_LAYER_SETTING_TYPE_INT32_EXT, 1,
+                              &use_metal_argument_buffers});
 #ifndef NDEBUG
     const int mvk_debug_value = 1;
     const int mvk_log_level = 2;
+    layer_settings.push_back({"MoltenVK", "MVK_CONFIG_DEBUG", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_debug_value});
+    layer_settings.push_back({"MoltenVK", "MVK_CONFIG_LOG_LEVEL", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_log_level});
 #endif
-    const VkLayerSettingEXT settings[] = {
-        {"MoltenVK", "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", VK_LAYER_SETTING_TYPE_INT32_EXT, 1,
-         &use_metal_argument_buffers},
-#ifndef NDEBUG
-        {"MoltenVK", "MVK_CONFIG_DEBUG", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_debug_value},
-        {"MoltenVK", "MVK_CONFIG_LOG_LEVEL", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &mvk_log_level}
-#endif
-    };
+#endif // PLATFORM_MACOS
+
+    if (enable_validation_ && rhi_->GetConfig().enable_sync_validation)
+    {
+        static constexpr VkBool32 ValidateSync = VK_TRUE;
+        layer_settings.push_back(
+            {validation_layers_.front(), "validate_sync", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &ValidateSync});
+        enable_sync_validation_ = true;
+        Log(Info, "Vulkan synchronization validation enabled");
+    }
+
     const VkLayerSettingsCreateInfoEXT layer_settings_create_info = {
         .sType = VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT,
         .pNext = nullptr,
-        .settingCount = ARRAY_COUNT(settings),
-        .pSettings = settings,
+        .settingCount = static_cast<uint32_t>(layer_settings.size()),
+        .pSettings = layer_settings.data(),
     };
-    create_info.pNext = &layer_settings_create_info;
-#endif // PLATFORM_MACOS
+    if (!layer_settings.empty())
+    {
+        create_info.pNext = &layer_settings_create_info;
+    }
 
     if (enable_validation_)
     {
@@ -876,6 +875,10 @@ bool VulkanContext::CreateInstance()
     if (success)
     {
         VulkanFunctionLoader::LoadInstance(instance_);
+
+        // skip labels and names rather than call a command the loader did not resolve
+        supports_debug_utils_ = supports_debug_utils_ && vkCmdBeginDebugUtilsLabelEXT != nullptr &&
+                                vkCmdEndDebugUtilsLabelEXT != nullptr && vkSetDebugUtilsObjectNameEXT != nullptr;
     }
     return success;
 }
@@ -891,6 +894,86 @@ void VulkanContext::QuerySubgroupQuadSupport()
 
     supports_subgroup_quad_ops_ = (subgroup_properties.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT) != 0u &&
                                   (subgroup_properties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0u;
+}
+
+void VulkanContext::QueryTimestampSupport()
+{
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &queue_family_count, nullptr);
+    std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &queue_family_count, queue_families.data());
+
+    const auto graphics_family = FindQueueFamilies(physical_device_, surface_).graphicsFamily;
+    timestamp_valid_bits_ = queue_families[graphics_family].timestampValidBits;
+}
+
+void VulkanContext::QueryOptionalDeviceFeatures()
+{
+    // the android emulator (gfxstream over llvmpipe) emulates compressed formats by decoding them when it
+    // intercepts vkCmdPipelineBarrier; its vkCmdPipelineBarrier2 skips the decode (fixed in gfxstream 9068c3aa)
+    VkPhysicalDeviceProperties device_properties;
+    vkGetPhysicalDeviceProperties(physical_device_, &device_properties);
+    compressed_image_barriers_need_sync1_ =
+        FRAMEWORK_ANDROID && std::string_view(device_properties.deviceName).find("llvmpipe") != std::string_view::npos;
+
+    // MoltenVK ends the Metal render pass at a by-region input attachment barrier and begins another, which stores and
+    // reloads the attachments (MVKCmdPipelineBarrier::encode)
+    VkPhysicalDeviceDriverProperties driver_properties{};
+    driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    VkPhysicalDeviceProperties2 device_properties2{};
+    device_properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    device_properties2.pNext = &driver_properties;
+    vkGetPhysicalDeviceProperties2(physical_device_, &device_properties2);
+    keeps_memoryless_across_pixel_local_barrier_ = driver_properties.driverID != VK_DRIVER_ID_MOLTENVK;
+
+    supports_astc_hdr_ = QueryDeviceFeatures<VkPhysicalDeviceVulkan13Features>(
+                             physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+                             .textureCompressionASTC_HDR == VK_TRUE;
+
+    supports_dynamic_rendering_local_read_ =
+        HasDeviceExtension(physical_device_, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) &&
+        QueryDeviceFeatures<VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR>(
+            physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR)
+                .dynamicRenderingLocalRead == VK_TRUE;
+    if (supports_dynamic_rendering_local_read_)
+    {
+        device_extensions_.push_back(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
+    }
+}
+
+bool VulkanContext::SupportsLazilyAllocatedImage(VkFormat format, VkImageUsageFlags usage) const
+{
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = format;
+    image_info.extent = {.width = 1, .height = 1, .depth = 1};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = usage;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkDeviceImageMemoryRequirements requirements_info{};
+    requirements_info.sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS;
+    requirements_info.pCreateInfo = &image_info;
+    VkMemoryRequirements2 requirements{};
+    requirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+    vkGetDeviceImageMemoryRequirements(device_, &requirements_info, &requirements);
+
+    VkPhysicalDeviceMemoryProperties memory_properties;
+    vkGetPhysicalDeviceMemoryProperties(physical_device_, &memory_properties);
+    for (auto type = 0u; type < memory_properties.memoryTypeCount; type++)
+    {
+        if ((requirements.memoryRequirements.memoryTypeBits & (1u << type)) != 0u &&
+            (memory_properties.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) != 0u)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool VulkanContext::CreateLogicalDevice()
@@ -922,6 +1005,8 @@ bool VulkanContext::CreateLogicalDevice()
 
     VkPhysicalDeviceFeatures device_features{};
     device_features.samplerAnisotropy = VK_TRUE;
+    // per-slot write masks of attachments a merged render graph pass does not write
+    device_features.independentBlend = VK_TRUE;
     // DXC-compiled shaders (NRD) access storage images without format decorations; without these
     // features such reads are undefined (Adreno returns zeros) with no validation-layer diagnostic
     device_features.shaderStorageImageReadWithoutFormat = supported_features.shaderStorageImageReadWithoutFormat;
@@ -931,18 +1016,31 @@ bool VulkanContext::CreateLogicalDevice()
     create_info.enabledExtensionCount = static_cast<uint32_t>(device_extensions_.size());
     create_info.ppEnabledExtensionNames = device_extensions_.data();
 
+    Log(Info, "enabled device extensions:");
+    for (const auto &extension : device_extensions_)
+    {
+        Log(Info, "\t{}", extension);
+    }
+
     VkPhysicalDeviceBufferDeviceAddressFeatures enabled_buffer_device_addres_features{};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR enabled_acceleration_structure_features{};
     VkPhysicalDeviceRayQueryFeaturesKHR enabled_ray_query_features{};
     VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing_features{};
     VkPhysicalDeviceRobustness2FeaturesEXT enabled_robustness_features{};
-    VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT enabled_astc_hdr_features{};
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR enabled_local_read_features{};
 
-    if (supports_astc_hdr_)
+    VkPhysicalDeviceVulkan13Features enabled_vulkan13_features{};
+    enabled_vulkan13_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    enabled_vulkan13_features.dynamicRendering = VK_TRUE;
+    enabled_vulkan13_features.synchronization2 = VK_TRUE;
+    enabled_vulkan13_features.textureCompressionASTC_HDR = supports_astc_hdr_ ? VK_TRUE : VK_FALSE;
+    ChainVkStructurePtr(create_info, enabled_vulkan13_features);
+
+    if (supports_dynamic_rendering_local_read_)
     {
-        enabled_astc_hdr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES_EXT;
-        enabled_astc_hdr_features.textureCompressionASTC_HDR = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_astc_hdr_features);
+        enabled_local_read_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR;
+        enabled_local_read_features.dynamicRenderingLocalRead = VK_TRUE;
+        ChainVkStructurePtr(create_info, enabled_local_read_features);
     }
 
     if (rhi_->SupportsHardwareRayTracing())
@@ -999,39 +1097,17 @@ void VulkanContext::CreateCommandPool()
     CHECK_VK_ERROR(vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_));
 }
 
-uint32_t VulkanContext::GetMaxUsableSampleCount()
+// extensions of the loader, the driver and the implicit layers
+static bool IsInstanceExtensionAvailable(std::string_view name)
 {
-    VkPhysicalDeviceProperties physical_device_properties;
-    vkGetPhysicalDeviceProperties(physical_device_, &physical_device_properties);
+    uint32_t extension_count = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr);
+    std::vector<VkExtensionProperties> extensions(extension_count);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, extensions.data());
 
-    VkSampleCountFlags const counts = physical_device_properties.limits.framebufferColorSampleCounts &
-                                      physical_device_properties.limits.framebufferDepthSampleCounts;
-    if (counts & VK_SAMPLE_COUNT_64_BIT)
-    {
-        return 64;
-    }
-    if (counts & VK_SAMPLE_COUNT_32_BIT)
-    {
-        return 32;
-    }
-    if (counts & VK_SAMPLE_COUNT_16_BIT)
-    {
-        return 16;
-    }
-    if (counts & VK_SAMPLE_COUNT_8_BIT)
-    {
-        return 8;
-    }
-    if (counts & VK_SAMPLE_COUNT_4_BIT)
-    {
-        return 4;
-    }
-    if (counts & VK_SAMPLE_COUNT_2_BIT)
-    {
-        return 2;
-    }
-
-    return 1;
+    return std::ranges::any_of(extensions, [name](const VkExtensionProperties &extension) {
+        return std::string_view(extension.extensionName) == name;
+    });
 }
 
 void VulkanContext::GetRequiredInstanceExtensions()
@@ -1047,33 +1123,23 @@ void VulkanContext::GetRequiredInstanceExtensions()
         instance_extensions_.push_back(required_extension);
     }
 
-    if (enable_validation_)
+    // labels and object names show up in captures and tools without validation too
+    supports_debug_utils_ = enable_validation_ || IsInstanceExtensionAvailable(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (supports_debug_utils_)
     {
         instance_extensions_.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
 #if PLATFORM_MACOS
-#if VK_KHR_portability_enumeration
     // Required on macOS regardless of headless mode, since CreateInstance always
     // sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.
     instance_extensions_.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 
     // Only add VK_EXT_layer_settings if the loader exposes it.
+    if (IsInstanceExtensionAvailable(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME))
     {
-        uint32_t ext_count = 0;
-        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, nullptr);
-        std::vector<VkExtensionProperties> exts(ext_count);
-        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data());
-
-        bool layer_settings_available = std::ranges::any_of(exts, [](const VkExtensionProperties &e) {
-            return std::string_view(e.extensionName) == VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
-        });
-        if (layer_settings_available)
-        {
-            instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
-        }
+        instance_extensions_.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
     }
-#endif
 #endif
 
     Log(Info, "enabled instance extensions:");
@@ -1085,7 +1151,7 @@ void VulkanContext::GetRequiredInstanceExtensions()
 
 void VulkanContext::SetDebugInfo(uint64_t objectHandle, VkObjectType objectType, const char *name)
 {
-    if (!enable_validation_)
+    if (!supports_debug_utils_)
     {
         return;
     }

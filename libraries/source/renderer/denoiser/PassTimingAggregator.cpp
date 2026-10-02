@@ -20,7 +20,7 @@ PassTimingAggregator::PassTimingAggregator(RHIContext *rhi, std::string label, u
 {
 }
 
-void PassTimingAggregator::AddStage(std::string name, RHIResourceRef<RHIComputePass> pass)
+void PassTimingAggregator::AddStage(std::string name, RHIResourceRef<RHIPass> pass)
 {
     stages_.push_back(
         {.name = std::move(name), .pass = std::move(pass), .slot_ran = std::vector<uint8_t>(max_frames_in_flight_, 0)});

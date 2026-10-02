@@ -5,6 +5,7 @@
 #include "rhi/VulkanRHI.h"
 
 #include "VulkanDescriptorSet.h"
+#include "VulkanImage.h"
 
 namespace sparkle
 {
@@ -110,16 +111,42 @@ inline VkCompareOp GetDepthCompareOp(const RHIPipelineState::DepthState &depth_s
     }
 }
 
+// lavapipe resets its blend state, independent blend included, when it binds a pipeline without color attachments, and
+// later pipelines then apply slot 0's write mask to every slot. every pipeline and rendering declares at least slot 0,
+// unused (VK_FORMAT_UNDEFINED, a null view) when nothing attaches it.
+inline constexpr uint32_t MinColorAttachmentCount = 1;
+
+// color_formats backs the returned struct and must outlive it
+inline VkPipelineRenderingCreateInfo GetVkPipelineRenderingCreateInfo(
+    const RHIAttachmentSignature &signature, std::array<VkFormat, MaxNumColorAttachments> &color_formats)
+{
+    auto get_format = [](PixelFormat format) {
+        return format == PixelFormat::Count ? VK_FORMAT_UNDEFINED : GetVkPixelFormat(format);
+    };
+
+    uint32_t color_attachment_count = MinColorAttachmentCount;
+    for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
+    {
+        color_formats[slot] = get_format(signature.color_formats[slot]);
+        if (color_formats[slot] != VK_FORMAT_UNDEFINED)
+        {
+            color_attachment_count = slot + 1;
+        }
+    }
+
+    VkPipelineRenderingCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    create_info.colorAttachmentCount = color_attachment_count;
+    create_info.pColorAttachmentFormats = color_formats.data();
+    create_info.depthAttachmentFormat = get_format(signature.depth_format);
+    return create_info;
+}
+
 class VulkanPipelineState : public RHIPipelineState
 {
 public:
     VulkanPipelineState(RHIPipelineState::PipelineType type, const std::string &name) : RHIPipelineState(type, name)
     {
-    }
-
-    [[nodiscard]] VkPipeline GetPipeline() const
-    {
-        return pipeline_;
     }
 
     ~VulkanPipelineState() override;
@@ -143,8 +170,6 @@ protected:
     std::vector<RHIShaderResourceSet> combined_resource_sets_;
 
     VkPipelineLayout pipeline_layout_;
-
-    VkPipeline pipeline_;
 };
 
 class VulkanForwardPipelineState : public VulkanPipelineState
@@ -155,13 +180,16 @@ public:
     {
     }
 
+    ~VulkanForwardPipelineState() override;
+
     void CompileInternal() override;
 
-    void SetViewportAndScissor();
+    // compiled on first use for each attachment signature
+    VkPipeline GetPipeline(const RHIAttachmentSignature &signature);
 
-    void BindBuffers();
+    void BindBuffers(VulkanCommandContext &command_context);
 
-    void BindDescriptorSets();
+    void BindDescriptorSets(VulkanCommandContext &command_context);
 
 private:
     struct VulkanVertexInputDescription
@@ -181,9 +209,7 @@ private:
 
     void InitPipelineInfo();
 
-    void CreatePipeline();
-
-    void SetupViewport();
+    [[nodiscard]] VkPipeline CreatePipeline(const RHIAttachmentSignature &signature) const;
 
     void SetupVertexInputInfo();
 
@@ -201,14 +227,14 @@ private:
 
     VkPipelineVertexInputStateCreateInfo vertex_input_info_;
     VkPipelineInputAssemblyStateCreateInfo input_assembly_;
-    VkViewport viewport_;
-    VkRect2D scissor_;
     VkPipelineRasterizationStateCreateInfo rasterizer_;
     VkPipelineMultisampleStateCreateInfo multisampling_;
 
-    std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments_;
-    VkPipelineColorBlendStateCreateInfo color_blending_;
+    // shared by every color slot the attachment signature does not mask
+    VkPipelineColorBlendAttachmentState color_blend_attachment_;
     VkPipelineDepthStencilStateCreateInfo depth_stencil_;
+
+    std::vector<std::pair<RHIAttachmentSignature, VkPipeline>> pipelines_;
 };
 
 class VulkanComputePipelineState : public VulkanPipelineState
@@ -219,9 +245,19 @@ public:
     {
     }
 
+    ~VulkanComputePipelineState() override;
+
     void CompileInternal() override;
 
-    void BindDescriptorSets();
+    [[nodiscard]] VkPipeline GetPipeline() const
+    {
+        return pipeline_;
+    }
+
+    void BindDescriptorSets(VulkanCommandContext &command_context);
+
+private:
+    VkPipeline pipeline_;
 };
 } // namespace sparkle
 

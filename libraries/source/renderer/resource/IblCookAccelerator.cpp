@@ -3,6 +3,8 @@
 #include "core/Exception.h"
 #include "core/cook/CookJob.h"
 #include "io/TextureCompression.h"
+#include "renderer/graph/RGTexturePool.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/IBLBrdfPass.h"
 #include "renderer/pass/IBLDiffusePass.h"
 #include "renderer/pass/IBLSpecularPass.h"
@@ -52,14 +54,19 @@ CookJobResult DrivePassToCompletion(RHIContext *rhi, std::unique_ptr<IBLPass> pa
     pass->SetArtifactReadyCallback([&payload](std::vector<char> result) { payload = std::move(result); });
     pass->InitRenderResources(config);
 
+    // each frame's graph holds one cook step; it creates no transients
     constexpr unsigned SamplesPerDispatch = 64;
+    RGTexturePool pool(rhi);
     while (!pass->IsReady())
     {
         if (!rhi->BeginFrame())
         {
             return CookJobResult::Failure();
         }
-        pass->CookOnTheFly(config, SamplesPerDispatch);
+        RenderGraph graph(rhi, pool, config);
+        pass->AddTo(graph, SamplesPerDispatch);
+        graph.Compile();
+        graph.Execute(*rhi->GetCommandContext());
         rhi->EndFrame();
     }
     rhi->WaitForDeviceIdle();

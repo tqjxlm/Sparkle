@@ -14,11 +14,21 @@ class CookHandle;
 class CookJob;
 class IBLPass;
 class Image2DCube;
+class RenderGraph;
 struct RenderConfig;
 
 class ImageBasedLighting
 {
 public:
+    // what passes sample the BRDF, diffuse and specular maps with
+    static constexpr RHISampler::SamplerAttribute MapSampler{
+        .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
+        .filtering_method_min = RHISampler::FilteringMethod::Linear,
+        .filtering_method_mag = RHISampler::FilteringMethod::Linear,
+        .filtering_method_mipmap = RHISampler::FilteringMethod::Linear,
+        .max_lod = RHISampler::SamplerAttribute::UnclampedLod,
+        .enable_anisotropy = false};
+
     ImageBasedLighting(const RHIResourceRef<RHIImage> &env_map, std::shared_ptr<const Image2DCube> env_map_cpu);
 
     ~ImageBasedLighting();
@@ -27,7 +37,8 @@ public:
 
     [[nodiscard]] bool NeedUpdate() const;
 
-    void CookOnTheFly(const RenderConfig &config);
+    // adds this frame's cook step of each map still cooking on the GPU
+    void AddCookPasses(RenderGraph &graph, const RenderConfig &config);
 
     [[nodiscard]] RHIResourceRef<RHIImage> GetDiffuseMap() const;
 

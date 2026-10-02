@@ -14,16 +14,6 @@ SkyRenderProxy::SkyRenderProxy(std::shared_ptr<const Image2DCube> sky_map) : sky
 
 SkyRenderProxy::~SkyRenderProxy() = default;
 
-void SkyRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera, const RenderConfig &config)
-{
-    LightRenderProxy::Update(rhi, camera, config);
-
-    if (image_based_lighting_ && image_based_lighting_->NeedUpdate())
-    {
-        image_based_lighting_->CookOnTheFly(config);
-    }
-}
-
 void SkyRenderProxy::InitRenderResources(RHIContext *rhi, const RenderConfig &config)
 {
     LightRenderProxy::InitRenderResources(rhi, config);

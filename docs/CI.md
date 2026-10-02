@@ -86,6 +86,8 @@ The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000
 python3 dev/run_tests.py --framework glfw --config Release --software
 ```
 
+The Linux + GLFW job registers the validation layer of the Vulkan SDK that the build jobs keep in `build_cache`, through `VK_ADD_LAYER_PATH` and a copy of the layer manifest that names the library by absolute path; a cache miss fails the job before the suite runs. Every case on that cell therefore runs under core validation, and its synchronization validation cases `forward_sync_validation`, `deferred_sync_validation`, `gpu_sync_validation`, `cpu_sync_validation`, `render_graph_sync_validation` and `render_graph_merge_parity_sync_validation` gate GPU hazards, with `sync_validation_hazard` proving the gate can fail (see [Test.md](Test.md#validation-layer)). The macOS + GLFW job also runs under core validation, because `run.py` puts the SDK's layer on the path, and so does the Android job, whose package ships the layer. The Windows job has no validation layer.
+
 The macOS package runs the forward and deferred pipelines on the runner's physical Metal GPU:
 
 ```bash
@@ -116,7 +118,7 @@ The paravirtual device also renders MTLHeap-placed resources as solid magenta th
 
 ## Screenshot Ground Truth
 
-The suite compares auto-generated screenshots with the published ground truth. CI coverage spans forward and deferred; pass `--case forward_render_static`, for example, to focus one pipeline during development. `TestScene` is the packaged default scene (`resources/packed/TestScene.usda`, see [USD.md](USD.md)) and is loaded when no `--scene` override is present. Ground-truth images are updated manually.
+The suite compares auto-generated screenshots with the published ground truth. CI coverage spans forward and deferred, plus cpu and gpu on `ubuntu-glfw-release`, where lavapipe runs the path tracer's ray queries in software (`cpu_render_static_64spp` and `gpu_render_static_64spp` stop at 64 samples per pixel, so they gate with a FLIP threshold that allows for the remaining noise); pass `--case forward_render_static`, for example, to focus one pipeline during development. `forward_render_static_sampled` and `deferred_render_static_sampled` gate forward and deferred on `ubuntu-glfw-release` with the render graph's pixel-local reads off, the path the android emulator and the iOS simulator take anyway (see [RenderGraph.md](RenderGraph.md#golden-graph-shapes)). `TestScene` is the packaged default scene (`resources/packed/TestScene.usda`, see [USD.md](USD.md)) and is loaded when no `--scene` override is present. Ground-truth images are updated manually.
 
 ### TestScene
 

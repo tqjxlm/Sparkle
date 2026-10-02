@@ -33,7 +33,7 @@
 	url = https://github.com/nlohmann/json.git
 [submodule "thirdparty/imgui"]
 	path = thirdparty/imgui
-	url = https://github.com/ocornut/imgui.git
+	url = https://github.com/tqjxlm/imgui.git
 [submodule "thirdparty/spirv_reflect"]
 	path = thirdparty/spirv_reflect
 	url = https://github.com/KhronosGroup/SPIRV-Reflect.git
@@ -73,3 +73,9 @@
 [submodule "thirdparty/ISPCTextureCompressor"]
 	path = thirdparty/ISPCTextureCompressor
 	url = https://github.com/GameTechDev/ISPCTextureCompressor.git
+[submodule "thirdparty/Vulkan-Headers"]
+	path = thirdparty/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "thirdparty/imgui_club"]
+	path = thirdparty/imgui_club
+	url = https://github.com/ocornut/imgui_club.git

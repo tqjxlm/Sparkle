@@ -24,7 +24,7 @@ These libraries should be installed via an installer or package manager (apt, br
   apt # Linux
   ```
 
-* **Vulkan SDK**: 1.4.350.0+
+* **Vulkan SDK**: 1.4.350.0+. It provides the Vulkan loader (and MoltenVK on macOS) that glfw builds link, the validation layer and shader tools. No build compiles against its headers: every Vulkan framework (glfw and android) uses the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git) submodule, pinned to the SDK version in [prerequisites.json](../prerequisites.json), so an installed SDK or NDK never changes the Vulkan API a build sees. Bump both together.
 
   ``` shell
   https://vulkan.lunarg.com/sdk/home
@@ -59,7 +59,8 @@ These libraries are managed by git submodules or CMake. They will be set up auto
 * [eigen](https://gitlab.com/libeigen/eigen.git)
 * [fast_float](https://github.com/fastfloat/fast_float.git)
 * [hash-library](https://github.com/lazy-eggplant/hash-library.git)
-* [imgui](https://github.com/ocornut/imgui.git)
+* [imgui](https://github.com/ocornut/imgui.git) v1.92.9b, from the [tqjxlm/imgui](https://github.com/tqjxlm/imgui.git) fork, whose Vulkan and Metal backends also draw inside renderings with several color attachments
+* [imgui_club](https://github.com/ocornut/imgui_club.git), for `imgui_threaded_rendering`'s texture queue, which hands ImGui's texture requests from the main thread to the render thread
 * [ios-cmake](https://github.com/leetal/ios-cmake.git)
 * [json](https://github.com/nlohmann/json.git)
 * [magic_enum](https://github.com/Neargye/magic_enum.git)
@@ -73,6 +74,7 @@ These libraries are managed by git submodules or CMake. They will be set up auto
 * [tracy](https://github.com/wolfpld/tracy.git)
 * [vma](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 * [volk](https://github.com/zeux/volk.git)
+* [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git)
 * [Xoshiro-cpp](https://github.com/Reputeless/Xoshiro-cpp.git)
 
 </details>
@@ -101,6 +103,8 @@ Otherwise, you need to specify them via environment variables. See the table bel
 | JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home  | android          | no (Android Studio)             |
 | VS_PATH      | C:/Program Files/Microsoft Visual Studio/[version]/[edition] | all windows      | no (vs-installer)               |
 | ISPC         | /Users/username/ispc/bin/ispc                                | glfw, macos      | yes                             |
+
+The Slang shader compiler (slangc) is always the version pinned in [prerequisites.json](../prerequisites.json): the build installs it into `build_cache` and replaces any other version it finds there. Every shader depends on the slangc binary, so a version change recompiles them all.
 
 ISPC compiles the block encoder kernels of the cook. Only the frameworks whose binary can cook (glfw, macos) build them; android and ios build the portable encoder instead, which they never run outside the `texture_compression` test.
 
@@ -274,6 +278,8 @@ open build_system/macos/project/sparkle.xcodeproj      # or build_system/ios/pro
 ### Android Studio (Only for android framework)
 
 The project builds with Android Gradle Plugin 9.3, which needs a matching Android Studio (Panda 3 or newer) and JDK 17 or newer to sync.
+
+The native build runs the Android SDK's `cmake;<version>` package at the CMake version pinned in [prerequisites.json](../prerequisites.json); `build.py` installs it through the SDK cmdline-tools' `sdkmanager` when it is missing and passes the build the pinned ninja, since the package's bundled ninja 1.10 cannot build C++20 module sources.
 
 ``` shell
 python3 build.py --framework=android --generate_only

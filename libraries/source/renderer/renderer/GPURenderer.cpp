@@ -4,10 +4,8 @@
 #include "renderer/BindlessManager.h"
 #include "renderer/denoiser/Denoiser.h"
 #include "renderer/denoiser/DenoiserFactory.h"
-#include "renderer/pass/ClearTexturePass.h"
-#include "renderer/pass/ScreenQuadPass.h"
+#include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/ToneMappingPass.h"
-#include "renderer/pass/UiPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/MeshRenderProxy.h"
@@ -64,9 +62,15 @@ class RayTracingComputeShader : public RHIShaderInfo
     };
 };
 
+static constexpr RHISampler::SamplerAttribute MaterialTextureSampler{
+    .address_mode = RHISampler::SamplerAddressMode::Repeat,
+    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
+    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
+
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
-                         SceneRenderProxy *scene_render_proxy)
-    : Renderer(render_config, rhi_context, scene_render_proxy),
+                         SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
+    : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool),
       spp_logger_(1.f, false, [this](float) { MeasurePerformance(); })
 {
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Gpu);
@@ -83,14 +87,9 @@ void GPURenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
-    RHIRenderTarget::Attribute scene_rt_attribute;
-    scene_rt_attribute.SetColorAttribute(
-        RHIImage::Attribute{
+    scene_texture_ = rhi_->CreateImage(
+        {
             .format = PixelFormat::RGBAFloat,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
             .width = resolution_.scene.x(),
             .height = resolution_.scene.y(),
             .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
@@ -98,46 +97,14 @@ void GPURenderer::InitRenderResources()
             .mip_levels = 1,
             .msaa_samples = 1,
         },
-        0);
-
-    scene_rt_ = rhi_->GetRenderTargetPool().Acquire(scene_rt_attribute, "GPUPipelineColorRT");
-    scene_texture_ = scene_rt_->GetColorImage(0);
-
-    RHIRenderTarget::Attribute tone_mapping_rt_attribute;
-    tone_mapping_rt_attribute.SetColorAttribute(
-        RHIImage::Attribute{
-            .format = PixelFormat::B8G8R8A8Srgb,
-            .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                        .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                        .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-            .width = resolution_.output.x(),
-            .height = resolution_.output.y(),
-            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::ColorAttachment |
-                      RHIImage::ImageUsage::TransferSrc,
-            .msaa_samples = 1,
-        },
-        0);
-
-    tone_mapping_rt_ = rhi_->GetRenderTargetPool().Acquire(tone_mapping_rt_attribute, "ToneMappingRT");
-    tone_mapping_output_ = tone_mapping_rt_->GetColorImage(0);
+        "Accumulator");
 
     denoiser_inputs_ = std::make_unique<PathTracingDenoiserInputs>(rhi_, resolution_.scene);
 
     InitSceneRenderResources();
 
-    tone_mapping_pass_ = PipelinePass::Create<ToneMappingPass>(render_config_, rhi_, scene_texture_, tone_mapping_rt_);
-
-    clear_pass_ = PipelinePass::Create<ClearTexturePass>(render_config_, rhi_, Vector4::Zero(),
-                                                         RHIImageLayout::StorageWrite, scene_rt_);
-
-    screen_quad_pass_ = PipelinePass::Create<ScreenQuadPass>(render_config_, rhi_, tone_mapping_output_,
-                                                             rhi_->GetBackBufferRenderTarget());
-
-    if (!rhi_->IsHeadless())
-    {
-        ui_pass_ = PipelinePass::Create<UiPass>(render_config_, rhi_, tone_mapping_rt_);
-    }
+    InitPostChain(ToneMappingPass::ScreenFormat, PostChain::ScreenPass::ToneMapping);
+    displayed_image_ = scene_texture_;
 
     performance_history_.resize(rhi_->GetMaxFramesInFlight());
 
@@ -147,15 +114,21 @@ void GPURenderer::InitRenderResources()
     compute_pass_ = rhi_->CreateComputePass("GPURendererComputePass", true);
 }
 
-void GPURenderer::Render()
+RGTexture GPURenderer::BuildGraph(RenderGraph &graph)
 {
-    PROFILE_SCOPE("GPURenderer::Render");
+    PROFILE_SCOPE("GPURenderer::BuildGraph");
 
     auto *camera = scene_render_proxy_->GetCamera();
 
+    const auto accumulator = graph.Import("Accumulator", scene_texture_);
+    const auto tlas = graph.Import("TLAS", tlas_);
+
     if (camera->NeedClear())
     {
-        clear_pass_->Render();
+        graph.AddRasterPass("ClearAccumulator", [accumulator](RGBuilder &builder) {
+            builder.ColorWrite(accumulator, 0, Vector4::Zero());
+            return [](RGRasterContext &) {};
+        });
         camera->ClearPixels();
     }
 
@@ -164,91 +137,69 @@ void GPURenderer::Render()
     const bool accumulation_complete =
         !camera->NeedClear() && camera->GetCumulatedSampleCount() >= render_config_.max_sample_per_pixel;
 
+    auto tone_mapping_input = accumulator;
+
+    if (tlas_->HasStagedBuild())
+    {
+        graph.AddCopyPass("BuildTLAS", [tlas](RGBuilder &builder) {
+            builder.AccelerationStructureBuild(tlas);
+            return [tlas](RGCopyContext &context) { context.BuildAccelerationStructure(tlas); };
+        });
+    }
+
     // base pass: render to texture
     if (tlas_->HasInstances() && !accumulation_complete && !AccumulationPaused())
     {
-        scene_texture_->Transition({.target_layout = RHIImageLayout::StorageWrite,
-                                    .after_stage = RHIPipelineStage::Top,
-                                    .before_stage = RHIPipelineStage::ComputeShader});
-
+        std::optional<DenoiserInputs> denoiser_inputs;
         if (denoiser_inputs_->IsAllocated())
         {
-            denoiser_inputs_->BeginWrite();
+            denoiser_inputs = denoiser_inputs_->Import(graph, accumulator);
         }
 
-        rhi_->BeginComputePass(compute_pass_);
-
-        rhi_->DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u}, {16u, 16u, 1u});
-
-        rhi_->EndComputePass(compute_pass_);
-
-        const auto scene_consumer_stage =
-            frame_denoiser_ ? RHIPipelineStage::ComputeShader : RHIPipelineStage::PixelShader;
-
-        scene_texture_->Transition({.target_layout = RHIImageLayout::Read,
-                                    .after_stage = RHIPipelineStage::ComputeShader,
-                                    .before_stage = scene_consumer_stage});
+        graph.AddComputePass(
+            "PathTrace", compute_pass_, [this, accumulator, tlas, denoiser_inputs](RGBuilder &builder) {
+                using Table = RayTracingComputeShader::ResourceTable;
+                builder.AccelerationStructureRead(tlas, &Table::tlas);
+                builder.StorageReadWrite(accumulator, &Table::imageData);
+                // the tracer binds them as storage images on every dispatch, written or not
+                if (denoiser_inputs)
+                {
+                    for (const auto &[texture, binding] :
+                         {std::pair{denoiser_inputs->noisy_radiance_hit_distance, &Table::gRadiance},
+                          std::pair{denoiser_inputs->normal_view_depth, &Table::gNormalDepth},
+                          std::pair{denoiser_inputs->albedo_object_id, &Table::gAlbedoObj},
+                          std::pair{denoiser_inputs->motion_hit_metallic, &Table::gMotion},
+                          std::pair{denoiser_inputs->noisy_specular_radiance_hit_distance, &Table::gRadianceSpecular},
+                          std::pair{denoiser_inputs->specular_albedo_roughness, &Table::gSpecAlbedo}})
+                    {
+                        builder.StorageWrite(texture, binding);
+                    }
+                }
+                return [this](RGComputeContext &context) {
+                    context.DispatchCompute(pipeline_state_, {resolution_.scene.x(), resolution_.scene.y(), 1u},
+                                            {16u, 16u, 1u});
+                };
+            });
 
         // an encoded frame is displayed as-is even when it completes max_spp: the max_spp=1 motion
         // harnesses film the denoiser, and NRD's final resolve equals the accumulator bit-exactly
-        if (frame_denoiser_ && !gbuffer_write_this_frame_)
+        if (gbuffer_write_this_frame_ && denoiser_inputs)
         {
-            tone_mapping_pass_->SetInput(scene_texture_);
+            tone_mapping_input = frame_denoiser_->AddTo(graph, *denoiser_inputs);
+            displayed_image_ = tone_mapping_input == accumulator ? scene_texture_ : frame_denoiser_->GetOutput();
         }
-        else if (frame_denoiser_ && gbuffer_write_this_frame_)
+        else
         {
-            const bool encoded = frame_denoiser_->Encode(denoiser_inputs_->GetInputs(scene_texture_.get()));
-            if (encoded && frame_denoiser_->GetOutput())
-            {
-                tone_mapping_pass_->SetInput(frame_denoiser_->GetOutput());
-            }
-            else
-            {
-                if (DenoiserSlot *slot = FindDenoiserSlot(frame_provider_))
-                {
-                    slot->failed = true;
-                }
-                Log(Error, "Denoiser {} failed while encoding; the next frame will select a fallback",
-                    frame_denoiser_->GetName());
-            }
+            displayed_image_ = scene_texture_;
         }
     }
-
-    // screen space passes (post processing)
+    else if (displayed_image_ != scene_texture_)
     {
-        tone_mapping_pass_->Render();
-
-        bool has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, false, RHIPipelineStage::ColorOutput);
-        const bool has_readback_without_ui = has_readback;
-        const bool rendered_ui = render_config_.render_ui && ui_pass_;
-
-        if (rendered_ui)
-        {
-            if (has_readback)
-            {
-                tone_mapping_output_->Transition({.target_layout = RHIImageLayout::ColorOutput,
-                                                  .after_stage = RHIPipelineStage::Transfer,
-                                                  .before_stage = RHIPipelineStage::ColorOutput});
-            }
-
-            ui_pass_->Render();
-        }
-
-        has_readback = ReadbackFinalOutputIfRequested(tone_mapping_rt_, true, RHIPipelineStage::ColorOutput);
-
-        RHIPipelineStage final_after_stage = RHIPipelineStage::ColorOutput;
-        if (has_readback || (!rendered_ui && has_readback_without_ui))
-        {
-            final_after_stage = RHIPipelineStage::Transfer;
-        }
-
-        tone_mapping_output_->Transition({.target_layout = RHIImageLayout::Read,
-                                          .after_stage = final_after_stage,
-                                          .before_stage = RHIPipelineStage::PixelShader});
+        // a frame without a dispatch keeps displaying the last denoised output
+        tone_mapping_input = graph.Import("DenoiserOutput", displayed_image_);
     }
 
-    // screen pass: render texture on a screen quad
-    screen_quad_pass_->Render();
+    return tone_mapping_input;
 }
 
 GPURenderer::~GPURenderer() = default;
@@ -265,29 +216,20 @@ void GPURenderer::Update()
 
     auto *camera = scene_render_proxy_->GetCamera();
     const DenoiserProvider requested = DenoiserConfig::Get().provider;
-    DenoiserProvider selected_provider = DenoiserProvider::Off;
-    Denoiser *selected_denoiser = SelectDenoiser(requested, selected_provider);
+    Denoiser *selected_denoiser = SelectDenoiser(requested);
 
     const bool selection_changed = requested != requested_provider_ || selected_denoiser != frame_denoiser_;
     requested_provider_ = requested;
-    frame_provider_ = selected_provider;
     frame_denoiser_ = selected_denoiser;
     denoiser_reset_this_frame_ = selection_changed;
 
     if (requested == DenoiserProvider::Off)
     {
-        tone_mapping_pass_->SetInput(scene_texture_);
+        displayed_image_ = scene_texture_;
     }
     else if (selection_changed)
     {
         camera->MarkPixelDirty();
-    }
-
-    if (frame_denoiser_ && frame_denoiser_->NeedsInputs() &&
-        denoiser_inputs_->EnsureAllocated(DenoiserConfig::Get().radiance_fp16 ? PixelFormat::RGBAFloat16
-                                                                              : PixelFormat::RGBAFloat))
-    {
-        BindDenoiserInputs();
     }
 
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
@@ -310,21 +252,15 @@ void GPURenderer::Update()
             auto sky_map = sky_light->GetSkyMap();
 
             cs_resources->skyMap().BindResource(sky_map->GetDefaultView(rhi_));
-            cs_resources->skyMapSampler().BindResource(sky_map->GetSampler());
         }
         else
         {
             auto dummy_texture = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
                 .format = PixelFormat::RGBAFloat16,
-                .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                            .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                            .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
                 .usages = RHIImage::ImageUsage::Texture,
                 .type = RHIImage::ImageType::Image2DCube,
             });
             cs_resources->skyMap().BindResource(dummy_texture->GetDefaultView(rhi_));
-            cs_resources->skyMapSampler().BindResource(dummy_texture->GetSampler());
         }
     }
 
@@ -370,13 +306,11 @@ void GPURenderer::Update()
         }
     }
 
+    // the BuildTLAS pass records the staged build
     if (need_rebuild_tlas)
     {
         // structural change, rebuild TLAS
         tlas_->Build();
-
-        auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
-        cs_resources->tlas().BindResource(tlas_, true);
     }
     else if (!primitives_to_update.empty())
     {
@@ -452,6 +386,12 @@ void GPURenderer::Update()
     }
     gbuffer_write_this_frame_ = will_dispatch && frame_denoiser_ != nullptr && frame_denoiser_->NeedsInputs();
 
+    if (gbuffer_write_this_frame_)
+    {
+        denoiser_inputs_->EnsureAllocated(DenoiserConfig::Get().radiance_fp16 ? PixelFormat::RGBAFloat16
+                                                                              : PixelFormat::RGBAFloat);
+    }
+
     RayTracingComputeShader::UniformBufferData ubo{
         .camera = camera->GetUniformBufferData(render_config_),
         .view_projection = camera->GetViewProjectionMatrix(),
@@ -480,15 +420,6 @@ void GPURenderer::Update()
         ubo.dir_light = dir_light->GetRenderData();
     }
     uniform_buffer_->Upload(rhi_, &ubo);
-
-    screen_quad_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-
-    if (ui_pass_)
-    {
-        ui_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
-    }
-
-    tone_mapping_pass_->UpdateFrameData(render_config_, scene_render_proxy_);
 
     spp_logger_.Tick();
 
@@ -530,34 +461,20 @@ void GPURenderer::InitSceneRenderResources()
 
     auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
     cs_resources->ubo().BindResource(uniform_buffer_);
-    cs_resources->imageData().BindResource(scene_texture_->GetDefaultView(rhi_));
-    cs_resources->tlas().BindResource(tlas_);
 
+    // the dummies the tracer binds until the path trace pass declares allocated inputs
     BindDenoiserInputs();
-
-    auto dummy_texture_2d = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
-        .format = PixelFormat::R8G8B8A8Srgb,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
-        .usages = RHIImage::ImageUsage::Texture,
-    });
 
     auto dummy_texture_cube = rhi_->GetOrCreateDummyTexture(RHIImage::Attribute{
         .format = PixelFormat::RGBAFloat16,
-        .sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-                    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest},
         .usages = RHIImage::ImageUsage::Texture,
         .type = RHIImage::ImageType::Image2DCube,
     });
 
     cs_resources->skyMap().BindResource(dummy_texture_cube->GetDefaultView(rhi_));
-    cs_resources->skyMapSampler().BindResource(dummy_texture_cube->GetSampler());
+    cs_resources->skyMapSampler().BindResource(rhi_->GetSampler(SkyRenderProxy::SkyMapSampler));
 
-    cs_resources->materialTextureSampler().BindResource(dummy_texture_2d->GetSampler());
+    cs_resources->materialTextureSampler().BindResource(rhi_->GetSampler(MaterialTextureSampler));
 
     BindBindlessResources();
 }
@@ -589,6 +506,13 @@ Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
         return nullptr;
     }
 
+    if (slot->denoiser && !slot->denoiser->IsReady())
+    {
+        slot->failed = true;
+        Log(Error, "Denoiser {} failed while encoding; selecting a fallback", slot->denoiser->GetName());
+        return nullptr;
+    }
+
     if (!slot->denoiser)
     {
         const DenoiserConfig &config = DenoiserConfig::Get();
@@ -596,6 +520,7 @@ Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
             .input_size = resolution_.scene,
             .output_size = resolution_.output,
             .radiance_format = config.radiance_fp16 ? PixelFormat::RGBAFloat16 : PixelFormat::RGBAFloat,
+            .accumulator_format = scene_texture_->GetAttributes().format,
             .max_frames_in_flight = rhi_->GetMaxFramesInFlight(),
             .synchronous_initialization = config.metalfx_sync_init,
         };
@@ -612,9 +537,8 @@ Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
     return slot->denoiser.get();
 }
 
-Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective)
+Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested)
 {
-    effective = DenoiserProvider::Off;
     if (requested == DenoiserProvider::Off)
     {
         return nullptr;
@@ -638,7 +562,6 @@ Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested, DenoiserProvid
         const DenoiserProvider provider = denoiser_slots_[index].provider;
         if (Denoiser *denoiser = GetOrCreateDenoiser(provider))
         {
-            effective = provider;
             return denoiser;
         }
     }

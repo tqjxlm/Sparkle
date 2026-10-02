@@ -64,7 +64,10 @@ public:
 
     [[nodiscard]] uint32_t GetNumVertices() const;
 
-    void Render(RHIContext *rhi, const RHIResourceRef<RHIPipelineState> &pipeline_state) const;
+    [[nodiscard]] const DrawArgs &GetDrawArgs() const
+    {
+        return draw_args_;
+    }
 
     bool Intersect(const Ray &ray, IntersectionCandidate &candidate) const override;
 

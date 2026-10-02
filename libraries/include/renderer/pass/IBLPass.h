@@ -11,6 +11,10 @@
 
 namespace sparkle
 {
+class RenderGraph;
+struct RGTexture;
+
+// cooks an IBL map on the GPU in steps that each add a batch of samples, then reads it back as an artifact
 class IBLPass : public PipelinePass
 {
 public:
@@ -32,11 +36,12 @@ public:
         return is_ready_;
     }
 
-    virtual void CookOnTheFly(const RenderConfig &config, unsigned samples_per_dispatch) = 0;
+    // adds the passes of one cook step, which accumulates `samples_per_dispatch` more samples
+    virtual void AddTo(RenderGraph &graph, unsigned samples_per_dispatch) = 0;
 
     // Consume a self-describing payload: the fp16 master or a family transcode. Render
     // thread only. Returns false when the payload does not match this pass's resource layout.
-    bool ApplyArtifact(const std::vector<char> &payload);
+    bool ApplyArtifact(RHICommandContext &command_context, const std::vector<char> &payload);
 
     // Receives the compact payload after GPU generation. Persistence belongs to the
     // derived-resource coordinator or cook job, never to the GPU pass.
@@ -50,15 +55,14 @@ protected:
 
     void PrepareForCooking();
 
+    // imports the map being cooked as `name`. the first step first adds a pass clearing each of its subresources.
+    [[nodiscard]] RGTexture ImportCookingMap(RenderGraph &graph, const std::string &name);
+
     virtual RHIResourceRef<RHIImage> CreateIBLMap(bool for_cooking, bool allow_write, PixelFormat resource_format) = 0;
 
     RHIResourceRef<RHIImage> ibl_image_;
 
     RHIResourceRef<RHIImage> env_map_;
-
-    RHIResourceRef<RHIRenderTarget> clear_target_;
-
-    std::unique_ptr<class ClearTexturePass> clear_pass_;
 
     RHIResourceRef<RHIShader> compute_shader_;
 
@@ -76,9 +80,10 @@ private:
 
     // builds the resident image from an artifact payload: native when the device samples the
     // payload's format, an fp16 decode otherwise. null on a bad payload
-    RHIResourceRef<RHIImage> MakeIblResource(const std::vector<char> &payload);
+    RHIResourceRef<RHIImage> MakeIblResource(RHICommandContext &command_context, const std::vector<char> &payload);
 
     bool is_ready_ = false;
+    bool cleared_ = false;
 
     std::function<void(std::vector<char>)> artifact_ready_callback_;
 };

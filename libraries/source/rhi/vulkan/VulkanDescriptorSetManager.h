@@ -29,6 +29,8 @@ inline VkDescriptorType GetVulkanDescriptorType(RHIShaderResourceReflection::Res
         return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     case RHIShaderResourceReflection::ResourceType::AccelerationStructure:
         return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    case RHIShaderResourceReflection::ResourceType::InputAttachment:
+        return VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
     default:
         UnImplemented(type);
         break;
@@ -75,6 +77,8 @@ public:
 
 private:
     void CreateDescriptorPool();
+
+    void ReturnDescriptorSet(uint32_t resource_hash, uint32_t layout_hash);
 
     VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout, const RHIShaderResourceSet &resource_set);
 

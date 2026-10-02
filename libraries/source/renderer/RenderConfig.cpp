@@ -29,10 +29,8 @@ static ConfigValue<float> config_render_scale("render_scale",
                                               "scene render resolution as a fraction of output resolution, (0, 1]",
                                               "renderer", 1.f, true);
 static ConfigValue<uint32_t> config_bounce("bounce", "num intersections allowed per ray", "renderer", 8);
-static ConfigValue<bool> config_ssao("ssao", "enable ssao", "renderer", false, true);
 static ConfigValue<bool> config_diffuse_ibl("diffuse_ibl", "enable diffuse ibl", "renderer", true, true);
 static ConfigValue<bool> config_specular_ibl("specular_ibl", "enable specular ibl", "renderer", true, true);
-static ConfigValue<bool> config_prepass("prepass", "enable prepass", "renderer", false, true);
 static ConfigValue<uint32_t> config_shadow_map_resolution("shadow_map_resolution", "shadow map resolution", "renderer",
                                                           1024);
 static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial denoise in ray tracing procedures",
@@ -46,6 +44,33 @@ static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear al
 static ConfigValue<bool> config_manual_accumulation(
     "manual_accumulation", "debug: accumulate samples only while the accumulate key (space) or panel button is held",
     "renderer", false, true);
+static ConfigValue<bool> config_render_graph_cull("render_graph_cull",
+                                                  "cull render graph passes whose outputs no live pass reads",
+                                                  "renderer", true, true);
+static ConfigValue<bool> config_render_graph_merge(
+    "render_graph_merge", "merge consecutive render graph raster passes into one render pass where they allow it",
+    "renderer", true, true);
+static ConfigValue<bool> config_render_graph_memoryless(
+    "render_graph_memoryless",
+    "keep render graph transients that live within one render pass in tile memory where the device allows it",
+    "renderer", true, true);
+static ConfigValue<bool> config_render_graph_pixel_local(
+    "render_graph_pixel_local",
+    "let render graph passes read what an earlier pass of their render pass wrote at the same pixel, where the device "
+    "allows it; off samples it after the render pass instead",
+    "renderer", true, true);
+static ConfigValue<bool> config_render_graph_full_barriers(
+    "render_graph_full_barriers",
+    "debug: before each render graph pass, also wait for every access of the earlier passes", "renderer", false, true);
+static ConfigValue<uint32_t> config_render_graph_tile_budget(
+    "render_graph_tile_budget",
+    "color attachment bytes per pixel a render graph render pass keeps in tile memory; 0 = the device's", "renderer", 0,
+    true);
+static ConfigValue<bool> config_render_graph_tile_budget_split(
+    "render_graph_tile_budget_split", "split render graph render passes whose color attachments exceed the tile budget",
+    "renderer", false, true);
+static ConfigValue<std::string> config_render_graph_view(
+    "render_graph_view", "render graph texture to show in place of the frame; empty = the frame", "renderer", "", true);
 
 void RenderConfig::Init()
 {
@@ -56,10 +81,8 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_bounce, max_bounce);
     ConfigCollectionHelper::RegisterConfig(this, config_max_spp, max_sample_per_pixel);
     ConfigCollectionHelper::RegisterConfig(this, config_random_seed_offset, random_seed_offset);
-    ConfigCollectionHelper::RegisterConfig(this, config_ssao, use_ssao);
     ConfigCollectionHelper::RegisterConfig(this, config_diffuse_ibl, use_diffuse_ibl);
     ConfigCollectionHelper::RegisterConfig(this, config_specular_ibl, use_specular_ibl);
-    ConfigCollectionHelper::RegisterConfig(this, config_prepass, use_prepass);
     ConfigCollectionHelper::RegisterConfig(this, config_width, image_width);
     ConfigCollectionHelper::RegisterConfig(this, config_height, image_height);
     ConfigCollectionHelper::RegisterConfig(this, config_render_scale, render_scale);
@@ -71,6 +94,14 @@ void RenderConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_enable_nee, enable_nee);
     ConfigCollectionHelper::RegisterConfig(this, config_clear_screenshots, clear_screenshots);
     ConfigCollectionHelper::RegisterConfig(this, config_manual_accumulation, manual_accumulation);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_cull, render_graph_cull);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_merge, render_graph_merge);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_memoryless, render_graph_memoryless);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_pixel_local, render_graph_pixel_local);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_full_barriers, render_graph_full_barriers);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_tile_budget, render_graph_tile_budget);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_tile_budget_split, render_graph_tile_budget_split);
+    ConfigCollectionHelper::RegisterConfig(this, config_render_graph_view, render_graph_view);
 
     AddUiGenerator([this] {
         if (!manual_accumulation)
@@ -136,32 +167,6 @@ void RenderConfig::Validate()
     if (rhi_ != nullptr)
     {
         Log(Info, "effective pipeline: {}", Enum2Str<Pipeline>(pipeline));
-    }
-
-    if (pipeline == Pipeline::Cpu || pipeline == Pipeline::Gpu)
-    {
-        if (use_prepass)
-        {
-            Log(Warn, "prepass will not work in mode {}. set to 0", static_cast<int>(pipeline));
-            config_prepass.Set(false);
-            use_prepass = false;
-        }
-        if (use_ssao)
-        {
-            Log(Warn, "ssao will not work in mode {}. set to 0", static_cast<int>(pipeline));
-            config_ssao.Set(false);
-            use_ssao = false;
-        }
-    }
-
-    if (use_ssao)
-    {
-        if (!use_prepass)
-        {
-            Log(Warn, "ssao requires prepass. set to 1");
-            config_prepass.Set(false);
-            use_prepass = true;
-        }
     }
 
     if (render_scale <= 0.f || render_scale > 1.f)

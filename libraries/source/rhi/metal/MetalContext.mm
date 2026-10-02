@@ -3,6 +3,7 @@
 #include "MetalContext.h"
 
 #include "MetalImage.h"
+#include "MetalTimer.h"
 
 namespace sparkle
 {
@@ -25,27 +26,27 @@ void MetalContext::CreateBackBuffer()
     attribute.mip_levels = 1;
     attribute.msaa_samples = 1;
     attribute.format = PixelFormat::B8G8R8A8Srgb;
-    attribute.usages = RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::TransientAttachment;
-    attribute.sampler = {.address_mode = RHISampler::SamplerAddressMode::Repeat,
-                         .filtering_method_min = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mag = RHISampler::FilteringMethod::Linear,
-                         .filtering_method_mipmap = RHISampler::FilteringMethod::Linear};
+    attribute.usages = RHIImage::ImageUsage::ColorAttachment;
     attribute.memory_properties = RHIMemoryProperty::DeviceLocal;
 
-    back_buffer_color_ = context->GetRHI()->CreateResource<MetalImage>(attribute, nullptr, "BackBufferColor");
+    // a windowed back buffer takes each frame's drawable texture (SwapBuffer); a headless one owns a texture, so passes
+    // rendering only into it have a valid attachment
+    back_buffer_color_ = headless_
+                             ? context->GetRHI()->CreateResource<MetalImage>(attribute, "BackBufferColor")
+                             : context->GetRHI()->CreateResource<MetalImage>(attribute, nullptr, "BackBufferColor");
 }
 
 MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headless, uint32_t headless_width,
                            uint32_t headless_height)
-    : view_(mtk_view), rhi_(context), headless_(is_headless), headless_width_(headless_width),
-      headless_height_(headless_height)
+    : device_(is_headless ? MTLCreateSystemDefaultDevice() : mtk_view.device),
+      supports_pass_timestamps_(MetalTimer::IsSupported(device_)), view_(mtk_view), rhi_(context),
+      headless_(is_headless), headless_width_(headless_width), headless_height_(headless_height)
 {
     if (headless_)
     {
         ASSERT_F(headless_width_ > 0 && headless_height_ > 0, "Invalid headless render size [{}, {}]", headless_width_,
                  headless_height_);
 
-        device_ = MTLCreateSystemDefaultDevice();
         if (!device_)
         {
             return;
@@ -57,7 +58,6 @@ MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headl
         return;
     }
 
-    device_ = view_.device;
     command_queue_ = [device_ newCommandQueue];
     current_drawable_ = [view_ currentDrawable];
 
@@ -87,18 +87,19 @@ void MetalContext::BeginFrame()
 
 void MetalContext::EndFrame()
 {
+    id<MTLCommandBuffer> command_buffer = command_context_.GetCommandBuffer();
     if (headless_)
     {
         dispatch_semaphore_t throttle = frame_throttle_semaphore_;
-        [current_command_buffer_ addCompletedHandler:^(id<MTLCommandBuffer>) {
+        [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
           dispatch_semaphore_signal(throttle);
         }];
     }
     else
     {
-        [current_command_buffer_ presentDrawable:current_drawable_];
+        [command_buffer presentDrawable:current_drawable_];
 
-        [current_command_buffer_ addCompletedHandler:^(id<MTLCommandBuffer>) {
+        [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
           dispatch_semaphore_signal([view_ getInFlightSemaphore]);
         }];
     }
@@ -176,15 +177,15 @@ void MetalContext::EndFrameCapture()
 
 void MetalContext::SubmitCommandBuffer()
 {
-    [current_command_buffer_ commit];
-    last_command_buffer_ = current_command_buffer_;
-    current_command_buffer_ = nullptr;
+    last_command_buffer_ = command_context_.GetCommandBuffer();
+    command_context_.End();
+    [last_command_buffer_ commit];
 }
 
 void MetalContext::BeginCommandBuffer()
 {
     ASSERT_F(!IsInCommandBuffer(), "already in a command buffer");
-    current_command_buffer_ = [command_queue_ commandBuffer];
+    command_context_.Begin([command_queue_ commandBuffer]);
 }
 
 void MetalContext::CaptureNextFrames(int count)

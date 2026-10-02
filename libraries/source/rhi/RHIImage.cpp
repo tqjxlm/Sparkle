@@ -4,6 +4,128 @@
 
 namespace sparkle
 {
+static RHIResourceAccess GetLegacySourceAccess(RHIPipelineStage stage)
+{
+    switch (stage)
+    {
+    case RHIPipelineStage::Top:
+    case RHIPipelineStage::Bottom:
+        return {};
+    case RHIPipelineStage::PixelShader:
+        return {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Pixel};
+    case RHIPipelineStage::ColorOutput:
+        return {.access = RHIAccess::ColorWrite};
+    case RHIPipelineStage::ComputeShader:
+        return {.access = RHIAccess::StorageWrite, .stages = RHIShaderStageMask::Compute};
+    case RHIPipelineStage::Transfer:
+        return {.access = RHIAccess::CopyDst};
+    default:
+        UnImplemented(stage);
+        return {};
+    }
+}
+
+static RHIShaderStageMask GetLegacyShaderStages(RHIPipelineStage stage)
+{
+    switch (stage)
+    {
+    case RHIPipelineStage::Top:
+    case RHIPipelineStage::Bottom:
+        return RHIShaderStageMask::All;
+    case RHIPipelineStage::PixelShader:
+        return RHIShaderStageMask::Pixel;
+    case RHIPipelineStage::ComputeShader:
+        return RHIShaderStageMask::Compute;
+    default:
+        UnImplemented(stage);
+        return RHIShaderStageMask::None;
+    }
+}
+
+static RHIResourceAccess GetLegacyTargetAccess(RHIImageLayout layout, RHIPipelineStage stage)
+{
+    switch (layout)
+    {
+    case RHIImageLayout::Read:
+        return {.access = RHIAccess::Sampled, .stages = GetLegacyShaderStages(stage)};
+    case RHIImageLayout::General:
+    case RHIImageLayout::StorageWrite:
+        return {.access = RHIAccess::StorageRead | RHIAccess::StorageWrite, .stages = GetLegacyShaderStages(stage)};
+    case RHIImageLayout::ColorOutput:
+        return {.access = RHIAccess::ColorWrite};
+    case RHIImageLayout::DepthStencilOutput:
+        return {.access = RHIAccess::DepthWrite};
+    case RHIImageLayout::TransferSrc:
+        return {.access = RHIAccess::CopySrc};
+    case RHIImageLayout::TransferDst:
+        return {.access = RHIAccess::CopyDst};
+    case RHIImageLayout::Present:
+        return {.access = RHIAccess::Present};
+    default:
+        UnImplemented(layout);
+        return {};
+    }
+}
+
+std::vector<RHIImageBarrier> RHIImage::TrackTransition(const TransitionRequest &request)
+{
+    ASSERT(request.base_mip < attributes_.mip_levels);
+    ASSERT(request.base_array_layer < GetArrayLayerCount());
+
+    const auto mip_count = request.mip_count == 0 ? attributes_.mip_levels - request.base_mip : request.mip_count;
+    const auto array_layer_count =
+        request.array_layer_count == 0 ? GetArrayLayerCount() - request.base_array_layer : request.array_layer_count;
+
+    ASSERT(request.base_mip + mip_count <= attributes_.mip_levels);
+    ASSERT(request.base_array_layer + array_layer_count <= GetArrayLayerCount());
+
+    const auto target = GetLegacyTargetAccess(request.target_layout, request.before_stage);
+    const auto legacy_source = GetLegacySourceAccess(request.after_stage);
+
+    std::vector<RHIImageBarrier> barriers;
+
+    const auto mip_end = request.base_mip + mip_count;
+    const auto array_layer_end = request.base_array_layer + array_layer_count;
+    for (auto array_layer = request.base_array_layer; array_layer < array_layer_end; array_layer++)
+    {
+        // contiguous mips in the same state share one barrier
+        auto range_start = request.base_mip;
+        while (range_start < mip_end)
+        {
+            const auto state = GetState(range_start, array_layer);
+            auto range_end = range_start + 1;
+            while (range_end < mip_end && GetState(range_end, array_layer) == state)
+            {
+                range_end++;
+            }
+
+            if (const auto next = TransitionImageState(state, {.layout = request.target_layout, .access = target}))
+            {
+                barriers.push_back({.image = this,
+                                    .base_mip = range_start,
+                                    .mip_count = range_end - range_start,
+                                    .base_array_layer = array_layer,
+                                    .array_layer_count = 1,
+                                    .from = state.access | legacy_source,
+                                    .to = target,
+                                    .from_layout = state.layout,
+                                    .to_layout = request.target_layout});
+
+                SetState(*next, range_start, range_end - range_start, array_layer, 1);
+            }
+
+            range_start = range_end;
+        }
+    }
+
+    return barriers;
+}
+
+void RHIImage::Transition(RHICommandContext &command_context, const TransitionRequest &request)
+{
+    command_context.Barrier(TrackTransition(request), {});
+}
+
 std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 {
     auto image_size = GetStorageSize();
@@ -15,15 +137,16 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
                            .is_dynamic = false},
                           "ImageReadBackStagingBuffer");
 
-    rhi->BeginCommandBuffer();
-
-    Transition({.target_layout = RHIImageLayout::TransferSrc,
-                .after_stage = RHIPipelineStage::Bottom,
-                .before_stage = RHIPipelineStage::Transfer});
-    CopyToBuffer(staging_buffer.get());
-    Transition({.target_layout = RHIImageLayout::Read,
-                .after_stage = RHIPipelineStage::Transfer,
-                .before_stage = RHIPipelineStage::PixelShader});
+    auto &command_context = rhi->BeginCommandBuffer();
+    Transition(command_context, {.target_layout = RHIImageLayout::TransferSrc,
+                                 .after_stage = RHIPipelineStage::Bottom,
+                                 .before_stage = RHIPipelineStage::Transfer});
+    command_context.CopyImageToBuffer(this, staging_buffer.get());
+    // waiting for the device does not make its writes visible to the host
+    command_context.Barrier({.from = {.access = RHIAccess::CopyDst}, .to = {.access = RHIAccess::HostRead}});
+    Transition(command_context, {.target_layout = RHIImageLayout::Read,
+                                 .after_stage = RHIPipelineStage::Transfer,
+                                 .before_stage = RHIPipelineStage::PixelShader});
 
     rhi->SubmitCommandBuffer();
 
@@ -43,12 +166,8 @@ std::vector<char> RHIImage::ReadToMemory(RHIContext *rhi)
 
 RHIImage::RHIImage(const Attribute &attributes, const std::string &name) : RHIResource(name), attributes_(attributes)
 {
-    if (attributes_.usages & ImageUsage::Texture)
-    {
-        ASSERT(attributes_.sampler.address_mode != RHISampler::SamplerAddressMode::Count);
-    }
-
-    current_layout_.assign(attributes_.mip_levels * GetArrayLayerCount(), attributes_.initial_layout);
+    subresource_states_.assign(attributes_.mip_levels * GetArrayLayerCount(),
+                               {.layout = attributes_.initial_layout, .access = {}});
 }
 
 RHIImageView::RHIImageView(Attribute attribute, RHIImage *image)

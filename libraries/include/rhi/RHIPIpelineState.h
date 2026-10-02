@@ -3,9 +3,11 @@
 #include "rhi/RHIResource.h"
 
 #include "rhi/RHIBuffer.h"
-#include "rhi/RHIRenderPass.h"
+#include "rhi/RHIRenderingInfo.h"
 #include "rhi/RHIShader.h"
 #include "rhi/RHIVertex.h"
+
+#include <optional>
 
 namespace sparkle
 {
@@ -88,15 +90,21 @@ public:
 
     void Compile()
     {
+        ASSERT_F(!compiled_, "pipeline {} compiles once", GetName());
+        ASSERT_F(pipeline_type_ != PipelineType::Graphics || attachment_signature_,
+                 "graphics pipeline {} needs an attachment signature before Compile", GetName());
+
         CompileInternal();
         compiled_ = true;
     }
 
     virtual void CompileInternal() = 0;
 
-    void SetRenderPass(const RHIResourceRef<RHIRenderPass> &pass)
+    // declares the attachments a graphics pipeline draws into, which it needs before Compile and compiles for up front.
+    // drawing into attachments of another signature compiles for that one at the first draw.
+    void SetAttachmentSignature(const RHIAttachmentSignature &signature)
     {
-        render_pass_ = pass;
+        attachment_signature_ = signature;
     }
 
     void SetVertexBuffer(uint32_t binding, const RHIResourceRef<RHIBuffer> &buffer)
@@ -167,6 +175,12 @@ public:
         return static_cast<T::ResourceTable *>(GetResourceTable(T::GetStage()));
     }
 
+    // one per shader stage, null for the stages the pipeline has no shader for
+    [[nodiscard]] const auto &GetResourceTables() const
+    {
+        return resource_table_;
+    }
+
 protected:
     [[nodiscard]] const RHIShaderResourceTable *GetResourceTable(RHIShaderStage stage) const
     {
@@ -178,7 +192,7 @@ protected:
         return resource_table_[static_cast<size_t>(stage)].get();
     }
 
-    RHIResourceRef<RHIRenderPass> render_pass_;
+    std::optional<RHIAttachmentSignature> attachment_signature_;
     RHIVertexInputDeclaration vertex_input_declaration_;
     std::vector<RHIResourceRef<RHIBuffer>> vertex_buffers_;
     RHIResourceRef<RHIBuffer> index_buffer_;
@@ -192,5 +206,22 @@ protected:
     PipelineType pipeline_type_;
 
     bool compiled_ = false;
+
+private:
+    friend class RHICommandContext;
+
+    // binds into each of the pipeline's resource tables that has the binding's member, and returns whether one had it
+    bool ApplyBinding(const RHIMemberBinding &binding)
+    {
+        bool applied = false;
+        for (const auto &table : resource_table_)
+        {
+            if (table)
+            {
+                applied = binding.BindTo(*table) || applied;
+            }
+        }
+        return applied;
+    }
 };
 } // namespace sparkle

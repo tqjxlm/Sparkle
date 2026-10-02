@@ -1,5 +1,7 @@
 #include "renderer/pass/ToneMappingPass.h"
 
+#include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/ColorSlot.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "rhi/RHI.h"
@@ -31,12 +33,6 @@ void ToneMappingPass::SetupPixelShader()
     pipeline_state_->SetShader<RHIShaderStage::Pixel>(pixel_shader_);
 }
 
-void ToneMappingPass::SetupRenderPass()
-{
-    RHIRenderPass::Attribute pass_attribute;
-    pass_ = rhi_->CreateRenderPass(pass_attribute, target_, "ToneMappingPass");
-}
-
 void ToneMappingPass::UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene)
 {
     ScreenQuadPass::UpdateFrameData(config, scene);
@@ -46,31 +42,9 @@ void ToneMappingPass::UpdateFrameData(const RenderConfig &config, SceneRenderPro
     ps_ub_->Upload(rhi_, &ubo);
 }
 
-// when the pass upsamples (sub-resolution rendering makes the source smaller than the target), sampling
-// needs bilinear footprints and edge clamping. 32-bit float sources keep their own sampler instead:
-// linear-filtering them is an optional device feature (and nearest never reaches the wrapped edge).
-RHIResourceRef<RHISampler> ToneMappingPass::GetInputSampler() const
-{
-    const auto &source = source_texture_->GetAttributes();
-    const auto &target = target_->GetAttribute();
-
-    if ((source.width == target.width && source.height == target.height) || source.format == PixelFormat::RGBAFloat)
-    {
-        return source_texture_->GetSampler();
-    }
-
-    auto sampler_attribute = source.sampler;
-    sampler_attribute.address_mode = RHISampler::SamplerAddressMode::ClampToEdge;
-    sampler_attribute.filtering_method_min = RHISampler::FilteringMethod::Linear;
-    sampler_attribute.filtering_method_mag = RHISampler::FilteringMethod::Linear;
-    return rhi_->GetSampler(sampler_attribute);
-}
-
 void ToneMappingPass::BindPixelShaderResources()
 {
     auto *ps_resources = pipeline_state_->GetShaderResource<ToneMappingPixelShader>();
-    ps_resources->screenTexture().BindResource(source_texture_->GetDefaultView(rhi_));
-    ps_resources->screenTextureSampler().BindResource(GetInputSampler());
 
     ps_ub_ = rhi_->CreateBuffer({.size = sizeof(ToneMappingPixelShader::UniformBufferData),
                                  .usages = RHIBuffer::BufferUsage::UniformBuffer,
@@ -79,5 +53,33 @@ void ToneMappingPass::BindPixelShaderResources()
                                 "ToneMappingUBO");
 
     ps_resources->ubo().BindResource(ps_ub_);
+}
+
+void ToneMappingPass::SampleInput(RGBuilder &builder, RGTexture input,
+                                  const RHISampler::SamplerAttribute &sampler) const
+{
+    using Table = ToneMappingPixelShader::ResourceTable;
+    builder.PixelLocalRead(input, ColorSlot::SceneColor, &Table::screenTexture, &Table::screenTextureSampler, sampler);
+}
+
+const RHIResourceRef<RHIPipelineState> &ToneMappingPass::GetPipeline(const RGRasterContext &context,
+                                                                     RGTexture input) const
+{
+    if (!context.IsPixelLocal(input))
+    {
+        return pipeline_state_;
+    }
+
+    if (!pixel_local_pipeline_)
+    {
+        auto signature = GetSignature();
+        signature.color_formats[ColorSlot::SceneColor] = context.GetImage(input)->GetAttributes().format;
+        pixel_local_pipeline_ = CreatePipeline(signature);
+        pixel_local_pipeline_->SetShader<RHIShaderStage::Pixel>(
+            rhi_->CreateShader<ToneMappingPixelShader>("PIXEL_LOCAL"));
+        CompilePipeline(*pixel_local_pipeline_);
+        pixel_local_pipeline_->GetShaderResource<ToneMappingPixelShader>()->ubo().BindResource(ps_ub_);
+    }
+    return pixel_local_pipeline_;
 }
 } // namespace sparkle

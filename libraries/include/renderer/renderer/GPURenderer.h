@@ -21,14 +21,13 @@ class PathTracingDenoiserInputs;
 class GPURenderer : public Renderer
 {
 public:
-    GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy);
+    GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context, SceneRenderProxy *scene_render_proxy,
+                RGTexturePool &graph_texture_pool);
 
     [[nodiscard]] RenderConfig::Pipeline GetRenderMode() const override
     {
         return RenderConfig::Pipeline::Gpu;
     }
-
-    void Render() override;
 
     void InitRenderResources() override;
 
@@ -48,6 +47,8 @@ private:
 
     void Update() override;
 
+    [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
+
     void InitSceneRenderResources();
 
     void BindDenoiserInputs();
@@ -56,7 +57,7 @@ private:
 
     [[nodiscard]] Denoiser *GetOrCreateDenoiser(DenoiserProvider provider);
 
-    [[nodiscard]] Denoiser *SelectDenoiser(DenoiserProvider requested, DenoiserProvider &effective);
+    [[nodiscard]] Denoiser *SelectDenoiser(DenoiserProvider requested);
 
     void BindBindlessResources();
 
@@ -75,16 +76,10 @@ private:
     RHIResourceRef<RHITLAS> tlas_;
 
     RHIResourceRef<RHIImage> scene_texture_;
-    RHIResourceRef<RHIRenderTarget> scene_rt_;
     std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
-    std::unique_ptr<class ScreenQuadPass> screen_quad_pass_;
 
-    RHIResourceRef<RHIImage> tone_mapping_output_;
-    RHIResourceRef<RHIRenderTarget> tone_mapping_rt_;
-    std::unique_ptr<class ToneMappingPass> tone_mapping_pass_;
-
-    std::unique_ptr<class ClearTexturePass> clear_pass_;
-    std::unique_ptr<class UiPass> ui_pass_;
+    // what tone mapping displayed last: the accumulator or a denoiser's output
+    RHIResourceRef<RHIImage> displayed_image_;
 
     RHIResourceRef<RHIPipelineState> pipeline_state_;
 
@@ -93,7 +88,6 @@ private:
     std::vector<DenoiserSlot> denoiser_slots_;
 
     Denoiser *frame_denoiser_ = nullptr;
-    DenoiserProvider frame_provider_ = DenoiserProvider::Off;
     DenoiserProvider requested_provider_ = DenoiserProvider::Off;
     bool gbuffer_write_this_frame_ = false;
     bool denoiser_reset_this_frame_ = false;

@@ -6,64 +6,7 @@
 
 namespace sparkle
 {
-inline VkAccessFlags GetImageAccessFlags(const RHIImage *image, RHIImageLayout layout, RHIPipelineStage stage)
-{
-    auto usages = image->GetAttributes().usages;
-
-    if (stage == RHIPipelineStage::Top || stage == RHIPipelineStage::Bottom)
-    {
-        return 0;
-    }
-
-    if (layout == RHIImageLayout::Undefined || layout == RHIImageLayout::Present)
-    {
-        return 0;
-    }
-
-    if (layout == RHIImageLayout::TransferDst)
-    {
-        return VK_ACCESS_TRANSFER_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::TransferSrc)
-    {
-        return VK_ACCESS_TRANSFER_READ_BIT;
-    }
-
-    if (stage == RHIPipelineStage::DrawIndirect)
-    {
-        return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-    }
-
-    if (layout == RHIImageLayout::StorageWrite)
-    {
-        return VK_ACCESS_SHADER_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::ColorOutput)
-    {
-        ASSERT(usages & RHIImage::ImageUsage::ColorAttachment);
-        return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::DepthStencilOutput)
-    {
-        ASSERT(usages & RHIImage::ImageUsage::DepthStencilAttachment);
-        return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    }
-
-    if (layout == RHIImageLayout::Read)
-    {
-        return VK_ACCESS_SHADER_READ_BIT;
-    }
-
-    // if it makes it here, some unexpected behaviour happens.
-    // Check whether api usage is correct or whether this function should be extended
-    ASSERT_F(false, "unexpected transition status. layout {}. stage {}", static_cast<int>(layout),
-             static_cast<int>(stage));
-
-    return 0;
-};
+class VulkanCommandContext;
 
 inline VkFilter GetVulkanFilteringMethod(RHISampler::FilteringMethod filtering_method)
 {
@@ -114,39 +57,6 @@ inline VkSamplerMipmapMode GetVulkanMipmapMethod(RHISampler::FilteringMethod fil
         return VK_SAMPLER_MIPMAP_MODE_MAX_ENUM;
     }
 }
-
-inline VkPipelineStageFlags GetVulkanPipelineStage(RHIPipelineStage stage)
-{
-    switch (stage)
-    {
-    case RHIPipelineStage::Top:
-        return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    case RHIPipelineStage::DrawIndirect:
-        return VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
-    case RHIPipelineStage::VertexInput:
-        return VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
-    case RHIPipelineStage::VertexShader:
-        return VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
-    case RHIPipelineStage::PixelShader:
-        return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    case RHIPipelineStage::EarlyZ:
-        return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    case RHIPipelineStage::LateZ:
-        return VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    case RHIPipelineStage::ColorOutput:
-        return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    case RHIPipelineStage::ComputeShader:
-        return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-    case RHIPipelineStage::Transfer:
-        return VK_PIPELINE_STAGE_TRANSFER_BIT;
-    case RHIPipelineStage::Bottom:
-        return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    default:
-        UnImplemented(stage);
-        break;
-    }
-    return VK_PIPELINE_STAGE_NONE_KHR;
-};
 
 inline VkSampleCountFlagBits GetVkMsaaSampleBit(uint32_t sample_count)
 {
@@ -253,6 +163,10 @@ inline VkImageUsageFlags GetVkImageUsage(RHIImage::ImageUsage usage)
     {
         flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     }
+    if (usage & RHIImage::ImageUsage::InputAttachment)
+    {
+        flags |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    }
     return flags;
 }
 
@@ -278,6 +192,8 @@ inline VkImageLayout GetVulkanImageLayout(RHIImageLayout rhi_layout)
         return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     case RHIImageLayout::ColorOutput:
         return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    case RHIImageLayout::LocalRead:
+        return VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR;
     case RHIImageLayout::DepthStencilOutput:
         return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     default:
@@ -418,6 +334,10 @@ public:
             }
             msaa_samples = GetVkMsaaSampleBit(attribute.msaa_samples);
             usages = GetVkImageUsage(attribute.usages);
+            if (attribute.memory_properties & RHIMemoryProperty::Memoryless)
+            {
+                usages |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+            }
             memory_properties = GetVulkanMemoryPropertyFlags(attribute.memory_properties);
         }
 
@@ -438,7 +358,6 @@ public:
         ASSERT(attributes_.format != PixelFormat::Count);
 
         CreateImage();
-        CreateSampler();
     }
 
     VulkanImage(const Attribute &attribute, VkFormat format_override, VkImage image, const std::string &name)
@@ -446,30 +365,21 @@ public:
           vulkan_attributes_(VulkanImageAttribute(attribute, format_override)), image_(image)
     {
         attributes_.format = VkFormatToPixelFormat(format_override);
-
-        CreateSampler();
     }
 
     ~VulkanImage() override;
 
-    void Transition(const TransitionRequest &request) override;
+    void Upload(RHICommandContext &command_context, const uint8_t *data) override;
 
-    void Upload(const uint8_t *data) override;
+    void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) override;
 
-    void UploadFaces(std::array<const uint8_t *, 6> data) override;
+    void CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const;
 
-    void CopyToImage(const RHIImage *image) const override;
+    void BlitToImage(VulkanCommandContext &command_context, const RHIImage *image,
+                     RHISampler::FilteringMethod filter) const;
 
-    void CopyToBuffer(const RHIBuffer *buffer) const override;
-
-    void GenerateMips() override;
-
-    void BlitToImage(const RHIImage *image, RHISampler::FilteringMethod filter) const override;
-
-    void BlitToImage(const RHIImage *image, uint8_t from_mip, uint8_t to_mip,
+    void BlitToImage(VulkanCommandContext &command_context, const RHIImage *image, uint8_t from_mip, uint8_t to_mip,
                      RHISampler::FilteringMethod filtering) const;
-
-    void TransitionLayout(VkCommandBuffer command_buffer, const TransitionRequest &request);
 
     [[nodiscard]] VkImage GetImage() const
     {
@@ -501,8 +411,6 @@ public:
 
 private:
     void CreateImage();
-
-    void CreateSampler();
 
     bool external_ = false;
     VulkanImageAttribute vulkan_attributes_;

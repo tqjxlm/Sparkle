@@ -3,21 +3,23 @@
 #include "core/Exception.h"
 #include "core/StackMemoryAllocator.h"
 #include "core/math/Types.h"
+#include "rhi/RHIBarrier.h"
 #include "rhi/RHIBuffer.h"
+#include "rhi/RHICommandContext.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIConfig.h"
 #include "rhi/RHIImage.h"
 #include "rhi/RHINrdBackend.h"
 #include "rhi/RHIPIpelineState.h"
+#include "rhi/RHIPass.h"
 #include "rhi/RHIRayTracing.h"
-#include "rhi/RHIRenderPass.h"
-#include "rhi/RHIRenderTarget.h"
-#include "rhi/RHIRenderTargetPool.h"
 #include "rhi/RHIResource.h"
 #include "rhi/RHIResourceArray.h"
 #include "rhi/RHIShader.h"
 #include "rhi/RHITimer.h"
 #include "rhi/RHIUiHandler.h"
+
+#include <optional>
 
 namespace sparkle
 {
@@ -74,11 +76,8 @@ public:
 
     void SetMaxFramesInFlight(unsigned max_frames_in_flight);
 
-    RHIResourceRef<RHIRenderTarget> GetBackBufferRenderTarget()
-    {
-        ASSERT_F(back_buffer_rt_, "Back buffer render target not initialized");
-        return back_buffer_rt_;
-    }
+    // the image the frame presents. a windowed Vulkan back buffer is the swap chain image acquired for the frame.
+    [[nodiscard]] virtual RHIResourceRef<RHIImage> GetBackBuffer() const = 0;
 
     void RecreateFrameBuffer(int /*width*/, int /*height*/)
     {
@@ -106,23 +105,33 @@ public:
 
     void EndFrame();
 
-    void BeginRenderPass(const RHIResourceRef<RHIRenderPass> &pass);
-
-    void EndRenderPass();
-
-    void BeginComputePass(const RHIResourceRef<RHIComputePass> &pass);
-
-    void EndComputePass(const RHIResourceRef<RHIComputePass> &pass);
-
     void Cleanup();
 
-    template <class T> RHIResourceRef<RHIShader> CreateShader()
+    // the shader T, or its variant compiled with the define `variant`
+    template <class T> RHIResourceRef<RHIShader> CreateShader(std::string variant = {})
     {
-        return CreateShader(T::GetShaderInfo());
+        return CreateShader(T::GetShaderInfo(), std::move(variant));
     }
 
     virtual void InitRenderResources() = 0;
     virtual bool SupportsHardwareRayTracing() = 0;
+
+    // GPU timestamps can measure render and compute passes (see RHIPass)
+    virtual bool SupportsPassTimestamps() = 0;
+
+    // images of `format` and `usages` may be created with RHIMemoryProperty::Memoryless
+    virtual bool SupportsMemorylessImage(PixelFormat format, RHIImage::ImageUsage usages) = 0;
+
+    // fragment shaders may read the value an earlier draw of their rendering wrote to a color attachment at the same
+    // pixel (RHIAccess::PixelLocalRead)
+    virtual bool SupportsPixelLocalRead() = 0;
+
+    // memoryless attachments keep their contents across RHICommandContext::PixelLocalBarrier
+    virtual bool KeepsMemorylessAcrossPixelLocalBarrier() = 0;
+
+    // the bytes per pixel of color attachments a render pass keeps in tile memory at the full tile size, none where it
+    // is unknown or unlimited
+    virtual std::optional<uint32_t> GetTileBudget() = 0;
 
     // false on software rasterizers (e.g. lavapipe): GPU-accelerated cooking is only
     // worthwhile on a physical device, otherwise the CPU cook jobs run instead
@@ -132,13 +141,59 @@ public:
     // textures fall back to a CPU decode and an uncompressed upload when unsupported
     virtual bool SupportsSampledFormat(PixelFormat format) = 0;
 
+    // whether a sampler with linear filtering may sample an image of the format
+    virtual bool SupportsLinearFiltering(PixelFormat format) = 0;
+
+    // errors the API validation layer has reported so far; nullopt when no validation layer is active
+    [[nodiscard]] virtual std::optional<unsigned> GetValidationErrorCount() const
+    {
+        return std::nullopt;
+    }
+
+    // the active validation layer also checks synchronization hazards between GPU accesses
+    [[nodiscard]] virtual bool IsSyncValidationActive() const
+    {
+        return false;
+    }
+
     [[nodiscard]] virtual uint32_t GetMinBufferOffsetAlignment() const
     {
         return 64;
     }
 
-    virtual void BeginCommandBuffer() = 0;
+    // records outside a frame: BeginCommandBuffer opens a one-shot command buffer and returns the context recording it,
+    // SubmitCommandBuffer submits it
+    RHICommandContext &BeginCommandBuffer();
     virtual void SubmitCommandBuffer() = 0;
+
+    // while it lives, a render graph executes and GetCommandContext asserts
+    class GraphExecutionScope
+    {
+    public:
+        explicit GraphExecutionScope(RHIContext &rhi) : rhi_(rhi)
+        {
+            rhi_.executing_graph_ = true;
+        }
+
+        ~GraphExecutionScope()
+        {
+            rhi_.executing_graph_ = false;
+        }
+
+        GraphExecutionScope(const GraphExecutionScope &) = delete;
+        GraphExecutionScope &operator=(const GraphExecutionScope &) = delete;
+
+    private:
+        RHIContext &rhi_;
+    };
+
+    // the context recording the open command buffer (the frame's, or the one BeginCommandBuffer opened); null when
+    // none is open. a backend may reuse one context object across command buffers.
+    // graph passes never call it: they record through their pass context, and it asserts while a graph executes. it
+    // serves frame setup handing the frame's context to the graph, and resource creation and updates issued outside
+    // the graph (texture uploads and initial layouts, RHIBuffer::Upload and PartialUpdate), which record before the
+    // graph in the frame, or in a BeginCommandBuffer scope.
+    RHICommandContext *GetCommandContext();
 
     virtual void WaitForDeviceIdle() = 0;
 
@@ -152,12 +207,6 @@ public:
 
     virtual void ReleaseRenderResources();
 
-    virtual void NextSubpass() = 0;
-
-    virtual void DrawMesh(const RHIResourceRef<RHIPipelineState> &pipeline_state, const DrawArgs &draw_args) = 0;
-    virtual void DispatchCompute(const RHIResourceRef<RHIPipelineState> &pipeline, Vector3UInt total_threads,
-                                 Vector3UInt thread_per_group) = 0;
-
     virtual RHIResourceRef<RHIResourceArray> CreateResourceArray(RHIShaderResourceReflection::ResourceType type,
                                                                  unsigned capacity, const std::string &name) = 0;
 
@@ -167,26 +216,8 @@ public:
         return CreateResourceArray(type, RHIShaderResourceBinding::MaxBindlessResources, name);
     }
 
-    virtual RHIResourceRef<RHIRenderTarget> CreateBackBufferRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                                         const RHIResourceRef<RHIImage> &depth_image,
-                                                                         const std::string &name) = 0;
-
-    virtual RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                               const RHIRenderTarget::ColorImageArray &color_images,
-                                                               const RHIResourceRef<RHIImage> &depth_image,
-                                                               const std::string &name) = 0;
-
-    RHIResourceRef<RHIRenderTarget> CreateRenderTarget(const RHIRenderTarget::Attribute &attribute,
-                                                       const RHIResourceRef<RHIImage> &color_image,
-                                                       const RHIResourceRef<RHIImage> &depth_image,
-                                                       const std::string &name)
-    {
-        return CreateRenderTarget(attribute, RHIRenderTarget::ColorImageArray{color_image}, depth_image, name);
-    }
-
-    virtual RHIResourceRef<RHIRenderPass> CreateRenderPass(const RHIRenderPass::Attribute &attribute,
-                                                           const RHIResourceRef<RHIRenderTarget> &rt,
-                                                           const std::string &name) = 0;
+    // names a render pass and, with need_timestamp, measures the renderings begun with it (see RHIPass)
+    RHIResourceRef<RHIPass> CreateRenderPass(const std::string &name, bool need_timestamp);
 
     virtual RHIResourceRef<RHIPipelineState> CreatePipelineState(RHIPipelineState::PipelineType type,
                                                                  const std::string &name) = 0;
@@ -216,16 +247,6 @@ public:
         return nullptr;
     }
 
-    [[nodiscard]] RHIResourceRef<RHIRenderPass> GetCurrentRenderPass() const
-    {
-        return current_render_pass_;
-    }
-
-    [[nodiscard]] RHIResourceRef<RHIComputePass> GetCurrentComputePass() const
-    {
-        return current_compute_pass_;
-    }
-
     [[nodiscard]] const auto &GetFrameStats(unsigned frame_index) const
     {
         return frame_stats_[frame_index];
@@ -241,11 +262,6 @@ public:
     }
 
     RHIResourceRef<RHISampler> GetSampler(RHISampler::SamplerAttribute attribute);
-
-    [[nodiscard]] RHIRenderTargetPool &GetRenderTargetPool()
-    {
-        return render_target_pool_;
-    }
 
     RHIResourceRef<RHIImage> CreateTexture(const Image2D *image, const std::string &name);
 
@@ -306,16 +322,14 @@ public:
 #endif
 
 protected:
-    virtual void BeginRenderPassInternal(const RHIResourceRef<RHIRenderPass> &pass) = 0;
-    virtual void EndRenderPassInternal() = 0;
-    virtual void BeginComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
-    virtual void EndComputePassInternal(const RHIResourceRef<RHIComputePass> &pass) = 0;
     [[nodiscard]] virtual bool BeginFrameInternal() = 0;
     virtual void EndFrameInternal() = 0;
     virtual void CleanupInternal() = 0;
+    virtual RHICommandContext *GetCommandContextInternal() = 0;
+    virtual RHICommandContext &BeginCommandBufferInternal() = 0;
     virtual RHIResourceRef<RHISampler> CreateSampler(RHISampler::SamplerAttribute attribute,
                                                      const std::string &name) = 0;
-    virtual RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info) = 0;
+    virtual RHIResourceRef<RHIShader> CreateShader(const RHIShaderInfo *shader_info, std::string variant) = 0;
     virtual RHIResourceRef<RHIUiHandler> CreateUiHandler() = 0;
 
     void CheckRHIResourceLeak();
@@ -327,13 +341,7 @@ protected:
     std::vector<RHIResourceWeakRef<RHIResource>> registered_resources_;
 #endif
 
-    RHIResourceRef<RHIRenderTarget> back_buffer_rt_;
-    RHIResourceRef<RHIRenderPass> current_render_pass_;
-    RHIResourceRef<RHIComputePass> current_compute_pass_;
-
     std::unordered_map<RHISampler::SamplerAttribute, RHIResourceRef<RHISampler>> samplers_;
-
-    RHIRenderTargetPool render_target_pool_{this};
 
     bool initialization_success_ = false;
     bool back_buffer_dirty_ = true;
@@ -359,6 +367,7 @@ private:
     unsigned frame_index_ = 0;
     bool frame_active_ = false;
     bool is_deleting_deferred_resources_ = false;
+    bool executing_graph_ = false;
 
     struct DeferredDeletion
     {

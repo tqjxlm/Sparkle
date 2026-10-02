@@ -120,6 +120,12 @@ float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, f
 {
     specular_out = (float3)0;
 
+    if (sky_light.has_sky_map == 0)
+    {
+        out_pdf = 0;
+        return 0;
+    }
+
     // TODO(tqjxlm): sample direction according to luminance distribution
     float3 sample_direction = CosineWeightedHemisphere::Sample();
 
@@ -169,8 +175,8 @@ float3 SampleLights(Intersection intersection, MaterialParameters mat_param, flo
 
 float GetLightPdf(float3 normal, float3 w_i)
 {
-    // only consider sky light for now
-    return CosineWeightedHemisphere::Pdf(normal, w_i);
+    // only consider sky light for now. without a sky map no light is sampled, so bsdf samples take the full weight
+    return sky_light.has_sky_map != 0 ? CosineWeightedHemisphere::Pdf(normal, w_i) : 0;
 }
 
 float GetMISWeight(float current_pdf, float compensation_pdf)

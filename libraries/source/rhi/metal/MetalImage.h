@@ -30,21 +30,14 @@ public:
 
     MetalImage(const Attribute &attributes, id<MTLTexture> texture, const std::string &name);
 
-    void Transition(const TransitionRequest &) override
-    {
-    }
+    // uploads synchronously through the texture or a standalone command buffer, recording nothing into the context
+    void Upload(RHICommandContext &command_context, const uint8_t *data) override;
 
-    void Upload(const uint8_t *data) override;
+    void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) override;
 
-    void UploadFaces(std::array<const uint8_t *, 6> data) override;
+    void CopyToBuffer(id<MTLBlitCommandEncoder> encoder, const RHIBuffer *buffer) const;
 
-    void CopyToImage(const RHIImage *image) const override;
-
-    void GenerateMips() override;
-
-    void CopyToBuffer(const RHIBuffer *buffer) const override;
-
-    void BlitToImage(const RHIImage *image, RHISampler::FilteringMethod filter) const override;
+    void BlitToImage(id<MTLCommandBuffer> command_buffer, const RHIImage *image) const;
 
     [[nodiscard]] id<MTLTexture> GetResource() const
     {
@@ -54,8 +47,6 @@ public:
     void SetImage(id<MTLTexture> texture);
 
 private:
-    void CreateSamplerIfNeeded();
-
     void UploadStaged(const uint8_t *data);
 
     id<MTLTexture> texture_;

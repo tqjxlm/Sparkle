@@ -34,14 +34,46 @@ file(GLOB_RECURSE SLANG_INCLUDE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h.slang"
 )
 
+# shader variants as <source>:<DEFINE>. a variant compiles its source with -D<DEFINE>=1 into <source>.<DEFINE>.spv (and
+# .metal) next to the base variant; RHIContext::CreateShader<T>("<DEFINE>") loads it.
+set(SHADER_VARIANTS
+    screen/directional_lighting.ps.slang:PIXEL_LOCAL
+    screen/tone_mapping.ps.slang:PIXEL_LOCAL
+)
+
+# the defines of the variants of the source at FILE_PATH_RELATIVE
+function(get_shader_variants FILE_PATH_RELATIVE OUT_DEFINES)
+    set(DEFINES "")
+    foreach(VARIANT ${SHADER_VARIANTS})
+        string(REPLACE ":" ";" VARIANT_PARTS ${VARIANT})
+        list(GET VARIANT_PARTS 0 VARIANT_SOURCE)
+        list(GET VARIANT_PARTS 1 VARIANT_DEFINE)
+        if (VARIANT_SOURCE STREQUAL FILE_PATH_RELATIVE)
+            list(APPEND DEFINES ${VARIANT_DEFINE})
+        endif()
+    endforeach()
+    set(${OUT_DEFINES} ${DEFINES} PARENT_SCOPE)
+endfunction()
+
+# the output suffix and the define flag of a variant's define, both empty for the base variant
+macro(get_shader_variant_flags DEFINE)
+    if (DEFINE)
+        set(VARIANT_SUFFIX ".${DEFINE}")
+        set(VARIANT_FLAG -D${DEFINE}=1)
+    else()
+        set(VARIANT_SUFFIX "")
+        set(VARIANT_FLAG "")
+    endif()
+endmacro()
+
 set(ALL_SPIRV_OUTPUTS)
 
 # stage 1: slang->spirv
 foreach(SLANG ${SLANG_SOURCE_FILES})
     cmake_path(GET SLANG FILENAME SHADER_NAME)
     cmake_path(RELATIVE_PATH SLANG BASE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE FILE_PATH_RELATIVE)
-    
-    set(SPIRV "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}.spv")
+    get_shader_variants(${FILE_PATH_RELATIVE} VARIANT_DEFINES)
+
     string(REPLACE "." ";" PARTS ${SHADER_NAME})
     list(GET PARTS 1 SHADER_TYPE)
 
@@ -64,19 +96,23 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
         set(SLANG_CAPABILITIES -capability spvRayQueryKHR)
     endif()
 
-    add_custom_command(
-        OUTPUT ${SPIRV}
-        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}
-        COMMENT "Compiling ${SHADER_NAME} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}"
-        DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
-    )
-    list(APPEND ALL_SPIRV_OUTPUTS ${SPIRV})
+    foreach(DEFINE "" ${VARIANT_DEFINES})
+        get_shader_variant_flags("${DEFINE}")
+        set(SPIRV "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}${VARIANT_SUFFIX}.spv")
+        add_custom_command(
+            OUTPUT ${SPIRV}
+            COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}
+            COMMENT "Compiling ${SHADER_NAME}${VARIANT_SUFFIX} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}"
+            DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC}
+        )
+        list(APPEND ALL_SPIRV_OUTPUTS ${SPIRV})
+    endforeach()
 endforeach(SLANG)
 
 # stage 2 (metal only): slang->metal directly.
 # ray_trace shaders still go slang->spirv->spirv-cross->metal: slang cannot emit valid MSL
 # for multiple unsized bindless arrays yet. its MSL also does not bake a vertex y-flip,
-# so the metal RHI flips the viewport instead (see MetalRenderPass).
+# so the metal RHI flips the viewport instead (see MetalCommandContext).
 # the branch follows the graphics backend, not the host OS: a glfw build on a macOS host
 # targets Vulkan and needs the SPIR-V outputs below.
 if (ENABLE_METAL)
@@ -89,9 +125,7 @@ if (ENABLE_METAL)
     foreach(SLANG ${SLANG_SOURCE_FILES})
         cmake_path(GET SLANG FILENAME SHADER_NAME)
         cmake_path(RELATIVE_PATH SLANG BASE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE FILE_PATH_RELATIVE)
-
-        set(SPIRV "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}.spv")
-        set(MSL "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}.metal")
+        get_shader_variants(${FILE_PATH_RELATIVE} VARIANT_DEFINES)
 
         string(REPLACE "." ";" PARTS ${SHADER_NAME})
         list(GET PARTS 1 SHADER_TYPE)
@@ -108,22 +142,29 @@ if (ENABLE_METAL)
         if (SUB_PATH_NAME STREQUAL "ray_trace")
             # ray trace shaders need bindless
             set(SPIRV_CROSS_FLAGS ${SPIRV_CROSS_FLAGS} --msl-argument-buffer-tier 2 --msl-texture-buffer-native)
-
-            add_custom_command(
-                OUTPUT ${MSL}
-                COMMAND ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}
-                COMMENT "Compiling ${SHADER_NAME} to Metal: ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}"
-                DEPENDS ${SPIRV}
-            )
-        else()
-            add_custom_command(
-                OUTPUT ${MSL}
-                COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include
-                COMMENT "Compiling ${SHADER_NAME} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} -I ${CMAKE_CURRENT_SOURCE_DIR}/include"
-                DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES}
-            )
         endif()
-        list(APPEND ALL_MTL_OUTPUTS ${MSL})
+
+        foreach(DEFINE "" ${VARIANT_DEFINES})
+            get_shader_variant_flags("${DEFINE}")
+            set(SPIRV "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}${VARIANT_SUFFIX}.spv")
+            set(MSL "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}${VARIANT_SUFFIX}.metal")
+            if (SUB_PATH_NAME STREQUAL "ray_trace")
+                add_custom_command(
+                    OUTPUT ${MSL}
+                    COMMAND ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}
+                    COMMENT "Compiling ${SHADER_NAME}${VARIANT_SUFFIX} to Metal: ${SPIRV_CROSS} --msl ${SPIRV} --output ${MSL} --msl-version 30000 --flip-vert-y ${SPIRV_CROSS_FLAGS}"
+                    DEPENDS ${SPIRV}
+                )
+            else()
+                add_custom_command(
+                    OUTPUT ${MSL}
+                    COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include
+                    COMMENT "Compiling ${SHADER_NAME}${VARIANT_SUFFIX} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC}
+                )
+            endif()
+            list(APPEND ALL_MTL_OUTPUTS ${MSL})
+        endforeach()
     endforeach(SLANG)
 
     add_custom_target(

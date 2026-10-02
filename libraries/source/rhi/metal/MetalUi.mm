@@ -9,7 +9,8 @@
 
 namespace sparkle
 {
-MetalUiHandler::MetalUiHandler() : RHIUiHandler("MetalUiHandler")
+MetalUiHandler::MetalUiHandler()
+    : RHIUiHandler("MetalUiHandler", ImGui_ImplMetal_UpdateTexture, context->GetRHI()->GetMaxFramesInFlight())
 {
     ImGui_ImplMetal_Init(context->GetDevice());
 
@@ -18,38 +19,26 @@ MetalUiHandler::MetalUiHandler() : RHIUiHandler("MetalUiHandler")
 
 MetalUiHandler::~MetalUiHandler()
 {
+    ShutdownTextureQueue();
     ImGui_ImplMetal_Shutdown();
     is_valid_ = false;
 }
 
-void MetalUiHandler::Render()
+void MetalUiHandler::Render(RHICommandContext &command_context)
 {
-    auto *pass = RHICast<MetalRenderPass>(render_pass_);
-    auto encoder = pass->GetRenderEncoder();
+    auto &metal_context = static_cast<MetalCommandContext &>(command_context);
 
     // it has been set in UiManager::Render()
     auto *draw_data = reinterpret_cast<ImDrawData *>(ImGui::GetIO().UserData);
 
-    ImGui_ImplMetal_RenderDrawData(draw_data, context->GetCurrentCommandBuffer(), encoder);
+    ProcessTextureRequests(*draw_data);
+
+    ImGui_ImplMetal_RenderDrawData(draw_data, metal_context.GetCommandBuffer(), metal_context.GetRenderEncoder());
 }
 
-void MetalUiHandler::BeginFrame()
+void MetalUiHandler::BeginFrame(const RHIRenderingInfo &info)
 {
-    auto *pass = RHICast<MetalRenderPass>(render_pass_);
-
-    ImGuiIO &io = ImGui::GetIO();
-
-    // it may be override by platform specific callbacks, so we need to set it every frame
-    io.DisplaySize = ImVec2(static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().width),
-                            static_cast<float>(render_pass_->GetRenderTarget()->GetAttribute().height));
-
-    ImGui_ImplMetal_NewFrame(pass->GetDescriptor());
-}
-
-void MetalUiHandler::Init()
-{
-    // manually touch resources
-    BeginFrame();
+    ImGui_ImplMetal_NewFrame(CreateMetalRenderPassDescriptor(info));
 }
 } // namespace sparkle
 

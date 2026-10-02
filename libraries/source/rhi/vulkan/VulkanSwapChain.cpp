@@ -4,7 +4,6 @@
 
 #include "VulkanCommon.h"
 #include "VulkanContext.h"
-#include "VulkanRenderTarget.h"
 #include "application/NativeView.h"
 #include "core/Exception.h"
 #include "core/math/Utilities.h"
@@ -208,6 +207,9 @@ void VulkanSwapChain::Recreate()
 
         swap_chain_images_[i] = context->GetRHI()->CreateResource<VulkanImage>(attribute, color_format_,
                                                                                created_images[i], "SwapchainImage");
+        // the presentation engine holds an image until its acquire, so its first use waits for the acquire too
+        swap_chain_images_[i]->SetState({.layout = RHIImageLayout::Undefined, .access = {.access = RHIAccess::Present}},
+                                        0, 1, 0, 1);
     }
 }
 
@@ -215,20 +217,8 @@ VkResult VulkanSwapChain::AcquireImage(VkSemaphore semaphore)
 {
     // Get the next image index from the swap chain
     // Note: this is an async request, the image is not available until the semaphore is ready
-    const VkResult result = vkAcquireNextImageKHR(context->GetDevice(), swap_chain_, UINT64_MAX, semaphore,
-                                                  VK_NULL_HANDLE, &swap_chain_index_);
-
-    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
-    {
-        return result;
-    }
-
-    for (auto *rt : regitsered_rt_)
-    {
-        rt->SyncWithSwapChain();
-    }
-
-    return result;
+    return vkAcquireNextImageKHR(context->GetDevice(), swap_chain_, UINT64_MAX, semaphore, VK_NULL_HANDLE,
+                                 &swap_chain_index_);
 }
 } // namespace sparkle
 
