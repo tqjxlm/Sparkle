@@ -34,10 +34,8 @@ struct LightingInputs
     }
 
 private:
-    // outside the shadow map reads as the far plane, so it is lit
     static constexpr RHISampler::SamplerAttribute ShadowMapSampler{
-        .address_mode = RHISampler::SamplerAddressMode::ClampToBorder,
-        .border_color = RHISampler::BorderColor::FloatOpaqueWhite,
+        .address_mode = RHISampler::SamplerAddressMode::ClampToEdge,
         .filtering_method_min = RHISampler::FilteringMethod::Nearest,
         .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
         .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
