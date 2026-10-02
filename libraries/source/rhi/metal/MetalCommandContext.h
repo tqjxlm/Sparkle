@@ -36,6 +36,10 @@ protected:
     {
     }
 
+    void PixelLocalBarrierInternal(std::span<const RHIImageBarrier> /*image_barriers*/) override
+    {
+    }
+
     void CopyBufferInternal(const RHIBuffer *src, const RHIBuffer *dst) override;
     void CopyBufferToImageInternal(const RHIBuffer *src, const RHIImage *dst) override;
     void CopyImageToBufferInternal(const RHIImage *src, const RHIBuffer *dst) override;

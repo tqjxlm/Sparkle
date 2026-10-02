@@ -91,6 +91,14 @@ class CiPipelineTest(unittest.TestCase):
             tested.add(ci_matrix.tested_triplet(product))
         self.assertEqual(tested, set(ci_matrix.covered_triplets()))
 
+    def test_test_jobs_rendering_graph_pages_fetch_elkjs(self):
+        fetching = {ci_matrix.tested_triplet(product) for product in release_products()
+                    if "thirdparty/elkjs" in JOBS.get(ci_matrix.slug("test", product), "")}
+        rendering = {triplet for triplet in ci_matrix.covered_triplets() if ci_matrix.renders_graph_pages(triplet)}
+
+        self.assertTrue(rendering)
+        self.assertEqual(fetching, rendering)
+
     def test_unmatched_coverage_column_fails_loudly(self):
         original = ci_matrix.covered_triplets
         ci_matrix.covered_triplets = lambda: ["windows-macos-release"]

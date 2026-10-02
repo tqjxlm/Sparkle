@@ -354,6 +354,11 @@ bool AppFramework::MainLoop()
         render_framework_->NotifySceneLoaded();
     }
 
+    if (render_config_.render_graph_export && !graph_export_ && render_framework_->IsReadyForAutoScreenshot())
+    {
+        graph_export_ = render_framework_->RequestGraphDump("render_graph_export");
+    }
+
 #if ENABLE_TEST_CASES
     if (test_case_ && scene_async_tasks_completed_)
     {

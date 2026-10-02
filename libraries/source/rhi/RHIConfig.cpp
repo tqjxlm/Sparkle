@@ -13,6 +13,10 @@ static ConfigValue<bool> config_validate_sync("validate_sync", "Vulkan synchroni
 static ConfigValue<bool> config_pre_transform("vulkan.android.pretransform", "enable vulkan pretransform for android",
                                               "rhi", true);
 static ConfigValue<bool> config_measure_gpu_time("measure_gpu_time", "measure gpu time", "rhi", true);
+static ConfigValue<bool> config_sampler_anisotropy("sampler_anisotropy",
+                                                   "debug: let samplers filter anisotropically; off creates every "
+                                                   "sampler without anisotropy",
+                                                   "rhi", true);
 
 void RHIConfig::Init()
 {
@@ -22,6 +26,7 @@ void RHIConfig::Init()
     ConfigCollectionHelper::RegisterConfig(this, config_validate_sync, enable_sync_validation);
     ConfigCollectionHelper::RegisterConfig(this, config_pre_transform, enable_pre_transform);
     ConfigCollectionHelper::RegisterConfig(this, config_measure_gpu_time, measure_gpu_time);
+    ConfigCollectionHelper::RegisterConfig(this, config_sampler_anisotropy, sampler_anisotropy);
 
     Validate();
 }

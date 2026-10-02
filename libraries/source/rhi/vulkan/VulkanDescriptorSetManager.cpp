@@ -64,8 +64,11 @@ static ShaderDescriptorSetInfo CollectDescriptorSetInfo(const RHIShaderResourceS
 
         binding.descriptorType = GetVulkanDescriptorType(shader_binding->GetType());
 
-        // ARM best practice suggests using stage_all for all cases
-        binding.stageFlags = VK_SHADER_STAGE_ALL;
+        // ARM best practice suggests using stage_all for all cases, but input attachments exist only in fragment
+        // shaders
+        binding.stageFlags = binding.descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT
+                                 ? VK_SHADER_STAGE_FRAGMENT_BIT
+                                 : VK_SHADER_STAGE_ALL;
     }
 
     return info;
@@ -104,7 +107,8 @@ static void CollectDescriptorUpdate(const RHIShaderResourceBinding *binding, uns
                 break;
             }
             case RHIShaderResourceReflection::ResourceType::Texture2D:
-            case RHIShaderResourceReflection::ResourceType::StorageImage2D: {
+            case RHIShaderResourceReflection::ResourceType::StorageImage2D:
+            case RHIShaderResourceReflection::ResourceType::InputAttachment: {
                 RHICast<VulkanImageView>(bound_resource)
                     ->WriteDescriptor(slot, descriptor_set, descriptor_type, out_set_write);
                 break;
@@ -314,6 +318,7 @@ void VulkanDescriptorSetManager::CreateDescriptorPool()
         {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = MaxTotalBindlessResources},
         {.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = MaxTotalBindlessResources},
         {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = MaxTotalBindlessResources},
+        {.type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, .descriptorCount = MaxTotalBindlessResources},
     };
 
     if (context->SupportsHardwareRayTracing())

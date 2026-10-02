@@ -72,6 +72,7 @@ static VulkanAccessScope GetVulkanAccessScope(const RHIResourceAccess &rhi_acces
         VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
             VK_ACCESS_2_SHADER_READ_BIT);
     add(RHIAccess::AccelerationStructureRead, shader_stages, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+    add(RHIAccess::PixelLocalRead, shader_stages, VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT);
     add(RHIAccess::HostRead, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
     add(RHIAccess::Any, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -189,7 +190,7 @@ static VkImageView GetAttachmentView(RHIImage *image, unsigned mip_level, unsign
 static void BeginVulkanRendering(VulkanCommandContext &command_context, const RHIRenderingInfo &info)
 {
     std::array<VkRenderingAttachmentInfo, MaxNumColorAttachments> color_infos{};
-    uint32_t color_attachment_count = 0;
+    uint32_t color_attachment_count = MinColorAttachmentCount;
     for (auto slot = 0u; slot < MaxNumColorAttachments; slot++)
     {
         const auto &attachment = info.color_attachments[slot];
@@ -203,7 +204,7 @@ static void BeginVulkanRendering(VulkanCommandContext &command_context, const RH
         color_attachment_count = slot + 1;
 
         color_info.imageView = GetAttachmentView(attachment.image, attachment.mip_level, attachment.array_layer);
-        color_info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_info.imageLayout = GetVulkanImageLayout(attachment.layout);
         color_info.loadOp = GetAttachmentLoadOp(attachment.load_op);
         color_info.storeOp = GetAttachmentStoreOp(attachment.store_op);
         color_info.clearValue.color = {{attachment.clear_color.x(), attachment.clear_color.y(),
@@ -277,16 +278,41 @@ VkImageMemoryBarrier2 VulkanCommandContext::GetVkImageBarrier(VkImage image, con
 }
 
 void VulkanCommandContext::RecordBarriers(std::span<const VkImageMemoryBarrier2> image_barriers,
-                                          std::span<const VkMemoryBarrier2> memory_barriers) const
+                                          std::span<const VkMemoryBarrier2> memory_barriers,
+                                          VkDependencyFlags dependency_flags) const
 {
     VkDependencyInfo dependency_info{};
     dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency_info.dependencyFlags = dependency_flags;
     dependency_info.memoryBarrierCount = static_cast<uint32_t>(memory_barriers.size());
     dependency_info.pMemoryBarriers = memory_barriers.data();
     dependency_info.imageMemoryBarrierCount = static_cast<uint32_t>(image_barriers.size());
     dependency_info.pImageMemoryBarriers = image_barriers.data();
 
     vkCmdPipelineBarrier2(command_buffer_, &dependency_info);
+}
+
+// VK_KHR_dynamic_rendering_local_read: inside the rendering, framebuffer-space stages only, by region, and each image
+// in the local read layout on both sides
+void VulkanCommandContext::PixelLocalBarrierInternal(std::span<const RHIImageBarrier> image_barriers)
+{
+    std::vector<VkImageMemoryBarrier2> vk_image_barriers;
+    vk_image_barriers.reserve(image_barriers.size());
+    for (const auto &barrier : image_barriers)
+    {
+        ASSERT(barrier.from_layout == RHIImageLayout::LocalRead && barrier.to_layout == RHIImageLayout::LocalRead);
+        const auto *image = RHICast<VulkanImage>(barrier.image);
+        vk_image_barriers.push_back(GetVkImageBarrier(image->GetImage(),
+                                                      {.aspectMask = image->GetAspect(),
+                                                       .baseMipLevel = barrier.base_mip,
+                                                       .levelCount = barrier.mip_count,
+                                                       .baseArrayLayer = barrier.base_array_layer,
+                                                       .layerCount = barrier.array_layer_count},
+                                                      barrier.from, barrier.to, barrier.from_layout,
+                                                      barrier.to_layout));
+    }
+
+    RecordBarriers(vk_image_barriers, {}, VK_DEPENDENCY_BY_REGION_BIT);
 }
 
 void VulkanCommandContext::BarrierInternal(std::span<const RHIImageBarrier> image_barriers,

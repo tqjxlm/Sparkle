@@ -31,6 +31,10 @@ void VulkanShader::SetupShaderReflection(RHIShaderResourceTable *shader_resource
             }
 
             shader_resource->second->UpdateReflectionIndex(set->set, binding->binding);
+            if (binding->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_INPUT_ATTACHMENT)
+            {
+                shader_resource->second->ReflectAsInputAttachment();
+            }
         }
     }
 }
@@ -42,7 +46,7 @@ void VulkanShader::Load()
         return;
     }
 
-    auto spv_path = shader_info_->GetPath() + ".spv";
+    auto spv_path = GetCompiledPath() + ".spv";
     LoadShaderModule(spv_path.c_str());
 
     loaded_ = true;

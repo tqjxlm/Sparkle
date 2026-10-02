@@ -2,6 +2,7 @@
 
 #include "renderer/RenderConfig.h"
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/GBufferPass.h"
 #include "renderer/pass/LightingInputs.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
@@ -35,9 +36,7 @@ class DirectionalLightingPassPixelShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(ibl_specular_sampler, RHIShaderResourceReflection::ResourceType::Sampler)
 
     USE_SHADER_RESOURCE(gbuffer_texture, RHIShaderResourceReflection::ResourceType::Texture2D)
-
     USE_SHADER_RESOURCE(depth_texture, RHIShaderResourceReflection::ResourceType::Texture2D)
-    USE_SHADER_RESOURCE(depth_sampler, RHIShaderResourceReflection::ResourceType::Sampler)
 
     END_SHADER_RESOURCE_TABLE
 
@@ -63,8 +62,12 @@ void DirectionalLightingPass::UpdateFrameData(const RenderConfig &config, SceneR
     const bool use_specular_ibl = has_ibl && config.use_specular_ibl;
 
     // scene proxy recreation (e.g. on scene load) replaces the camera and its view buffer
-    auto *ps_resources = pipeline_state_->GetShaderResource<DirectionalLightingPassPixelShader>();
-    ps_resources->view().BindResource(camera->GetViewBuffer());
+    view_buffer_ = camera->GetViewBuffer();
+    BindView(*pipeline_state_);
+    if (pixel_local_pipeline_)
+    {
+        BindView(*pixel_local_pipeline_);
+    }
 
     const PbrConfig pbr_config{.mode = static_cast<uint32_t>(config.debug_mode),
                                .use_ibl_diffuse = static_cast<uint32_t>(use_diffuse_ibl ? 1 : 0),
@@ -96,18 +99,47 @@ void DirectionalLightingPass::BindPixelShaderResources()
     pipeline_state_->GetShaderResource<DirectionalLightingPassPixelShader>()->ubo().BindResource(ps_ub_);
 }
 
-void DirectionalLightingPass::AddTo(RenderGraph &graph, const LightingInputs &lighting, RGTexture gbuffer,
-                                    RGTexture scene_depth, RGTexture scene_color) const
+void DirectionalLightingPass::BindView(RHIPipelineState &pipeline) const
 {
-    graph.AddRasterPass(name_, [this, lighting, gbuffer, scene_depth, scene_color](RGBuilder &builder) {
+    pipeline.GetShaderResource<DirectionalLightingPassPixelShader>()->view().BindResource(view_buffer_);
+}
+
+const RHIResourceRef<RHIPipelineState> &DirectionalLightingPass::GetPipeline(const RGRasterContext &context,
+                                                                             RGTexture gbuffer) const
+{
+    if (!context.IsPixelLocal(gbuffer))
+    {
+        return pipeline_state_;
+    }
+
+    if (!pixel_local_pipeline_)
+    {
+        auto signature = GetSignature();
+        signature.color_formats[ColorSlot::GBufferPacked] = GBufferPass::PackedDesc.format;
+        signature.color_formats[ColorSlot::DepthCopy] = GBufferPass::DepthCopyDesc.format;
+        pixel_local_pipeline_ = CreatePipeline(signature);
+        pixel_local_pipeline_->SetShader<RHIShaderStage::Pixel>(
+            rhi_->CreateShader<DirectionalLightingPassPixelShader>("PIXEL_LOCAL"));
+        CompilePipeline(*pixel_local_pipeline_);
+        pixel_local_pipeline_->GetShaderResource<DirectionalLightingPassPixelShader>()->ubo().BindResource(ps_ub_);
+        BindView(*pixel_local_pipeline_);
+    }
+    return pixel_local_pipeline_;
+}
+
+void DirectionalLightingPass::AddTo(RenderGraph &graph, const LightingInputs &lighting, RGTexture gbuffer,
+                                    RGTexture depth_copy, RGTexture scene_color) const
+{
+    graph.AddRasterPass(name_, [this, lighting, gbuffer, depth_copy, scene_color](RGBuilder &builder) {
         using Table = DirectionalLightingPassPixelShader::ResourceTable;
-        builder.Sampled(gbuffer, &Table::gbuffer_texture);
-        // the depth is sampled at the texel centres of a target of its own size
-        builder.Sampled(scene_depth, &Table::depth_texture, &Table::depth_sampler, NearestSampler);
+        // GBuffer writes both, so either both stay pixel-local or neither does
+        builder.PixelLocalRead(gbuffer, ColorSlot::GBufferPacked, &Table::gbuffer_texture);
+        builder.PixelLocalRead(depth_copy, ColorSlot::DepthCopy, &Table::depth_texture);
         lighting.Sample<Table>(builder, rhi_);
-        builder.ColorWrite(scene_color, 0);
+        builder.ColorWrite(scene_color, ColorSlot::SceneColor);
         builder.FullyOverwrites();
-        return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
+        return
+            [this, gbuffer](RGRasterContext &context) { context.DrawMesh(GetPipeline(context, gbuffer), draw_args_); };
     });
 }
 } // namespace sparkle

@@ -6,8 +6,11 @@
 #include "renderer/graph/RGTexturePool.h"
 #include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/ScreenQuadPass.h"
+#include "renderer/pass/ToneMappingPass.h"
 #include "rhi/RHI.h"
 
+#include <magic_enum/magic_enum.hpp>
+#include <magic_enum/magic_enum_flags.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -16,6 +19,7 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <tuple>
 
 namespace sparkle
 {
@@ -68,6 +72,44 @@ private:
     RHIResourceRef<RHIImage> placeholder_;
 };
 
+// a screen quad whose pipeline keeps the default depth state, which tests and writes depth
+class DepthTestingQuadPass : public ScreenQuadPass
+{
+public:
+    using ScreenQuadPass::AddTo;
+    using ScreenQuadPass::ScreenQuadPass;
+
+    // draws `input` over `output` where the quad passes the depth test against `depth`
+    void AddTo(RenderGraph &graph, RGTexture input, RGTexture output, RGTexture depth) const
+    {
+        graph.AddRasterPass(name_, [this, input, output, depth](RGBuilder &builder) {
+            SampleInput(builder, input, NearestSampler);
+            builder.ColorWrite(output, 0);
+            builder.DepthTest(depth);
+            return [this](RGRasterContext &context) { context.DrawMesh(pipeline_state_, draw_args_); };
+        });
+    }
+
+protected:
+    void SetupPixelShader() override
+    {
+        ScreenQuadPass::SetupPixelShader();
+        pipeline_state_->SetDepthState({});
+    }
+};
+
+// tone mapping at an exposure the test sets, which reads its input pixel-locally at slot 1
+class ExposedToneMappingPass : public ToneMappingPass
+{
+public:
+    using ToneMappingPass::ToneMappingPass;
+
+    void SetExposure(float exposure) const
+    {
+        ps_ub_->Upload(rhi_, &exposure);
+    }
+};
+
 // a screen quad that keeps the sampler its pass binds to the input
 class SamplerProbePass : public ScreenQuadPass
 {
@@ -91,11 +133,11 @@ private:
 };
 } // namespace
 
-// builds synthetic render graphs, compares their compiled plans (culling, physical images, barriers, load/store with
-// reasons) against expected dump summaries, and executes each one. under synchronization validation that proves the
-// planned barriers order every access, including a pooled image reused by the next graph and a buffer copied through.
-// graphs read back a texture to prove the recorded passes ran and a draw binds the texture and sampler its pass
-// declared. screen quads are checked for the sampler each input filter chooses.
+// builds synthetic render graphs, compares their compiled plans (culling, physical images, physical passes and why
+// they break, barriers, load/store with reasons) against expected dump summaries, and executes each one. under
+// synchronization validation that proves the planned barriers order every access, including a pooled image reused by
+// the next graph and a buffer copied through. graphs read back a texture to prove the recorded passes ran and a draw
+// binds the texture and sampler its pass declared. screen quads are checked for the sampler each input filter chooses.
 class RenderGraphCompileTest : public TestCase
 {
 public:
@@ -121,7 +163,10 @@ public:
         config.image_height = 32;
         config.render_scale = 0.5f;
         config.render_graph_cull = true;
+        config.render_graph_merge = true;
         config.render_graph_full_barriers = false;
+        config.render_graph_tile_budget = 0;
+        config.render_graph_tile_budget_split = false;
 
         task_pending_.store(true, std::memory_order_release);
         const bool last = step_ + 1 == Steps.size();
@@ -148,6 +193,7 @@ private:
 
     static constexpr RGTextureDesc Rgba8Output{.format = PixelFormat::R8G8B8A8Unorm, .size_class = RGSizeClass::Output};
     static constexpr RGTextureDesc Rgba8Scene{.format = PixelFormat::R8G8B8A8Unorm, .size_class = RGSizeClass::Scene};
+    static constexpr RGTextureDesc DepthOutput{.format = PixelFormat::D32, .size_class = RGSizeClass::Output};
 
     struct Resources
     {
@@ -164,11 +210,27 @@ private:
                    : resource;
     }
 
+    // the members of a physical pass joined by '+'
+    static std::string JoinMembers(const nlohmann::json &dump, const nlohmann::json &physical)
+    {
+        std::string joined;
+        for (const auto &member : physical.at("members"))
+        {
+            joined += (joined.empty() ? "" : "+") +
+                      dump.at("passes").at(member.get<unsigned>()).at("name").get<std::string>();
+        }
+        return joined;
+    }
+
+    // each pass with its barriers, then each physical pass's attachments after its last member, named when it merges
+    // passes
     static std::vector<std::string> Summarize(const nlohmann::json &dump)
     {
         std::vector<std::string> lines;
-        for (const auto &pass : dump.at("passes"))
+        const auto &passes = dump.at("passes");
+        for (auto index = 0u; index < passes.size(); index++)
         {
+            const auto &pass = passes.at(index);
             const auto name = pass.at("name").get<std::string>();
             if (pass.at("culled").get<bool>())
             {
@@ -176,7 +238,9 @@ private:
                 continue;
             }
 
-            lines.push_back(std::format("{}: {}", name, pass.at("kind").get<std::string>()));
+            const auto step = pass.at("step").get<unsigned>();
+            lines.push_back(step == 0 ? std::format("{}: {}", name, pass.at("kind").get<std::string>())
+                                      : std::format("{}: {}, step {}", name, pass.at("kind").get<std::string>(), step));
             for (const auto &barrier : pass.at("barriers"))
             {
                 // memory barriers have no layouts
@@ -184,11 +248,29 @@ private:
                                          ? std::format(" {}->{}", barrier.at("from_layout").get<std::string>(),
                                                        barrier.at("to_layout").get<std::string>())
                                          : std::string();
-                lines.push_back(std::format("  barrier {}{} [{} -> {}]", GetResource(barrier), layouts,
+                lines.push_back(std::format("  barrier{} {}{} [{} -> {}]",
+                                            barrier.value("in_rendering", false) ? " in rendering" : "",
+                                            GetResource(barrier), layouts, barrier.at("from").get<std::string>(),
+                                            barrier.at("to").get<std::string>()));
+            }
+            for (const auto &barrier : pass.value("barriers_after", nlohmann::json::array()))
+            {
+                lines.push_back(std::format("  barrier after {} [{} -> {}]", GetResource(barrier),
                                             barrier.at("from").get<std::string>(),
                                             barrier.at("to").get<std::string>()));
             }
-            for (const auto &attachment : pass.at("attachments"))
+
+            const auto &physical = dump.at("physical_passes").at(pass.at("physical_pass").get<unsigned>());
+            const auto &members = physical.at("members");
+            if (members.back().get<unsigned>() != index)
+            {
+                continue;
+            }
+            if (members.size() > 1)
+            {
+                lines.push_back("  physical " + JoinMembers(dump, physical));
+            }
+            for (const auto &attachment : physical.at("attachments"))
             {
                 const auto &slot = attachment.at("slot");
                 lines.push_back(std::format(
@@ -197,50 +279,123 @@ private:
                     attachment.at("load").get<std::string>(), attachment.at("load_reason").get<std::string>(),
                     attachment.at("store").get<std::string>(), attachment.at("store_reason").get<std::string>()));
             }
-            for (const auto &barrier : pass.value("barriers_after", nlohmann::json::array()))
-            {
-                lines.push_back(std::format("  barrier after {} [{} -> {}]", GetResource(barrier),
-                                            barrier.at("from").get<std::string>(),
-                                            barrier.at("to").get<std::string>()));
-            }
         }
 
         for (const auto &resource : dump.at("resources"))
         {
             if (resource.at("kind") == "Transient")
             {
+                const auto name = resource.at("name").get<std::string>();
                 lines.push_back(resource.contains("physical")
-                                    ? std::format("{}: physical {}", resource.at("name").get<std::string>(),
-                                                  resource.at("physical").get<unsigned>())
-                                    : std::format("{}: no image", resource.at("name").get<std::string>()));
+                                    ? std::format("{}: physical {}{}", name, resource.at("physical").get<unsigned>(),
+                                                  resource.at("memoryless").get<bool>() ? ", memoryless" : "")
+                                    : std::format("{}: no image", name));
             }
         }
         return lines;
     }
 
-    // compiles, checks the plan and records the graph into its own command buffer
-    void Run(RHIContext *rhi, RenderGraph &graph, const std::vector<std::string> &expected, const std::string &what)
+    // why each physical pass ends before the next: "<its members> | <the next one's members>: <reason>(<resource>)"
+    static std::vector<std::string> Breaks(const nlohmann::json &dump)
     {
-        graph.Compile();
+        std::vector<std::string> lines;
+        const auto &physical_passes = dump.at("physical_passes");
+        for (auto index = 0u; index + 1 < physical_passes.size(); index++)
+        {
+            const auto &physical = physical_passes.at(index);
+            const auto resource = physical.contains("break_resource")
+                                      ? std::format("({})", physical.at("break_resource").get<std::string>())
+                                      : std::string();
+            lines.push_back(std::format("{} | {}: {}{}", JoinMembers(dump, physical),
+                                        JoinMembers(dump, physical_passes.at(index + 1)),
+                                        physical.at("break_reason").get<std::string>(), resource));
+        }
+        return lines;
+    }
 
-        const auto summary = Summarize(graph.Dump());
-        Expect(summary == expected, std::format("{} plan", what));
-        if (summary != expected)
+    // each pixel-local read request: "<pass> <resource>: PixelLocalRead", or "lowered <reason>" with the reason it was
+    // lowered to Sampled
+    static std::vector<std::string> PixelLocalReads(const nlohmann::json &dump)
+    {
+        std::vector<std::string> lines;
+        for (const auto &pass : dump.at("passes"))
+        {
+            for (const auto &access : pass.at("accesses"))
+            {
+                if (access.contains("pixel_local_slot"))
+                {
+                    lines.push_back(std::format("{} {}: {}", pass.at("name").get<std::string>(), GetResource(access),
+                                                access.contains("lowered_reason")
+                                                    ? "lowered " + access.at("lowered_reason").get<std::string>()
+                                                    : access.at("access").get<std::string>()));
+                }
+            }
+        }
+        return lines;
+    }
+
+    // expects `lines` from the compiled graph's `what`
+    void ExpectLines(const std::vector<std::string> &lines, const std::vector<std::string> &expected,
+                     const std::string &what, const nlohmann::json &dump)
+    {
+        Expect(lines == expected, what);
+        if (lines != expected)
         {
             Log(Error, "expected:");
             for (const auto &line : expected)
             {
                 Log(Error, "{}", line);
             }
-            Log(Error, "got (full dump {}):", graph.Dump().dump());
-            for (const auto &line : summary)
+            Log(Error, "got (full dump {}):", dump.dump());
+            for (const auto &line : lines)
             {
                 Log(Error, "{}", line);
             }
         }
+    }
 
+    // compiles, checks the plan and the images backing it, and records the graph into its own command buffer
+    void Run(RHIContext *rhi, RenderGraph &graph, const std::vector<std::string> &expected, const std::string &what)
+    {
+        graph.Compile();
+
+        const auto dump = graph.Dump();
+        ExpectLines(Summarize(dump), expected, std::format("{} plan", what), dump);
+        ExpectBackings(rhi, dump, what);
+
+        Record(rhi, graph);
+    }
+
+    // a memoryless transient has a memoryless image where the device has memoryless storage for its format and usages,
+    // every other transient a pooled one
+    void ExpectBackings(RHIContext *rhi, const nlohmann::json &dump, const std::string &what)
+    {
+        for (const auto &resource : dump.at("resources"))
+        {
+            if (resource.contains("physical"))
+            {
+                const auto format = magic_enum::enum_cast<PixelFormat>(resource.at("format").get<std::string>());
+                const auto usages =
+                    magic_enum::enum_flags_cast<RHIImage::ImageUsage>(resource.at("usage").get<std::string>());
+                const bool memoryless = resource.at("memoryless").get<bool>() && format && usages &&
+                                        rhi->SupportsMemorylessImage(*format, *usages);
+                Expect(resource.at("backing") == (memoryless ? "memoryless" : "pooled"),
+                       std::format("{}: {} has a {} image", what, resource.at("name").get<std::string>(),
+                                   memoryless ? "memoryless" : "pooled"));
+            }
+        }
+    }
+
+    static void Record(RHIContext *rhi, RenderGraph &graph)
+    {
         graph.Execute(rhi->BeginCommandBuffer());
         rhi->SubmitCommandBuffer();
+    }
+
+    void ExpectBreaks(const RenderGraph &graph, const std::vector<std::string> &expected, const std::string &what)
+    {
+        const auto dump = graph.Dump();
+        ExpectLines(Breaks(dump), expected, std::format("{} breaks", what), dump);
     }
 
     static RHIResourceRef<RHIImage> CreateImportImage(RHIContext *rhi, Vector2UInt size, const std::string &name)
@@ -309,6 +464,25 @@ private:
         const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
         Expect(pixel[0] == 0 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255,
                "the readback pass copies the texture the sample pass cleared");
+        readback->UnLock();
+    }
+
+    static void AddClear(RenderGraph &graph, std::string name, RGTextureRange texture, uint8_t slot,
+                         const Vector4 &color)
+    {
+        graph.AddRasterPass(std::move(name), [texture, slot, color](RGBuilder &builder) {
+            builder.ColorWrite(texture, slot, color);
+            return [](RGRasterContext &) {};
+        });
+    }
+
+    // expects the first texel of an R8G8B8A8 readback
+    void ExpectTexel(RHIContext *rhi, const RHIResourceRef<RHIBuffer> &readback, const std::array<uint8_t, 4> &texel,
+                     const std::string &what)
+    {
+        rhi->WaitForDeviceIdle();
+        const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
+        Expect(std::equal(texel.begin(), texel.end(), pixel), what);
         readback->UnLock();
     }
 
@@ -444,12 +618,12 @@ private:
             },
             "full barriers");
 
-        const auto passes = graph.Dump().at("passes");
-        Expect(std::ranges::all_of(passes,
-                                   [](const nlohmann::json &pass) {
-                                       return pass.value("full_barrier", false) == !pass.at("culled").get<bool>();
-                                   }),
-               "every live pass records a full barrier, and no culled pass does");
+        const auto physical_passes = graph.Dump().at("physical_passes");
+        Expect(physical_passes.size() == 2 && std::ranges::all_of(physical_passes,
+                                                                  [](const nlohmann::json &physical) {
+                                                                      return physical.value("full_barrier", false);
+                                                                  }),
+               "every physical pass records a full barrier");
     }
 
     // a buffer the host reads becomes visible to it right after its last live pass, before the passes after it. a
@@ -507,7 +681,7 @@ private:
                     "  attachment B slot 0: Clear (clear) / DontCare (no later reader)",
                     "Upload: culled (unread outputs: C)",
                     "A: physical 0",
-                    "B: physical 1",
+                    "B: physical 1, memoryless",
                     "C: no image",
                 },
                 "host read after the last pass");
@@ -610,8 +784,8 @@ private:
         readback->UnLock();
     }
 
-    // a raster pass declaring native access records through the raw command context, inside the rendering the graph
-    // began over its attachments
+    // a raster pass declaring native access merges like any other and records through the raw command context, inside
+    // the rendering of its physical pass, whose signature masks the slot it does not attach
     void NativeRecording(RHIContext *rhi, const RenderConfig &config)
     {
         auto readback = CreateReadbackBuffer(rhi, config);
@@ -621,35 +795,48 @@ private:
         {
             RenderGraph graph(rhi, pool, config);
             const auto a = graph.CreateTexture("A", Rgba8Output);
-            graph.AddRasterPass("Native", [a, &inside_rendering](RGBuilder &builder) {
+            const auto b = graph.CreateTexture("B", Rgba8Output);
+            graph.AddRasterPass("Base", [a, b](RGBuilder &builder) {
                 builder.ColorWrite(a, 0, Vector4(1.f, 1.f, 0.f, 1.f));
+                builder.ColorWrite(b, 1, Vector4(0.f, 0.f, 1.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("Native", [a, &inside_rendering](RGBuilder &builder) {
+                builder.ColorWrite(a, 0);
                 builder.NativeAccess();
                 return [a, &inside_rendering](RGRasterContext &context) {
-                    const auto &attachment = context.GetNativeContext().GetRenderingInfo().color_attachments[0];
-                    inside_rendering =
-                        attachment.image == context.GetImage(a) && attachment.load_op == RHILoadOp::Clear;
+                    const auto &native_context = context.GetNativeContext();
+                    const auto &attachments = native_context.GetRenderingInfo().color_attachments;
+                    inside_rendering = attachments[0].image == context.GetImage(a) &&
+                                       attachments[0].load_op == RHILoadOp::Clear && attachments[1].image != nullptr &&
+                                       native_context.GetAttachmentSignature().unwritten_color_slots == 0b10;
                 };
             });
             AddReadback(graph, a, readback);
 
             Run(rhi, graph,
                 {
-                    "Native: Raster",
+                    "Base: Raster",
                     "  barrier A Undefined->ColorOutput [None -> ColorWrite]",
+                    "  barrier B Undefined->ColorOutput [None -> ColorWrite]",
+                    "Native: Raster, step 1",
+                    "  physical Base+Native",
                     "  attachment A slot 0: Clear (clear) / Store (read by Readback)",
+                    "  attachment B slot 1: Clear (clear) / DontCare (no later reader)",
                     "Readback: Copy",
                     "  barrier A ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
                     "  barrier after Readback [CopyDst -> HostRead]",
                     "A: physical 0",
+                    "B: physical 1, memoryless",
                 },
                 "native recording");
         }
-        Expect(inside_rendering, "the native context records inside the rendering over the pass's attachment");
+        Expect(inside_rendering, "the native context records inside the rendering of its physical pass");
 
         rhi->WaitForDeviceIdle();
         const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
         Expect(pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255,
-               "the native pass's attachment is cleared");
+               "the physical pass's attachment is cleared");
         readback->UnLock();
     }
 
@@ -924,7 +1111,7 @@ private:
                 "  barrier Out Undefined->ColorOutput [ColorWrite -> ColorWrite]",
                 "  attachment Out slot 0: Clear (clear) / Store (imported)",
                 "SourceColor: physical 0",
-                "DebugColor: physical 1",
+                "DebugColor: physical 1, memoryless",
             },
             "culling disabled");
     }
@@ -1030,7 +1217,7 @@ private:
                 "WriteHistory: Raster",
                 "  barrier History ColorOutput->ColorOutput [ColorWrite -> ColorWrite]",
                 "  attachment History slot 0: Load (written by External) / Store (imported)",
-                "Color: physical 0",
+                "Color: physical 0, memoryless",
             },
             "imported seeding");
         Expect(history->GetState(0, 0) ==
@@ -1038,46 +1225,96 @@ private:
                "the graph writes the final state through to the import");
     }
 
+    // per pass without merging; merged, Base, Overlay and Fullscreen share one rendering, whose load ops come from the
+    // first member attaching each subresource and store ops from the passes after it, with no barrier between members
     void LoadStore(RHIContext *rhi, const RenderConfig &config)
     {
-        auto output = CreateImportImage(rhi, config.GetResolution().scene, "RenderGraphTestOutput");
+        const auto build = [rhi, &config](RenderGraph &graph) {
+            const auto marker = graph.CreateTexture("MarkerColor", Rgba8Scene);
+            const auto color = graph.CreateTexture("Color", Rgba8Scene);
+            const auto depth =
+                graph.CreateTexture("Depth", {.format = PixelFormat::D32, .size_class = RGSizeClass::Scene});
+            const auto output_texture =
+                graph.Import("Output", CreateImportImage(rhi, config.GetResolution().scene, "RenderGraphTestOutput"));
+            graph.AddRasterPass("MarkerClear", [marker](RGBuilder &builder) {
+                builder.ColorWrite(marker, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("Marker", [marker](RGBuilder &builder) {
+                builder.ColorWrite(marker, 0);
+                builder.SideEffect();
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("Base", [color, depth](RGBuilder &builder) {
+                builder.ColorWrite(color, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                builder.DepthWrite(depth, 1.f);
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("Overlay", [color, depth](RGBuilder &builder) {
+                builder.ColorWrite(color, 0);
+                builder.DepthTest(depth);
+                builder.SideEffect();
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("Fullscreen", [color](RGBuilder &builder) {
+                builder.ColorWrite(color, 0);
+                builder.FullyOverwrites();
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("Compose", [color, output_texture](RGBuilder &builder) {
+                builder.Sampled(color);
+                builder.ColorWrite(output_texture, 0);
+                return [](RGRasterContext &) {};
+            });
+        };
+
+        {
+            auto no_merge = config;
+            no_merge.render_graph_merge = false;
+            RGTexturePool pool(rhi);
+            RenderGraph graph(rhi, pool, no_merge);
+            build(graph);
+            Run(rhi, graph,
+                {
+                    "MarkerClear: culled (unread outputs: MarkerColor)",
+                    "Marker: Raster",
+                    "  barrier MarkerColor Undefined->ColorOutput [None -> ColorWrite]",
+                    "  attachment MarkerColor slot 0: DontCare (no earlier writer) / DontCare (no later reader)",
+                    "Base: Raster",
+                    "  barrier Color Undefined->ColorOutput [None -> ColorWrite]",
+                    "  barrier Depth Undefined->DepthStencilOutput [None -> DepthWrite]",
+                    "  attachment Color slot 0: Clear (clear) / Store (read by Overlay)",
+                    "  attachment Depth slot depth: Clear (clear) / Store (read by Overlay)",
+                    "Overlay: Raster",
+                    "  barrier Color ColorOutput->ColorOutput [ColorWrite -> ColorWrite]",
+                    "  barrier Depth DepthStencilOutput->DepthStencilOutput [DepthWrite -> DepthWrite]",
+                    "  attachment Color slot 0: Load (written by Base) / DontCare (overwritten by Fullscreen)",
+                    "  attachment Depth slot depth: Load (written by Base) / DontCare (no later reader)",
+                    "Fullscreen: Raster",
+                    "  barrier Color Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                    "  attachment Color slot 0: DontCare (fully overwritten) / Store (read by Compose)",
+                    "Compose: Raster",
+                    "  barrier Color ColorOutput->Read [ColorWrite -> Sampled(Pixel)]",
+                    "  barrier Output Undefined->ColorOutput [None -> ColorWrite]",
+                    "  attachment Output slot 0: Load (imported) / Store (imported)",
+                    "MarkerColor: physical 0, memoryless",
+                    "Color: physical 1",
+                    "Depth: physical 2",
+                },
+                "load/store inference");
+            ExpectBreaks(graph,
+                         {
+                             "Marker | Base: SlotConflict(Color)",
+                             "Base | Overlay: Disabled",
+                             "Overlay | Fullscreen: Disabled",
+                             "Fullscreen | Compose: SlotConflict(Output)",
+                         },
+                         "load/store inference");
+        }
+
         RGTexturePool pool(rhi);
         RenderGraph graph(rhi, pool, config);
-        const auto marker = graph.CreateTexture("MarkerColor", Rgba8Scene);
-        const auto color = graph.CreateTexture("Color", Rgba8Scene);
-        const auto depth = graph.CreateTexture("Depth", {.format = PixelFormat::D32, .size_class = RGSizeClass::Scene});
-        const auto output_texture = graph.Import("Output", output);
-        graph.AddRasterPass("MarkerClear", [marker](RGBuilder &builder) {
-            builder.ColorWrite(marker, 0, Vector4(0.f, 0.f, 0.f, 1.f));
-            return [](RGRasterContext &) {};
-        });
-        graph.AddRasterPass("Marker", [marker](RGBuilder &builder) {
-            builder.ColorWrite(marker, 0);
-            builder.SideEffect();
-            return [](RGRasterContext &) {};
-        });
-        graph.AddRasterPass("Base", [color, depth](RGBuilder &builder) {
-            builder.ColorWrite(color, 0, Vector4(0.f, 0.f, 0.f, 1.f));
-            builder.DepthWrite(depth, 1.f);
-            return [](RGRasterContext &) {};
-        });
-        graph.AddRasterPass("Overlay", [color, depth](RGBuilder &builder) {
-            builder.ColorWrite(color, 0);
-            builder.DepthTest(depth);
-            builder.SideEffect();
-            return [](RGRasterContext &) {};
-        });
-        graph.AddRasterPass("Fullscreen", [color](RGBuilder &builder) {
-            builder.ColorWrite(color, 0);
-            builder.FullyOverwrites();
-            return [](RGRasterContext &) {};
-        });
-        graph.AddRasterPass("Compose", [color, output_texture](RGBuilder &builder) {
-            builder.Sampled(color);
-            builder.ColorWrite(output_texture, 0);
-            return [](RGRasterContext &) {};
-        });
-
+        build(graph);
         Run(rhi, graph,
             {
                 "MarkerClear: culled (unread outputs: MarkerColor)",
@@ -1085,27 +1322,370 @@ private:
                 "  barrier MarkerColor Undefined->ColorOutput [None -> ColorWrite]",
                 "  attachment MarkerColor slot 0: DontCare (no earlier writer) / DontCare (no later reader)",
                 "Base: Raster",
-                "  barrier Color Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                "  barrier Color Undefined->ColorOutput [None -> ColorWrite]",
                 "  barrier Depth Undefined->DepthStencilOutput [None -> DepthWrite]",
-                "  attachment Color slot 0: Clear (clear) / Store (read by Overlay)",
-                "  attachment Depth slot depth: Clear (clear) / Store (read by Overlay)",
                 "Overlay: Raster",
-                "  barrier Color ColorOutput->ColorOutput [ColorWrite -> ColorWrite]",
-                "  barrier Depth DepthStencilOutput->DepthStencilOutput [DepthWrite -> DepthWrite]",
-                "  attachment Color slot 0: Load (written by Base) / DontCare (overwritten by Fullscreen)",
-                "  attachment Depth slot depth: Load (written by Base) / DontCare (no later reader)",
-                "Fullscreen: Raster",
-                "  barrier Color Undefined->ColorOutput [ColorWrite -> ColorWrite]",
-                "  attachment Color slot 0: DontCare (fully overwritten) / Store (read by Compose)",
+                "Fullscreen: Raster, step 1",
+                "  physical Base+Overlay+Fullscreen",
+                "  attachment Color slot 0: Clear (clear) / Store (read by Compose)",
+                "  attachment Depth slot depth: Clear (clear) / DontCare (no later reader)",
                 "Compose: Raster",
                 "  barrier Color ColorOutput->Read [ColorWrite -> Sampled(Pixel)]",
                 "  barrier Output Undefined->ColorOutput [None -> ColorWrite]",
                 "  attachment Output slot 0: Load (imported) / Store (imported)",
-                "MarkerColor: physical 0",
-                "Color: physical 0",
-                "Depth: physical 1",
+                "MarkerColor: physical 0, memoryless",
+                "Color: physical 1",
+                "Depth: physical 2, memoryless",
             },
-            "load/store inference");
+            "merged load/store");
+        ExpectBreaks(graph,
+                     {
+                         "Marker | Base+Overlay+Fullscreen: SlotConflict(Color)",
+                         "Base+Overlay+Fullscreen | Compose: SlotConflict(Output)",
+                     },
+                     "merged load/store");
+    }
+
+    // one graph breaking its physical passes for every reason in turn, with and without merging, which changes only
+    // whether a depth-less clear joins the depth pass after it. every pass's result reaches the readbacks.
+    void BreakReasons(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto x_readback = CreateReadbackBuffer(rhi, config);
+        auto y_readback = CreateReadbackBuffer(rhi, config);
+        const auto build = [&x_readback, &y_readback](RenderGraph &graph) {
+            const auto x = graph.CreateTexture("X", Rgba8Output);
+            const auto y = graph.CreateTexture("Y", Rgba8Output);
+            const auto d1 = graph.CreateTexture("D1", DepthOutput);
+            const auto d2 = graph.CreateTexture("D2", DepthOutput);
+            AddClear(graph, "ClearX", x, 0, Vector4(1.f, 0.f, 0.f, 1.f));
+            graph.AddRasterPass("SampleX", [x, y](RGBuilder &builder) {
+                builder.Sampled(x);
+                builder.ColorWrite(y, 1, Vector4(0.f, 0.f, 1.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("AttachX", [x](RGBuilder &builder) {
+                builder.ColorWrite(x, 0);
+                builder.SideEffect();
+                return [](RGRasterContext &) {};
+            });
+            AddClear(graph, "ClearXAgain", x, 0, Vector4(0.f, 1.f, 0.f, 1.f));
+            for (const auto &[name, depth] : {std::pair{"DepthA", d1}, std::pair{"DepthB", d2}})
+            {
+                graph.AddRasterPass(name, [x, depth](RGBuilder &builder) {
+                    builder.ColorWrite(x, 0);
+                    builder.DepthWrite(depth, 1.f);
+                    return [](RGRasterContext &) {};
+                });
+            }
+            graph.AddRasterPass("SlotY", [y](RGBuilder &builder) {
+                builder.ColorWrite(y, 0);
+                return [](RGRasterContext &) {};
+            });
+            graph.AddExternalPass("External", [y](RGBuilder &builder) {
+                builder.ColorWrite(y, 0);
+                return [](RGExternalContext &) {};
+            });
+            AddReadback(graph, x, x_readback);
+            AddReadback(graph, y, y_readback);
+        };
+
+        for (const bool merge : {true, false})
+        {
+            auto merge_config = config;
+            merge_config.render_graph_merge = merge;
+            std::vector<std::string> expected{
+                "ClearX | SampleX: NonLocalRead(X)",
+                "SampleX | AttachX: AttachmentReadInPass(X)",
+            };
+            if (merge)
+            {
+                expected.insert(expected.end(), {"AttachX | ClearXAgain+DepthA: ClearInPass(X)",
+                                                 "ClearXAgain+DepthA | DepthB: DifferentDepth(D2)"});
+            }
+            else
+            {
+                expected.insert(expected.end(),
+                                {"AttachX | ClearXAgain: ClearInPass(X)", "ClearXAgain | DepthA: Disabled",
+                                 "DepthA | DepthB: DifferentDepth(D2)"});
+            }
+            expected.insert(expected.end(), {
+                                                "DepthB | SlotY: SlotConflict(Y)",
+                                                "SlotY | External: ExternalPass",
+                                                "External | Readback: ExternalPass",
+                                                "Readback | Readback: NonRasterPass",
+                                            });
+
+            const auto what = merge ? std::string("break reasons") : std::string("break reasons without merging");
+            RGTexturePool pool(rhi);
+            {
+                RenderGraph graph(rhi, pool, merge_config);
+                build(graph);
+                graph.Compile();
+                ExpectBreaks(graph, expected, what);
+                Record(rhi, graph);
+            }
+            ExpectTexel(rhi, x_readback, {0, 255, 0, 255}, what + ": the last clear of X reaches its readback");
+            ExpectTexel(rhi, y_readback, {0, 0, 255, 255}, what + ": the clear of Y reaches its readback");
+        }
+
+        // clears of two faces of a cube, then a texture sampled in two shader stages: a second barrier would share the
+        // prologue batch of the first
+        auto cube = CreateImage(rhi, "RenderGraphTestFaces", 8,
+                                RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::Texture, 1,
+                                RHIImage::ImageType::Image2DCube);
+        RGTexturePool pool(rhi);
+        {
+            RenderGraph graph(rhi, pool, config);
+            const auto faces = graph.Import("Cube", cube);
+            const auto x = graph.CreateTexture("X", Rgba8Output);
+            const auto y = graph.CreateTexture("Y", Rgba8Output);
+            AddClear(graph, "ClearFace0", faces.Subresource(0, 0), 0, Vector4(1.f, 0.f, 0.f, 1.f));
+            AddClear(graph, "ClearFace1", faces.Subresource(0, 1), 0, Vector4(0.f, 1.f, 0.f, 1.f));
+            AddClear(graph, "ClearX", x, 0, Vector4(1.f, 0.f, 0.f, 1.f));
+            graph.AddRasterPass("SamplePixel", [x, y](RGBuilder &builder) {
+                builder.Sampled(x, RHIShaderStageMask::Pixel);
+                builder.ColorWrite(y, 1, Vector4(0.f, 0.f, 1.f, 1.f));
+                return [](RGRasterContext &) {};
+            });
+            graph.AddRasterPass("SampleVertex", [x, y](RGBuilder &builder) {
+                builder.Sampled(x, RHIShaderStageMask::Vertex);
+                builder.ColorWrite(y, 1);
+                return [](RGRasterContext &) {};
+            });
+            AddReadback(graph, y, y_readback);
+            graph.Compile();
+            ExpectBreaks(graph,
+                         {
+                             "ClearFace0 | ClearFace1: SlotConflict(Cube)",
+                             "ClearFace1 | ClearX: TargetSizeMismatch",
+                             "ClearX | SamplePixel: NonLocalRead(X)",
+                             "SamplePixel | SampleVertex: NonLocalRead(X)",
+                             "SampleVertex | Readback: NonRasterPass",
+                         },
+                         "cube faces and shader stages");
+            Record(rhi, graph);
+        }
+        ExpectTexel(rhi, y_readback, {0, 0, 255, 255}, "the texture sampled in two stages keeps its clear");
+    }
+
+    // a boundary that breaks several rules lists every one with the resources it names, and the opportunity report
+    // weighs each physical pass by the bytes its attachment loads and stores move
+    void OpportunityReport(RHIContext *rhi, const RenderConfig &config)
+    {
+        auto no_merge = config;
+        no_merge.render_graph_merge = false;
+        RGTexturePool pool(rhi);
+        RenderGraph graph(rhi, pool, no_merge);
+        const auto x = graph.CreateTexture("X", Rgba8Output);
+        const auto y = graph.CreateTexture("Y", Rgba8Output);
+        const auto d1 = graph.CreateTexture("D1", DepthOutput);
+        const auto d2 = graph.CreateTexture("D2", DepthOutput);
+        graph.AddRasterPass("WriteX", [x, d1](RGBuilder &builder) {
+            builder.ColorWrite(x, 0, Vector4(1.f, 0.f, 0.f, 1.f));
+            builder.DepthWrite(d1, 1.f);
+            return [](RGRasterContext &) {};
+        });
+        graph.AddRasterPass("SampleX", [x, y, d2](RGBuilder &builder) {
+            builder.Sampled(x);
+            builder.ColorWrite(y, 0, Vector4(0.f, 0.f, 1.f, 1.f));
+            builder.DepthWrite(d2, 1.f);
+            builder.SideEffect();
+            return [](RGRasterContext &) {};
+        });
+        graph.Compile();
+
+        const auto dump = graph.Dump();
+        const auto x_bytes = uint64_t{config.GetResolution().output.x()} * config.GetResolution().output.y() * 4;
+        Expect(dump.at("physical_passes").at(0).at("breaks") ==
+                   nlohmann::json::array({"DifferentDepth(D2)", "SlotConflict(Y)", "NonLocalRead(X)", "Disabled"}),
+               "a boundary lists every rule it breaks");
+        Expect(dump.at("physical_passes").at(0).at("break_reason") == "DifferentDepth",
+               "the first rule broken is the break reason");
+        Expect(dump.at("opportunities") ==
+                   nlohmann::json::array(
+                       {std::format("WriteX|SampleX: DifferentDepth(D2), SlotConflict(Y), NonLocalRead(X), Disabled; "
+                                    "Store X {:.2f} MB",
+                                    static_cast<double>(x_bytes) / 1e6),
+                        "SampleX"}),
+               "the opportunity report weighs the store of X");
+        const auto &totals = dump.at("totals");
+        Expect(totals.at("render_passes") == 2 && totals.at("load_bytes") == 0 && totals.at("store_bytes") == x_bytes,
+               "the totals count the render passes and the bytes stored");
+        if (HasFailed())
+        {
+            Log(Error, "dump: {}", dump.dump());
+        }
+        Record(rhi, graph);
+    }
+
+    // attachments over the tile budget warn in one physical pass, or split it with render_graph_tile_budget_split
+    void TileBudget(RHIContext *rhi, const RenderConfig &config)
+    {
+        for (const bool split : {false, true})
+        {
+            auto budget_config = config;
+            budget_config.render_graph_tile_budget = 4;
+            budget_config.render_graph_tile_budget_split = split;
+            RGTexturePool pool(rhi);
+            RenderGraph graph(rhi, pool, budget_config);
+            const auto x = graph.CreateTexture("X", Rgba8Output);
+            const auto y = graph.CreateTexture("Y", Rgba8Output);
+            for (const auto &[name, texture, slot] : {std::tuple{"WriteX", x, 0}, std::tuple{"WriteY", y, 1}})
+            {
+                graph.AddRasterPass(name, [texture, slot](RGBuilder &builder) {
+                    builder.ColorWrite(texture, static_cast<uint8_t>(slot), Vector4(0.f, 0.f, 0.f, 1.f));
+                    builder.SideEffect();
+                    return [](RGRasterContext &) {};
+                });
+            }
+            graph.Compile();
+
+            const auto what = split ? std::string("tile budget split") : std::string("tile budget warning");
+            const auto dump = graph.Dump();
+            ExpectLines(Breaks(dump),
+                        split ? std::vector<std::string>{"WriteX | WriteY: TileBudget"} : std::vector<std::string>{},
+                        what, dump);
+            const auto &physical = dump.at("physical_passes").at(0);
+            Expect(dump.at("tile_budget") == 4 && physical.at("color_bytes_per_pixel") == (split ? 4 : 8) &&
+                       physical.value("over_tile_budget", false) == !split,
+                   what + ": the physical pass reports its color bytes per pixel against the budget");
+            if (!split)
+            {
+                Expect(dump.at("opportunities") ==
+                           nlohmann::json::array({"WriteY: 8 B/pixel over the 4 B tile budget"}),
+                       what + ": the opportunity report warns");
+            }
+            Record(rhi, graph);
+        }
+
+        RGTexturePool pool(rhi);
+        RenderGraph graph(rhi, pool, config);
+        graph.Compile();
+        const auto budget = rhi->GetTileBudget();
+        Expect(budget ? graph.Dump().at("tile_budget") == *budget : !graph.Dump().contains("tile_budget"),
+               "without render_graph_tile_budget the device's budget applies");
+    }
+
+    // a quad sampling a texture written before its physical pass, whose pipeline tests depth, joins a pass clearing
+    // slot 1 and the depth to 0, where every depth test fails: the sampled texture's barrier is recorded before the
+    // rendering, the quad's write mask leaves slot 1 untouched, and it neither tests nor writes the depth it does not
+    // attach
+    void MergedDraws(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto quad = PipelinePass::Create<DepthTestingQuadPass>(config, rhi, "Quad", Rgba8Output.format,
+                                                                     ScreenQuadPass::InputFilter::Nearest);
+        auto first_readback = CreateReadbackBuffer(rhi, config);
+        auto second_readback = CreateReadbackBuffer(rhi, config);
+
+        RGTexturePool pool(rhi);
+        {
+            RenderGraph graph(rhi, pool, config);
+            const auto input = graph.CreateTexture("Input", Rgba8Scene);
+            const auto first = graph.CreateTexture("First", Rgba8Output);
+            const auto second = graph.CreateTexture("Second", Rgba8Output);
+            const auto depth = graph.CreateTexture("Depth", DepthOutput);
+            AddClear(graph, "ClearInput", input, 0, Vector4(0.f, 0.f, 1.f, 1.f));
+            graph.AddRasterPass("ClearTargets", [second, depth](RGBuilder &builder) {
+                builder.ColorWrite(second, 1, Vector4(0.f, 1.f, 0.f, 1.f));
+                builder.DepthWrite(depth, 0.f);
+                return [](RGRasterContext &) {};
+            });
+            quad->AddTo(graph, input, first);
+            AddReadback(graph, first, first_readback);
+            AddReadback(graph, second, second_readback);
+
+            Run(rhi, graph,
+                {
+                    "ClearInput: Raster",
+                    "  barrier Input Undefined->ColorOutput [None -> ColorWrite]",
+                    "  attachment Input slot 0: Clear (clear) / Store (read by Quad)",
+                    "ClearTargets: Raster",
+                    "  barrier Second Undefined->ColorOutput [None -> ColorWrite]",
+                    "  barrier Depth Undefined->DepthStencilOutput [None -> DepthWrite]",
+                    "Quad: Raster, step 1",
+                    "  barrier Input ColorOutput->Read [ColorWrite -> Sampled(Pixel)]",
+                    "  barrier First Undefined->ColorOutput [None -> ColorWrite]",
+                    "  physical ClearTargets+Quad",
+                    "  attachment Second slot 1: Clear (clear) / Store (read by Readback)",
+                    "  attachment Depth slot depth: Clear (clear) / DontCare (no later reader)",
+                    "  attachment First slot 0: DontCare (fully overwritten) / Store (read by Readback)",
+                    "Readback: Copy",
+                    "  barrier First ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
+                    "Readback: Copy",
+                    "  barrier Second ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
+                    "Input: physical 0",
+                    "First: physical 3",
+                    "Second: physical 1",
+                    "Depth: physical 2, memoryless",
+                },
+                "merged draws");
+            ExpectBreaks(graph,
+                         {
+                             "ClearInput | ClearTargets+Quad: TargetSizeMismatch",
+                             "ClearTargets+Quad | Readback: NonRasterPass",
+                             "Readback | Readback: NonRasterPass",
+                         },
+                         "merged draws");
+        }
+
+        ExpectTexel(rhi, first_readback, {0, 0, 255, 255},
+                    "the quad draws the texture sampled after its barrier, ignoring the depth");
+        ExpectTexel(rhi, second_readback, {0, 255, 0, 255}, "the quad leaves the slot it does not write untouched");
+    }
+
+    // a transient last used by one member and one first used by a later member are attached together, so they get
+    // pooled images of their own; unmerged, they share one
+    void AliasingInPhysicalPass(RHIContext *rhi, const RenderConfig &config)
+    {
+        for (const bool merge : {true, false})
+        {
+            auto merge_config = config;
+            merge_config.render_graph_merge = merge;
+            merge_config.render_graph_memoryless = false;
+            auto readback = CreateReadbackBuffer(rhi, config);
+            RGTexturePool pool(rhi);
+            {
+                RenderGraph graph(rhi, pool, merge_config);
+                const auto t1 = graph.CreateTexture("T1", Rgba8Output);
+                const auto t2 = graph.CreateTexture("T2", Rgba8Output);
+                graph.AddRasterPass("WriteT1", [t1](RGBuilder &builder) {
+                    builder.ColorWrite(t1, 0, Vector4(1.f, 0.f, 0.f, 1.f));
+                    builder.SideEffect();
+                    return [](RGRasterContext &) {};
+                });
+                AddClear(graph, "WriteT2", t2, 1, Vector4(0.f, 1.f, 0.f, 1.f));
+                AddReadback(graph, t2, readback);
+
+                const std::vector<std::string> readback_lines{
+                    "Readback: Copy",
+                    "  barrier T2 ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                    "  barrier after Readback [CopyDst -> HostRead]",
+                };
+                auto expected = merge ? std::vector<std::string>{
+                                            "WriteT1: Raster",
+                                            "  barrier T1 Undefined->ColorOutput [None -> ColorWrite]",
+                                            "WriteT2: Raster, step 1",
+                                            "  barrier T2 Undefined->ColorOutput [None -> ColorWrite]",
+                                            "  physical WriteT1+WriteT2",
+                                            "  attachment T1 slot 0: Clear (clear) / DontCare (no later reader)",
+                                            "  attachment T2 slot 1: Clear (clear) / Store (read by Readback)",
+                                        }
+                                      : std::vector<std::string>{
+                                            "WriteT1: Raster",
+                                            "  barrier T1 Undefined->ColorOutput [None -> ColorWrite]",
+                                            "  attachment T1 slot 0: Clear (clear) / DontCare (no later reader)",
+                                            "WriteT2: Raster",
+                                            "  barrier T2 Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                                            "  attachment T2 slot 1: Clear (clear) / Store (read by Readback)",
+                                        };
+                expected.insert(expected.end(), readback_lines.begin(), readback_lines.end());
+                expected.insert(expected.end(), {"T1: physical 0", merge ? "T2: physical 1" : "T2: physical 0"});
+                Run(rhi, graph, expected, merge ? "aliasing in a physical pass" : "aliasing without merging");
+            }
+            ExpectTexel(rhi, readback, {0, 255, 0, 255}, "the second transient keeps its clear");
+        }
     }
 
     // a pass that fully overwrites one texture discards only that one: another it reads and writes keeps its contents
@@ -1150,9 +1730,288 @@ private:
                 "  attachment Shown slot 0: Clear (clear) / DontCare (no later reader)",
                 "Sum: physical 0",
                 "Radiance: physical 1",
-                "Shown: physical 2",
+                "Shown: physical 2, memoryless",
             },
             "fully overwrites with a read-write access");
+    }
+
+    // a transient only the attachments of one physical pass use is memoryless: Scratch, and Depth once its clear and
+    // test merge. Target, of Scratch's format, is stored and read back. unmerged, Depth is stored for the quad, whose
+    // depth test fails against its clear, and the pool gives it no memoryless image of the merged frame. with the knob
+    // off, or Scratch sampled after the physical pass, they are not memoryless.
+    void Memoryless(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto quad = PipelinePass::Create<DepthTestingQuadPass>(config, rhi, "Quad", Rgba8Output.format,
+                                                                     ScreenQuadPass::InputFilter::Nearest);
+        auto readback = CreateReadbackBuffer(rhi, config);
+        const auto build = [&quad, &readback](RenderGraph &graph, bool view) {
+            const auto input = graph.CreateTexture("Input", Rgba8Output);
+            const auto target = graph.CreateTexture("Target", Rgba8Output);
+            const auto scratch = graph.CreateTexture("Scratch", Rgba8Output);
+            const auto depth = graph.CreateTexture("Depth", DepthOutput);
+            AddClear(graph, "ClearInput", input, 0, Vector4(0.f, 0.f, 1.f, 1.f));
+            graph.AddRasterPass("ClearTargets", [target, scratch, depth](RGBuilder &builder) {
+                builder.ColorWrite(target, 0, Vector4(0.f, 1.f, 0.f, 1.f));
+                builder.ColorWrite(scratch, 1, Vector4(1.f, 0.f, 0.f, 1.f));
+                builder.DepthWrite(depth, 0.f);
+                return [](RGRasterContext &) {};
+            });
+            quad->AddTo(graph, input, target, depth);
+            if (view)
+            {
+                const auto viewed = graph.CreateTexture("Viewed", Rgba8Output);
+                graph.AddRasterPass("View", [scratch, viewed](RGBuilder &builder) {
+                    builder.Sampled(scratch);
+                    builder.ColorWrite(viewed, 0, Vector4(0.f, 0.f, 0.f, 1.f));
+                    builder.SideEffect();
+                    return [](RGRasterContext &) {};
+                });
+            }
+            AddReadback(graph, target, readback);
+        };
+        const auto run = [this, rhi, &config, &build, &readback](RGTexturePool &pool, bool merge, bool memoryless,
+                                                                 bool view, const std::string &what) {
+            auto case_config = config;
+            case_config.render_graph_merge = merge;
+            case_config.render_graph_memoryless = memoryless;
+            nlohmann::json dump;
+            {
+                RenderGraph graph(rhi, pool, case_config);
+                build(graph, view);
+                graph.Compile();
+                dump = graph.Dump();
+                ExpectBackings(rhi, dump, what);
+                Record(rhi, graph);
+            }
+            ExpectTexel(rhi, readback, {0, 255, 0, 255}, what + ": the quad fails the depth test against the clear");
+            return dump;
+        };
+        // the resource lines of a summary
+        const auto images = [](const nlohmann::json &dump) {
+            auto lines = Summarize(dump);
+            std::erase_if(lines, [](const std::string &line) { return line.find(": physical ") == std::string::npos; });
+            return lines;
+        };
+
+        RGTexturePool pool(rhi);
+        const auto merged = run(pool, true, true, false, "memoryless");
+        ExpectLines(Summarize(merged),
+                    {
+                        "ClearInput: Raster",
+                        "  barrier Input Undefined->ColorOutput [None -> ColorWrite]",
+                        "  attachment Input slot 0: Clear (clear) / Store (read by Quad)",
+                        "ClearTargets: Raster",
+                        "  barrier Target Undefined->ColorOutput [None -> ColorWrite]",
+                        "  barrier Scratch Undefined->ColorOutput [None -> ColorWrite]",
+                        "  barrier Depth Undefined->DepthStencilOutput [None -> DepthWrite]",
+                        "Quad: Raster, step 1",
+                        "  barrier Input ColorOutput->Read [ColorWrite -> Sampled(Pixel)]",
+                        "  physical ClearTargets+Quad",
+                        "  attachment Target slot 0: Clear (clear) / Store (read by Readback)",
+                        "  attachment Scratch slot 1: Clear (clear) / DontCare (no later reader)",
+                        "  attachment Depth slot depth: Clear (clear) / DontCare (no later reader)",
+                        "Readback: Copy",
+                        "  barrier Target ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                        "  barrier after Readback [CopyDst -> HostRead]",
+                        "Input: physical 0",
+                        "Target: physical 1",
+                        "Scratch: physical 2, memoryless",
+                        "Depth: physical 3, memoryless",
+                    },
+                    "memoryless plan", merged);
+
+        // only a memoryless image of the merged frame is new to the stored Depth
+        const auto unmerged = run(pool, false, true, false, "memoryless without merging");
+        ExpectLines(Summarize(unmerged),
+                    {
+                        "ClearInput: Raster",
+                        "  barrier Input Undefined->ColorOutput [Sampled(Pixel) -> ColorWrite]",
+                        "  attachment Input slot 0: Clear (clear) / Store (read by Quad)",
+                        "ClearTargets: Raster",
+                        "  barrier Target Undefined->ColorOutput [CopySrc -> ColorWrite]",
+                        "  barrier Scratch Undefined->ColorOutput [ColorWrite -> ColorWrite]",
+                        rhi->SupportsMemorylessImage(DepthOutput.format, RHIImage::ImageUsage::DepthStencilAttachment)
+                            ? "  barrier Depth Undefined->DepthStencilOutput [None -> DepthWrite]"
+                            : "  barrier Depth Undefined->DepthStencilOutput [DepthWrite -> DepthWrite]",
+                        "  attachment Target slot 0: Clear (clear) / Store (read by Quad)",
+                        "  attachment Scratch slot 1: Clear (clear) / DontCare (no later reader)",
+                        "  attachment Depth slot depth: Clear (clear) / Store (read by Quad)",
+                        "Quad: Raster",
+                        "  barrier Input ColorOutput->Read [ColorWrite -> Sampled(Pixel)]",
+                        "  barrier Target ColorOutput->ColorOutput [ColorWrite -> ColorWrite]",
+                        "  barrier Depth DepthStencilOutput->DepthStencilOutput [DepthWrite -> DepthWrite]",
+                        "  attachment Target slot 0: Load (written by ClearTargets) / Store (read by Readback)",
+                        "  attachment Depth slot depth: Load (written by ClearTargets) / DontCare (no later reader)",
+                        "Readback: Copy",
+                        "  barrier Target ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+                        "  barrier Readback [HostRead -> CopyDst]",
+                        "  barrier after Readback [CopyDst -> HostRead]",
+                        "Input: physical 0",
+                        "Target: physical 1",
+                        "Scratch: physical 2, memoryless",
+                        "Depth: physical 3",
+                    },
+                    "memoryless without merging plan", unmerged);
+
+        RGTexturePool off_pool(rhi);
+        const auto off = run(off_pool, true, false, false, "memoryless off");
+        ExpectLines(images(off),
+                    {"Input: physical 0", "Target: physical 1", "Scratch: physical 2", "Depth: physical 3"},
+                    "memoryless off images", off);
+
+        RGTexturePool view_pool(rhi);
+        const auto viewed = run(view_pool, true, true, true, "memoryless of a sampled texture");
+        ExpectLines(images(viewed),
+                    {"Input: physical 0", "Target: physical 1", "Scratch: physical 2", "Depth: physical 3, memoryless",
+                     "Viewed: physical 4, memoryless"},
+                    "memoryless of a sampled texture images", viewed);
+    }
+
+    // tone mapping reads a clear of an earlier member of its physical pass pixel-locally, recording the barrier its
+    // read waits on inside the rendering, and the cleared texture stays in tile memory. with pixel-local reads off, or
+    // a device without them, it samples the clear after its physical pass instead, and draws the same texels.
+    void PixelLocalReadback(RHIContext *rhi, const RenderConfig &config)
+    {
+        constexpr RGTextureDesc ColorDesc{.format = PixelFormat::RGBAFloat16, .size_class = RGSizeClass::Output};
+        const auto tone_mapping = PipelinePass::Create<ExposedToneMappingPass>(config, rhi, Rgba8Output.format);
+        tone_mapping->SetExposure(1.f);
+
+        const std::vector<std::string> local_plan{
+            "WriteColor: Raster",
+            "  barrier Color Undefined->LocalRead [None -> ColorWrite]",
+            "ToneMapping: Raster, step 1",
+            "  barrier in rendering Color LocalRead->LocalRead [ColorWrite -> PixelLocalRead(Pixel)]",
+            "  barrier Out Undefined->ColorOutput [None -> ColorWrite]",
+            "  physical WriteColor+ToneMapping",
+            "  attachment Color slot 1: Clear (clear) / DontCare (no later reader)",
+            "  attachment Out slot 0: DontCare (fully overwritten) / Store (read by Readback)",
+        };
+        const std::vector<std::string> sampled_plan{
+            "WriteColor: Raster",
+            "  barrier Color Undefined->ColorOutput [None -> ColorWrite]",
+            "  attachment Color slot 1: Clear (clear) / Store (read by ToneMapping)",
+            "ToneMapping: Raster",
+            "  barrier Color ColorOutput->Read [ColorWrite -> Sampled(Pixel)]",
+            "  barrier Out Undefined->ColorOutput [None -> ColorWrite]",
+            "  attachment Out slot 0: DontCare (fully overwritten) / Store (read by Readback)",
+        };
+        const std::vector<std::string> readback_plan{
+            "Readback: Copy",
+            "  barrier Out ColorOutput->TransferSrc [ColorWrite -> CopySrc]",
+            "  barrier after Readback [CopyDst -> HostRead]",
+        };
+
+        std::array<std::array<uint8_t, 4>, 2> texels{};
+        for (const bool pixel_local : {true, false})
+        {
+            auto case_config = config;
+            case_config.render_graph_pixel_local = pixel_local;
+            const bool kept = pixel_local && rhi->SupportsPixelLocalRead();
+            const auto what = std::format("pixel-local read {}", pixel_local ? "on" : "off");
+            auto readback = CreateReadbackBuffer(rhi, config);
+            RGTexturePool pool(rhi);
+            {
+                RenderGraph graph(rhi, pool, case_config);
+                const auto color = graph.CreateTexture("Color", ColorDesc);
+                const auto out = graph.CreateTexture("Out", Rgba8Output);
+                AddClear(graph, "WriteColor", color, 1, Vector4(0.25f, 0.5f, 1.f, 1.f));
+                tone_mapping->AddTo(graph, color, out);
+                AddReadback(graph, out, readback);
+
+                auto expected = kept ? local_plan : sampled_plan;
+                expected.insert(expected.end(), readback_plan.begin(), readback_plan.end());
+                expected.insert(expected.end(),
+                                {kept ? "Color: physical 0, memoryless" : "Color: physical 0", "Out: physical 1"});
+                Run(rhi, graph, expected, what);
+
+                const auto dump = graph.Dump();
+                ExpectLines(PixelLocalReads(dump),
+                            {kept ? "ToneMapping Color: PixelLocalRead(Pixel)"
+                                  : std::string("ToneMapping Color: lowered NoPixelLocalSupport(Color)")},
+                            what + " request", dump);
+            }
+
+            rhi->WaitForDeviceIdle();
+            const auto *pixel = static_cast<const uint8_t *>(readback->Lock());
+            std::copy_n(pixel, 4, texels[pixel_local ? 0 : 1].begin());
+            readback->UnLock();
+        }
+
+        Expect(texels[0] == texels[1], "the pixel-local and the sampled read tone map the same texel");
+        Expect(texels[0][2] > texels[0][0] && texels[0][0] > 0, "tone mapping draws the clear it reads");
+    }
+
+    // each reason a pixel-local read request is lowered to Sampled for, among requests by passes that draw nothing: the
+    // reason the physical pass of the texture's last writer ended, or no writer. requests whose writer attaches the
+    // texture at the slot they read, in their physical pass, stay pixel-local.
+    void PixelLocalLowering(RHIContext *rhi, const RenderConfig &config)
+    {
+        const auto compute_pass = rhi->CreateComputePass("RenderGraphTestCompute", false);
+        auto imported = CreateImage(rhi, "RenderGraphTestPixelLocal", 8,
+                                    RHIImage::ImageUsage::ColorAttachment | RHIImage::ImageUsage::Texture);
+        const auto build = [&compute_pass, &imported](RenderGraph &graph) {
+            const auto read = [&graph](const std::string &name, RGTexture input, uint8_t slot, RGTexture output) {
+                graph.AddRasterPass(name, [input, slot, output](RGBuilder &builder) {
+                    builder.PixelLocalRead(input, slot);
+                    builder.ColorWrite(output, 0);
+                    builder.SideEffect();
+                    return [](RGRasterContext &) {};
+                });
+            };
+            const auto out = graph.CreateTexture("Out", Rgba8Output);
+            const auto x = graph.CreateTexture("X", Rgba8Output);
+            AddClear(graph, "WriteX", x, 1, Vector4(1.f, 0.f, 0.f, 1.f));
+            read("ReadX", x, 1, out);
+
+            const auto scene = graph.CreateTexture("Scene", Rgba8Scene);
+            AddClear(graph, "WriteScene", scene, 1, Vector4(1.f, 0.f, 0.f, 1.f));
+            read("ReadScene", scene, 1, out);
+
+            const auto slot2 = graph.CreateTexture("Slot2", Rgba8Output);
+            AddClear(graph, "WriteSlot2", slot2, 2, Vector4(1.f, 0.f, 0.f, 1.f));
+            read("ReadSlot2", slot2, 1, out);
+
+            const auto stored = graph.CreateTexture("Stored", Rgba8Output);
+            graph.AddComputePass("StoreStored", compute_pass, [stored](RGBuilder &builder) {
+                builder.StorageWrite(stored);
+                return [](RGComputeContext &) {};
+            });
+            read("ReadStored", stored, 1, out);
+
+            read("ReadImported", graph.Import("Imported", imported), 1, graph.CreateTexture("Small", Rgba8Scene));
+        };
+
+        for (const auto &[merge, pixel_local] : {std::pair{true, true}, std::pair{true, false}, std::pair{false, true}})
+        {
+            auto case_config = config;
+            case_config.render_graph_merge = merge;
+            case_config.render_graph_pixel_local = pixel_local;
+            const bool supported = pixel_local && rhi->SupportsPixelLocalRead();
+            const auto what = std::format("pixel-local lowering, merge {} pixel-local {}", merge, pixel_local);
+            const auto same_physical = [supported, merge](const std::string &resource) {
+                if (!supported)
+                {
+                    return std::format("lowered NoPixelLocalSupport({})", resource);
+                }
+                return merge ? std::string("PixelLocalRead(Pixel)") : std::string("lowered Disabled");
+            };
+
+            RGTexturePool pool(rhi);
+            RenderGraph graph(rhi, pool, case_config);
+            build(graph);
+            graph.Compile();
+            const auto dump = graph.Dump();
+            ExpectLines(PixelLocalReads(dump),
+                        {
+                            "ReadX X: " + same_physical("X"),
+                            "ReadScene Scene: lowered TargetSizeMismatch",
+                            "ReadSlot2 Slot2: lowered SlotConflict(Slot2)",
+                            "ReadStored Stored: lowered NonRasterPass",
+                            "ReadImported Imported: lowered NoWriter",
+                        },
+                        what, dump);
+            Record(rhi, graph);
+        }
     }
 
     // the same graph in two consecutive frames: the second reuses the first's images, and its barriers wait for the
@@ -1194,7 +2053,7 @@ private:
                             : "  barrier Shown Undefined->ColorOutput [ColorWrite -> ColorWrite]",
                 "  attachment Shown slot 0: Clear (clear) / DontCare (no later reader)",
                 "Radiance: physical 0",
-                "Shown: physical 1",
+                "Shown: physical 1, memoryless",
             },
             first_frame ? "first frame" : "next frame");
 
@@ -1222,7 +2081,7 @@ private:
     }
 
     // each step runs in its own frame, so the next-frame reuse steps are consecutive frames
-    static constexpr std::array<Step, 19> Steps{
+    static constexpr std::array<Step, 27> Steps{
         &RenderGraphCompileTest::ClearSampleReadback,
         &RenderGraphCompileTest::DeclaredBinding,
         &RenderGraphCompileTest::Placeholder,
@@ -1237,7 +2096,15 @@ private:
         &RenderGraphCompileTest::IntraFrameReuse,
         &RenderGraphCompileTest::ImportedSeeding,
         &RenderGraphCompileTest::LoadStore,
+        &RenderGraphCompileTest::BreakReasons,
+        &RenderGraphCompileTest::OpportunityReport,
+        &RenderGraphCompileTest::TileBudget,
+        &RenderGraphCompileTest::MergedDraws,
+        &RenderGraphCompileTest::AliasingInPhysicalPass,
         &RenderGraphCompileTest::FullyOverwritesReadWrite,
+        &RenderGraphCompileTest::Memoryless,
+        &RenderGraphCompileTest::PixelLocalReadback,
+        &RenderGraphCompileTest::PixelLocalLowering,
         &RenderGraphCompileTest::NextFrameReuse,
         &RenderGraphCompileTest::NextFrameReuse,
         &RenderGraphCompileTest::ReleaseUnused,

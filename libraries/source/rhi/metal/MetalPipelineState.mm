@@ -119,11 +119,11 @@ void MetalPipelineState::SetupShaderResources(RHIShaderStage stage)
 // spirv-cross emits runtime-sized resource arrays as opaque pointers named after their
 // descriptor slot (e.g. "spvDescriptorSet2Binding0") instead of the variable name, so map
 // variable names to those aliases through SPIR-V reflection
-static std::unordered_map<std::string, std::string> LoadSpirvBindingAliases(const RHIShaderInfo *shader_info)
+static std::unordered_map<std::string, std::string> LoadSpirvBindingAliases(const RHIShader *shader)
 {
     std::unordered_map<std::string, std::string> aliases;
 
-    auto spv_code = FileManager::GetNativeFileManager()->Read(Path::Resource(shader_info->GetPath() + ".spv"));
+    auto spv_code = FileManager::GetNativeFileManager()->Read(Path::Resource(shader->GetCompiledPath() + ".spv"));
     if (spv_code.empty())
     {
         return aliases;
@@ -198,6 +198,7 @@ void MetalPipelineState::SetupShaderResources(MTLAutoreleasedRenderPipelineRefle
 
     // remap all resources into one descriptor set with set id as 0 and binding id as argument index from reflection
     auto *resource_table = GetResourceTable(stage);
+    const auto &shader = *RHICast<MetalShader>(shaders_[static_cast<int>(stage)]);
     std::optional<std::unordered_map<std::string, std::string>> spirv_aliases;
     unsigned long max_binding_point = 0;
     for (const auto &[name, resource] : resource_table->GetBindingMap())
@@ -205,12 +206,19 @@ void MetalPipelineState::SetupShaderResources(MTLAutoreleasedRenderPipelineRefle
         const bool is_bindless = resource->IsBindless();
         const auto &resource_name = std::string(name) + (is_bindless ? "_" : "");
 
+        if (shader.FetchesFramebuffer(std::string(name)))
+        {
+            resource->ReflectAsInputAttachment();
+            resource->UpdateReflectionIndex(0, UINT_MAX);
+            continue;
+        }
+
         auto found = reflection_table.find(resource_name);
-        if (found == reflection_table.end())
+        if (found == reflection_table.end() && is_bindless)
         {
             if (!spirv_aliases)
             {
-                spirv_aliases = LoadSpirvBindingAliases(shaders_[static_cast<int>(stage)]->GetInfo());
+                spirv_aliases = LoadSpirvBindingAliases(&shader);
             }
 
             auto alias = spirv_aliases->find(std::string(name));
@@ -222,7 +230,10 @@ void MetalPipelineState::SetupShaderResources(MTLAutoreleasedRenderPipelineRefle
 
         if (found == reflection_table.end())
         {
-            Log(Warn, "failed to find a variable reflection {}", resource_name);
+            if (!shader.IsVariant())
+            {
+                Log(Warn, "failed to find a variable reflection {}", resource_name);
+            }
 
             resource->UpdateReflectionIndex(0, UINT_MAX);
 
@@ -287,7 +298,7 @@ void MetalPipelineState::BindResources(id<MTLCommandEncoder> encoder, RHIShaderS
 
         if (binding_point == UINT_MAX)
         {
-            // optimized out of the compiled shader; Initialize() has warned about it
+            // optimized out of the compiled shader (Initialize() has warned about it), or a framebuffer fetch
             continue;
         }
 
@@ -337,7 +348,7 @@ void MetalGraphicsPipeline::Bind(id<MTLRenderCommandEncoder> encoder, const RHIA
 {
     [encoder setRenderPipelineState:GetPipelineState(signature)];
     [encoder setCullMode:GetMetalCullMode(rasterization_state_.cull_mode)];
-    [encoder setDepthStencilState:depth_stencil_state_];
+    [encoder setDepthStencilState:signature.depth_unused ? unused_depth_stencil_state_ : depth_stencil_state_];
 
     auto vertex_buffer_index = num_vertex_shader_buffers_;
     for (auto &vertex_buffer : vertex_buffers_)
@@ -391,8 +402,8 @@ void MetalGraphicsPipeline::CreatePipelineState()
     SetupShaderResources(reflection, nullptr, RHIShaderStage::Pixel);
 #endif
 
-    vs_resource->Initialize();
-    ps_resource->Initialize();
+    vs_resource->Initialize(shaders_[static_cast<int>(RHIShaderStage::Vertex)]->IsVariant());
+    ps_resource->Initialize(shaders_[static_cast<int>(RHIShaderStage::Pixel)]->IsVariant());
 }
 
 id<MTLRenderPipelineState> MetalGraphicsPipeline::GetPipelineState(const RHIAttachmentSignature &signature)
@@ -433,6 +444,10 @@ MTLRenderPipelineDescriptor *MetalGraphicsPipeline::CreatePipelineDescriptor(con
 
         auto color_attachment = pipeline_state_descriptor.colorAttachments[i];
         color_attachment.pixelFormat = GetMetalPixelFormat(signature.color_formats[i]);
+        if (signature.unwritten_color_slots & (1u << i))
+        {
+            color_attachment.writeMask = MTLColorWriteMaskNone;
+        }
         if (blend_state_.enabled)
         {
             color_attachment.blendingEnabled = blend_state_.enabled;
@@ -515,7 +530,7 @@ void MetalComputePipeline::CreatePipelineState()
 #endif
 
     auto *shader_resources = GetResourceTable(RHIShaderStage::Compute);
-    shader_resources->Initialize();
+    shader_resources->Initialize(compute_shader->IsVariant());
 }
 
 void MetalGraphicsPipeline::CreateDepthStencilState()
@@ -526,6 +541,10 @@ void MetalGraphicsPipeline::CreateDepthStencilState()
     ds_descriptor.depthCompareFunction = GetMetalCompareFunction(depth_state_.test_state);
 
     depth_stencil_state_ = [context->GetDevice() newDepthStencilStateWithDescriptor:ds_descriptor];
+
+    // the default descriptor always passes and writes nothing
+    unused_depth_stencil_state_ =
+        [context->GetDevice() newDepthStencilStateWithDescriptor:[[MTLDepthStencilDescriptor alloc] init]];
 }
 
 void MetalPipelineState::LoadShaders()

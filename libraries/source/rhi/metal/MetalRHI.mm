@@ -87,6 +87,52 @@ bool MetalRHI::SupportsPassTimestamps()
     return context->SupportsPassTimestamps();
 }
 
+// memoryless storage exists only on Apple family GPUs; the simulator creates depth textures only in private storage
+bool MetalRHI::SupportsMemorylessImage(PixelFormat /*format*/, RHIImage::ImageUsage /*usages*/)
+{
+#if TARGET_OS_SIMULATOR
+    return false;
+#else
+    return [context->GetDevice() supportsFamily:MTLGPUFamilyApple1];
+#endif
+}
+
+// framebuffer fetch (programmable blending) exists only on Apple family GPUs; the simulator rejects reading a render
+// target
+bool MetalRHI::SupportsPixelLocalRead()
+{
+#if TARGET_OS_SIMULATOR
+    return false;
+#else
+    return [context->GetDevice() supportsFamily:MTLGPUFamilyApple1];
+#endif
+}
+
+// a pixel-local barrier records nothing
+bool MetalRHI::KeepsMemorylessAcrossPixelLocalBarrier()
+{
+    return true;
+}
+
+// Metal feature set tables: the maximum implicit image block size per pixel when using multiple color render targets
+std::optional<uint32_t> MetalRHI::GetTileBudget()
+{
+    id<MTLDevice> device = context->GetDevice();
+    if ([device supportsFamily:MTLGPUFamilyApple7])
+    {
+        return 128;
+    }
+    if ([device supportsFamily:MTLGPUFamilyApple4])
+    {
+        return 64;
+    }
+    if ([device supportsFamily:MTLGPUFamilyApple2])
+    {
+        return 32;
+    }
+    return std::nullopt;
+}
+
 bool MetalRHI::SupportsSampledFormat(PixelFormat format)
 {
     switch (format)
@@ -180,9 +226,9 @@ void MetalRHI::RecreateSwapChain()
     UnImplemented();
 }
 
-RHIResourceRef<RHIShader> MetalRHI::CreateShader(const RHIShaderInfo *shader_info)
+RHIResourceRef<RHIShader> MetalRHI::CreateShader(const RHIShaderInfo *shader_info, std::string variant)
 {
-    return CreateResource<MetalShader>(shader_info);
+    return CreateResource<MetalShader>(shader_info, std::move(variant));
 }
 
 RHIResourceRef<RHIPipelineState> MetalRHI::CreatePipelineState(RHIPipelineState::PipelineType type,

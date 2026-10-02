@@ -27,7 +27,7 @@ inline VkShaderStageFlagBits GetShaderStage(RHIShaderStage type)
 class VulkanShader : public RHIShader
 {
 public:
-    explicit VulkanShader(const RHIShaderInfo *shader_info) : RHIShader(shader_info)
+    VulkanShader(const RHIShaderInfo *shader_info, std::string variant) : RHIShader(shader_info, std::move(variant))
     {
     }
 

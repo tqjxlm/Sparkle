@@ -1,0 +1,50 @@
+DirectionalShadow: Raster
+  access ShadowMap DepthWrite clear
+  barrier ShadowMap Undefined->DepthStencilOutput [Sampled(Pixel) -> DepthWrite]
+physical DirectionalShadow, break TargetSizeMismatch, DifferentDepth(SceneDepth), NonLocalRead(ShadowMap), Disabled
+  attachment ShadowMap slot depth: Clear (clear) / Store (read by BasePass)
+BasePass: Raster
+  access ShadowMap Sampled(Pixel)
+  access IblBrdf Sampled(Pixel)
+  access IblDiffuse Sampled(Pixel)
+  access IblSpecular Sampled(Pixel)
+  access SceneColor ColorWrite clear
+  access SceneDepth DepthWrite clear
+  barrier ShadowMap DepthStencilOutput->Read [DepthWrite -> Sampled(Pixel)]
+  barrier SceneColor Undefined->ColorOutput [Sampled(Pixel) -> ColorWrite]
+  barrier SceneDepth Undefined->DepthStencilOutput [DepthWrite -> DepthWrite]
+physical BasePass, break Disabled
+  attachment SceneColor slot 1: Clear (clear) / Store (read by SkyBox)
+  attachment SceneDepth slot depth: Clear (clear) / Store (read by SkyBox)
+SkyBox: Raster
+  access SkyMap Sampled(Pixel)
+  access SceneColor ColorWrite
+  access SceneDepth DepthTest
+  barrier SceneColor ColorOutput->ColorOutput [ColorWrite -> ColorWrite]
+  barrier SceneDepth DepthStencilOutput->DepthStencilOutput [DepthWrite -> DepthWrite]
+physical SkyBox, break Disabled
+  attachment SceneColor slot 1: Load (written by BasePass) / Store (read by ToneMapping)
+  attachment SceneDepth slot depth: Load (written by BasePass) / DontCare (no later reader)
+ToneMapping: Raster
+  access SceneColor Sampled(Pixel) lowered from PixelLocalRead slot 1: Disabled
+  access Screen ColorWrite
+  barrier SceneColor ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier Screen Undefined->ColorOutput [Sampled(Pixel) -> ColorWrite]
+physical ToneMapping, break SlotConflict(BackBuffer), NonLocalRead(Screen), Disabled
+  attachment Screen slot 0: DontCare (fully overwritten) / Store (read by Present)
+Present: Raster
+  access Screen Sampled(Pixel)
+  access BackBuffer ColorWrite
+  barrier Screen ColorOutput->Read [ColorWrite -> Sampled(Pixel)]
+  barrier BackBuffer Undefined->ColorOutput [ColorWrite -> ColorWrite]
+physical Present
+  attachment BackBuffer slot 0: DontCare (fully overwritten) / Store (imported)
+ShadowMap: Transient D32 Absolute 1024x1024, physical 0, DirectionalShadow..BasePass, Texture|DepthStencilAttachment
+IblBrdf: Imported, BasePass..BasePass, Texture
+IblDiffuse: Imported, BasePass..BasePass, Texture
+IblSpecular: Imported, BasePass..BasePass, Texture
+SceneColor: Transient RGBAFloat16 Scene, physical 1, BasePass..ToneMapping, Texture|ColorAttachment
+SceneDepth: Transient D32 Scene, physical 2, BasePass..SkyBox, DepthStencilAttachment
+SkyMap: Imported, SkyBox..SkyBox, Texture
+Screen: Transient B8G8R8A8Srgb Output, physical 3, ToneMapping..Present, Texture|ColorAttachment
+BackBuffer: Imported, Present..Present, ColorAttachment

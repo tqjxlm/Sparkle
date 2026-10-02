@@ -34,6 +34,10 @@ struct RHIAttachmentSignature
     }();
     PixelFormat depth_format = PixelFormat::Count;
     uint8_t samples = 1;
+    // a bit per color slot whose write mask is 0
+    uint8_t unwritten_color_slots = 0;
+    // depth is neither tested nor written
+    bool depth_unused = false;
 
     bool operator==(const RHIAttachmentSignature &) const = default;
 };
@@ -44,6 +48,8 @@ struct RHIColorAttachment
     RHIImage *image = nullptr;
     unsigned mip_level = 0;
     unsigned array_layer = 0;
+    // ColorOutput, or LocalRead when draws of the rendering read it pixel-locally
+    RHIImageLayout layout = RHIImageLayout::ColorOutput;
     RHILoadOp load_op = RHILoadOp::DontCare;
     RHIStoreOp store_op = RHIStoreOp::Store;
     Vector4 clear_color{0, 0, 0, 1};
@@ -59,7 +65,8 @@ struct RHIDepthAttachment
     float clear_depth = 1.f;
 };
 
-// one render pass instance, rendering into attachments in the color and depth attachment layouts
+// one render pass instance, rendering into color attachments in their layouts and a depth attachment in the depth
+// attachment layout
 struct RHIRenderingInfo
 {
     std::array<RHIColorAttachment, MaxNumColorAttachments> color_attachments;

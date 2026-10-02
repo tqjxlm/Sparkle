@@ -163,6 +163,10 @@ inline VkImageUsageFlags GetVkImageUsage(RHIImage::ImageUsage usage)
     {
         flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     }
+    if (usage & RHIImage::ImageUsage::InputAttachment)
+    {
+        flags |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    }
     return flags;
 }
 
@@ -188,6 +192,8 @@ inline VkImageLayout GetVulkanImageLayout(RHIImageLayout rhi_layout)
         return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     case RHIImageLayout::ColorOutput:
         return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    case RHIImageLayout::LocalRead:
+        return VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR;
     case RHIImageLayout::DepthStencilOutput:
         return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     default:
@@ -328,6 +334,10 @@ public:
             }
             msaa_samples = GetVkMsaaSampleBit(attribute.msaa_samples);
             usages = GetVkImageUsage(attribute.usages);
+            if (attribute.memory_properties & RHIMemoryProperty::Memoryless)
+            {
+                usages |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+            }
             memory_properties = GetVulkanMemoryPropertyFlags(attribute.memory_properties);
         }
 

@@ -29,24 +29,9 @@ VulkanUiHandler::VulkanUiHandler() : RHIUiHandler("VulkanUiHandler")
 
     CreateDescriptorPool();
 
-    is_valid_ = true;
-}
-
-void VulkanUiHandler::Init()
-{
-    if (initialized_)
-    {
-        ImGui_ImplVulkan_Shutdown();
-
-        // the backend frees its sampler descriptor sets only when it owns the pool. ours outlives
-        // the backend, so reclaim everything or repeated re-inits exhaust it (maxSets is tiny).
-        CHECK_VK_ERROR(vkResetDescriptorPool(context->GetDevice(), descriptor_pool_, 0));
-    }
-
     QueueFamilyIndices const indices = FindQueueFamilies(context->GetPhysicalDevice(), context->GetSurface());
 
-    std::array<VkFormat, MaxNumColorAttachments> color_formats;
-
+    // no main pipeline yet: Render compiles one for the attachment signature it draws against
     ImGui_ImplVulkan_InitInfo init_info = {};
     init_info.ApiVersion = ApiVersion;
     init_info.Instance = context->GetInstance();
@@ -57,22 +42,17 @@ void VulkanUiHandler::Init()
     init_info.PipelineCache = VK_NULL_HANDLE;
     init_info.DescriptorPool = descriptor_pool_;
     init_info.UseDynamicRendering = true;
-    init_info.PipelineInfoMain.PipelineRenderingCreateInfo =
-        GetVkPipelineRenderingCreateInfo(signature_, color_formats);
-    init_info.PipelineInfoMain.MSAASamples = GetVkMsaaSampleBit(signature_.samples);
     init_info.MinImageCount = 2;
     init_info.ImageCount = context->GetRHI()->GetMaxFramesInFlight();
     init_info.Allocator = VK_NULL_HANDLE;
     init_info.CheckVkResultFn = CheckVkResult;
     ImGui_ImplVulkan_Init(&init_info);
 
-    initialized_ = true;
+    is_valid_ = true;
 }
 
 void VulkanUiHandler::BeginFrame(const RHIRenderingInfo &info)
 {
-    ASSERT(initialized_);
-
     ImGuiIO &io = ImGui::GetIO();
 
     // it may be override by platform specific callbacks, so we need to set it every frame
@@ -93,11 +73,35 @@ void VulkanUiHandler::Render(RHICommandContext &command_context)
         return;
     }
 
+    CompilePipeline(command_context.GetAttachmentSignature());
+
     auto &vulkan_context = static_cast<VulkanCommandContext &>(command_context);
     ImGui_ImplVulkan_RenderDrawData(draw_data, vulkan_context.GetCommandBuffer());
 
     // imgui records its pipeline, buffers, descriptor sets and viewport directly
     vulkan_context.ResetCommandState();
+}
+
+void VulkanUiHandler::CompilePipeline(const RHIAttachmentSignature &signature)
+{
+    if (pipeline_signature_ == signature)
+    {
+        return;
+    }
+
+    // ImGui destroys its previous pipeline right away, while earlier frames may still draw with it
+    if (pipeline_signature_)
+    {
+        context->GetRHI()->WaitForDeviceIdle();
+    }
+
+    std::array<VkFormat, MaxNumColorAttachments> color_formats;
+    ImGui_ImplVulkan_PipelineInfo pipeline_info = {};
+    pipeline_info.PipelineRenderingCreateInfo = GetVkPipelineRenderingCreateInfo(signature, color_formats);
+    pipeline_info.MSAASamples = GetVkMsaaSampleBit(signature.samples);
+    ImGui_ImplVulkan_CreateMainPipeline(&pipeline_info);
+
+    pipeline_signature_ = signature;
 }
 
 VulkanUiHandler::~VulkanUiHandler()

@@ -16,6 +16,8 @@ enum class RHIImageLayout : uint8_t
     Read,
     StorageWrite,
     ColorOutput,
+    // a color attachment that draws of its rendering also read pixel-locally (Vulkan RENDERING_LOCAL_READ)
+    LocalRead,
     DepthStencilOutput,
     TransferSrc,
     TransferDst,
@@ -47,6 +49,8 @@ enum class RHIAccess : uint32_t
     HostRead = 1u << 15,
     // every access of every command
     Any = 1u << 16,
+    // a fragment shader reads the attachment value an earlier draw of the rendering wrote at the same pixel
+    PixelLocalRead = 1u << 17,
 };
 
 RegisterEnumAsFlag(RHIAccess);
@@ -65,7 +69,8 @@ RegisterEnumAsFlag(RHIShaderStageMask);
 struct RHIResourceAccess
 {
     RHIAccess access = RHIAccess::None;
-    // stages of the shader accesses in `access` (sampled, storage, uniform, acceleration structure read)
+    // stages of the shader accesses in `access` (sampled, storage, uniform, acceleration structure read, pixel-local
+    // read)
     RHIShaderStageMask stages = RHIShaderStageMask::None;
 
     bool operator==(const RHIResourceAccess &) const = default;

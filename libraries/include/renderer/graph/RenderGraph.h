@@ -11,6 +11,7 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -25,6 +26,7 @@ class RHIContext;
 class RenderGraph;
 struct RenderConfig;
 struct RGTextureRange;
+struct RGBreak;
 
 // a texture of one graph: an index into its resource table
 struct RGTexture
@@ -179,6 +181,31 @@ public:
         BindLastAccess(SamplerBinding(sampler_binding, sampler));
     }
 
+    // reads the value an earlier member of the pass's physical pass wrote at the same pixel into color `slot`, which
+    // keeps the pass in that physical pass. it is a request: where the read cannot stay there (another physical pass
+    // wrote the texture, pixel-local reads are off or unsupported), the compiler lowers it to a Sampled access in the
+    // pixel stage and records why; RGRasterContext::IsPixelLocal tells the pass which one it records. raster passes
+    // only, and never at a slot the pass writes.
+    void PixelLocalRead(RGTextureRange texture, uint8_t slot);
+
+    // as above, binding the texture at `binding` of a shader variant that reads it pixel-locally, or, lowered, of one
+    // that loads it
+    template <class Table> void PixelLocalRead(RGTextureRange texture, uint8_t slot, RGSampledBinding<Table> binding)
+    {
+        PixelLocalRead(texture, slot);
+        Bind(binding);
+    }
+
+    // as above, for a variant that samples it when lowered, with a sampler of the given attributes at
+    // `sampler_binding`
+    template <class Table>
+    void PixelLocalRead(RGTextureRange texture, uint8_t slot, RGSampledBinding<Table> binding,
+                        RGSamplerBinding<Table> sampler_binding, const RHISampler::SamplerAttribute &sampler)
+    {
+        PixelLocalRead(texture, slot, binding);
+        BindLastAccessWhenSampled(SamplerBinding(sampler_binding, sampler));
+    }
+
     // Sampled when `texture` is valid. otherwise the input is missing, and `placeholder`, an image outside the graph,
     // binds there instead, so no pipeline keeps an image an earlier graph bound.
     template <class Table>
@@ -242,8 +269,8 @@ public:
     // the pass runs even when nothing reads its outputs
     void SideEffect();
 
-    // the raster pass records foreign commands (ImGui) through the raw command context, inside the rendering the graph
-    // begins over its attachments. the foreign code resets the backend state it records around.
+    // the raster pass records foreign commands (ImGui) through the raw command context, inside the rendering of its
+    // physical pass. the foreign code resets the backend state it records around.
     void NativeAccess();
 
 private:
@@ -300,6 +327,9 @@ private:
 
     void BindLastAccess(ImageBinding binding);
 
+    // a binding the last access makes only when it is a PixelLocalRead request lowered to Sampled
+    void BindLastAccessWhenSampled(ImageBinding binding);
+
     void BindPlaceholder(const RHIResourceRef<RHIImage> &placeholder, ImageBinding binding);
 
     RenderGraph &graph_;
@@ -327,6 +357,9 @@ protected:
     // the raw command context of a pass that declared NativeAccess
     [[nodiscard]] RHICommandContext &GetNativeContext() const;
 
+    // whether the pass's PixelLocalRead of `texture` stays pixel-local, rather than lowered to Sampled
+    [[nodiscard]] bool IsPixelLocal(RGTexture texture) const;
+
     RHICommandContext &command_context_;
 
 private:
@@ -349,6 +382,7 @@ public:
     }
 
     using RGPassContext::GetNativeContext;
+    using RGPassContext::IsPixelLocal;
 
 private:
     friend class RenderGraph;
@@ -420,9 +454,10 @@ concept RGPassSetup =
     std::invocable<Setup, RGBuilder &> && std::invocable<std::invoke_result_t<Setup, RGBuilder &>, Context &>;
 
 // one frame's passes and textures, rebuilt every frame. passes run in declaration order; each depends on the last
-// writer before it. Compile culls unused passes, backs transients with pooled images and plans barriers and load/store
-// actions without recording anything; Execute records the live passes. planning reads the images' tracked states, so
-// nothing else may record on them between the two. declaration errors abort in every build.
+// writer before it. Compile culls unused passes, merges consecutive raster passes into physical passes (one rendering
+// each) and decides which pixel-local reads stay pixel-local, backs transients with pooled or memoryless images and
+// plans barriers and load/store actions without recording anything; Execute records the live passes. planning reads the
+// images' tracked states, so nothing else may record on them between the two. declaration errors abort in every build.
 class RenderGraph
 {
 public:
@@ -489,12 +524,12 @@ public:
 
     void Compile();
 
-    // raster passes are timed by `timers` when given, compute passes by their RHIComputePass
+    // raster physical passes are timed by `timers` when given, compute passes by their RHIComputePass
     void Execute(RHICommandContext &command_context, RGPassTimers *timers = nullptr);
 
-    // the compiled graph, with the GPU time of each executed pass whose timer has a result. it names size classes
-    // instead of pixel sizes, so a steady frame dumps the same passes, accesses, barriers and attachments at any
-    // resolution.
+    // the compiled graph, with the GPU time of each executed physical pass whose timer has a result. it names size
+    // classes instead of pixel sizes, so a steady frame dumps the same passes, accesses, barriers and attachments at
+    // any resolution.
     [[nodiscard]] nlohmann::json Dump() const;
 
 private:
@@ -507,6 +542,7 @@ private:
     struct Access;
     struct BufferAccess;
     struct Pass;
+    struct PhysicalPass;
     struct Texture;
     struct Buffer;
 
@@ -533,6 +569,29 @@ private:
 
     void Cull();
 
+    // groups the live passes into physical passes, recording why each one ends
+    void FormPhysicalPasses();
+
+    // every rule `next` breaks against `physical`; none when it joins
+    [[nodiscard]] std::vector<RGBreak> FindBreaks(const PhysicalPass &physical, const Pass &next) const;
+
+    // the bytes per pixel of the color attachments of the members of `physical`, and of `next` when given
+    [[nodiscard]] uint32_t GetColorBytesPerPixel(const PhysicalPass &physical, const Pass *next = nullptr) const;
+
+    // whether `access` is a PixelLocalRead request of what a member of `physical` attaches at the slot it reads
+    [[nodiscard]] bool ReadsAttachment(const PhysicalPass &physical, const Access &access) const;
+
+    // the first access of the passes `members` that `matches`
+    template <typename Matches>
+    [[nodiscard]] const Access *FindAccess(std::span<const uint32_t> members, const Matches &matches) const;
+
+    // the size of the mip an attachment attaches
+    [[nodiscard]] Vector2UInt GetAttachmentSize(const Access &attachment) const;
+
+    // lowers each PixelLocalRead request of the live pass `index` that stays pixel-local, moving the attachments it
+    // reads into the LocalRead layout, and records why each other one is lowered to Sampled
+    void ResolvePixelLocalReads(uint32_t index);
+
     void ResolveTextures();
 
     void ResolveBuffers();
@@ -549,9 +608,11 @@ private:
 
     void InferStoreOps();
 
-    // the attachments of each live raster pass, with the load and store actions planned for them
+    // the attachments of each raster physical pass, with the load and store actions planned for them, and the
+    // attachments each member leaves untouched
     void BuildRenderingInfos();
 
+    // checks the subresources the pass is the last member of its physical pass to access
     void CheckDeclaredStates(const Pass &pass) const;
 
     static void CheckBindingsApplied(const Pass &pass, const RHICommandContext &command_context);
@@ -564,8 +625,16 @@ private:
     RGTexturePool &pool_;
     RenderResolution resolution_;
     bool cull_;
+    bool merge_;
+    bool memoryless_;
+    // render_graph_pixel_local on a device that supports pixel-local reads
+    bool pixel_local_;
     bool full_barriers_;
+    // render_graph_tile_budget, or the device's
+    std::optional<uint32_t> tile_budget_;
+    bool tile_budget_split_;
     std::vector<Pass> passes_;
+    std::vector<PhysicalPass> physical_passes_;
     std::vector<Texture> textures_;
     std::vector<Buffer> buffers_;
     // from the pool's BeginGraph in Compile

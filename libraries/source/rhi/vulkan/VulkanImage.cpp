@@ -33,7 +33,10 @@ void VulkanImage::CreateImage()
     }
 
     VmaAllocationCreateInfo allocation_info{};
-    allocation_info.usage = VMA_MEMORY_USAGE_AUTO;
+    // lazily allocated memory gets a dedicated allocation
+    allocation_info.usage = attributes_.memory_properties & RHIMemoryProperty::Memoryless
+                                ? VMA_MEMORY_USAGE_GPU_LAZILY_ALLOCATED
+                                : VMA_MEMORY_USAGE_AUTO;
     allocation_info.requiredFlags = vulkan_attributes_.memory_properties;
 
     auto result =
@@ -304,8 +307,18 @@ void VulkanImageView::WriteDescriptor(uint32_t slot, VkDescriptorSet descriptor_
     info.imageView = GetView();
     // descriptor sets are cached, so bake the layout the image will hold when the descriptor is
     // consumed (see GetVulkanImageLayout), not whatever layout it happens to be in right now
-    info.imageLayout = descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ? VK_IMAGE_LAYOUT_GENERAL
-                                                                           : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    switch (descriptor_type)
+    {
+    case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        break;
+    case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+        info.imageLayout = VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR;
+        break;
+    default:
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        break;
+    }
 
     set_write.pImageInfo = &info;
 }
