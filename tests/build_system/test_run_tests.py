@@ -99,6 +99,12 @@ class RunTestsCommandTest(unittest.TestCase):
         self.assertNotIn("tests/screenshot/screenshot_test.py", flattened)
         self.assertNotIn("functional_test.py", flattened)
 
+    def test_evaluator_arguments_expand_the_case_name(self):
+        commands = dict(suite_steps("macos-glfw-release"))
+
+        command = commands["forward_render_static_halfres (compare)"]
+        self.assertEqual(command[command.index("--case") + 1], "forward_render_static_halfres")
+
     def test_suite_checks_scene_load_failure_propagation(self):
         self.assertIn("scene_load_failure", dict(suite_steps("macos-macos-release")))
 
