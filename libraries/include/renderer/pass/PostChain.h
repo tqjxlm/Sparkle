@@ -22,9 +22,8 @@ public:
     // the pass drawing the scene into the Screen transient
     enum class ScreenPass : uint8_t
     {
-        // none: the scene is the screen
-        None,
         ToneMapping,
+        // a scene at output resolution is the screen
         Upsample,
     };
 
@@ -42,8 +41,8 @@ public:
     void UpdateFrameData(SceneRenderProxy *scene);
 
     // adds the passes after the scene passes: the screen pass drawing `scene` into the Screen transient, or `scene` as
-    // the screen without one, unless the texture render_graph_view names is drawn there instead; the screenshot
-    // readbacks; the ui when shown; and the present drawing the screen into the back buffer
+    // the screen when Upsample has nothing to upsample, unless the texture render_graph_view names is drawn there
+    // instead; the screenshot readbacks; the ui when shown; and the present drawing the screen into the back buffer
     void AddTo(RenderGraph &graph, RGTexture scene);
 
 private:
@@ -66,8 +65,8 @@ private:
     RHIContext *rhi_;
 
     RGTextureDesc screen_desc_;
-    // null for ScreenPass::None
     std::unique_ptr<ScreenQuadPass> screen_pass_;
+    bool upsamples_;
     // null when headless
     std::unique_ptr<UiPass> ui_pass_;
     std::unique_ptr<ScreenQuadPass> present_pass_;

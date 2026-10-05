@@ -47,6 +47,10 @@ private:
 
     void Update() override;
 
+    void OnResize() override;
+
+    void CreateAccumulator();
+
     [[nodiscard]] RGTexture BuildGraph(RenderGraph &graph) override;
 
     void InitSceneRenderResources();

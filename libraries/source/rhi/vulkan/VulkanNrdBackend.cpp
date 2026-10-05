@@ -274,22 +274,13 @@ void VulkanNrdBackend::DestroyPoolImage(PoolImage &pool_image)
     pool_image = {};
 }
 
-void VulkanNrdBackend::AllocateResources(uint32_t width, uint32_t height, const PoolTexture *permanent,
-                                         uint32_t permanent_count, const PoolTexture *transient,
-                                         uint32_t transient_count, const uint32_t *samplers, uint32_t sampler_count,
+void VulkanNrdBackend::AllocateResources(const PoolTexture *permanent, uint32_t permanent_count,
+                                         const PoolTexture *transient, uint32_t transient_count,
+                                         const uint32_t *samplers, uint32_t sampler_count,
                                          uint32_t constant_buffer_size)
 {
-    permanent_pool_.reserve(permanent_count);
-    for (uint32_t i = 0; i < permanent_count; i++)
-    {
-        permanent_pool_.push_back(CreatePoolImage(permanent[i], width, height, i));
-    }
-
-    transient_pool_.reserve(transient_count);
-    for (uint32_t i = 0; i < transient_count; i++)
-    {
-        transient_pool_.push_back(CreatePoolImage(transient[i], width, height, permanent_count + i));
-    }
+    permanent_requests_.assign(permanent, permanent + permanent_count);
+    transient_requests_.assign(transient, transient + transient_count);
 
     samplers_.reserve(sampler_count);
     for (uint32_t i = 0; i < sampler_count; i++)
@@ -324,8 +315,38 @@ void VulkanNrdBackend::AllocateResources(uint32_t width, uint32_t height, const 
         CHECK_VK_ERROR(vkCreateDescriptorPool(context->GetDevice(), &pool_info, nullptr, &pool));
     }
 
-    Log(Info, "VulkanNrdBackend: allocated pool {}+{} textures, {} samplers, cb {}B, at {}x{}", permanent_count,
-        transient_count, sampler_count, constant_buffer_size, width, height);
+    Log(Info, "VulkanNrdBackend: {}+{} pool textures, {} samplers, cb {}B", permanent_count, transient_count,
+        sampler_count, constant_buffer_size);
+}
+
+void VulkanNrdBackend::ResizePools(uint32_t width, uint32_t height)
+{
+    std::vector<PoolImage> retired;
+    for (auto *pool : {&permanent_pool_, &transient_pool_})
+    {
+        retired.insert(retired.end(), pool->begin(), pool->end());
+        pool->clear();
+    }
+    context->GetRHI()->EnqueueEndOfRenderTasks([retired]() mutable {
+        for (auto &image : retired)
+        {
+            DestroyPoolImage(image);
+        }
+    });
+
+    uint32_t index = 0;
+    for (const auto &[requests, pool] :
+         {std::pair{&permanent_requests_, &permanent_pool_}, std::pair{&transient_requests_, &transient_pool_}})
+    {
+        pool->reserve(requests->size());
+        for (const auto &request : *requests)
+        {
+            pool->push_back(CreatePoolImage(request, width, height, index++));
+        }
+    }
+    pool_layouts_initialized_ = false;
+
+    Log(Info, "VulkanNrdBackend: pool textures at {}x{}", width, height);
 }
 
 void VulkanNrdBackend::InitializePoolLayouts(VulkanCommandContext &command_context)

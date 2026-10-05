@@ -425,9 +425,8 @@ void RenderFramework::StopRenderThread()
 
 void RenderFramework::RecreateRendererIfNecessary()
 {
-    bool should_recreate = !renderer_ || render_config_.pipeline != renderer_->GetRenderMode() ||
-                           render_config_.GetResolution() != renderer_->GetResolution();
-    if (!should_recreate)
+    // a resolution change does not recreate the renderer: Renderer::Tick resizes it
+    if (renderer_ && render_config_.pipeline == renderer_->GetRenderMode())
     {
         return;
     }

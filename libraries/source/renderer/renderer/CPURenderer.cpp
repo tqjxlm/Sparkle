@@ -20,8 +20,7 @@ namespace sparkle
 {
 CPURenderer::CPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
-    : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool),
-      output_image_(resolution_.scene.x(), resolution_.scene.y(), PixelFormat::RGBAFloat16)
+    : Renderer(render_config, rhi_context, scene_render_proxy, graph_texture_pool)
 {
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Cpu);
 }
@@ -40,22 +39,27 @@ void CPURenderer::InitRenderResources()
 
     camera_ = scene_render_proxy_->GetCamera();
 
+    OnResize();
+
+    InitPostChain(output_image_.GetFormat(), PostChain::ScreenPass::Upsample);
+
+    sub_pixel_count_ =
+        static_cast<unsigned>(std::lround(std::sqrt(static_cast<float>(render_config_.sample_per_pixel))));
+    actual_sample_per_pixel_ = sub_pixel_count_ * sub_pixel_count_;
+}
+
+void CPURenderer::OnResize()
+{
+    output_image_ = Image2D(resolution_.scene.x(), resolution_.scene.y(), PixelFormat::RGBAFloat16);
     image_buffer_ = rhi_->CreateBuffer({.size = output_image_.GetStorageSize(),
                                         .usages = RHIBuffer::BufferUsage::TransferSrc,
                                         .mem_properties = RHIMemoryProperty::None,
                                         .is_dynamic = true},
                                        "RayTracingOutputBuffer");
 
-    InitPostChain(output_image_.GetFormat(),
-                  resolution_.NeedUpsample() ? PostChain::ScreenPass::Upsample : PostChain::ScreenPass::None);
-
     gbuffer_.Resize(resolution_.scene.x(), resolution_.scene.y());
-    ping_pong_buffer_.resize(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
-    frame_buffer_.resize(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
-
-    sub_pixel_count_ =
-        static_cast<unsigned>(std::lround(std::sqrt(static_cast<float>(render_config_.sample_per_pixel))));
-    actual_sample_per_pixel_ = sub_pixel_count_ * sub_pixel_count_;
+    ping_pong_buffer_.assign(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
+    frame_buffer_.assign(resolution_.scene.y(), std::vector<Vector4>(resolution_.scene.x()));
 }
 
 RGTexture CPURenderer::BuildGraph(RenderGraph &graph)

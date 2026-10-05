@@ -122,7 +122,8 @@ public:
         show_control_panel_ = visible;
     }
 
-    void FrameBufferResizeCallback(int width, int height) const;
+    // the view's frame buffer is now `width` x `height` pixels: the output resolution follows it
+    void FrameBufferResizeCallback(int width, int height);
     void CaptureNextFrames(int count);
     void ResetInputEvents();
 

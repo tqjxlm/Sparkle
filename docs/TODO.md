@@ -30,7 +30,6 @@
 * [ ] the glfw CMake cache keeps `Vulkan_LIBRARY` from the first configure, so after a Vulkan SDK bump an existing build still links (and on macOS bundles MoltenVK from) the old SDK until it is reconfigured from scratch
 * [ ] MoltenVK 1.4.1 (Vulkan SDK 1.4.350) adds memoryless textures to its residency set, so the glfw build aborts under `MTL_DEBUG_LAYER=1` on the render graph's memoryless attachments; fixed in MoltenVK 1.4.2, bump the SDK once it ships it
 
-* [ ] render graph resize: transients re-resolve each frame and persistent resources reset through a hook, instead of recreating the renderer and scene proxies
 * [ ] render graph MSAA: a `ResolveTo(src, dst)` access lowered to Vulkan resolve attachments and Metal `MultisampleResolve` store actions, with a memoryless MSAA source
 * [ ] render graph heap aliasing of transients, once dumped transient bytes on mobile justify its aliasing barriers and untracked Metal heaps
 * [ ] render graph async compute as a per-pass attribute, scheduled from dependency levels
@@ -75,6 +74,9 @@
 
 * [ ] the control panel's Save Screenshot and Save Graph Dump build their names from `RenderFramework::render_config_.pipeline` on the main thread while the render thread's `NewFrame` writes `render_config_`
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
+
+* [ ] the window scale that converts a desktop frame buffer resize into the output resolution is read once at startup (`backingScaleFactor`, the monitor content scale), so moving the window to a display with another scale sets the wrong output size
+* [ ] Android reports no frame buffer resize: a new native window (`APP_CMD_INIT_WINDOW`) recreates the swap chain but keeps the output aspect ratio, which only the landscape orientation lock keeps correct; multi-window and freeform sizes stretch
 
 * [ ] a windowed glfw run on macOS crashes in `glfwGetMonitorContentScale` (`GLFWNativeView::InitGUI`) when `glfwGetPrimaryMonitor` returns no monitor, e.g. in a session whose display is asleep; the content scale needs a fallback
 

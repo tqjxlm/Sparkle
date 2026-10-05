@@ -54,6 +54,8 @@ public:
 
     void UpdateFrameData(const DenoiserFrameData &frame) override;
 
+    void Resize(const Vector2UInt &input_size, const Vector2UInt &output_size) override;
+
     [[nodiscard]] RGTexture AddTo(RenderGraph &graph, const DenoiserInputs &inputs) override;
 
 private:
@@ -66,6 +68,9 @@ private:
     void SampleConfig();
 
     void Initialize(PixelFormat output_format);
+
+    // the backend's pool and the full-screen textures at input_size_, bound into the pack and resolve pipelines
+    void CreateTextures(PixelFormat output_format);
 
     void BindInputs(const RGPassContext &context, const DenoiserInputs &inputs);
 

@@ -163,7 +163,7 @@ struct MetalFxDenoiser::Impl
         return rhi->CreateResource<MetalImage>(attribute, texture, name);
     }
 
-    void CreatePreparePipeline()
+    void CreatePipelines()
     {
         prepare_ubo = rhi->CreateBuffer({.size = sizeof(MetalFxPrepareShader::UniformBufferData),
                                          .usages = RHIBuffer::BufferUsage::UniformBuffer,
@@ -174,22 +174,101 @@ struct MetalFxDenoiser::Impl
         prepare_pipeline = rhi->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "MetalFxPreparePipeline");
         prepare_pipeline->SetShader<RHIShaderStage::Compute>(prepare_shader);
         prepare_pipeline->Compile();
-
-        auto *resources = prepare_pipeline->GetShaderResource<MetalFxPrepareShader>();
-        resources->ubo().BindResource(prepare_ubo);
-        resources->outColor().BindResource(color->GetDefaultView(rhi));
-        resources->outDepth().BindResource(depth->GetDefaultView(rhi));
-        resources->outMotion().BindResource(motion->GetDefaultView(rhi));
-        resources->outDiffuseAlbedo().BindResource(diffuse_albedo->GetDefaultView(rhi));
-        resources->outSpecularAlbedo().BindResource(specular_albedo->GetDefaultView(rhi));
-        resources->outNormal().BindResource(normal->GetDefaultView(rhi));
-        resources->outRoughness().BindResource(roughness->GetDefaultView(rhi));
-
+        prepare_pipeline->GetShaderResource<MetalFxPrepareShader>()->ubo().BindResource(prepare_ubo);
         prepare_pass = rhi->CreateComputePass("MetalFxPreparePass", true);
+
+        resolve_ubo = rhi->CreateBuffer({.size = sizeof(MetalFxResolveShader::UniformBufferData),
+                                         .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                         .mem_properties = RHIMemoryProperty::None,
+                                         .is_dynamic = true},
+                                        "MetalFxResolveUBO");
+        resolve_shader = rhi->CreateShader<MetalFxResolveShader>();
+        resolve_pipeline = rhi->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "MetalFxResolvePipeline");
+        resolve_pipeline->SetShader<RHIShaderStage::Compute>(resolve_shader);
+        resolve_pipeline->Compile();
+        resolve_pipeline->GetShaderResource<MetalFxResolveShader>()->ubo().BindResource(resolve_ubo);
+        resolve_pass = rhi->CreateComputePass("MetalFxResolvePass", true);
+
+        timings.AddStage("prepare", prepare_pass);
+        timings.AddStage("resolve", resolve_pass);
     }
 
-    void CreateResolvePipeline()
+#if SPARKLE_HAS_METALFX_DENOISED
+    // the scaler and its textures for the descriptor's extents, bound into the pipelines. returns whether the device
+    // serves the extents.
+    API_AVAILABLE(macos(26.0), ios(26.0)) bool CreateScaler()
     {
+        scaler = nil;
+
+        if (desc.input_size.x() == 0 || desc.input_size.y() == 0 || desc.output_size.x() == 0 ||
+            desc.output_size.y() == 0)
+        {
+            Log(Error, "MetalFX: input and output extents must be nonzero");
+            return false;
+        }
+
+        auto device = context->GetDevice();
+        const float min_scale = [MTLFXTemporalDenoisedScalerDescriptor supportedInputContentMinScaleForDevice:device];
+        const float max_scale = [MTLFXTemporalDenoisedScalerDescriptor supportedInputContentMaxScaleForDevice:device];
+        const float scale_x = static_cast<float>(desc.output_size.x()) / static_cast<float>(desc.input_size.x());
+        const float scale_y = static_cast<float>(desc.output_size.y()) / static_cast<float>(desc.input_size.y());
+        if (scale_x < min_scale || scale_x > max_scale || scale_y < min_scale || scale_y > max_scale)
+        {
+            Log(Info, "MetalFX: requested input scales [{}, {}] are outside supported range [{}, {}]", scale_x, scale_y,
+                min_scale, max_scale);
+            return false;
+        }
+
+        MTLFXTemporalDenoisedScalerDescriptor *descriptor = [[MTLFXTemporalDenoisedScalerDescriptor alloc] init];
+        descriptor.colorTextureFormat = MTLPixelFormatRGBA16Float;
+        descriptor.depthTextureFormat = MTLPixelFormatR32Float;
+        descriptor.motionTextureFormat = MTLPixelFormatRG16Float;
+        descriptor.diffuseAlbedoTextureFormat = MTLPixelFormatRGBA16Float;
+        descriptor.specularAlbedoTextureFormat = MTLPixelFormatRGBA16Float;
+        descriptor.normalTextureFormat = MTLPixelFormatRGBA16Float;
+        descriptor.roughnessTextureFormat = MTLPixelFormatR16Float;
+        descriptor.outputTextureFormat = MTLPixelFormatRGBA16Float;
+        descriptor.inputWidth = desc.input_size.x();
+        descriptor.inputHeight = desc.input_size.y();
+        descriptor.outputWidth = desc.output_size.x();
+        descriptor.outputHeight = desc.output_size.y();
+        descriptor.autoExposureEnabled = NO;
+        descriptor.requiresSynchronousInitialization = desc.synchronous_initialization;
+        descriptor.reactiveMaskTextureEnabled = NO;
+        descriptor.specularHitDistanceTextureEnabled = NO;
+        descriptor.denoiseStrengthMaskTextureEnabled = NO;
+        descriptor.transparencyOverlayTextureEnabled = NO;
+
+        id<MTLFXTemporalDenoisedScaler> new_scaler = [descriptor newTemporalDenoisedScalerWithDevice:device];
+        if (!new_scaler)
+        {
+            Log(Info, "MetalFX: failed to create temporal denoised scaler");
+            return false;
+        }
+
+        color = CreatePreparedTexture(PixelFormat::RGBAFloat16, new_scaler.colorTextureUsage, true, desc.input_size,
+                                      "MetalFxColor");
+        depth = CreatePreparedTexture(PixelFormat::R32Float, new_scaler.depthTextureUsage, true, desc.input_size,
+                                      "MetalFxDepth");
+        motion = CreatePreparedTexture(PixelFormat::RGFloat16, new_scaler.motionTextureUsage, true, desc.input_size,
+                                       "MetalFxMotion");
+        diffuse_albedo = CreatePreparedTexture(PixelFormat::RGBAFloat16, new_scaler.diffuseAlbedoTextureUsage, true,
+                                               desc.input_size, "MetalFxDiffuseAlbedo");
+        specular_albedo = CreatePreparedTexture(PixelFormat::RGBAFloat16, new_scaler.specularAlbedoTextureUsage, true,
+                                                desc.input_size, "MetalFxSpecularAlbedo");
+        normal = CreatePreparedTexture(PixelFormat::RGBAFloat16, new_scaler.normalTextureUsage, true, desc.input_size,
+                                       "MetalFxNormal");
+        roughness = CreatePreparedTexture(PixelFormat::R16Float, new_scaler.roughnessTextureUsage, true,
+                                          desc.input_size, "MetalFxRoughness");
+        // writable: while the scaler output is displayed, the render graph declares the scaler's write as a
+        // storage write
+        output = CreatePreparedTexture(PixelFormat::RGBAFloat16, new_scaler.outputTextureUsage, true, desc.output_size,
+                                       "MetalFxOutput");
+        if (!color || !depth || !motion || !diffuse_albedo || !specular_albedo || !normal || !roughness || !output)
+        {
+            return false;
+        }
+
         resolved_output = rhi->CreateImage(
             RHIImage::Attribute{
                 .format = PixelFormat::RGBAFloat16,
@@ -202,26 +281,26 @@ struct MetalFxDenoiser::Impl
             },
             "MetalFxResolvedOutput");
 
-        resolve_ubo = rhi->CreateBuffer({.size = sizeof(MetalFxResolveShader::UniformBufferData),
-                                         .usages = RHIBuffer::BufferUsage::UniformBuffer,
-                                         .mem_properties = RHIMemoryProperty::None,
-                                         .is_dynamic = true},
-                                        "MetalFxResolveUBO");
-        resolve_shader = rhi->CreateShader<MetalFxResolveShader>();
-        resolve_pipeline = rhi->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "MetalFxResolvePipeline");
-        resolve_pipeline->SetShader<RHIShaderStage::Compute>(resolve_shader);
-        resolve_pipeline->Compile();
+        auto *prepare_resources = prepare_pipeline->GetShaderResource<MetalFxPrepareShader>();
+        prepare_resources->outColor().BindResource(color->GetDefaultView(rhi));
+        prepare_resources->outDepth().BindResource(depth->GetDefaultView(rhi));
+        prepare_resources->outMotion().BindResource(motion->GetDefaultView(rhi));
+        prepare_resources->outDiffuseAlbedo().BindResource(diffuse_albedo->GetDefaultView(rhi));
+        prepare_resources->outSpecularAlbedo().BindResource(specular_albedo->GetDefaultView(rhi));
+        prepare_resources->outNormal().BindResource(normal->GetDefaultView(rhi));
+        prepare_resources->outRoughness().BindResource(roughness->GetDefaultView(rhi));
 
-        auto *resources = resolve_pipeline->GetShaderResource<MetalFxResolveShader>();
-        resources->ubo().BindResource(resolve_ubo);
-        resources->scalerOutput().BindResource(output->GetDefaultView(rhi));
-        resources->outColor().BindResource(resolved_output->GetDefaultView(rhi));
+        auto *resolve_resources = resolve_pipeline->GetShaderResource<MetalFxResolveShader>();
+        resolve_resources->scalerOutput().BindResource(output->GetDefaultView(rhi));
+        resolve_resources->outColor().BindResource(resolved_output->GetDefaultView(rhi));
 
-        resolve_pass = rhi->CreateComputePass("MetalFxResolvePass", true);
-
-        timings.AddStage("prepare", prepare_pass);
-        timings.AddStage("resolve", resolve_pass);
+        scaler = new_scaler;
+        reset_history = true;
+        Log(Info, "MetalFX: temporal denoised scaler ready, input [{} x {}], output [{} x {}]", desc.input_size.x(),
+            desc.input_size.y(), desc.output_size.x(), desc.output_size.y());
+        return true;
     }
+#endif
 
     [[nodiscard]] DenoiserHandoff GetHandoff() const
     {
@@ -301,83 +380,10 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const DenoiserDesc &desc) : im
 #if SPARKLE_HAS_METALFX_DENOISED
     if (@available(macOS 26.0, iOS 26.0, *))
     {
-        if (desc.input_size.x() == 0 || desc.input_size.y() == 0 || desc.output_size.x() == 0 ||
-            desc.output_size.y() == 0)
-        {
-            Log(Error, "MetalFX: input and output extents must be nonzero");
-            return;
-        }
-
         auto device = context->GetDevice();
         if (![MTLFXTemporalDenoisedScalerDescriptor supportsDevice:device])
         {
             Log(Info, "MetalFX: temporal denoised scaling is unsupported by this device");
-            return;
-        }
-
-        const float min_scale = [MTLFXTemporalDenoisedScalerDescriptor supportedInputContentMinScaleForDevice:device];
-        const float max_scale = [MTLFXTemporalDenoisedScalerDescriptor supportedInputContentMaxScaleForDevice:device];
-        const float scale_x = static_cast<float>(desc.output_size.x()) / static_cast<float>(desc.input_size.x());
-        const float scale_y = static_cast<float>(desc.output_size.y()) / static_cast<float>(desc.input_size.y());
-        if (scale_x < min_scale || scale_x > max_scale || scale_y < min_scale || scale_y > max_scale)
-        {
-            Log(Info, "MetalFX: requested input scales [{}, {}] are outside supported range [{}, {}]", scale_x, scale_y,
-                min_scale, max_scale);
-            return;
-        }
-
-        MTLFXTemporalDenoisedScalerDescriptor *descriptor = [[MTLFXTemporalDenoisedScalerDescriptor alloc] init];
-        descriptor.colorTextureFormat = MTLPixelFormatRGBA16Float;
-        descriptor.depthTextureFormat = MTLPixelFormatR32Float;
-        descriptor.motionTextureFormat = MTLPixelFormatRG16Float;
-        descriptor.diffuseAlbedoTextureFormat = MTLPixelFormatRGBA16Float;
-        descriptor.specularAlbedoTextureFormat = MTLPixelFormatRGBA16Float;
-        descriptor.normalTextureFormat = MTLPixelFormatRGBA16Float;
-        descriptor.roughnessTextureFormat = MTLPixelFormatR16Float;
-        descriptor.outputTextureFormat = MTLPixelFormatRGBA16Float;
-        descriptor.inputWidth = desc.input_size.x();
-        descriptor.inputHeight = desc.input_size.y();
-        descriptor.outputWidth = desc.output_size.x();
-        descriptor.outputHeight = desc.output_size.y();
-        descriptor.autoExposureEnabled = NO;
-        descriptor.requiresSynchronousInitialization = desc.synchronous_initialization;
-        descriptor.reactiveMaskTextureEnabled = NO;
-        descriptor.specularHitDistanceTextureEnabled = NO;
-        descriptor.denoiseStrengthMaskTextureEnabled = NO;
-        descriptor.transparencyOverlayTextureEnabled = NO;
-
-        id<MTLFXTemporalDenoisedScaler> scaler = [descriptor newTemporalDenoisedScalerWithDevice:device];
-        if (!scaler)
-        {
-            Log(Info, "MetalFX: failed to create temporal denoised scaler");
-            return;
-        }
-        impl_->scaler = scaler;
-
-        impl_->color = impl_->CreatePreparedTexture(PixelFormat::RGBAFloat16, scaler.colorTextureUsage, true,
-                                                    desc.input_size, "MetalFxColor");
-        impl_->depth = impl_->CreatePreparedTexture(PixelFormat::R32Float, scaler.depthTextureUsage, true,
-                                                    desc.input_size, "MetalFxDepth");
-        impl_->motion = impl_->CreatePreparedTexture(PixelFormat::RGFloat16, scaler.motionTextureUsage, true,
-                                                     desc.input_size, "MetalFxMotion");
-        impl_->diffuse_albedo = impl_->CreatePreparedTexture(PixelFormat::RGBAFloat16, scaler.diffuseAlbedoTextureUsage,
-                                                             true, desc.input_size, "MetalFxDiffuseAlbedo");
-        impl_->specular_albedo =
-            impl_->CreatePreparedTexture(PixelFormat::RGBAFloat16, scaler.specularAlbedoTextureUsage, true,
-                                         desc.input_size, "MetalFxSpecularAlbedo");
-        impl_->normal = impl_->CreatePreparedTexture(PixelFormat::RGBAFloat16, scaler.normalTextureUsage, true,
-                                                     desc.input_size, "MetalFxNormal");
-        impl_->roughness = impl_->CreatePreparedTexture(PixelFormat::R16Float, scaler.roughnessTextureUsage, true,
-                                                        desc.input_size, "MetalFxRoughness");
-        // writable: while the scaler output is displayed, the render graph declares the scaler's write as a
-        // storage write
-        impl_->output = impl_->CreatePreparedTexture(PixelFormat::RGBAFloat16, scaler.outputTextureUsage, true,
-                                                     desc.output_size, "MetalFxOutput");
-
-        if (!impl_->color || !impl_->depth || !impl_->motion || !impl_->diffuse_albedo || !impl_->specular_albedo ||
-            !impl_->normal || !impl_->roughness || !impl_->output)
-        {
-            impl_->scaler = nil;
             return;
         }
 
@@ -392,16 +398,12 @@ MetalFxDenoiser::MetalFxDenoiser(RHIContext *rhi, const DenoiserDesc &desc) : im
         if (!impl_->exposure_texture)
         {
             Log(Error, "MetalFX: failed to allocate exposure texture");
-            impl_->scaler = nil;
             return;
         }
         impl_->exposure_texture.label = @"MetalFxExposure";
 
-        impl_->CreatePreparePipeline();
-        impl_->CreateResolvePipeline();
-        impl_->ready = true;
-        Log(Info, "MetalFX: temporal denoised scaler ready, input [{} x {}], output [{} x {}]", desc.input_size.x(),
-            desc.input_size.y(), desc.output_size.x(), desc.output_size.y());
+        impl_->CreatePipelines();
+        impl_->ready = impl_->CreateScaler();
     }
     else
     {
@@ -454,6 +456,18 @@ RHIResourceRef<RHIImage> MetalFxDenoiser::GetOutput() const
 void MetalFxDenoiser::UpdateFrameData(const DenoiserFrameData &frame)
 {
     impl_->frame = frame;
+}
+
+void MetalFxDenoiser::Resize(const Vector2UInt &input_size, const Vector2UInt &output_size)
+{
+    impl_->desc.input_size = input_size;
+    impl_->desc.output_size = output_size;
+#if SPARKLE_HAS_METALFX_DENOISED
+    if (@available(macOS 26.0, iOS 26.0, *))
+    {
+        impl_->ready = impl_->CreateScaler();
+    }
+#endif
 }
 
 // the prepared textures and, while resolving, the scaler output stay private to the pass and keep their own

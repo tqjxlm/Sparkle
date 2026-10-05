@@ -144,22 +144,12 @@ id<MTLTexture> MetalNrdBackend::CreatePoolTexture(const PoolTexture &desc, uint3
     return [device_ newTextureWithDescriptor:descriptor];
 }
 
-void MetalNrdBackend::AllocateResources(uint32_t width, uint32_t height, const PoolTexture *permanent,
-                                        uint32_t permanent_count, const PoolTexture *transient,
-                                        uint32_t transient_count, const uint32_t *samplers, uint32_t sampler_count,
-                                        uint32_t constant_buffer_size)
+void MetalNrdBackend::AllocateResources(const PoolTexture *permanent, uint32_t permanent_count,
+                                        const PoolTexture *transient, uint32_t transient_count,
+                                        const uint32_t *samplers, uint32_t sampler_count, uint32_t constant_buffer_size)
 {
-    permanent_pool_.reserve(permanent_count);
-    for (uint32_t i = 0; i < permanent_count; i++)
-    {
-        permanent_pool_.push_back(CreatePoolTexture(permanent[i], width, height));
-    }
-
-    transient_pool_.reserve(transient_count);
-    for (uint32_t i = 0; i < transient_count; i++)
-    {
-        transient_pool_.push_back(CreatePoolTexture(transient[i], width, height));
-    }
+    permanent_requests_.assign(permanent, permanent + permanent_count);
+    transient_requests_.assign(transient, transient + transient_count);
 
     samplers_.reserve(sampler_count);
     for (uint32_t i = 0; i < sampler_count; i++)
@@ -172,8 +162,25 @@ void MetalNrdBackend::AllocateResources(uint32_t width, uint32_t height, const P
     constant_buffer_ = [device_ newBufferWithLength:(constant_slot_size_ * constant_slot_count_)
                                             options:MTLResourceStorageModeShared];
 
-    Log(Info, "MetalNrdBackend: allocated pool {}+{} textures, {} samplers, cb {}B, at {}x{}", permanent_count,
-        transient_count, sampler_count, constant_buffer_size, width, height);
+    Log(Info, "MetalNrdBackend: {}+{} pool textures, {} samplers, cb {}B", permanent_count, transient_count,
+        sampler_count, constant_buffer_size);
+}
+
+// command buffers retain the textures they use, so frames in flight keep the previous pool alive
+void MetalNrdBackend::ResizePools(uint32_t width, uint32_t height)
+{
+    for (const auto &[requests, pool] :
+         {std::pair{&permanent_requests_, &permanent_pool_}, std::pair{&transient_requests_, &transient_pool_}})
+    {
+        pool->clear();
+        pool->reserve(requests->size());
+        for (const auto &request : *requests)
+        {
+            pool->push_back(CreatePoolTexture(request, width, height));
+        }
+    }
+
+    Log(Info, "MetalNrdBackend: pool textures at {}x{}", width, height);
 }
 
 void MetalNrdBackend::RunDispatches(RHICommandContext &command_context, const Dispatch *dispatches, uint32_t count)

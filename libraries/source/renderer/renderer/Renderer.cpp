@@ -75,6 +75,14 @@ Renderer::~Renderer() = default;
 
 void Renderer::Tick()
 {
+    if (const auto resolution = render_config_.GetResolution(); resolution != resolution_)
+    {
+        resolution_ = resolution;
+        Log(Info, "Resize to [{}, {}], scene [{}, {}]", resolution_.output.x(), resolution_.output.y(),
+            resolution_.scene.x(), resolution_.scene.y());
+        OnResize();
+    }
+
     scene_render_proxy_->Update(rhi_, *scene_render_proxy_->GetCamera(), render_config_);
 
     Update();

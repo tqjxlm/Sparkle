@@ -383,6 +383,10 @@ void MetalImage::SetImage(id<MTLTexture> texture)
     // TODO(tqjxlm): there should be a more robust way
     texture_ = texture;
 
+    // a drawable has the view's size at the time it was acquired
+    attributes_.width = static_cast<uint32_t>(texture.width);
+    attributes_.height = static_cast<uint32_t>(texture.height);
+
     id_dirty_ = true;
 }
 

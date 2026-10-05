@@ -72,6 +72,11 @@ struct RenderConfig : public ConfigCollection
         return {{image_width, image_height}, render_scale};
     }
 
+    // sets the output resolution for a view whose frame buffer is `width` x `height` pixels: the view's size in ui
+    // coordinates on desktop; on mobile, which is always full screen, the configured height at the frame buffer's
+    // aspect ratio
+    void FitToFrameBuffer(int width, int height);
+
     void SetupBackend(RHIContext *rhi, NativeView *view)
     {
         rhi_ = rhi;

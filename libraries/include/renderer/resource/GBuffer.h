@@ -25,8 +25,8 @@ struct CPUGBuffer
 
     void Resize(unsigned width, unsigned height)
     {
-        color.resize(height, std::vector<Vector4>(width));
-        world_normal.resize(height, std::vector<Vector3>(width));
+        color.assign(height, std::vector<Vector4>(width));
+        world_normal.assign(height, std::vector<Vector3>(width));
     }
 
     void Clear()

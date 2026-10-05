@@ -235,11 +235,47 @@ void NrdDenoiser::Initialize(PixelFormat output_format)
                         .downsample_factor = desc.transientPool[i].downsampleFactor};
     }
 
-    backend_->AllocateResources(input_size_.x(), input_size_.y(), permanent.data(), desc.permanentPoolSize,
-                                transient.data(), desc.transientPoolSize,
+    backend_->AllocateResources(permanent.data(), desc.permanentPoolSize, transient.data(), desc.transientPoolSize,
                                 reinterpret_cast<const uint32_t *>(desc.samplers), desc.samplersNum,
                                 desc.constantBufferMaxDataSize);
     reblur_pass_ = rhi_->CreateComputePass("NrdReblurPass", true);
+
+    pack_ubo_ = rhi_->CreateBuffer({.size = sizeof(NrdPackShader::UniformBufferData),
+                                    .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                    .mem_properties = RHIMemoryProperty::None,
+                                    .is_dynamic = true},
+                                   "NrdPackUBO");
+    pack_shader_ = rhi_->CreateShader<NrdPackShader>();
+    pack_pipeline_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "NrdPackPipeline");
+    pack_pipeline_->SetShader<RHIShaderStage::Compute>(pack_shader_);
+    pack_pipeline_->Compile();
+    pack_pipeline_->GetShaderResource<NrdPackShader>()->ubo().BindResource(pack_ubo_);
+    pack_pass_ = rhi_->CreateComputePass("NrdPackPass", true);
+
+    resolve_ubo_ = rhi_->CreateBuffer({.size = sizeof(NrdResolveShader::UniformBufferData),
+                                       .usages = RHIBuffer::BufferUsage::UniformBuffer,
+                                       .mem_properties = RHIMemoryProperty::None,
+                                       .is_dynamic = true},
+                                      "NrdResolveUBO");
+    resolve_shader_ = rhi_->CreateShader<NrdResolveShader>();
+    resolve_pipeline_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "NrdResolvePipeline");
+    resolve_pipeline_->SetShader<RHIShaderStage::Compute>(resolve_shader_);
+    resolve_pipeline_->Compile();
+    resolve_pipeline_->GetShaderResource<NrdResolveShader>()->ubo().BindResource(resolve_ubo_);
+    resolve_pass_ = rhi_->CreateComputePass("NrdResolvePass", true);
+
+    CreateTextures(output_format);
+
+    timings_.AddStage("pack", pack_pass_);
+    timings_.AddStage("reblur", reblur_pass_);
+    timings_.AddStage("resolve", resolve_pass_);
+
+    enabled_resources_ready_ = true;
+}
+
+void NrdDenoiser::CreateTextures(PixelFormat output_format)
+{
+    backend_->ResizePools(input_size_.x(), input_size_.y());
 
     // half precision per NRD's own format recommendations (radiance/MV); normal+roughness matches
     // NRD_NORMAL_ENCODING=2 (oct-packed R10G10B10A2); viewZ stays a full 32-bit float (plane-distance
@@ -257,54 +293,32 @@ void NrdDenoiser::Initialize(PixelFormat output_format)
     output_ = CreateFullScreenTexture(output_format, "NrdOutput");
     output_history_ = CreateFullScreenTexture(output_format, "NrdOutputHistory");
 
-    pack_ubo_ = rhi_->CreateBuffer({.size = sizeof(NrdPackShader::UniformBufferData),
-                                    .usages = RHIBuffer::BufferUsage::UniformBuffer,
-                                    .mem_properties = RHIMemoryProperty::None,
-                                    .is_dynamic = true},
-                                   "NrdPackUBO");
-    pack_shader_ = rhi_->CreateShader<NrdPackShader>();
-    pack_pipeline_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "NrdPackPipeline");
-    pack_pipeline_->SetShader<RHIShaderStage::Compute>(pack_shader_);
-    pack_pipeline_->Compile();
+    auto *pack = pack_pipeline_->GetShaderResource<NrdPackShader>();
+    pack->outMv().BindResource(in_mv_->GetDefaultView(rhi_));
+    pack->outNormalRoughness().BindResource(in_normal_roughness_->GetDefaultView(rhi_));
+    pack->outViewZ().BindResource(in_viewz_->GetDefaultView(rhi_));
+    pack->outDiff().BindResource(in_diff_->GetDefaultView(rhi_));
+    pack->outSpec().BindResource(in_spec_->GetDefaultView(rhi_));
+
+    auto *resolve = resolve_pipeline_->GetShaderResource<NrdResolveShader>();
+    resolve->denoisedDiff().BindResource(out_diff_->GetDefaultView(rhi_));
+    resolve->denoisedSpec().BindResource(out_spec_->GetDefaultView(rhi_));
+    resolve->inMv().BindResource(in_mv_->GetDefaultView(rhi_));
+    resolve->inNormalRoughness().BindResource(in_normal_roughness_->GetDefaultView(rhi_));
+    resolve->inViewZ().BindResource(in_viewz_->GetDefaultView(rhi_));
+    resolve->inDiff().BindResource(in_diff_->GetDefaultView(rhi_));
+    resolve->inSpec().BindResource(in_spec_->GetDefaultView(rhi_));
+    resolve->validation().BindResource(validation_->GetDefaultView(rhi_));
+}
+
+void NrdDenoiser::Resize(const Vector2UInt &input_size, const Vector2UInt & /*output_size*/)
+{
+    input_size_ = input_size;
+    if (enabled_resources_ready_)
     {
-        auto *r = pack_pipeline_->GetShaderResource<NrdPackShader>();
-        r->ubo().BindResource(pack_ubo_);
-        r->outMv().BindResource(in_mv_->GetDefaultView(rhi_));
-        r->outNormalRoughness().BindResource(in_normal_roughness_->GetDefaultView(rhi_));
-        r->outViewZ().BindResource(in_viewz_->GetDefaultView(rhi_));
-        r->outDiff().BindResource(in_diff_->GetDefaultView(rhi_));
-        r->outSpec().BindResource(in_spec_->GetDefaultView(rhi_));
+        CreateTextures(output_->GetAttributes().format);
+        reset_history_ = true;
     }
-    pack_pass_ = rhi_->CreateComputePass("NrdPackPass", true);
-
-    resolve_ubo_ = rhi_->CreateBuffer({.size = sizeof(NrdResolveShader::UniformBufferData),
-                                       .usages = RHIBuffer::BufferUsage::UniformBuffer,
-                                       .mem_properties = RHIMemoryProperty::None,
-                                       .is_dynamic = true},
-                                      "NrdResolveUBO");
-    resolve_shader_ = rhi_->CreateShader<NrdResolveShader>();
-    resolve_pipeline_ = rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Compute, "NrdResolvePipeline");
-    resolve_pipeline_->SetShader<RHIShaderStage::Compute>(resolve_shader_);
-    resolve_pipeline_->Compile();
-    {
-        auto *r = resolve_pipeline_->GetShaderResource<NrdResolveShader>();
-        r->ubo().BindResource(resolve_ubo_);
-        r->denoisedDiff().BindResource(out_diff_->GetDefaultView(rhi_));
-        r->denoisedSpec().BindResource(out_spec_->GetDefaultView(rhi_));
-        r->inMv().BindResource(in_mv_->GetDefaultView(rhi_));
-        r->inNormalRoughness().BindResource(in_normal_roughness_->GetDefaultView(rhi_));
-        r->inViewZ().BindResource(in_viewz_->GetDefaultView(rhi_));
-        r->inDiff().BindResource(in_diff_->GetDefaultView(rhi_));
-        r->inSpec().BindResource(in_spec_->GetDefaultView(rhi_));
-        r->validation().BindResource(validation_->GetDefaultView(rhi_));
-    }
-    resolve_pass_ = rhi_->CreateComputePass("NrdResolvePass", true);
-
-    timings_.AddStage("pack", pack_pass_);
-    timings_.AddStage("reblur", reblur_pass_);
-    timings_.AddStage("resolve", resolve_pass_);
-
-    enabled_resources_ready_ = true;
 }
 
 void NrdDenoiser::BindInputs(const RGPassContext &context, const DenoiserInputs &inputs)

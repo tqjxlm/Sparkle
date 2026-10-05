@@ -60,6 +60,10 @@ public:
 
     virtual void UpdateFrameData(const DenoiserFrameData &frame) = 0;
 
+    // reallocates the provider's images for new extents and restarts its history. IsReady() tells whether the provider
+    // serves them.
+    virtual void Resize(const Vector2UInt &input_size, const Vector2UInt &output_size) = 0;
+
     // adds the frame's denoising to `graph` as one External pass that reads `inputs` and writes the provider's
     // persistent images, and returns the texture it leaves for display. a provider that cannot encode the frame adds
     // no pass, returns `inputs.accumulated_radiance` and stops being ready.

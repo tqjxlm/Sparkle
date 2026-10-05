@@ -256,7 +256,9 @@ python3 dev/render_graph_viewer.py <external-storage-path>/screenshots/render_gr
 
 ## Renderers
 
-Each renderer builds one graph per frame from the `RenderFramework`'s texture pool, which outlives renderer recreation, so a pipeline switch reuses the images both pipelines' graphs need. The goldens in [tests/render_graph/golden/](../tests/render_graph/golden/) list the passes, accesses, barriers, attachments and resources of a typical frame of each renderer (see [Tests](#tests)); the [viewer](#viewer) renders a dump of any frame.
+Each renderer builds one graph per frame from the `RenderFramework`'s texture pool, which outlives renderer recreation, so a pipeline switch reuses the images both pipelines' graphs need.
+
+Only a pipeline switch recreates the renderer (with the scene's render proxies, after a device-idle wait). A resolution change (`width`, `height`, `render_scale`, or a window resize, which sets `width` and `height`) resizes it in place: transients resolve their size classes against each frame's `RenderResolution`, and the pool releases images of the old sizes once no graph uses them. `Renderer::Tick` calls the renderer's `OnResize` hook for its persistent, imported resources before the frame updates: the GPU renderer recreates the accumulator, reallocates the denoiser inputs and resizes each denoiser in place (`Denoiser::Resize`), and the CPU renderer reallocates its host buffers. The camera proxy recomputes its projection and restarts accumulation when the scene resolution changes. Images a frame in flight still uses are released through the RHI's deferred deletion. The goldens in [tests/render_graph/golden/](../tests/render_graph/golden/) list the passes, accesses, barriers, attachments and resources of a typical frame of each renderer (see [Tests](#tests)); the [viewer](#viewer) renders a dump of any frame.
 
 Each attachment role has one color slot in every pass that attaches it ([ColorSlot.h](../libraries/include/renderer/pass/ColorSlot.h)): Screen and BackBuffer 0, SceneColor 1, GBufferPacked 2, DepthCopy 3. Other attachments, such as the GPU accumulator and the IBL cook clears, use slot 0.
 
@@ -266,8 +268,7 @@ Every frame ends with the post chain (`PostChain`, [PostChain.h](../libraries/in
 
 * **Screen pass.** It draws `scene` into Screen, a transient at output resolution. The renderer chooses it and Screen's format once (`Renderer::InitPostChain`):
   * `ToneMapping` into `B8G8R8A8Srgb` for the renderers that tone map on the GPU;
-  * `Upsample` into `RGBAFloat16` for the CPU renderer when `render_scale` < 1;
-  * none for the CPU renderer otherwise, and `scene` is the screen.
+  * `Upsample` into `RGBAFloat16` for the CPU renderer, which draws only when `render_scale` < 1; otherwise `scene` is the screen.
   * `GraphView` replaces the screen pass while `render_graph_view` shows a texture.
 * **Readback.** A Copy pass copies the screen into a staging buffer the host reads when a screenshot is pending.
   * It runs before `Ui` for a screenshot without UI and after it for one with UI.

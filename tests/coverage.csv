@@ -2,12 +2,17 @@ case,windows-glfw-release,macos-macos-release,macos-glfw-release,macos-ios-relea
 smoke,,,,,,
 forward_render_static,x,x,x,x,x,x
 forward_render_static_halfres,x,x,x,x,x,x
+forward_resize,x,x,x,,,x
+deferred_resize,x,x,x,,,x
+forward_render_scale_change,x,x,x,x,x,x
 deferred_render_static,x,x,x,x,,x
 deferred_render_static_emulated,,,,,x,
 forward_render_static_sampled,,,,,,x
 deferred_render_static_sampled,,,,,,x
 cpu_render_static_64spp,,,,,,x
 gpu_render_static_64spp,,,,,,x
+cpu_resize_64spp,,,,,,x
+gpu_resize_64spp,,,,,,x
 camera_nudge_return,x,x,x,x,x,x
 primitive_move,x,x,x,x,x,x
 usd_round_trip,,x,,,,

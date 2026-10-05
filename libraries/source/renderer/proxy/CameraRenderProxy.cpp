@@ -18,6 +18,12 @@ void CameraRenderProxy::Update(RHIContext *rhi, const CameraRenderProxy &camera,
         prev_view_projection_matrix_ = view_projection_matrix_;
     }
 
+    if (const auto scene_resolution = config.GetResolution().scene; scene_resolution != scene_resolution_)
+    {
+        scene_resolution_ = scene_resolution;
+        attribute_dirty_ = true;
+    }
+
     if (attribute_dirty_)
     {
         aspect_ratio_ = config.GetResolution().AspectRatio();

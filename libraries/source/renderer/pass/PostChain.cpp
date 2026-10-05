@@ -67,7 +67,8 @@ RHIResourceRef<RHIBuffer> CreateScreenshotBuffer(RHIContext *rhi, PixelFormat fo
 } // namespace
 
 PostChain::PostChain(const RenderConfig &config, RHIContext *rhi, PixelFormat screen_format, ScreenPass screen_pass)
-    : config_(config), rhi_(rhi), screen_desc_{.format = screen_format, .size_class = RGSizeClass::Output}
+    : config_(config), rhi_(rhi), screen_desc_{.format = screen_format, .size_class = RGSizeClass::Output},
+      upsamples_(screen_pass == ScreenPass::Upsample)
 {
     if (!rhi_->IsHeadless())
     {
@@ -83,8 +84,6 @@ PostChain::PostChain(const RenderConfig &config, RHIContext *rhi, PixelFormat sc
 
     switch (screen_pass)
     {
-    case ScreenPass::None:
-        break;
     case ScreenPass::ToneMapping:
         screen_pass_ = PipelinePass::Create<ToneMappingPass>(config_, rhi_, screen_format);
         break;
@@ -114,11 +113,7 @@ void PostChain::RequestScreenshot(const std::string &file_path, bool capture_ui,
 
 void PostChain::UpdateFrameData(SceneRenderProxy *scene)
 {
-    if (screen_pass_)
-    {
-        screen_pass_->UpdateFrameData(config_, scene);
-    }
-
+    screen_pass_->UpdateFrameData(config_, scene);
     present_pass_->UpdateFrameData(config_, scene);
 }
 
@@ -176,7 +171,8 @@ RGTexture PostChain::FindGraphView(const RenderGraph &graph)
 
 void PostChain::AddTo(RenderGraph &graph, RGTexture scene)
 {
-    const ScreenQuadPass *screen_pass = screen_pass_.get();
+    const ScreenQuadPass *screen_pass =
+        upsamples_ && !config_.GetResolution().NeedUpsample() ? nullptr : screen_pass_.get();
     if (const auto view = FindGraphView(graph); view.IsValid())
     {
         scene = view;

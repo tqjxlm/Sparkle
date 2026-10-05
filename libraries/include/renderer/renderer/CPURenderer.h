@@ -25,6 +25,8 @@ public:
     {
     }
 
+    void OnResize() override;
+
     [[nodiscard]] bool IsReadyForAutoScreenshot() const override;
 
     ~CPURenderer() override;
