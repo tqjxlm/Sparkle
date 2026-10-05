@@ -386,10 +386,16 @@ private:
         void DeleteResources();
 
         void PushResource(RHIResource *resource, bool should_lock = true);
+
+        void MoveTo(DeferredDeletion &other);
     };
 
     // resources that will be held until the frame finishes rendering. it is a ring buffer.
     std::vector<DeferredDeletion> deferred_deletion_;
+
+    // resources released outside a frame, which the previous frame or work submitted before the next frame may still
+    // use: the next frame holds them until it finishes rendering
+    DeferredDeletion deferred_deletion_outside_frame_;
 
     // tasks that will be run when the frame finishes rendering. it is a ring buffer.
     std::vector<std::vector<std::function<void(void)>>> end_of_render_tasks_;

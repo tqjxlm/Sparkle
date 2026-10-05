@@ -224,6 +224,7 @@ bool RHIContext::BeginFrame()
     is_deleting_deferred_resources_ = true;
     deferred_deletion_[frame_index_].DeleteResources();
     is_deleting_deferred_resources_ = false;
+    deferred_deletion_outside_frame_.MoveTo(deferred_deletion_[frame_index_]);
 
     for (auto &task : end_of_render_tasks_[frame_index_])
     {
@@ -307,7 +308,9 @@ void RHIContext::DeferResourceDeletion(RHIResource *resource)
     ASSERT(resource);
 
     // if we are in the middle of deleting deferred resources, do not lock because it will cause deadlock
-    deferred_deletion_[frame_index_].PushResource(resource, !is_deleting_deferred_resources_);
+    auto &deletion = frame_active_ || is_deleting_deferred_resources_ ? deferred_deletion_[frame_index_]
+                                                                      : deferred_deletion_outside_frame_;
+    deletion.PushResource(resource, !is_deleting_deferred_resources_);
 }
 
 void RHIContext::DeferredDeletion::DeleteResources()
@@ -357,6 +360,19 @@ void RHIContext::DeferredDeletion::PushResource(RHIResource *resource, bool shou
     }
 }
 
+void RHIContext::DeferredDeletion::MoveTo(DeferredDeletion &other)
+{
+    std::scoped_lock<std::mutex, std::mutex> lock(*mutex, *other.mutex);
+
+    other.resources.insert(other.resources.end(), resources.begin(), resources.end());
+    resources.clear();
+
+#ifndef NDEBUG
+    other.duplication_guard.merge(duplication_guard);
+    duplication_guard.clear();
+#endif
+}
+
 RHIContext::DeferredDeletion::DeferredDeletion() : mutex(std::make_unique<std::mutex>())
 {
 }
@@ -401,6 +417,7 @@ void RHIContext::FlushDeferredDeletions()
 
     is_deleting_deferred_resources_ = true;
 
+    deferred_deletion_outside_frame_.DeleteResources();
     deferred_deletion_.clear();
     deferred_deletion_.resize(max_frames_in_flight_);
 
