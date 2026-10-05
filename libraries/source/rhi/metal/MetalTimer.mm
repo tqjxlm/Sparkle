@@ -124,25 +124,23 @@ void MetalTimer::End(RHICommandContext &command_context)
 
     id<MTLCounterSampleBuffer> buffer = counter_sample_buffer_;
     const NSUInteger sample_count = sample_count_;
-    std::atomic<float> *time_slot = &resolved_time_ms_;
-    std::atomic<bool> *resolved = &resolved_;
-    uint64_t *previous = previous_samples_.data();
+    std::shared_ptr<ResolveState> state = resolve_state_;
     [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
       NSData *data = [buffer resolveCounterRange:NSMakeRange(0, sample_count)];
       if (data)
       {
           const auto *samples = static_cast<const MTLCounterResultTimestamp *>(data.bytes);
-          *time_slot = GetElapsedTimeMs(samples, previous, sample_count);
+          state->time_ms = GetElapsedTimeMs(samples, state->previous_samples.data(), sample_count);
           for (NSUInteger i = 0; i < sample_count; i++)
           {
-              previous[i] = samples[i].timestamp;
+              state->previous_samples[i] = samples[i].timestamp;
           }
       }
       else
       {
-          *time_slot = -1.f;
+          state->time_ms = -1.f;
       }
-      *resolved = true;
+      state->resolved = true;
     }];
 }
 
@@ -155,13 +153,13 @@ void MetalTimer::TryGetResult()
 
     ASSERT_EQUAL(status_, Status::WaitingForResult);
 
-    if (!resolved_)
+    if (!resolve_state_->resolved)
     {
         return;
     }
 
-    cached_time_ms_ = resolved_time_ms_;
-    resolved_ = false;
+    cached_time_ms_ = resolve_state_->time_ms;
+    resolve_state_->resolved = false;
     status_ = Status::Ready;
 }
 } // namespace sparkle

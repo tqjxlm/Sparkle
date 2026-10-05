@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <memory>
 
 namespace sparkle
 {
@@ -38,16 +39,23 @@ private:
     // a render pass samples the start and end of its vertex and fragment stages
     static constexpr NSUInteger MaxSampleCount = 4;
 
+    // what the resolving command buffer's completion writes, shared with its handler, which can run after the timer is
+    // gone
+    struct ResolveState
+    {
+        // the samples of the last resolve, which a stage that does not run leaves in the buffer
+        std::array<uint64_t, MaxSampleCount> previous_samples{};
+        std::atomic<bool> resolved = false;
+        std::atomic<float> time_ms = 0.f;
+    };
+
     id<MTLCounterSampleBuffer> counter_sample_buffer_ = nil;
     // the command buffer whose completion resolves the samples. every run in it writes the same samples, so they hold
     // its last run and one resolve serves them all
     __weak id<MTLCommandBuffer> resolving_command_buffer_ = nil;
     // samples of the attached pass: a start and an end per stage
     NSUInteger sample_count_ = 0;
-    // the samples of the last resolve, which a stage that does not run leaves in the buffer
-    std::array<uint64_t, MaxSampleCount> previous_samples_{};
-    std::atomic<bool> resolved_ = false;
-    std::atomic<float> resolved_time_ms_ = 0.f;
+    std::shared_ptr<ResolveState> resolve_state_ = std::make_shared<ResolveState>();
 };
 } // namespace sparkle
 
