@@ -566,8 +566,14 @@ void AppFramework::ResetInputEvents()
     }
 }
 
-void AppFramework::FrameBufferResizeCallback(int width, int height) const
+void AppFramework::FrameBufferResizeCallback(int width, int height)
 {
+    // Init validates the render config against the frame buffer it starts with
+    if (initialized_)
+    {
+        render_config_.FitToFrameBuffer(width, height);
+    }
+
     TaskManager::RunInRenderThread([this, width, height]() {
         if (render_framework_)
         {

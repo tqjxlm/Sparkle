@@ -169,6 +169,8 @@ private:
     Mat4 prev_view_projection_matrix_;
 
     float aspect_ratio_;
+    // the scene resolution the projection and the accumulated pixels belong to
+    Vector2UInt scene_resolution_ = Vector2UInt::Zero();
     float near_ = 0.1f;
     float far_ = 1000.f;
 

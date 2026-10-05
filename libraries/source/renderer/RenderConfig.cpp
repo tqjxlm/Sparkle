@@ -1,12 +1,12 @@
 #include "renderer/RenderConfig.h"
 
-#include "core/Logger.h"
-#include "rhi/RHI.h"
-#if FRAMEWORK_ANDROID || FRAMEWORK_IOS
-#include "application/NativeView.h"
-#endif
 #include "application/ConfigCollectionHelper.h"
 #include "application/InputManager.h"
+#include "application/NativeView.h"
+#include "core/Logger.h"
+#include "rhi/RHI.h"
+
+#include <cmath>
 
 namespace sparkle
 {
@@ -188,17 +188,39 @@ void RenderConfig::Validate()
 #if FRAMEWORK_ANDROID || FRAMEWORK_IOS
     if (view_)
     {
-        // for mobile platforms, it is always full-screen. we calculate width given height
-        // TODO(tqjxlm): full screen support for desktop platforms
         int back_buffer_width;
         int back_buffer_height;
         view_->GetFrameBufferSize(back_buffer_width, back_buffer_height);
-        const float aspect_ratio = static_cast<float>(back_buffer_width) / static_cast<float>(back_buffer_height);
-        image_width = static_cast<uint32_t>(static_cast<float>(image_height) * aspect_ratio);
-        config_width.Set(image_width);
-
-        Log(Info, "View size [{}, {}]", image_width, image_height);
+        FitToFrameBuffer(back_buffer_width, back_buffer_height);
     }
 #endif
+}
+
+void RenderConfig::FitToFrameBuffer(int width, int height)
+{
+    if (!view_ || width <= 0 || height <= 0)
+    {
+        return;
+    }
+
+#if FRAMEWORK_ANDROID || FRAMEWORK_IOS
+    const auto output_width = static_cast<uint32_t>(static_cast<float>(image_height) * static_cast<float>(width) /
+                                                    static_cast<float>(height));
+    const auto output_height = image_height;
+#else
+    const auto scale = view_->GetWindowScale();
+    const auto output_width = static_cast<uint32_t>(std::lround(static_cast<float>(width) / scale.x()));
+    const auto output_height = static_cast<uint32_t>(std::lround(static_cast<float>(height) / scale.y()));
+#endif
+
+    if (output_width == image_width && output_height == image_height)
+    {
+        return;
+    }
+
+    config_width.Set(output_width);
+    config_height.Set(output_height);
+
+    Log(Info, "View size [{}, {}]", image_width, image_height);
 }
 } // namespace sparkle

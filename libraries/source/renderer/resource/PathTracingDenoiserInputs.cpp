@@ -70,6 +70,16 @@ void PathTracingDenoiserInputs::EnsureAllocated(PixelFormat radiance_format)
     allocated_ = true;
 }
 
+void PathTracingDenoiserInputs::Resize(const Vector2UInt &size)
+{
+    size_ = size;
+    if (allocated_)
+    {
+        allocated_ = false;
+        EnsureAllocated(radiance_format_);
+    }
+}
+
 DenoiserInputs PathTracingDenoiserInputs::Import(RenderGraph &graph, RGTexture accumulated_radiance) const
 {
     ASSERT(allocated_);

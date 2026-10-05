@@ -22,9 +22,11 @@ public:
         return static_cast<uint32_t>(pipelines_.size());
     }
 
-    void AllocateResources(uint32_t width, uint32_t height, const PoolTexture *permanent, uint32_t permanent_count,
-                           const PoolTexture *transient, uint32_t transient_count, const uint32_t *samplers,
-                           uint32_t sampler_count, uint32_t constant_buffer_size) override;
+    void AllocateResources(const PoolTexture *permanent, uint32_t permanent_count, const PoolTexture *transient,
+                           uint32_t transient_count, const uint32_t *samplers, uint32_t sampler_count,
+                           uint32_t constant_buffer_size) override;
+
+    void ResizePools(uint32_t width, uint32_t height) override;
 
     void RunDispatches(RHICommandContext &command_context, const Dispatch *dispatches, uint32_t count) override;
 
@@ -44,6 +46,8 @@ private:
     id<MTLDevice> device_;
     MTLCompileOptions *compile_options_;
     std::vector<NrdPipeline> pipelines_;
+    std::vector<PoolTexture> permanent_requests_;
+    std::vector<PoolTexture> transient_requests_;
     std::vector<id<MTLTexture>> permanent_pool_;
     std::vector<id<MTLTexture>> transient_pool_;
     std::vector<id<MTLSamplerState>> samplers_;

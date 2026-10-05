@@ -25,6 +25,8 @@ public:
 
     void UpdateFrameData(const DenoiserFrameData &frame) override;
 
+    void Resize(const Vector2UInt &input_size, const Vector2UInt &output_size) override;
+
     [[nodiscard]] RGTexture AddTo(RenderGraph &graph, const DenoiserInputs &inputs) override;
 
 private:

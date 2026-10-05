@@ -87,17 +87,7 @@ void GPURenderer::InitRenderResources()
 {
     scene_render_proxy_->InitRenderResources(rhi_, render_config_);
 
-    scene_texture_ = rhi_->CreateImage(
-        {
-            .format = PixelFormat::RGBAFloat,
-            .width = resolution_.scene.x(),
-            .height = resolution_.scene.y(),
-            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
-            .memory_properties = RHIMemoryProperty::DeviceLocal,
-            .mip_levels = 1,
-            .msaa_samples = 1,
-        },
-        "Accumulator");
+    CreateAccumulator();
 
     denoiser_inputs_ = std::make_unique<PathTracingDenoiserInputs>(rhi_, resolution_.scene);
 
@@ -112,6 +102,39 @@ void GPURenderer::InitRenderResources()
         1000.f / render_config_.target_framerate / static_cast<float>(render_config_.sample_per_pixel);
 
     compute_pass_ = rhi_->CreateComputePass("GPURendererComputePass", true);
+}
+
+void GPURenderer::CreateAccumulator()
+{
+    scene_texture_ = rhi_->CreateImage(
+        {
+            .format = PixelFormat::RGBAFloat,
+            .width = resolution_.scene.x(),
+            .height = resolution_.scene.y(),
+            .usages = RHIImage::ImageUsage::Texture | RHIImage::ImageUsage::UAV | RHIImage::ImageUsage::ColorAttachment,
+            .memory_properties = RHIMemoryProperty::DeviceLocal,
+            .mip_levels = 1,
+            .msaa_samples = 1,
+        },
+        "Accumulator");
+}
+
+void GPURenderer::OnResize()
+{
+    CreateAccumulator();
+    displayed_image_ = scene_texture_;
+
+    denoiser_inputs_->Resize(resolution_.scene);
+
+    // a provider that could not serve the previous extents is tried again at the new ones
+    for (auto &slot : denoiser_slots_)
+    {
+        if (slot.denoiser)
+        {
+            slot.denoiser->Resize(resolution_.scene, resolution_.output);
+        }
+        slot.failed = slot.denoiser && !slot.denoiser->IsReady();
+    }
 }
 
 RGTexture GPURenderer::BuildGraph(RenderGraph &graph)

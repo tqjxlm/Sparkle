@@ -48,6 +48,66 @@
         }
     },
     {
+        "name": "forward_resize",
+        "test_case": "resize",
+        "description": "The forward pipeline starts at 640x360 and render_scale 0.5; a frame buffer resize to 1280x720 and render_scale 1 at runtime resize the renderer without recreating it, and the frame FLIP-matches the full-resolution ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward", "--width", "640", "--height", "360", "--render_scale", "0.5"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "forward"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "deferred_resize",
+        "test_case": "resize",
+        "description": "The deferred pipeline resized at runtime from 640x360 at render_scale 0.5 to 1280x720 at render_scale 1 through a frame buffer resize, without recreating the renderer, FLIP-compared against the full-resolution ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred", "--width", "640", "--height", "360", "--render_scale", "0.5"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "deferred", "--flip_threshold", "0.03"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "gpu_resize_64spp",
+        "test_case": "resize",
+        "description": "The gpu path-tracing pipeline with the automatic denoiser resized at runtime from 640x360 at render_scale 0.5 to 1280x720 at render_scale 1, without recreating the renderer: the accumulator, the denoiser inputs and the denoiser resize in place, and the frame after 64 samples per pixel FLIP-matches the converged ground truth within the 64 spp noise allowance.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--width", "640", "--height", "360", "--render_scale", "0.5", "--max_spp", "64", "--denoiser", "auto"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "gpu", "--flip_threshold", "0.1"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "cpu_resize_64spp",
+        "test_case": "resize",
+        "description": "The cpu path-tracing pipeline resized at runtime from 640x360 at render_scale 0.5 to 1280x720 at render_scale 1, without recreating the renderer, FLIP-compared after 64 samples per pixel against the converged ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "cpu", "--width", "640", "--height", "360", "--render_scale", "0.5", "--max_spp", "64"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "cpu", "--flip_threshold", "0.1"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
+        "name": "forward_render_scale_change",
+        "test_case": "render_scale_change",
+        "description": "The forward pipeline switched from render_scale 1 to 0.5 at runtime without recreating the renderer; the output stays at full resolution and FLIP-matches the ground truth within the upsampling-softness allowance.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "forward", "--flip_threshold", "0.05"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
         "name": "forward_render_static_sampled",
         "test_case": "screenshot",
         "description": "The forward still frame with render_graph_pixel_local off, so tone mapping samples the scene color after the physical pass that writes it instead of reading it pixel-locally, FLIP-compared against the same ground truth.",

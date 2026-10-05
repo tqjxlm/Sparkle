@@ -84,13 +84,13 @@ public:
         debug_point_.y() = y < 0 ? UINT_MAX : static_cast<unsigned>(y);
     }
 
-    [[nodiscard]] const RenderResolution &GetResolution() const
-    {
-        return resolution_;
-    }
-
 protected:
     virtual void Update() = 0;
+
+    // reallocates the renderer's persistent resources for `resolution_`, which changed since the last frame
+    virtual void OnResize()
+    {
+    }
 
     // adds the frame's passes before the post chain, returning the texture they leave the scene in
     [[nodiscard]] virtual RGTexture BuildGraph(RenderGraph &graph) = 0;

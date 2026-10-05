@@ -18,6 +18,9 @@ public:
     void BindDummies();
     void EnsureAllocated(PixelFormat radiance_format);
 
+    // reallocates the allocated textures at `size`
+    void Resize(const Vector2UInt &size);
+
     [[nodiscard]] bool IsAllocated() const
     {
         return allocated_;
