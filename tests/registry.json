@@ -7,7 +7,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "forward"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "forward"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -19,7 +19,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "deferred"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "deferred"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -31,7 +31,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "deferred", "--flip_threshold", "0.03"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "deferred", "--flip_threshold", "0.03"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -43,7 +43,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "forward", "--flip_threshold", "0.05"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "forward", "--flip_threshold", "0.05"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -55,7 +55,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "forward"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "forward"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -67,7 +67,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "deferred", "--flip_threshold", "0.03"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "deferred", "--flip_threshold", "0.03"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -79,7 +79,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "gpu", "--flip_threshold", "0.1"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "gpu", "--flip_threshold", "0.1"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -91,7 +91,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "cpu", "--flip_threshold", "0.1"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "cpu", "--flip_threshold", "0.1"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -103,7 +103,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "forward", "--flip_threshold", "0.05"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "forward", "--flip_threshold", "0.05"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -115,7 +115,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "forward"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "forward"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -127,7 +127,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "deferred"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "deferred"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -139,7 +139,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "gpu"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "gpu"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -151,7 +151,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "cpu"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "cpu"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -163,7 +163,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "cpu", "--flip_threshold", "0.1"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "cpu", "--flip_threshold", "0.1"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },
@@ -175,7 +175,7 @@
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
             "script": "tests/screenshot/static_render_test.py",
-            "args": ["--framework", "{framework}", "--pipeline", "gpu", "--flip_threshold", "0.1"],
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "gpu", "--flip_threshold", "0.1"],
             "scene_args": ["--scene", "{scene_stem}"]
         }
     },

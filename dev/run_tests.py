@@ -104,9 +104,10 @@ def test_steps(cases, framework, config, software, scene,
     steps = []
 
     for case in cases:
-        app_args = expand(case.get("app_args", []), context)
+        case_context = {**context, "name": case["name"]}
+        app_args = expand(case.get("app_args", []), case_context)
         if scene:
-            app_args += expand(case.get("scene_args", []), context)
+            app_args += expand(case.get("scene_args", []), case_context)
         app_args += common_args + list(other_args)
         steps.append((
             case["name"],
@@ -117,9 +118,9 @@ def test_steps(cases, framework, config, software, scene,
         evaluator = case.get("evaluator")
         if evaluator:
             command = [test_python, evaluator["script"]]
-            command += expand(evaluator["args"], context)
+            command += expand(evaluator["args"], case_context)
             if scene:
-                command += expand(evaluator.get("scene_args", []), context)
+                command += expand(evaluator.get("scene_args", []), case_context)
             steps.append((f"{case['name']} (compare)", command))
 
     return steps

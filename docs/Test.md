@@ -32,7 +32,7 @@ How to compare a render against the ground truth — signed per-pixel diffs, 1:1
 A case carries:
 
 * `test_case`: the C++ `TestCase` it runs.
-* `app_args` / `scene_args`: cvar arguments for the app run; `scene_args` apply only when the suite is given `--scene`. `{framework}`, `{scene}` and `{scene_stem}` expand at run time.
+* `app_args` / `scene_args`: cvar arguments for the app run; `scene_args` apply only when the suite is given `--scene`. `{name}` (the case name), `{framework}`, `{scene}` and `{scene_stem}` expand at run time, also in evaluator arguments.
 * `evaluator`: an optional Python script (with its own `args` / `scene_args`) that judges the app output afterwards.
 * `recooks`: marks a case whose deliberate runtime cook would trip the suite's cook gate; coverage runs drop it, so it runs only via `--case`.
 

@@ -26,6 +26,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--framework", required=True,
                         choices=SUPPORTED_FRAMEWORKS)
+    parser.add_argument("--case", required=True,
+                        help="registry case name; names the screenshot kept under captures")
     parser.add_argument("--pipeline", default="forward")
     parser.add_argument("--scene", default=DEFAULT_SCENE)
     parser.add_argument("--flip_threshold", type=float, default=FLIP_THRESHOLD,
@@ -38,7 +40,7 @@ def main():
     try:
         screenshot = find_screenshot(args.framework)
         shutil.copy(screenshot, os.path.join(
-            get_captures_dir(args.framework), f"{args.scene}_{args.pipeline}_capture.png"))
+            get_captures_dir(args.framework), f"{args.case}_capture.png"))
         print("Downloading ground truth...", flush=True)
         ground_truth = download_ground_truth(
             args.framework, args.scene, args.pipeline)
