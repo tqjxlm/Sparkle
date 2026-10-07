@@ -373,6 +373,15 @@ public:
 
     void UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data) override;
 
+    // records the copy of an upload, every subresource from staging, between the transitions around it
+    void RecordUploadCopy(RHICommandContext &command_context, const RHIBuffer *staging);
+
+    // lets an upload replay keep the image alive; see VulkanContext::ScheduleUploadReplay
+    void SetSelf(RHIResourceWeakRef<RHIImage> self)
+    {
+        self_ = std::move(self);
+    }
+
     void CopyToBuffer(VulkanCommandContext &command_context, const RHIBuffer *buffer) const;
 
     void BlitToImage(VulkanCommandContext &command_context, const RHIImage *image,
@@ -411,6 +420,10 @@ public:
 
 private:
     void CreateImage();
+
+    void ScheduleUploadReplay(const RHICommandContext &command_context, const RHIResourceRef<RHIBuffer> &staging);
+
+    RHIResourceWeakRef<RHIImage> self_;
 
     bool external_ = false;
     VulkanImageAttribute vulkan_attributes_;
