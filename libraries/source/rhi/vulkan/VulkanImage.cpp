@@ -59,13 +59,8 @@ void VulkanImage::Upload(RHICommandContext &command_context, const uint8_t *data
     // immediate and blocking upload
     staging_buffer->UploadImmediate(data);
 
-    Transition(command_context, {.target_layout = RHIImageLayout::TransferDst,
-                                 .after_stage = RHIPipelineStage::Top,
-                                 .before_stage = RHIPipelineStage::Transfer});
-    command_context.CopyBufferToImage(staging_buffer.get(), this);
-    Transition(command_context, {.target_layout = RHIImageLayout::Read,
-                                 .after_stage = RHIPipelineStage::Transfer,
-                                 .before_stage = RHIPipelineStage::Bottom});
+    RecordUploadCopy(command_context, staging_buffer.get());
+    ScheduleUploadReplay(command_context, staging_buffer);
 }
 
 void VulkanImage::UploadFaces(RHICommandContext &command_context, std::array<const uint8_t *, 6> data)
@@ -90,13 +85,31 @@ void VulkanImage::UploadFaces(RHICommandContext &command_context, std::array<con
     }
     staging_buffer->UnLock();
 
+    RecordUploadCopy(command_context, staging_buffer.get());
+    ScheduleUploadReplay(command_context, staging_buffer);
+}
+
+void VulkanImage::RecordUploadCopy(RHICommandContext &command_context, const RHIBuffer *staging)
+{
     Transition(command_context, {.target_layout = RHIImageLayout::TransferDst,
                                  .after_stage = RHIPipelineStage::Top,
                                  .before_stage = RHIPipelineStage::Transfer});
-    command_context.CopyBufferToImage(staging_buffer.get(), this);
+    command_context.CopyBufferToImage(staging, this);
     Transition(command_context, {.target_layout = RHIImageLayout::Read,
                                  .after_stage = RHIPipelineStage::Transfer,
                                  .before_stage = RHIPipelineStage::Bottom});
+}
+
+void VulkanImage::ScheduleUploadReplay(const RHICommandContext &command_context,
+                                       const RHIResourceRef<RHIBuffer> &staging)
+{
+    constexpr auto WritableUsages = ImageUsage::UAV | ImageUsage::ColorAttachment | ImageUsage::DepthStencilAttachment |
+                                    ImageUsage::InputAttachment;
+    if (!context->ReplaysUploads() || !context->RecordsFrame(command_context) || (attributes_.usages & WritableUsages))
+    {
+        return;
+    }
+    context->ScheduleUploadReplay(self_.lock(), staging);
 }
 
 void VulkanImage::BlitToImage(VulkanCommandContext &command_context, const RHIImage *image,

@@ -5,6 +5,8 @@
 #include "VulkanCommandBuffer.h"
 #include "VulkanCommandContext.h"
 #include "VulkanMemory.h"
+#include "rhi/RHIBuffer.h"
+#include "rhi/RHIImage.h"
 
 #include <atomic>
 #include <optional>
@@ -120,6 +122,23 @@ public:
         return compressed_image_barriers_need_sync1_;
     }
 
+    // see RHIConfig::UploadReplay
+    [[nodiscard]] bool ReplaysUploads() const
+    {
+        return replay_uploads_;
+    }
+
+    [[nodiscard]] bool RecordsFrame(const RHICommandContext &command_context) const
+    {
+        return &command_context == &frame_command_context_;
+    }
+
+    // copies staging into image once more in a submission of its own after the frame's
+    void ScheduleUploadReplay(RHIResourceRef<RHIImage> image, RHIResourceRef<RHIBuffer> staging)
+    {
+        upload_replays_.push_back({.image = std::move(image), .staging = std::move(staging)});
+    }
+
     // of the graphics queue; 0 when it cannot write timestamps
     [[nodiscard]] uint32_t GetTimestampValidBits() const
     {
@@ -187,6 +206,8 @@ private:
 
     void BeginFrameCommandBuffer(unsigned frame_index);
     VkCommandBuffer EndFrameCommandBuffer();
+    // submitted right after the frame's own submission
+    void SubmitUploadReplays();
     void ReleaseFinishedCommandBufferResources();
 
     [[nodiscard]] VkPresentModeKHR ChooseSwapPresentMode(
@@ -248,6 +269,7 @@ private:
     bool supports_dynamic_rendering_local_read_ = false;
     bool keeps_memoryless_across_pixel_local_barrier_ = true;
     bool compressed_image_barriers_need_sync1_ = false;
+    bool replay_uploads_ = false;
     uint32_t timestamp_valid_bits_ = 0;
 
     VulkanRHI *rhi_;
@@ -255,6 +277,16 @@ private:
     std::optional<OneShotCommandBufferScope> temporary_command_buffer_;
 
     std::queue<OneShotCommandBufferScope::CommandBufferResources> pending_command_buffer_resources_;
+
+    struct UploadReplay
+    {
+        RHIResourceRef<RHIImage> image;
+        RHIResourceRef<RHIBuffer> staging;
+    };
+
+    std::vector<UploadReplay> upload_replays_;
+    // released with the next frame, whose fence also covers the replays submitted before it
+    std::vector<UploadReplay> submitted_upload_replays_;
 };
 
 // the life cycle is managed by VulkanRHI

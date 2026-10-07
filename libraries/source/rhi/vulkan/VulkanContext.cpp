@@ -6,12 +6,14 @@
 #include "VulkanCommon.h"
 #include "VulkanDescriptorSetManager.h"
 #include "VulkanFunctionLoader.h"
+#include "VulkanImage.h"
 #include "VulkanSwapChain.h"
 #include "application/NativeView.h"
 
 #include <algorithm>
 #include <format>
 #include <unordered_set>
+#include <utility>
 
 namespace sparkle
 {
@@ -336,6 +338,9 @@ void VulkanContext::Cleanup()
 void VulkanContext::ReleaseRenderResources()
 {
     ASSERT_F(command_context_ != &frame_command_context_, "render resources are released inside a frame");
+    ASSERT(upload_replays_.empty());
+    // the device is idle
+    submitted_upload_replays_.clear();
 
     if (!command_buffers_.empty())
     {
@@ -511,6 +516,25 @@ VkCommandBuffer VulkanContext::EndFrameCommandBuffer()
     return command_buffer;
 }
 
+void VulkanContext::SubmitUploadReplays()
+{
+    submitted_upload_replays_.clear();
+    if (upload_replays_.empty())
+    {
+        return;
+    }
+
+    {
+        OneShotCommandBufferScope scope;
+        for (const auto &replay : upload_replays_)
+        {
+            RHICast<VulkanImage>(replay.image.get())->RecordUploadCopy(scope.GetCommandContext(), replay.staging.get());
+        }
+    }
+    Log(Info, "copied {} uploads again after their frame", upload_replays_.size());
+    submitted_upload_replays_ = std::exchange(upload_replays_, {});
+}
+
 void VulkanContext::ReleaseFinishedCommandBufferResources()
 {
     while (!pending_command_buffer_resources_.empty() && pending_command_buffer_resources_.front().Finished())
@@ -533,6 +557,7 @@ VkResult VulkanContext::EndFrame()
         submit_info.pCommandBuffers = &command_buffer;
 
         CHECK_VK_ERROR(vkQueueSubmit(graphics_queue_, 1, &submit_info, queue_finish_fences_[frame_index]));
+        SubmitUploadReplays();
 
         ReleaseFinishedCommandBufferResources();
 
@@ -569,6 +594,7 @@ VkResult VulkanContext::EndFrame()
 
     vkResetFences(device_, 1, &queue_finish_fences_[frame_index]);
     CHECK_VK_ERROR(vkQueueSubmit(graphics_queue_, 1, &submit_info, queue_finish_fences_[frame_index]));
+    SubmitUploadReplays();
 
     VkPresentInfoKHR present_info{};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -925,6 +951,17 @@ void VulkanContext::QueryOptionalDeviceFeatures()
     device_properties2.pNext = &driver_properties;
     vkGetPhysicalDeviceProperties2(physical_device_, &device_properties2);
     keeps_memoryless_across_pixel_local_barrier_ = driver_properties.driverID != VK_DRIVER_ID_MOLTENVK;
+
+    // MoltenVK on the Apple Paravirtual device (hosted macOS CI runners) can lose a texture uploaded in the frame that
+    // creates it, from that frame's first render pass on; a copy submitted after that frame is kept
+    const auto upload_replay = rhi_->GetConfig().upload_replay;
+    replay_uploads_ = upload_replay == RHIConfig::UploadReplay::On ||
+                      (upload_replay == RHIConfig::UploadReplay::Auto &&
+                       std::string_view(device_properties.deviceName) == "Apple Paravirtual device");
+    if (replay_uploads_)
+    {
+        Log(Info, "uploads into new read-only textures are copied again after their frame");
+    }
 
     supports_astc_hdr_ = QueryDeviceFeatures<VkPhysicalDeviceVulkan13Features>(
                              physical_device_, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)

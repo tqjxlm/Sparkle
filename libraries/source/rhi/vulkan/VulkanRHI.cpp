@@ -373,7 +373,9 @@ RHICommandContext *VulkanRHI::GetCommandContextInternal()
 
 RHIResourceRef<RHIImage> VulkanRHI::CreateImage(const RHIImage::Attribute &attributes, const std::string &name)
 {
-    return CreateResource<VulkanImage>(attributes, VK_FORMAT_UNDEFINED, name);
+    auto image = CreateResource<VulkanImage>(attributes, VK_FORMAT_UNDEFINED, name);
+    image->SetSelf(RHIResourceWeakRef<VulkanImage>(image));
+    return image;
 }
 
 RHIResourceRef<RHIImageView> VulkanRHI::CreateImageView(RHIImage *image, const RHIImageView::Attribute &attribute)
