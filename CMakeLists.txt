@@ -1,9 +1,13 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.30)
 project(sparkle)
 
 # ------------------ c++ configuration ------------------
 
 set(CMAKE_CXX_STANDARD 20)
+
+# no first-party source imports a named module; dependencies that ship modules declare them in
+# CXX_MODULES file sets, which are scanned regardless
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # required by clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

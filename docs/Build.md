@@ -38,7 +38,7 @@ These libraries should be installed via an installer or package manager (apt, br
   sudo apt install libglfw3-dev # Linux
   ```
 
-* **CMake**: 3.24+
+* **CMake**: 3.30+
 
   ``` shell
   brew install cmake # MacOS
