@@ -56,7 +56,7 @@ def stem_of(blob_name, permutation):
 def keep(blob_name, permutation, prefixes, signal):
     if not any(blob_name.startswith(p) for p in prefixes):
         return False
-    return "NRD_SIGNAL=" not in permutation or f"NRD_SIGNAL={signal}" in permutation
+    return "NRD_SIGNAL=" not in permutation or f"NRD_SIGNAL=NRD_SIGNAL_{signal}" in permutation.split()
 
 
 def nrd_version(nrd_header):

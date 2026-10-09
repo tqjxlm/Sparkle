@@ -279,7 +279,7 @@ if(IOS)
         shadermake
         DOWNLOAD_EXTRACT_TIMESTAMP 1
         DOWNLOAD_NO_PROGRESS 1
-        URL https://github.com/NVIDIA-RTX/ShaderMake/archive/18f5a344e7ca8fa65daaf079d07bc8ce38453e05.zip
+        URL https://github.com/NVIDIA-RTX/ShaderMake/archive/3f01623a76b092ac127d2debd79a672f55d77665.zip
     )
 
     set(SHADERMAKE_HOST_BUILD_DIR ${CMAKE_BINARY_DIR}/shadermake_host)
