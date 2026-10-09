@@ -166,14 +166,14 @@ set(MI_BUILD_OBJECT ON)
 set(MI_BUILD_STATIC OFF)
 set(MI_BUILD_TESTS OFF)
 set(MI_OVERRIDE ON)
-if (WIN32)
-    set(MI_USE_CXX ON)
-endif()
 if (ANDROID)
-    set(MI_LOCAL_DYNAMIC_TLS ON)
+    set(MI_TLS_MODEL LOCAL_DYNAMIC CACHE STRING "" FORCE)
 endif()
 add_subdirectory(mimalloc)
 
+# mimalloc's copy of the object file depends on mimalloc-static, which MI_BUILD_STATIC=OFF leaves
+# undefined; sparkle links mimalloc-obj directly and never needs the copy
+set_target_properties(mimalloc-obj-target PROPERTIES EXCLUDE_FROM_ALL ON)
 suppress_warnings(mimalloc-obj)
 
 target_link_libraries(sparkle_thirdparty PUBLIC mimalloc-obj)
