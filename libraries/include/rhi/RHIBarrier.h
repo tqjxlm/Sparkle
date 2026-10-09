@@ -21,7 +21,6 @@ enum class RHIImageLayout : uint8_t
     DepthStencilOutput,
     TransferSrc,
     TransferDst,
-    PreInitialized,
     Present,
 };
 
