@@ -5,7 +5,7 @@ inputs:
   mesa-version:
     description: "Mesa version to install (windows only; linux uses the distribution package)"
     required: false
-    default: "25.3.5"
+    default: "26.2.4"
 
 runs:
   using: "composite"
