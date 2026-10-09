@@ -212,7 +212,7 @@ The pipeline is three stages, selected with `--stage` (repeatable) and run in ca
 * `--cook_targets=<a+b+...>` - Cook targets the cook stage produces content images for (default: the built framework's own target). Known targets: `android`, `ios`, `macos`, `macos-glfw`, `windows-glfw`, `linux-glfw`.
 * `--generate_only` - Generate IDE project files without building.
 * `--clangd` - Generate compile_commands.json for clangd intellisense support.
-* `--profile` - Enable Tracy profiler.
+* `--profile` - Enable the Tracy profiler client. Connect to it with the [Tracy](https://github.com/wolfpld/tracy/releases) profiler GUI of the same release as the `thirdparty/tracy` submodule: the network protocol changes between releases, and a mismatched GUI refuses the connection.
 * `--strip_test` - Disable TestCase support (enabled by default). See [Test.md](Test.md) for details.
 * `--asan` - Enable AddressSanitizer.
 * `--clean` - Clean output directory before configure, which resolves some build errors.
