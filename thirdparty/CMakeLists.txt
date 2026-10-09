@@ -311,6 +311,10 @@ endif()
 
 add_subdirectory(NRD)
 suppress_warnings(NRD)
+# NRD passes -mssse3 to clang but not to clang-cl, and its MathLib needs ssse3 intrinsics
+if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|arm64|aarch64")
+    target_compile_options(NRD PRIVATE -mssse3)
+endif()
 target_link_libraries(sparkle_thirdparty PUBLIC NRD)
 target_include_directories(sparkle_thirdparty SYSTEM PUBLIC NRD/Include)
 
