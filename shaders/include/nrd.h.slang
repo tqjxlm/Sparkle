@@ -1,7 +1,7 @@
 #ifndef NRD_COMMON_H_
 #define NRD_COMMON_H_
 
-// Exact replicas of the NRD v4.17.3 front/back-end encoding math (thirdparty/NRD/Shaders/NRD.hlsli).
+// Exact replicas of the NRD v4.18.0 front/back-end encoding math (thirdparty/NRD/Shaders/NRD.hlsli).
 // Must stay in sync with the pinned NRD submodule: the packed values are decoded by NRD's own shaders.
 // Normal encoding is R10G10B10A2_UNORM (NRD_NORMAL_ENCODING=2 in thirdparty/CMakeLists.txt):
 // oct-packed normal + linear roughness, see NrdPackNormalRoughness below.
