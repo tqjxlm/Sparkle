@@ -20,7 +20,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
-MESA_VERSION = "25.3.5"
+MESA_VERSION = "26.2.4"
 MESA_CACHE_DIR = os.path.join(PROJECT_ROOT, "build_cache", "mesa")
 
 # where distributions drop their Vulkan driver manifests
