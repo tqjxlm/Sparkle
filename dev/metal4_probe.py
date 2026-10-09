@@ -38,10 +38,8 @@ def main():
     subprocess.run(["xcodebuild", "-version"], check=True)
 
     arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
-    macos = build("macosx", f"{arch}-apple-macos14.2")
+    passed = run("macOS", [build("macosx", f"{arch}-apple-macos14.2")])
     simulator = build("iphonesimulator", f"{arch}-apple-ios18.0-simulator")
-
-    passed = run("macOS", [macos])
     passed &= run("iOS Simulator", ["xcrun", "simctl", "spawn", ensure_simulator(), simulator])
     return 0 if passed else 1
 

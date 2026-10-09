@@ -11,27 +11,34 @@ static NSString *const KernelSource = @"kernel void probe(device uint *out [[buf
                                        "                  uint id [[thread_position_in_grid]])"
                                        "{ out[id] = id * 3 + 1; }";
 
-static void PrintFamilies(id<MTLDevice> device)
-{
-    const struct
-    {
-        const char *name;
-        MTLGPUFamily family;
-    } families[] = {
-        {"Apple7", MTLGPUFamilyApple7},   {"Apple8", MTLGPUFamilyApple8},
-        {"Apple9", MTLGPUFamilyApple9},   {"Metal3", MTLGPUFamilyMetal3},
-#if __has_include(<Metal/MTL4CommandQueue.h>)
-        {"Apple10", MTLGPUFamilyApple10}, {"Metal4", MTLGPUFamilyMetal4},
+// the iOS Simulator SDK ships the Metal 4 headers but declares none of their API
+#if __has_include(<Metal/MTL4CommandQueue.h>) && !TARGET_OS_SIMULATOR
+#define METAL4_SDK 1
+#else
+#define METAL4_SDK 0
 #endif
-    };
 
-    for (const auto &entry : families)
-    {
-        printf("family %s: %s\n", entry.name, [device supportsFamily:entry.family] ? "yes" : "no");
-    }
+static void PrintFamily(id<MTLDevice> device, const char *name, MTLGPUFamily family)
+{
+    printf("family %s: %s\n", name, [device supportsFamily:family] ? "yes" : "no");
 }
 
-#if __has_include(<Metal/MTL4CommandQueue.h>)
+static void PrintFamilies(id<MTLDevice> device)
+{
+    PrintFamily(device, "Apple7", MTLGPUFamilyApple7);
+    PrintFamily(device, "Apple8", MTLGPUFamilyApple8);
+    PrintFamily(device, "Apple9", MTLGPUFamilyApple9);
+    PrintFamily(device, "Metal3", MTLGPUFamilyMetal3);
+#if METAL4_SDK
+    if (@available(macOS 26.0, iOS 26.0, *))
+    {
+        PrintFamily(device, "Apple10", MTLGPUFamilyApple10);
+        PrintFamily(device, "Metal4", MTLGPUFamilyMetal4);
+    }
+#endif
+}
+
+#if METAL4_SDK
 API_AVAILABLE(macos(26.0), ios(26.0)) static NSString *RunMetal4Workload(id<MTLDevice> device)
 {
     id<MTL4CommandQueue> queue = [device newMTL4CommandQueue];
@@ -152,7 +159,7 @@ int main()
         printf("ray tracing: %s\n", device.supportsRaytracing ? "yes" : "no");
         PrintFamilies(device);
 
-#if __has_include(<Metal/MTL4CommandQueue.h>)
+#if METAL4_SDK
         if (@available(macOS 26.0, iOS 26.0, *))
         {
             NSString *failure = RunMetal4Workload(device);
@@ -162,7 +169,7 @@ int main()
         }
         printf("RESULT: OS older than 26, no Metal 4\n");
 #else
-        printf("RESULT: SDK has no Metal 4 headers\n");
+        printf("RESULT: SDK declares no Metal 4 API\n");
 #endif
         return 1;
     }
