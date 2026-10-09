@@ -53,7 +53,7 @@ def load_prerequisites_versions():
 def install_cmake():
     """Install CMake automatically based on platform."""
     prerequisites = load_prerequisites_versions()
-    cmake_version = prerequisites.get("cmake", "3.30.5")
+    cmake_version = prerequisites.get("cmake", "4.1.2")
 
     os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
 
