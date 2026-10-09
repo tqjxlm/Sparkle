@@ -24,7 +24,7 @@ These libraries should be installed via an installer or package manager (apt, br
   apt # Linux
   ```
 
-* **Vulkan SDK**: 1.4.350.0+. It provides the Vulkan loader (and MoltenVK on macOS) that glfw builds link, the validation layer and shader tools. No build compiles against its headers: every Vulkan framework (glfw and android) uses the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git) submodule, pinned to the SDK version in [prerequisites.json](../prerequisites.json), so an installed SDK or NDK never changes the Vulkan API a build sees. Bump both together.
+* **Vulkan SDK**: 1.4.363.0+. It provides the Vulkan loader (and MoltenVK on macOS) that glfw builds link, the validation layer and shader tools. No build compiles against its headers: every Vulkan framework (glfw and android) uses the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git) submodule, pinned to the SDK version in [prerequisites.json](../prerequisites.json), so an installed SDK or NDK never changes the Vulkan API a build sees. Bump both together.
 
   ``` shell
   https://vulkan.lunarg.com/sdk/home
@@ -95,7 +95,7 @@ Otherwise, you need to specify them via environment variables. See the table bel
 
 | variable     | example                                                      | valid for        | auto-installable                |
 | ------------ | ------------------------------------------------------------ | ---------------- | ------------------------------- |
-| VULKAN_SDK   | /Users/username/VulkanSDK/1.4.350.0                          | all              | yes (requires admin on windows) |
+| VULKAN_SDK   | /Users/username/VulkanSDK/1.4.363.0                          | all              | yes (requires admin on windows) |
 | CMAKE_PATH   | /opt/homebrew/bin/cmake                                      | all              | yes                             |
 | VCPKG_PATH   | D:/SDKs/vcpkg                                                | all windows      | yes                             |
 | LLVM         | /opt/homebrew/opt/llvm                                       | non-windows glfw | yes                             |
@@ -114,47 +114,47 @@ ISPC compiles the block encoder kernels of the cook. Only the frameworks whose b
 
 ``` shell
 # make a GLFW Windows release build with clang-cl toolchain
-$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.350.0'
+$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.363.0'
 $env:VCPKG_PATH='D:/SDKs/vcpkg'
 python3 build.py --framework glfw --config Release
 ```
 
 ``` shell
 # make a GLFW MacOS debug build with llvm toolchain
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.350.0
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
 python3 build.py --framework glfw
 ```
 
 ``` shell
 # generate GLFW Visual Studio solution with msvc toolchain, without building
-$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.350.0'
+$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.363.0'
 $env:VCPKG_PATH='D:/SDKs/vcpkg'
 python3 build.py --framework glfw --generate_only
 ```
 
 ``` shell
 # make an Android APK debug apk and run on a connected device
-$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.350.0'
+$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.363.0'
 $env:ANDROID_HOME='D:/SDKs/AndroidSDK'
 python3 run.py --framework android
 ```
 
 ``` shell
 # generate a MacOS Xcode project and build in debug mode
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.350.0
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
 python3 build.py --framework macos
 ```
 
 ``` shell
 # generate an iOS Xcode project without building
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.350.0
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
 export APPLE_DEVELOPER_TEAM_ID=ABC123DEF4
 python3 build.py --framework ios --apple_auto_sign --generate_only
 ```
 
 ``` shell
 # make an iOS release build and run on a connected device in ray tracing mode
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.350.0
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
 export APPLE_DEVELOPER_TEAM_ID=ABC123DEF4
 python3 run.py --framework ios --apple_auto_sign --pipeline gpu
 ```
