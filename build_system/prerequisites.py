@@ -268,7 +268,7 @@ def install_vulkan_sdk(build_cache_dir):
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
     prerequisites = load_prerequisites_versions()
-    latest_version = prerequisites.get("VulkanSDK", "1.4.350.0")
+    latest_version = prerequisites.get("VulkanSDK", "1.4.363.0")
     print(f"Use Vulkan SDK version: {latest_version}")
 
     vulkan_sdk_path = os.path.join(
@@ -859,11 +859,12 @@ def install_glfw():
 def setup_android_validation(script_dir):
     """Setup Android Vulkan validation layer binaries with version from prerequisites.json."""
     prerequisites = load_prerequisites_versions()
-    vulkan_version = prerequisites.get("VulkanSDK", "1.4.350.0")
+    vulkan_version = prerequisites.get("VulkanSDK", "1.4.363.0")
 
     android_dir = script_dir
     app_jni_dir = os.path.join(android_dir, "app", "src", "main", "jniLibs")
-    zip_path = os.path.join(android_dir, "android-validation-binaries.zip")
+    zip_path = os.path.join(
+        android_dir, f"android-validation-binaries-{vulkan_version}.zip")
     url = f"https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/download/vulkan-sdk-{vulkan_version}/android-binaries-{vulkan_version}.zip"
 
     if os.path.exists(zip_path):
