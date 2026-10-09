@@ -447,7 +447,7 @@ void RHIContext::ReleaseRenderResources()
 RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute attribute)
 {
     // we don't care about the content of a dummy texture. it is just a place holder.
-    attribute.initial_layout = RHIImageLayout::PreInitialized;
+    attribute.initial_layout = RHIImageLayout::Undefined;
     attribute.width = attribute.height = 1;
 
     auto hash = attribute.GetHashForShader();

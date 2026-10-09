@@ -178,8 +178,6 @@ inline VkImageLayout GetVulkanImageLayout(RHIImageLayout rhi_layout)
         return VK_IMAGE_LAYOUT_UNDEFINED;
     case RHIImageLayout::General:
         return VK_IMAGE_LAYOUT_GENERAL;
-    case RHIImageLayout::PreInitialized:
-        return VK_IMAGE_LAYOUT_PREINITIALIZED;
     case RHIImageLayout::Read:
         return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     case RHIImageLayout::StorageWrite:
