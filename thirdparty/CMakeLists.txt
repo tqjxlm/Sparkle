@@ -108,7 +108,7 @@ if(DEFINED ENV{ISPC})
             -o ${ISPC_OBJECT}
             -h ${ISPC_GENERATED_DIR}/kernel_ispc.h
             -O2 --arch=${ISPC_ARCH} --target=${ISPC_TARGETS} --opt=fast-math ${ISPC_PIC_FLAG}
-        DEPENDS ${ISPC_TEXCOMP_DIR}/kernel.ispc
+        DEPENDS ${ISPC_TEXCOMP_DIR}/kernel.ispc ${ISPC}
         COMMENT "Compiling ispc_texcomp kernels for ${ISPC_ARCH} (${ISPC_TARGETS})"
         VERBATIM)
 

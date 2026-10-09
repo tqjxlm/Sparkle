@@ -2,6 +2,7 @@ import glob
 import json
 import os
 import platform
+import re
 import subprocess
 import shutil
 import sys
@@ -454,11 +455,18 @@ def _ispc_paths(build_cache_dir):
     return ispc_dir, executable
 
 
-def install_ispc(build_cache_dir):
-    """Install ispc, which compiles the texture encoder kernels, to build_cache."""
-    prerequisites = load_prerequisites_versions()
-    ispc_version = prerequisites.get("ispc", "1.27.0")
+def _installed_ispc_version(ispc_executable):
+    """The version ispc reports, or None when it is missing or cannot run."""
+    try:
+        result = subprocess.run([ispc_executable, "--version"], capture_output=True, text=True)
+    except OSError:
+        return None
+    match = re.search(r"ISPC\), (\S+)", result.stdout)
+    return match.group(1) if result.returncode == 0 and match else None
 
+
+def install_ispc(build_cache_dir, ispc_version):
+    """Install ispc, which compiles the texture encoder kernels, to build_cache, replacing any other version."""
     ispc_dir, ispc_executable = _ispc_paths(build_cache_dir)
 
     machine = platform.machine().lower()
@@ -512,14 +520,17 @@ def install_ispc(build_cache_dir):
 
 
 def find_ispc():
-    """Find ispc or install it automatically. Returns the path to the ispc executable."""
+    """Find the pinned ispc or install it automatically. Returns the path to the ispc executable."""
+    ispc_version = load_prerequisites_versions().get("ispc", "1.31.0")
     _, ispc_executable = _ispc_paths(_BUILD_CACHE_DIR)
-    if os.path.exists(ispc_executable):
+
+    installed_version = _installed_ispc_version(ispc_executable)
+    if installed_version == ispc_version:
         return ispc_executable
 
-    print("ispc not found. Installing to build_cache...")
+    print(f"ispc {ispc_version} is pinned, build_cache has {installed_version or 'none'}. Installing...")
     os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
-    return install_ispc(_BUILD_CACHE_DIR)
+    return install_ispc(_BUILD_CACHE_DIR, ispc_version)
 
 
 def find_slangc():
@@ -751,7 +762,7 @@ def find_or_install_ninja():
         return ninja_executable
 
     prerequisites = load_prerequisites_versions()
-    ninja_version = prerequisites.get("ninja", "1.12.1")
+    ninja_version = prerequisites.get("ninja", "1.13.2")
 
     os.makedirs(_BUILD_CACHE_DIR, exist_ok=True)
 
