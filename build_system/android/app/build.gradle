@@ -5,7 +5,7 @@ def targetAbi = project.hasProperty('targetAbi') ? project.targetAbi : 'arm64-v8
 
 android {
     compileSdk 37
-    ndkVersion '29.0.14206865'
+    ndkVersion '30.0.16248370'
     
     defaultConfig {
         applicationId 'io.tqjxlm.sparkle'
@@ -174,5 +174,5 @@ afterEvaluate {
 dependencies {
     implementation 'androidx.core:core:1.19.1'
     implementation 'androidx.appcompat:appcompat:1.8.0'
-    implementation 'androidx.games:games-activity:4.0.0'
+    implementation 'androidx.games:games-activity:4.4.2'
 }
