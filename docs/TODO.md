@@ -6,6 +6,7 @@
 * [ ] performance test pipeline
 * [ ] `dev/run_tests.py --framework android` on a macOS host resolves to `macos-android-release`, which has no coverage column, so a coverage run against a USB device needs the `ubuntu-android-release` column
 * [ ] `gpu_render_static` measures FLIP 0.0203 on the S25 Ultra, over its 0.02 gate (residual path-tracing noise on the bottle and the speaker grille)
+* [ ] an iOS simulator CI test can hang until the 900 s timeout with stdout ending at "Render thread started." (seen once in `forward_render_scale_change`); `StartRenderThread` signalling under the mutex it waits on closes the lost wakeup that matches that stop point, but the hang never reproduces locally, so the cause is unconfirmed; `build_system/ios/build.py` writes every thread's stack of a hung app to `logs/sample_<pid>.log`
 
 ## Path Tracing Renderers
 
