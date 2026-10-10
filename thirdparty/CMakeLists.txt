@@ -169,6 +169,12 @@ set(MI_OVERRIDE ON)
 if (ANDROID)
     set(MI_TLS_MODEL LOCAL_DYNAMIC CACHE STRING "" FORCE)
 endif()
+# Apple's pthread TLS model deletes its keys in mi_process_done, so a static destructor that allocates
+# afterwards re-initializes the main thread; the guard reuses the theap the thread already owns, where
+# debug builds would assert on it
+if (APPLE)
+    set(MI_TLS_RECURSE_GUARD ON)
+endif()
 add_subdirectory(mimalloc)
 
 # mimalloc's copy of the object file depends on mimalloc-static, which MI_BUILD_STATIC=OFF leaves
