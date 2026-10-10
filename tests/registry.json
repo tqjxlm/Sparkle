@@ -263,6 +263,11 @@
         "recooks": true
     },
     {
+        "name": "gltf_primitives",
+        "test_case": "gltf_primitives",
+        "description": "glTF primitive assembly: triangle fans and strips, non-indexed geometry, double-precision positions and the default material."
+    },
+    {
         "name": "input_injection",
         "test_case": "input_injection",
         "description": "Synthetic mouse and touch sequences through InputManager::Push."

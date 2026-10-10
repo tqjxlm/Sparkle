@@ -6,6 +6,7 @@
 #include "core/task/TaskManager.h"
 #include "io/Image.h"
 #include "io/Mesh.h"
+#include "scene/FindMeshPrimitive.h"
 #include "scene/Scene.h"
 #include "scene/SceneManager.h"
 #include "scene/component/light/DirectionalLight.h"
@@ -284,22 +285,6 @@ def Xform "Root"
         auto *file_manager = FileManager::GetNativeFileManager();
         success &= !file_manager->Write(ScenePath, scene_data.data(), scene_data.size()).empty();
         return success;
-    }
-
-    static MeshPrimitive *FindMeshPrimitive(Scene *scene, std::string_view name)
-    {
-        MeshPrimitive *result = nullptr;
-        scene->GetRootNode()->Traverse([name, &result](SceneNode *node) {
-            for (const auto &component : node->GetComponents())
-            {
-                auto *primitive = dynamic_cast<MeshPrimitive *>(component.get());
-                if (primitive && primitive->GetMeshResource()->name == name)
-                {
-                    result = primitive;
-                }
-            }
-        });
-        return result;
     }
 
     static bool VerifyTextures(Scene *scene)

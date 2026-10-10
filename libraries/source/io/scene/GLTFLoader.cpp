@@ -27,6 +27,7 @@
 #include <attic/tiny_gltf.h>
 
 #include <algorithm>
+#include <numeric>
 
 namespace sparkle
 {
@@ -101,13 +102,6 @@ template <typename T> struct VectorArray
         return adapter.elemCount;
     }
 };
-
-using V2fArray = VectorArray<Vector2>;
-using V3fArray = VectorArray<Vector3>;
-using V4fArray = VectorArray<Vector4>;
-using V2dArray = VectorArray<Vector2d>;
-using V3dArray = VectorArray<Vector3d>;
-using V4dArray = VectorArray<Vector4d>;
 
 template <typename SourceType, typename TargetType> static void ConvertVectorType(const SourceType &v, TargetType &vec)
 {
@@ -198,51 +192,13 @@ static void LoadPositionArray(Mesh &loaded_mesh, const Vector3 &scale, const tin
     loaded_mesh.center = (p_max + p_min) * 0.5f;
     loaded_mesh.extent = (p_max - p_min) * 0.5f;
 
-    switch (attrib_accessor.type)
+    ASSERT_EQUAL(attrib_accessor.type, TINYGLTF_TYPE_VEC3);
+    LoadVaryingBufferToArray(attrib_accessor.type, attrib_accessor.componentType, loaded_mesh.vertices, data_ptr, count,
+                             byte_stride);
+
+    for (auto &vertex : loaded_mesh.vertices)
     {
-    case TINYGLTF_TYPE_VEC3: {
-        switch (attrib_accessor.componentType)
-        {
-        case TINYGLTF_COMPONENT_TYPE_FLOAT: {
-            const V3fArray positions(ArrayAdapter<Vector3>(data_ptr, count, byte_stride));
-            loaded_mesh.vertices.resize(positions.Size());
-
-            for (size_t i{0}; i < positions.Size(); ++i)
-            {
-                const Vector3 v = positions[i].cwiseProduct(scale);
-
-                loaded_mesh.vertices[i] = v;
-            }
-        }
-        break;
-        default:
-            ASSERT(false);
-        }
-        break;
-    case TINYGLTF_COMPONENT_TYPE_DOUBLE: {
-        switch (attrib_accessor.type)
-        {
-        case TINYGLTF_TYPE_VEC3: {
-            const V3dArray positions(ArrayAdapter<Vector3d>(data_ptr, count, byte_stride));
-            loaded_mesh.vertices.resize(positions.Size());
-
-            for (size_t i{0}; i < positions.Size(); ++i)
-            {
-                const Vector3 v = positions[i].cast<Scalar>().cwiseProduct(scale);
-
-                loaded_mesh.vertices[i] = v;
-            }
-        }
-        break;
-        default:
-            UnImplemented(attrib_accessor.type);
-            break;
-        }
-        break;
-    default:
-        break;
-    }
-    }
+        vertex = vertex.cwiseProduct(scale);
     }
 }
 
@@ -335,6 +291,7 @@ static std::shared_ptr<Mesh> LoadPrimitive(const tinygltf::Model &model, const t
 
     bool converted_to_triangle_list = false;
     std::unique_ptr<IntArrayBase> indices_array_ptr = nullptr;
+    if (primitive.indices >= 0)
     {
         const auto &indices_accessor = model.accessors[static_cast<unsigned>(primitive.indices)];
         const auto &buffer_view = model.bufferViews[static_cast<unsigned>(indices_accessor.bufferView)];
@@ -377,14 +334,19 @@ static std::shared_ptr<Mesh> LoadPrimitive(const tinygltf::Model &model, const t
             break;
         }
     }
-    const auto &indices = *indices_array_ptr;
+    else if (const auto position = primitive.attributes.find("POSITION"); position != primitive.attributes.end())
+    {
+        // non-indexed geometry takes the vertices in order
+        loaded_mesh.indices.resize(model.accessors[static_cast<unsigned>(position->second)].count);
+        std::iota(loaded_mesh.indices.begin(), loaded_mesh.indices.end(), 0U);
+    }
 
     if (indices_array_ptr)
     {
         loaded_mesh.indices.resize(indices_array_ptr->Size());
         for (size_t i(0); i < indices_array_ptr->Size(); ++i)
         {
-            loaded_mesh.indices[i] = indices[i];
+            loaded_mesh.indices[i] = (*indices_array_ptr)[i];
         }
     }
 
@@ -398,11 +360,11 @@ static std::shared_ptr<Mesh> LoadPrimitive(const tinygltf::Model &model, const t
             auto triangle_fan = std::move(loaded_mesh.indices);
             loaded_mesh.indices.resize((triangle_fan.size() - 2) * 3);
 
-            for (size_t i{2}; i < triangle_fan.size(); ++i)
+            for (size_t i{0}; i + 2 < triangle_fan.size(); ++i)
             {
-                loaded_mesh.indices[i * 3 + 0] = triangle_fan[0];
-                loaded_mesh.indices[i * 3 + 1] = triangle_fan[i - 1];
-                loaded_mesh.indices[i * 3 + 2] = triangle_fan[i];
+                loaded_mesh.indices[i * 3 + 0] = triangle_fan[i + 1];
+                loaded_mesh.indices[i * 3 + 1] = triangle_fan[i + 2];
+                loaded_mesh.indices[i * 3 + 2] = triangle_fan[0];
             }
         }
         FMT_FALLTHROUGH;
@@ -414,11 +376,12 @@ static std::shared_ptr<Mesh> LoadPrimitive(const tinygltf::Model &model, const t
             auto triangle_strip = std::move(loaded_mesh.indices);
             loaded_mesh.indices.resize((triangle_strip.size() - 2) * 3);
 
-            for (size_t i{2}; i < triangle_strip.size(); ++i)
+            // odd triangles swap their last two vertices to keep a consistent winding
+            for (size_t i{0}; i + 2 < triangle_strip.size(); ++i)
             {
-                loaded_mesh.indices[i * 3 + 0] = triangle_strip[i - 2];
-                loaded_mesh.indices[i * 3 + 1] = triangle_strip[i - 1];
-                loaded_mesh.indices[i * 3 + 2] = triangle_strip[i];
+                loaded_mesh.indices[i * 3 + 0] = triangle_strip[i];
+                loaded_mesh.indices[i * 3 + 1] = triangle_strip[i + 1 + i % 2];
+                loaded_mesh.indices[i * 3 + 2] = triangle_strip[i + 2 - i % 2];
             }
         }
         FMT_FALLTHROUGH;
@@ -556,7 +519,8 @@ static std::shared_ptr<SceneNode> ProcessNode(const tinygltf::Model &model, unsi
             mesh_resource->name = std::format("{}_{}", mesh.name, primitive_id);
 
             auto mesh_component = std::make_shared<MeshPrimitive>(mesh_resource);
-            mesh_component->SetMaterial(materials[static_cast<size_t>(primitive.material)]);
+            mesh_component->SetMaterial(primitive.material >= 0 ? materials[static_cast<size_t>(primitive.material)]
+                                                                : MaterialManager::Instance().GetDefaultMaterial());
 
             scene_node->AddComponent(mesh_component);
         }
