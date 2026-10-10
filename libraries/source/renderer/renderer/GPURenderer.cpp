@@ -401,6 +401,7 @@ void GPURenderer::Update()
             .projection = camera->GetProjectionMatrix(),
             .exposure = camera->GetAttribute().exposure,
             .far_plane = camera->GetFar(),
+            .delta_time = render_config_.delta_time,
             .accumulated_samples = camera->GetCumulatedSampleCount(),
             .maximum_samples = render_config_.max_sample_per_pixel,
             .reset_history = denoiser_reset_this_frame_ || !scene_ready,

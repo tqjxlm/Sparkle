@@ -347,6 +347,7 @@ void NrdDenoiser::UpdateFrameData(const DenoiserFrameData &frame)
 {
     SampleConfig();
     far_plane_ = frame.far_plane;
+    delta_time_ = frame.delta_time;
     view_matrix_ = frame.view;
     projection_matrix_ = frame.projection;
     cumulated_samples_ = frame.accumulated_samples;
@@ -524,6 +525,8 @@ void NrdDenoiser::RenderReblur(RHICommandContext &command_context, const Vector3
     cs.rectSizePrev[0] = cs.resourceSize[0];
     cs.rectSizePrev[1] = cs.resourceSize[1];
     cs.denoisingRange = far_plane_ * 2.f;
+    // ReBLUR's temporal response scales with the frame time; without it NRD times frames by its own wall clock
+    cs.timeDeltaBetweenFrames = delta_time_ * 1000.f;
     cs.frameIndex = frame_index_++;
     cs.accumulationMode = reset_history_ ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
     cs.isMotionVectorInWorldSpace = false;
