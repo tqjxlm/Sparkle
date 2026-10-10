@@ -24,7 +24,7 @@
 #endif
 
 #define TINYGLTF_IMPLEMENTATION
-#include <tiny_gltf.h>
+#include <attic/tiny_gltf.h>
 
 #include <algorithm>
 
