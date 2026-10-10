@@ -126,6 +126,11 @@ struct RenderConfig : public ConfigCollection
     bool accumulate_key_held = false;
     bool accumulate_button_held = false;
 
+    // seconds since the previous frame. Not a ConfigValue: the app layer measures it every frame, except that headless
+    // and test-case runs advance by NominalDeltaTime so their captures do not depend on the real frame rate.
+    static constexpr float NominalDeltaTime = 1.f / 60.f;
+    float delta_time = NominalDeltaTime;
+
 protected:
     void Validate() override;
 

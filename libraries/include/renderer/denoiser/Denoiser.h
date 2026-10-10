@@ -37,6 +37,8 @@ struct DenoiserFrameData
     Mat4 projection;
     float exposure = 1.f;
     float far_plane = 0.f;
+    // seconds since the previous frame
+    float delta_time = 0.f;
     uint32_t accumulated_samples = 0;
     uint32_t maximum_samples = 0;
     bool reset_history = false;

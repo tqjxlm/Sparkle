@@ -415,7 +415,12 @@ bool AppFramework::MainLoop()
 
 void AppFramework::AdvanceFrame(float main_thread_time)
 {
-    delta_time_ = frame_timer_.ElapsedSecond();
+#if ENABLE_TEST_CASES
+    const bool nominal_step = app_config_.headless || test_case_;
+#else
+    const bool nominal_step = app_config_.headless;
+#endif
+    render_config_.delta_time = nominal_step ? RenderConfig::NominalDeltaTime : frame_timer_.ElapsedSecond();
     frame_timer_.Reset();
 
     last_second_main_thread_time_ += main_thread_time;

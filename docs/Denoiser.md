@@ -58,7 +58,7 @@ nrd_pack.cs.slang         demodulate diffuse (albedo) / specular (pre-integrated
                           distances, sky sentinel viewZ (sky + primary-emissive pixels); writes NRD's IN_* textures
         |
 NrdDenoiser               owns the GPU-agnostic nrd::Instance; per frame feeds CommonSettings
- (renderer)               (matrices, frame index, reset) and translates GetComputeDispatches into
+ (renderer)               (matrices, frame time, frame index, reset) and translates GetComputeDispatches into
         |                 RHINrdBackend dispatches
 MetalNrdBackend /         Metal loads NRD's pre-cooked MSL (see below) and binds resources by NRD
 VulkanNrdBackend          register order on one encoder; Vulkan consumes NRD's SPIR-V directly,
@@ -87,6 +87,7 @@ The manifest carries the NRD version; `NrdDenoiser` hard-fails on a mismatch or 
 ### Conventions that must hold
 
 * NRD decomposes `viewToClipMatrix` with D3D clip conventions (+Y up). The engine's projection bakes a Vulkan-style Y flip, so `NrdDenoiser` negates row 1 before the handoff. Getting this wrong is invisible for static views and yaw motion and breaks pitch/roll/vertical motion (the pitch gate exists for exactly this).
+* `timeDeltaBetweenFrames` carries the app's frame time (`RenderConfig::delta_time`): the measured interval interactively, and a nominal 1/60 s in headless and test-case runs, whose harnesses step the camera per frame. ReBLUR scales its anti-lag, its stabilization history clamp and its temporal-accumulation motion thresholds by the frame time, and at 0 NRD times frames by its own wall clock, which would make captures depend on the real frame rate.
 * viewZ is signed view-space z (negative for visible geometry); sky uses a sentinel beyond `denoisingRange`.
 * Skipped-lobe frames write hit distance EXACTLY 0 (`HitDistanceReconstructionMode` fills them); any positive floor collapses ReBLUR's blur radius.
 * Sky pixels write a valid placeholder normal: ReBLUR's temporal accumulation averages neighbor normals without range gating, so NaN corrupts adjacent geometry.
