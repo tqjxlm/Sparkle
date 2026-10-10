@@ -269,6 +269,19 @@ def collect_test_artifacts(sim_home):
             shutil.copy(os.path.join(app_screenshots, name), screenshots_dir)
 
 
+def sample_hung_app(spawner_pid):
+    """Record every thread's stack of the hung app next to its log. Simulator processes
+    are host processes, so the host's sample tool can attach to them."""
+    pids = subprocess.run(["pgrep", "-f", "sparkle.app/sparkle"], capture_output=True, text=True).stdout.split()
+    pids = [pid for pid in pids if pid != str(spawner_pid)]
+    logs_dir = os.path.join(DEVICE_OUTPUT_DIR, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    for pid in pids:
+        report = os.path.join(logs_dir, f"sample_{pid}.log")
+        subprocess.run(["sample", pid, "3", "-file", report], check=False)
+        print(f"=== stack sample of hung app: {report}", flush=True)
+
+
 def packaged_ipa_path(args):
     product = os.path.join(SCRIPTPATH, "product", f"ios-{args['config']}.ipa")
     return product if os.path.isfile(product) else None
@@ -295,13 +308,15 @@ def run_test_case(args):
     if "--headless" not in args["unknown_args"]:
         command += ["--headless", "true"]
     print(f"Running: {' '.join(command)}", flush=True)
+    process = subprocess.Popen(command, env=os.environ.copy())
     try:
-        code = subprocess.run(command, env=os.environ.copy(),
-                              timeout=TEST_TIMEOUT_SECONDS).returncode
+        code = process.wait(timeout=TEST_TIMEOUT_SECONDS)
         print(f"=== test run: exit {code}", flush=True)
     except subprocess.TimeoutExpired:
-        subprocess.run(["pkill", "-f", "sparkle.app/sparkle"], check=False)
         print(f"=== test run: timeout after {TEST_TIMEOUT_SECONDS}s", flush=True)
+        sample_hung_app(process.pid)
+        process.kill()
+        subprocess.run(["pkill", "-f", "sparkle.app/sparkle"], check=False)
         code = 1
 
     collect_test_artifacts(sim_home)
