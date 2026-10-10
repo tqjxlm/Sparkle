@@ -28,7 +28,6 @@
 
 * [ ] the Metal sampler ignores `RHISampler` anisotropy and `min_lod`/`max_lod` (`MetalSampler` sets neither `maxAnisotropy` nor the LOD clamps), so Metal samples with anisotropy 1 and the full mip range where Vulkan honours them
 * [ ] the glfw CMake cache keeps `Vulkan_LIBRARY` from the first configure, so after a Vulkan SDK bump an existing build still links (and on macOS bundles MoltenVK from) the old SDK until it is reconfigured from scratch
-* [ ] MoltenVK 1.4.1 (Vulkan SDK 1.4.350) adds memoryless textures to its residency set, so the glfw build aborts under `MTL_DEBUG_LAYER=1` on the render graph's memoryless attachments; fixed in MoltenVK 1.4.2, bump the SDK once it ships it
 * [ ] `std::hash<RHISampler::SamplerAttribute>` hashes only the border color and address mode
 * [ ] `RHIContext::GetOrCreateDummyTexture` keys its cache by a 32-bit attribute hash without an equality check
 * [ ] `PickPhysicalDevice` appends the ray tracing extension list to `device_extensions_` once per candidate device, and `CheckDeviceExtensionSupport` mutates that static list (portability subset), so duplicate extension names are possible on multi-GPU hosts and on MoltenVK
