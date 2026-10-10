@@ -244,7 +244,7 @@ void RenderFramework::RenderThreadMain()
     ThreadManager::RegisterRenderThread();
 
     {
-        std::unique_lock<std::mutex> lock(task_queue_mutex_);
+        std::unique_lock<std::mutex> lock(thread_mutex_);
         render_loop_started_ = true;
         render_thread_started_.notify_all();
 
