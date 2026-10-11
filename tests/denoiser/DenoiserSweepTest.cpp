@@ -88,32 +88,37 @@ public:
             return Result::Pending;
 
         case Phase::Sweep:
-            if (request_)
+            // a screenshot reads back the frame after the one its request arrives with, so requesting one tick
+            // before the pose step captures the first frame rendered at the new pose
+            if (!request_)
             {
-                if (request_->IsCompleted())
-                {
-                    request_.reset();
-                    Log(Info, "{}: captured frame {}/{}", GetName(), capture_idx_ + 1, NumFrames);
-                    capture_idx_++;
-                    if (capture_idx_ >= NumFrames)
-                    {
-                        if (config_sweep_converged.Get())
-                        {
-                            phase_ = Phase::Converge;
-                            return Result::Pending;
-                        }
-                        return Result::Pass;
-                    }
-                }
+                request_ = rf->RequestTakeScreenshot(std::format("denoiser_sweep_{}", capture_idx_));
                 return Result::Pending;
             }
-            SetPose(app, WarmupSteps + capture_idx_ + 1);
-            if (++sweep_tick_ >= HoldTicks)
+            if (!pose_stepped_)
             {
-                sweep_tick_ = 0;
-                request_ = rf->RequestTakeScreenshot(std::format("denoiser_sweep_{}", capture_idx_));
+                SetPose(app, WarmupSteps + capture_idx_ + 1);
+                pose_stepped_ = true;
+                return Result::Pending;
             }
-            return Result::Pending;
+            if (!request_->IsCompleted())
+            {
+                return Result::Pending;
+            }
+            request_.reset();
+            pose_stepped_ = false;
+            Log(Info, "{}: captured frame {}/{}", GetName(), capture_idx_ + 1, NumFrames);
+            capture_idx_++;
+            if (capture_idx_ < NumFrames)
+            {
+                return Result::Pending;
+            }
+            if (config_sweep_converged.Get())
+            {
+                phase_ = Phase::Converge;
+                return Result::Pending;
+            }
+            return Result::Pass;
 
         case Phase::Converge:
             if (request_)
@@ -188,13 +193,13 @@ private:
 
     static constexpr uint32_t NumFrames = 16;
     static constexpr uint32_t WarmupSteps = 8;
-    static constexpr uint32_t HoldTicks = 2; // ticks per step: lets a 1-spp frame render before capture
+    static constexpr uint32_t HoldTicks = 2; // warmup ticks per step
 
     Phase phase_ = Phase::Init;
     uint32_t capture_idx_ = 0;
     uint32_t warmup_step_ = 0;
     uint32_t warmup_tick_ = 0;
-    uint32_t sweep_tick_ = 0;
+    bool pose_stepped_ = false;
     std::shared_ptr<ScreenshotRequest> request_;
 
     Vector3 base_center_;
