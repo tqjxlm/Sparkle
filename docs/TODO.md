@@ -64,7 +64,6 @@
 
 * [ ] the control panel's Save Screenshot and Save Graph Dump build their names from `RenderFramework::render_config_.pipeline` on the main thread while the render thread's `NewFrame` writes `render_config_`
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
-* [ ] about 1 `denoiser_sweep` capture in 26 on macOS reads back the second frame rendered at its pose instead of the first (about 0.65/255 off on that frame, every rendered frame identical), so sweep captures are not byte-identical from run to run; the cause is unknown
 
 * [ ] the window scale that converts a desktop frame buffer resize into the output resolution is read once at startup (`backingScaleFactor`, the monitor content scale), so moving the window to a display with another scale sets the wrong output size
 * [ ] Android reports no frame buffer resize: a new native window (`APP_CMD_INIT_WINDOW`) recreates the swap chain but keeps the output aspect ratio, which only the landscape orientation lock keeps correct; multi-window and freeform sizes stretch
