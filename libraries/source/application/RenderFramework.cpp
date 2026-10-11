@@ -588,10 +588,7 @@ std::shared_ptr<ScreenshotRequest> RenderFramework::RequestTakeScreenshot(const 
                                                                           bool dump_graph)
 {
     auto request = std::make_shared<ScreenshotRequest>(name, capture_ui, dump_graph);
-    {
-        std::scoped_lock<std::mutex> lock(screenshot_queue_mutex_);
-        screenshot_queue_.push(request);
-    }
+    TaskManager::RunInRenderThread([this, request] { screenshot_queue_.push(request); });
     return request;
 }
 
@@ -619,20 +616,13 @@ bool RenderFramework::IsReadyForAutoScreenshot() const
 
 void RenderFramework::ProcessScreenshotRequest()
 {
-    if (active_screenshot_ || !renderer_ || !IsSceneFullyLoaded())
+    if (active_screenshot_ || screenshot_queue_.empty() || !renderer_ || !IsSceneFullyLoaded())
     {
         return;
     }
 
-    {
-        std::scoped_lock<std::mutex> lock(screenshot_queue_mutex_);
-        if (screenshot_queue_.empty())
-        {
-            return;
-        }
-        active_screenshot_ = std::move(screenshot_queue_.front());
-        screenshot_queue_.pop();
-    }
+    active_screenshot_ = std::move(screenshot_queue_.front());
+    screenshot_queue_.pop();
 
     Log(Info, "Screenshot requested: {}", active_screenshot_->GetName());
     // the next graph reads the screenshot back, and its dump is saved before the readback completes
