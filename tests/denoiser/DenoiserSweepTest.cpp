@@ -89,16 +89,16 @@ public:
 
         case Phase::Sweep:
             // a screenshot reads back the frame after the one its request arrives with, so requesting one tick
-            // before the pose step captures the first frame rendered at the new pose
+            // before the pose ticks captures the first frame rendered at the new pose
             if (!request_)
             {
                 request_ = rf->RequestTakeScreenshot(std::format("denoiser_sweep_{}", capture_idx_));
                 return Result::Pending;
             }
-            if (!pose_stepped_)
+            if (sweep_tick_ < HoldTicks)
             {
                 SetPose(app, WarmupSteps + capture_idx_ + 1);
-                pose_stepped_ = true;
+                sweep_tick_++;
                 return Result::Pending;
             }
             if (!request_->IsCompleted())
@@ -106,7 +106,7 @@ public:
                 return Result::Pending;
             }
             request_.reset();
-            pose_stepped_ = false;
+            sweep_tick_ = 0;
             Log(Info, "{}: captured frame {}/{}", GetName(), capture_idx_ + 1, NumFrames);
             capture_idx_++;
             if (capture_idx_ < NumFrames)
@@ -193,13 +193,13 @@ private:
 
     static constexpr uint32_t NumFrames = 16;
     static constexpr uint32_t WarmupSteps = 8;
-    static constexpr uint32_t HoldTicks = 2; // warmup ticks per step
+    static constexpr uint32_t HoldTicks = 2; // ticks per step: lets a 1-spp frame render before capture
 
     Phase phase_ = Phase::Init;
     uint32_t capture_idx_ = 0;
     uint32_t warmup_step_ = 0;
     uint32_t warmup_tick_ = 0;
-    bool pose_stepped_ = false;
+    uint32_t sweep_tick_ = 0;
     std::shared_ptr<ScreenshotRequest> request_;
 
     Vector3 base_center_;
