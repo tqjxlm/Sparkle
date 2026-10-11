@@ -25,15 +25,10 @@ struct ThreadTaskQueue
 };
 
 // Task dispatcher routes tasks to different threads.
-// It uses a monitor thread to wait for new tasks from TaskManager and TaskFuture.
+// A named thread's task lands in that thread's queue before EnqueueTask returns, so it is ordered with the
+// caller's frame. Worker tasks go through a monitor thread that hands them to the thread pool.
 class TaskDispatcher
 {
-    struct PendingTask
-    {
-        std::function<void()> task;
-        ThreadName thread;
-    };
-
 public:
     static TaskDispatcher &Instance()
     {
@@ -46,13 +41,22 @@ public:
 
     void RegisterTaskQueue(std::weak_ptr<ThreadTaskQueue> task_queue, ThreadName thread)
     {
+        std::scoped_lock<std::mutex> lock(mutex_);
         task_queues_[thread] = std::move(task_queue);
     }
 
     void EnqueueTask(std::function<void()> &&task, ThreadName thread_name)
     {
         std::scoped_lock<std::mutex> lock(mutex_);
-        pending_tasks_.emplace(std::move(task), thread_name);
+        if (thread_name != ThreadName::Worker)
+        {
+            if (auto task_queue = task_queues_[thread_name].lock())
+            {
+                task_queue->AddTask(std::move(task));
+            }
+            return;
+        }
+        pending_tasks_.push(std::move(task));
         new_task_pushed_.notify_all();
     }
 
@@ -81,7 +85,7 @@ private:
 
     void DispatchPendingTasks();
 
-    std::queue<PendingTask> pending_tasks_;
+    std::queue<std::function<void()>> pending_tasks_;
 
     std::mutex mutex_;
 

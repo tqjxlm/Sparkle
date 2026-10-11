@@ -102,23 +102,11 @@ void TaskDispatcher::DispatchPendingTasks()
 
     while (!pending_tasks_.empty() && !shutdown_requested_)
     {
-        auto [task, thread_name] = pending_tasks_.front();
+        auto task = std::move(pending_tasks_.front());
         pending_tasks_.pop();
 
-        if (thread_name == ThreadName::Worker)
-        {
-            // for worker thread task, hand it over to thread pool and forget it
-            worker_thread_pool_->submit_task(std::move(task)).wait_for(std::chrono::nanoseconds(0));
-        }
-        else
-        {
-            // for other named thread task, leave it to the thread to consume
-            auto task_queue = task_queues_[thread_name].lock();
-            if (task_queue)
-            {
-                task_queue->AddTask(std::move(task));
-            }
-        }
+        // hand it over to thread pool and forget it
+        worker_thread_pool_->submit_task(std::move(task)).wait_for(std::chrono::nanoseconds(0));
     }
 }
 
