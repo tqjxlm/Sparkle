@@ -336,7 +336,7 @@ target_include_directories(sparkle_thirdparty SYSTEM PUBLIC
     tinygltf
     eigen
     volk
-    # TODO: it crashes we have multiple versions of fast_float. for now we just use the one in tinyusdz.
+    # tinyusdz's bundled fast_float: a second version alongside it would break the ODR
     tinyusdz/src/external/fast_float/include
     json/single_include
     imgui
