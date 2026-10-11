@@ -27,13 +27,13 @@ void SpherePrimitive::OnTransformChange()
     // may support non-uniform scaling in the future
     radius_ = GetLocalTransform().GetScale().maxCoeff();
 
-    TaskManager::RunInRenderThread([this]() {
+    TaskManager::RunInRenderThread([this, radius = radius_]() {
         if (!GetRenderProxy())
         {
             return;
         }
 
-        GetRenderProxy()->As<SphereRenderProxy>()->SetRadius(radius_);
+        GetRenderProxy()->As<SphereRenderProxy>()->SetRadius(radius);
     });
 }
 } // namespace sparkle

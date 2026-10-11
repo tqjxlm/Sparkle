@@ -62,13 +62,13 @@ void RenderableComponent::OnTransformChange()
 {
     Component::OnTransformChange();
 
-    TaskManager::RunInRenderThread([this]() {
+    TaskManager::RunInRenderThread([this, transform = GetTransform()]() {
         if (!render_proxy_)
         {
             return;
         }
 
-        render_proxy_->UpdateTransform(GetTransform());
+        render_proxy_->UpdateTransform(transform);
     });
 }
 } // namespace sparkle
