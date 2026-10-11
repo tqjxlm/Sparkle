@@ -4,6 +4,8 @@
 
 #include <cpptrace/cpptrace.hpp>
 
+#include <array>
+
 #if PLATFORM_WINDOWS
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnonportable-system-include-path"
@@ -13,8 +15,21 @@
 
 namespace sparkle
 {
+#if PLATFORM_WINDOWS
+static constexpr std::array DumpedSignals{SIGABRT};
+#else
+static constexpr std::array DumpedSignals{SIGSEGV, SIGBUS, SIGABRT};
+#endif
+
 static void SignalDump(int signum)
 {
+    // the dump allocates and logs, so a fault inside it (e.g. a failing allocator) must take the default action
+    // instead of re-entering the dump
+    for (const int dumped : DumpedSignals)
+    {
+        signal(dumped, SIG_DFL);
+    }
+
     ExceptionHandler::PrintStackTrace();
 
     Logger::Flush();
@@ -23,9 +38,6 @@ static void SignalDump(int signum)
     // windows does not have a way to break into debugger from signal handler, so we do it manually
     __debugbreak();
 #endif
-
-    // recover signal to avoid recursive dumping
-    signal(signum, SIG_DFL);
 
     raise(signum);
 }
@@ -60,11 +72,11 @@ ExceptionHandler::ExceptionHandler()
 
 #if PLATFORM_WINDOWS
     AddVectoredExceptionHandler(1, VectoredHandler); // `1` = call this handler first
-#else
-    signal(SIGSEGV, &SignalDump);
-    signal(SIGBUS, &SignalDump);
 #endif
-    signal(SIGABRT, &SignalDump);
+    for (const int dumped : DumpedSignals)
+    {
+        signal(dumped, &SignalDump);
+    }
 
     printf("Overrode signals\n");
 
