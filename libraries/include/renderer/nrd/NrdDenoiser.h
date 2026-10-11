@@ -95,6 +95,7 @@ private:
     uint32_t last_cumulated_samples_ = 0;
     uint32_t max_sample_per_pixel_ = 0;
     float far_plane_ = 1000.f;
+    float delta_time_ = 0.f;
 
     Mat4 view_matrix_ = Mat4::Identity();
     Mat4 projection_matrix_ = Mat4::Identity();
