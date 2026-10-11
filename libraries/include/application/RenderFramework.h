@@ -103,8 +103,10 @@ public:
     // called by main thread, run on render thread
     void NotifySceneLoaded();
 
-    // Called from main thread. Returns a request handle the caller can poll for completion. With `dump_graph`, the
-    // render graph of the frame the screenshot reads back is written to screenshots/<name>.json before it completes.
+    // Called from main thread. Returns a request handle the caller can poll for completion. The request travels with
+    // this frame's render tasks, so the screenshot includes every change the main thread made before the call. With
+    // `dump_graph`, the render graph of the frame the screenshot reads back is written to screenshots/<name>.json
+    // before it completes.
     [[nodiscard]] std::shared_ptr<ScreenshotRequest> RequestTakeScreenshot(const std::string &name,
                                                                            bool capture_ui = false,
                                                                            bool dump_graph = false);
@@ -190,10 +192,8 @@ private:
     bool scene_loaded_notified_ = false;
     std::atomic<bool> ready_for_auto_screenshot_{false};
 
-    std::mutex screenshot_queue_mutex_;
-    std::queue<std::shared_ptr<ScreenshotRequest>> screenshot_queue_;
-
     // Owned exclusively by the render thread.
+    std::queue<std::shared_ptr<ScreenshotRequest>> screenshot_queue_;
     std::shared_ptr<ScreenshotRequest> active_screenshot_;
 
     // render thread only: served by the dump of the next render graph the renderer executes
