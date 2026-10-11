@@ -1,0 +1,25 @@
+name: Metal 4 probe
+
+on:
+  pull_request:
+    paths:
+      - 'dev/metal4_probe.*'
+      - '.github/workflows/metal4_probe.yml'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-26]
+    name: probe (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Probe
+        run: python3 dev/metal4_probe.py
