@@ -320,12 +320,7 @@ template <> struct hash<sparkle::RHISampler::SamplerAttribute>
 {
     size_t operator()(const sparkle::RHISampler::SamplerAttribute &k) const
     {
-        // http://stackoverflow.com/a/1646913/126995
-        size_t res = 17;
-
-        res = res * 31 + hash<uint8_t>()(static_cast<uint8_t>(k.border_color));
-        res = res * 31 + hash<uint8_t>()(static_cast<uint8_t>(k.address_mode));
-        return res;
+        return k.GetHash();
     }
 };
 } // namespace std
