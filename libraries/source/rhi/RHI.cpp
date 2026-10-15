@@ -450,15 +450,13 @@ RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute
     attribute.initial_layout = RHIImageLayout::Undefined;
     attribute.width = attribute.height = 1;
 
-    auto hash = attribute.GetHashForShader();
-
-    auto found = dummy_textures_.find(hash);
+    auto found = dummy_textures_.find(attribute);
     if (found != dummy_textures_.end())
     {
         return found->second;
     }
 
-    auto texture = CreateImage(attribute, std::format("DummyTexture_{}", hash));
+    auto texture = CreateImage(attribute, std::format("DummyTexture_{}", dummy_textures_.size()));
     // a dummy never gets per-use transitions, so it rests in the one layout that satisfies all
     // bindings it can appear in: General when it can be bound as storage, Read otherwise
     const bool has_uav_usage = attribute.usages & RHIImage::ImageUsage::UAV;
@@ -466,7 +464,7 @@ RHIResourceRef<RHIImage> RHIContext::GetOrCreateDummyTexture(RHIImage::Attribute
                         {.target_layout = has_uav_usage ? RHIImageLayout::General : RHIImageLayout::Read,
                          .after_stage = RHIPipelineStage::Top,
                          .before_stage = RHIPipelineStage::Bottom});
-    dummy_textures_.emplace(hash, texture);
+    dummy_textures_.emplace(attribute, texture);
 
     return texture;
 }
