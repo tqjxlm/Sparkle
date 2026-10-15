@@ -23,6 +23,9 @@ REGISTRY = os.path.join(REPO, "tests", "registry.json")
 COVERAGE = os.path.join(REPO, "tests", "coverage.csv")
 SUPPORTED_FRAMEWORKS = ("glfw", "macos", "android", "ios")
 HOST_NAMES = {"darwin": "macos", "win32": "windows", "linux": "ubuntu"}
+# their apps run on a device, so the host of a coverage column only names the CI
+# runner that drives it
+DEVICE_FRAMEWORKS = ("android", "ios")
 
 
 def venv_python():
@@ -78,9 +81,13 @@ def load_coverage():
     return coverage
 
 
-def current_triplet(framework, config):
-    host = HOST_NAMES.get(sys.platform, "linux")
-    return f"{host}-{framework}-{config.lower()}"
+def current_triplet(coverage, framework, config):
+    suffix = f"-{framework}-{config.lower()}"
+    if framework in DEVICE_FRAMEWORKS:
+        columns = [triplet for triplet in coverage if triplet.endswith(suffix)]
+        if len(columns) == 1:
+            return columns[0]
+    return HOST_NAMES.get(sys.platform, "linux") + suffix
 
 
 def covered_cases(registry, coverage, triplet):
@@ -204,7 +211,7 @@ def select_cases(registry, coverage, args):
             return None
         cases = [case for case in registry if case["name"] in args.cases]
     else:
-        triplet = current_triplet(args.framework, args.config)
+        triplet = current_triplet(coverage, args.framework, args.config)
         cases = covered_cases(registry, coverage, triplet)
         if not cases:
             print(f"ERROR: triplet {triplet} has no coverage;"

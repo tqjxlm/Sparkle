@@ -76,6 +76,7 @@ The suite runs on a device or emulator through the android runner in [build_syst
 * The config push requires `adb root` (available on emulator `google_apis` images): files a non-root shell creates under `Android/data` are invisible to the app through FUSE. On a non-rootable physical device the push may still work depending on the vendor's FUSE behavior.
 * A `TestCase` can ask the runner for device-level actions by logging `[TestCaseAction] <name>`; `surface_loss_recovery` uses the `cycle_window` action (screen off/on) to destroy and restore the native window mid-run.
 * Render cases compare against the published android ground truth, which is captured at 1560x720; pass `--width 1560 --height 720` so headless screenshots match.
+* A coverage run (no `--case`) runs the `ubuntu-android-release` column from any host, because the device, not the host, runs the app; the same holds for the ios column.
 * CI covers the `ubuntu-android-release` triplet with a dedicated x86_64 package (`--android_abi x86_64`, a product that exists only for this cell) on a KVM-accelerated emulator, because no hosted runner can emulate the shipping arm64 apk: Google publishes no linux-arm64 emulator, x86 hosts reject arm64 system images, and GitHub's Apple-silicon runners expose no nested virtualization. The emulator image ABI follows the host, so local runs on Apple silicon test the arm64 apk itself.
 
 ```bash
