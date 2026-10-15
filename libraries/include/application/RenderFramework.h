@@ -98,7 +98,8 @@ public:
         return renderer_created_event_.OnTrigger();
     }
 
-    void DrawUi();
+    // called by main thread, run on main thread
+    void DrawUi(RenderConfig::Pipeline pipeline);
 
     // called by main thread, run on render thread
     void NotifySceneLoaded();

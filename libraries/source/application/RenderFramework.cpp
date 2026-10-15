@@ -639,7 +639,7 @@ void RenderFramework::ProcessScreenshotRequest()
     });
 }
 
-void RenderFramework::DrawUi()
+void RenderFramework::DrawUi(RenderConfig::Pipeline pipeline)
 {
     ImGui::TextUnformatted("Screenshot");
     ImGui::Separator();
@@ -649,7 +649,7 @@ void RenderFramework::DrawUi()
     ImGui::BeginDisabled(saving);
     if (ImGui::Button("Save Screenshot"))
     {
-        auto screenshot_name = BuildScreenshotName(scene_, render_config_.pipeline) + ".png";
+        auto screenshot_name = BuildScreenshotName(scene_, pipeline) + ".png";
         const bool capture_ui = should_capture_ui_;
 
         last_saved_screenshot_path_ = screenshot_name;
@@ -678,7 +678,7 @@ void RenderFramework::DrawUi()
 
     if (ImGui::Button("Save Graph Dump"))
     {
-        saved_graph_dump_ = RequestGraphDump(BuildScreenshotName(scene_, render_config_.pipeline));
+        saved_graph_dump_ = RequestGraphDump(BuildScreenshotName(scene_, pipeline));
     }
 
     if (saved_graph_dump_)
