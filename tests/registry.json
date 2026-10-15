@@ -205,6 +205,17 @@
         }
     },
     {
+        "name": "gpu_primitive_move_sync_validation",
+        "test_case": "primitive_move",
+        "description": "Moves one mesh under the gpu pipeline with synchronization validation, so the acceleration structure refit and its instance update run under the layer; any validation error, or a missing layer, fails the case, and the evaluator requires a visible difference.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/scene/primitive_move_test.py",
+            "args": ["--framework", "{framework}", "--skip_run"]
+        }
+    },
+    {
         "name": "cpu_sync_validation",
         "test_case": "screenshot",
         "description": "One cpu path-traced sample under the Vulkan validation layer with synchronization validation, covering the cpu render graph's upload, screenshot readback and present; any validation error, or a missing layer, fails the case.",

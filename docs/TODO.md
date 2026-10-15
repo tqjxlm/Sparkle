@@ -4,7 +4,6 @@
 
 * [ ] unit test pipeline
 * [ ] performance test pipeline
-* [ ] `dev/run_tests.py --framework android` on a macOS host resolves to `macos-android-release`, which has no coverage column, so a coverage run against a USB device needs the `ubuntu-android-release` column
 * [ ] `gpu_render_static` measures FLIP 0.0203 on the S25 Ultra, over its 0.02 gate (residual path-tracing noise on the bottle and the speaker grille)
 * [ ] an iOS simulator CI test can hang until the 900 s timeout with stdout ending at "Render thread started." (seen once in `forward_render_scale_change`); `StartRenderThread` signalling under the mutex it waits on closes the lost wakeup that matches that stop point, but the hang never reproduces locally, so the cause is unconfirmed; `build_system/ios/build.py` writes every thread's stack of a hung app to `logs/sample_<pid>.log`
 
@@ -27,14 +26,11 @@
 
 ## RHI
 
-* [ ] the Metal sampler ignores `RHISampler` anisotropy and `min_lod`/`max_lod` (`MetalSampler` sets neither `maxAnisotropy` nor the LOD clamps), so Metal samples with anisotropy 1 and the full mip range where Vulkan honours them
 * [ ] the glfw CMake cache keeps `Vulkan_LIBRARY` from the first configure, so after a Vulkan SDK bump an existing build still links (and on macOS bundles MoltenVK from) the old SDK until it is reconfigured from scratch
 * [ ] a Vulkan present on a lost or out-of-date surface waits on a per-image semaphore that `VulkanContext::ReleaseRenderResources` destroys right after `vkDeviceWaitIdle`, which does not cover the presentation engine's waits; `VK_KHR_swapchain_maintenance1` present fences would tell when the semaphore is free
-* [ ] `VulkanTLAS::Update` rewrites the host-visible instance buffer in place while the previous frame's refit may still read it
 * [ ] `MetalResourceArray::Bind` patches the bindless argument buffer in place while frames in flight may still read it
 * [ ] Metal frame GPU time (`GPUEndTime - GPUStartTime` of the frame's last command buffer) undercounts when a TLAS build commits the frame mid-way
 * [ ] three `VkSampler`s leak at `vkDestroyDevice`
-* [ ] the ray tracing extension list still enables buffer device address, descriptor indexing, `VK_KHR_spirv_1_4` and float controls, which are core in Vulkan 1.2; dropping buffer device address also needs `VmaAllocatorCreateInfo::vulkanApiVersion`, which is left at 1.0
 
 ## IO
 

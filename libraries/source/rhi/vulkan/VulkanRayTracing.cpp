@@ -14,6 +14,18 @@
 
 namespace sparkle
 {
+static VkAccelerationStructureInstanceKHR GetInstance(VulkanBLAS *blas, uint32_t primitive_id)
+{
+    if (blas->IsDirty())
+    {
+        blas->Build();
+    }
+
+    auto instance = blas->GetDescriptor();
+    instance.instanceCustomIndex = primitive_id;
+    return instance;
+}
+
 void VulkanBLAS::Build()
 {
     VkDevice device = context->GetDevice();
@@ -132,20 +144,14 @@ void VulkanTLAS::Build()
             continue;
         }
 
-        if (blas->IsDirty())
-        {
-            blas->Build();
-        }
-
-        auto &instance = instances[primitive_id];
-        instance = blas->GetDescriptor();
-        instance.instanceCustomIndex = primitive_id;
+        instances[primitive_id] = GetInstance(blas, primitive_id);
     }
 
     context->GetRHI()->RecreateBuffer(
         RHIBuffer::Attribute{.size = instances.size() * sizeof(VkAccelerationStructureInstanceKHR),
                              .usages = RHIBuffer::BufferUsage::DeviceAddress |
-                                       RHIBuffer::BufferUsage::AccelerationStructureBuildInput,
+                                       RHIBuffer::BufferUsage::AccelerationStructureBuildInput |
+                                       RHIBuffer::BufferUsage::StorageBuffer,
                              .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
                              .is_dynamic = false},
         "TLASInstanceBuffer", instance_buffer_);
@@ -163,22 +169,19 @@ void VulkanTLAS::Build()
 
 void VulkanTLAS::Update(const std::unordered_set<uint32_t> &instances_to_update)
 {
-    auto *instance_data = reinterpret_cast<VkAccelerationStructureInstanceKHR *>(instance_buffer_->Lock());
+    std::vector<VkAccelerationStructureInstanceKHR> instances;
+    std::vector<uint32_t> indices;
+    instances.reserve(instances_to_update.size());
+    indices.reserve(instances_to_update.size());
 
     for (auto primitive_id : instances_to_update)
     {
-        auto *blas = RHICast<VulkanBLAS>(all_blas_[primitive_id]);
-
-        if (blas->IsDirty())
-        {
-            blas->Build();
-        }
-
-        instance_data[primitive_id] = blas->GetDescriptor();
-        instance_data[primitive_id].instanceCustomIndex = primitive_id;
+        instances.push_back(GetInstance(RHICast<VulkanBLAS>(all_blas_[primitive_id]), primitive_id));
+        indices.push_back(primitive_id);
     }
 
-    instance_buffer_->UnLock();
+    // earlier frames' refits may still read the instance buffer, so the write is ordered on the GPU
+    instance_buffer_->PartialUpdate(context->GetRHI(), instances, indices);
 
     Stage(StagedBuild::Refit);
 }

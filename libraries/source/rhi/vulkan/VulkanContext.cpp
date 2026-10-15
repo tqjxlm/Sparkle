@@ -19,13 +19,12 @@
 
 namespace sparkle
 {
+// buffer device address, descriptor indexing and SPIR-V 1.4, which acceleration structures and ray queries also
+// require, are core in Vulkan 1.2
 static constexpr std::array RayTracingExtensions = {
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
     // Required by VK_KHR_acceleration_structure
-    VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-    // Required by spirv
-    VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME, VK_KHR_SPIRV_1_4_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME};
+    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME};
 
 static VkResult CreateDebugUtilsMessengerExt(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
                                              const VkAllocationCallbacks *pAllocator,
@@ -749,6 +748,7 @@ void VulkanContext::SubmitCommandBuffer()
 void VulkanContext::SetupMemoryAllocator()
 {
     VmaAllocatorCreateInfo allocator_info = {};
+    allocator_info.vulkanApiVersion = ApiVersion;
     if (rhi_->SupportsHardwareRayTracing())
     {
         allocator_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
@@ -1062,10 +1062,9 @@ bool VulkanContext::CreateLogicalDevice()
         Log(Info, "\t{}", extension);
     }
 
-    VkPhysicalDeviceBufferDeviceAddressFeatures enabled_buffer_device_addres_features{};
+    VkPhysicalDeviceVulkan12Features enabled_vulkan12_features{};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR enabled_acceleration_structure_features{};
     VkPhysicalDeviceRayQueryFeaturesKHR enabled_ray_query_features{};
-    VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing_features{};
     VkPhysicalDeviceRobustness2FeaturesEXT enabled_robustness_features{};
     VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR enabled_local_read_features{};
 
@@ -1085,9 +1084,13 @@ bool VulkanContext::CreateLogicalDevice()
 
     if (rhi_->SupportsHardwareRayTracing())
     {
-        enabled_buffer_device_addres_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-        enabled_buffer_device_addres_features.bufferDeviceAddress = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_buffer_device_addres_features);
+        enabled_vulkan12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        enabled_vulkan12_features.bufferDeviceAddress = VK_TRUE;
+        enabled_vulkan12_features.descriptorBindingPartiallyBound = VK_TRUE;
+        enabled_vulkan12_features.runtimeDescriptorArray = VK_TRUE;
+        enabled_vulkan12_features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+        enabled_vulkan12_features.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+        ChainVkStructurePtr(create_info, enabled_vulkan12_features);
 
         enabled_acceleration_structure_features.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -1098,13 +1101,6 @@ bool VulkanContext::CreateLogicalDevice()
         enabled_ray_query_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
         enabled_ray_query_features.rayQuery = VK_TRUE;
         ChainVkStructurePtr(create_info, enabled_ray_query_features);
-
-        enabled_descriptor_indexing_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-        enabled_descriptor_indexing_features.descriptorBindingPartiallyBound = VK_TRUE;
-        enabled_descriptor_indexing_features.runtimeDescriptorArray = VK_TRUE;
-        enabled_descriptor_indexing_features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-        enabled_descriptor_indexing_features.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
-        ChainVkStructurePtr(create_info, enabled_descriptor_indexing_features);
 
         enabled_robustness_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
         enabled_robustness_features.nullDescriptor = VK_TRUE;
