@@ -18,9 +18,9 @@ void VulkanBuffer::RequestDeviceAddress()
         return;
     }
 
-    const VkBufferDeviceAddressInfoKHR info = {VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, buffer_};
+    const VkBufferDeviceAddressInfo info = {VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, buffer_};
 
-    device_address_ = vkGetBufferDeviceAddressKHR(context->GetDevice(), &info);
+    device_address_ = vkGetBufferDeviceAddress(context->GetDevice(), &info);
     device_address_cached_ = true;
 }
 
