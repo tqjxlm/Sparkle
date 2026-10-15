@@ -125,6 +125,10 @@ MetalSampler::MetalSampler(const SamplerAttribute &attribute, const std::string 
     sampler_descriptor.minFilter = GetMetalMinMagFilter(attribute_.filtering_method_min);
     sampler_descriptor.magFilter = GetMetalMinMagFilter(attribute_.filtering_method_mag);
     sampler_descriptor.mipFilter = GetMetalMipFilter(attribute_.filtering_method_mipmap);
+    // 16 is the maximum Metal accepts
+    sampler_descriptor.maxAnisotropy = attribute_.enable_anisotropy ? 16 : 1;
+    sampler_descriptor.lodMinClamp = attribute_.min_lod;
+    sampler_descriptor.lodMaxClamp = attribute_.max_lod;
 
     SetDebugInfo(sampler_descriptor, GetName());
 
