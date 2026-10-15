@@ -11,13 +11,15 @@
 #include "application/NativeView.h"
 
 #include <algorithm>
+#include <array>
 #include <format>
+#include <span>
 #include <unordered_set>
 #include <utility>
 
 namespace sparkle
 {
-static std::vector<const char *> ray_tracing_extensions = {
+static constexpr std::array RayTracingExtensions = {
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
     // Required by VK_KHR_acceleration_structure
     VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
@@ -93,7 +95,7 @@ static void DestroyDebugUtilsMessengerExt(VkInstance instance, VkDebugUtilsMesse
     }
 }
 
-static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<const char *> &device_extensions)
+static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::span<const char *const> device_extensions)
 {
     uint32_t extension_count;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
@@ -106,11 +108,6 @@ static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, std::vector<con
     for (const auto &extension : available_extensions)
     {
         Log(Debug, "\t{}", extension.extensionName);
-
-        if (strcmp(extension.extensionName, "VK_KHR_portability_subset") == 0)
-        {
-            device_extensions.push_back("VK_KHR_portability_subset");
-        }
     }
 
     std::unordered_set<std::string> required_extensions(device_extensions.begin(), device_extensions.end());
@@ -157,7 +154,7 @@ template <class T> static T QueryDeviceFeatures(VkPhysicalDevice device, VkStruc
 
 static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
 {
-    if (!CheckDeviceExtensionSupport(device, ray_tracing_extensions))
+    if (!CheckDeviceExtensionSupport(device, RayTracingExtensions))
     {
         return false;
     }
@@ -185,8 +182,8 @@ static bool DeviceSupportHardwareRayTracing(VkPhysicalDevice device)
     return acceleration_structure_features.accelerationStructure != 0;
 }
 
-static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, std::vector<const char *> &deviceExtensions,
-                             bool require_surface)
+static bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface,
+                             std::span<const char *const> deviceExtensions, bool require_surface)
 {
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(device, &device_properties);
@@ -787,16 +784,22 @@ bool VulkanContext::PickPhysicalDevice()
     {
         // always enable ray tracing when we can
         bool can_enable_ray_tracing = DeviceSupportHardwareRayTracing(device);
+        auto device_extensions = device_extensions_;
         if (can_enable_ray_tracing)
         {
-            device_extensions_.insert(device_extensions_.end(), ray_tracing_extensions.begin(),
-                                      ray_tracing_extensions.end());
+            device_extensions.insert(device_extensions.end(), RayTracingExtensions.begin(), RayTracingExtensions.end());
         }
 
-        if (IsDeviceSuitable(device, GetSurface(), device_extensions_, !rhi_->IsHeadless()))
+        if (IsDeviceSuitable(device, GetSurface(), device_extensions, !rhi_->IsHeadless()))
         {
             physical_device_ = device;
             enable_ray_tracing_ = can_enable_ray_tracing;
+            device_extensions_ = std::move(device_extensions);
+            // a device that exposes the portability subset requires it enabled
+            if (HasDeviceExtension(device, "VK_KHR_portability_subset"))
+            {
+                device_extensions_.push_back("VK_KHR_portability_subset");
+            }
 
             VkPhysicalDeviceProperties device_properties;
             vkGetPhysicalDeviceProperties(physical_device_, &device_properties);
