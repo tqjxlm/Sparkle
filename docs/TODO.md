@@ -61,10 +61,8 @@
 
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
 
-* [ ] the window scale that converts a desktop frame buffer resize into the output resolution is read once at startup (`backingScaleFactor`, the monitor content scale), so moving the window to a display with another scale sets the wrong output size
+* [ ] the window scale that converts a desktop frame buffer resize into the output resolution is read once at startup (`backingScaleFactor`, the glfw window content scale), so moving the window to a display with another scale sets the wrong output size
 * [ ] Android reports no frame buffer resize: a new native window (`APP_CMD_INIT_WINDOW`) recreates the swap chain but keeps the output aspect ratio, which only the landscape orientation lock keeps correct; multi-window and freeform sizes stretch
-
-* [ ] a windowed glfw run on macOS crashes in `glfwGetMonitorContentScale` (`GLFWNativeView::InitGUI`) when `glfwGetPrimaryMonitor` returns no monitor, e.g. in a session whose display is asleep; the content scale needs a fallback
 
 * [ ] scene replacement has no render-command lifetime fence. Calling
       `SceneManager::LoadScene` while commands for the previous scene generation are

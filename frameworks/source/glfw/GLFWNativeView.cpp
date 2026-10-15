@@ -187,17 +187,15 @@ void GLFWNativeView::InitGUI(AppFramework *app)
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    auto *monitor = glfwGetPrimaryMonitor();
+    view_ = glfwCreateWindow(static_cast<int>(render_config.image_width), static_cast<int>(render_config.image_height),
+                             config.app_name, nullptr, nullptr);
 
     if (config.platform == AppConfig::NativePlatform::MacOS)
     {
-        glfwGetMonitorContentScale(monitor, &window_scale_.x(), &window_scale_.y());
+        glfwGetWindowContentScale(view_, &window_scale_.x(), &window_scale_.y());
     }
 
     Log(Info, "content scale: {}, {}", window_scale_.x(), window_scale_.y());
-
-    view_ = glfwCreateWindow(static_cast<int>(render_config.image_width), static_cast<int>(render_config.image_height),
-                             config.app_name, nullptr, nullptr);
 
     glfwSetWindowUserPointer(view_, app);
     glfwSetFramebufferSizeCallback(view_, FrameBufferResizeCallback);
