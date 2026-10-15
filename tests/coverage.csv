@@ -53,6 +53,7 @@ sync_validation_hazard,,,,,,x
 forward_sync_validation,,,,,,x
 deferred_sync_validation,,,,,,x
 gpu_sync_validation,,,,,,x
+gpu_primitive_move_sync_validation,,,,,,x
 cpu_sync_validation,,,,,,x
 surface_loss_recovery,,,,,x,
 gpu_render_static,,,,,,

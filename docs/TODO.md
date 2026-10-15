@@ -28,7 +28,6 @@
 
 * [ ] the glfw CMake cache keeps `Vulkan_LIBRARY` from the first configure, so after a Vulkan SDK bump an existing build still links (and on macOS bundles MoltenVK from) the old SDK until it is reconfigured from scratch
 * [ ] a Vulkan present on a lost or out-of-date surface waits on a per-image semaphore that `VulkanContext::ReleaseRenderResources` destroys right after `vkDeviceWaitIdle`, which does not cover the presentation engine's waits; `VK_KHR_swapchain_maintenance1` present fences would tell when the semaphore is free
-* [ ] `VulkanTLAS::Update` rewrites the host-visible instance buffer in place while the previous frame's refit may still read it
 * [ ] `MetalResourceArray::Bind` patches the bindless argument buffer in place while frames in flight may still read it
 * [ ] Metal frame GPU time (`GPUEndTime - GPUStartTime` of the frame's last command buffer) undercounts when a TLAS build commits the frame mid-way
 * [ ] three `VkSampler`s leak at `vkDestroyDevice`
