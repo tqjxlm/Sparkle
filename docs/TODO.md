@@ -32,7 +32,6 @@
 * [ ] `MetalResourceArray::Bind` patches the bindless argument buffer in place while frames in flight may still read it
 * [ ] Metal frame GPU time (`GPUEndTime - GPUStartTime` of the frame's last command buffer) undercounts when a TLAS build commits the frame mid-way
 * [ ] three `VkSampler`s leak at `vkDestroyDevice`
-* [ ] the ray tracing extension list still enables buffer device address, descriptor indexing, `VK_KHR_spirv_1_4` and float controls, which are core in Vulkan 1.2; dropping buffer device address also needs `VmaAllocatorCreateInfo::vulkanApiVersion`, which is left at 1.0
 
 ## IO
 

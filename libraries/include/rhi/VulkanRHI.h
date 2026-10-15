@@ -22,7 +22,7 @@ namespace sparkle
 // any usage outside of "sparkle" namepsace will result in linking errors.
 
 // NOLINTBEGIN
-inline PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
+inline PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress;
 inline PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
 inline PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR;
 inline PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR;

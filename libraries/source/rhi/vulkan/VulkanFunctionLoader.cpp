@@ -72,7 +72,7 @@ void VulkanFunctionLoader::LoadDevice(VkDevice device)
 #else
     if (rhi_->SupportsHardwareRayTracing())
     {
-        GET_VK_FN_CHECKED(vkGetBufferDeviceAddressKHR);
+        GET_VK_FN_CHECKED(vkGetBufferDeviceAddress);
         GET_VK_FN_CHECKED(vkCreateAccelerationStructureKHR);
         GET_VK_FN_CHECKED(vkDestroyAccelerationStructureKHR);
         GET_VK_FN_CHECKED(vkGetAccelerationStructureBuildSizesKHR);
