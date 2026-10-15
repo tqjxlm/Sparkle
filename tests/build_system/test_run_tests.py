@@ -183,6 +183,19 @@ class RunTestsCommandTest(unittest.TestCase):
     def test_uncovered_triplet_is_rejected(self):
         self.assertIsNone(select(triplet="macos-glfw-debug"))
 
+    def test_device_framework_column_ignores_the_host(self):
+        for platform in run_tests.HOST_NAMES:
+            with patch.object(run_tests.sys, "platform", platform):
+                self.assertEqual(run_tests.current_triplet(COVERAGE, "android", "Release"),
+                                 "ubuntu-android-release")
+                self.assertEqual(run_tests.current_triplet(COVERAGE, "ios", "Release"),
+                                 "macos-ios-release")
+
+    def test_desktop_framework_column_follows_the_host(self):
+        with patch.object(run_tests.sys, "platform", "darwin"):
+            self.assertEqual(run_tests.current_triplet(COVERAGE, "glfw", "Release"),
+                             "macos-glfw-release")
+
 
 if __name__ == "__main__":
     unittest.main()
