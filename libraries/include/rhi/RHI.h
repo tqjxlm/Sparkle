@@ -405,7 +405,7 @@ private:
 
     std::unique_ptr<RHIBufferManager> buffer_manager_;
 
-    std::unordered_map<uint32_t, RHIResourceRef<RHIImage>> dummy_textures_;
+    std::unordered_map<RHIImage::Attribute, RHIResourceRef<RHIImage>> dummy_textures_;
 
     StackMemoryAllocator frame_memory_;
 

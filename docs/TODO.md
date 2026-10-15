@@ -29,7 +29,6 @@
 
 * [ ] the Metal sampler ignores `RHISampler` anisotropy and `min_lod`/`max_lod` (`MetalSampler` sets neither `maxAnisotropy` nor the LOD clamps), so Metal samples with anisotropy 1 and the full mip range where Vulkan honours them
 * [ ] the glfw CMake cache keeps `Vulkan_LIBRARY` from the first configure, so after a Vulkan SDK bump an existing build still links (and on macOS bundles MoltenVK from) the old SDK until it is reconfigured from scratch
-* [ ] `RHIContext::GetOrCreateDummyTexture` keys its cache by a 32-bit attribute hash without an equality check
 * [ ] `PickPhysicalDevice` appends the ray tracing extension list to `device_extensions_` once per candidate device, and `CheckDeviceExtensionSupport` mutates that static list (portability subset), so duplicate extension names are possible on multi-GPU hosts and on MoltenVK
 * [ ] a Vulkan present on a lost or out-of-date surface waits on a per-image semaphore that `VulkanContext::ReleaseRenderResources` destroys right after `vkDeviceWaitIdle`, which does not cover the presentation engine's waits; `VK_KHR_swapchain_maintenance1` present fences would tell when the semaphore is free
 * [ ] `VulkanTLAS::Update` rewrites the host-visible instance buffer in place while the previous frame's refit may still read it

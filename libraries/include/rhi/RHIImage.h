@@ -323,4 +323,12 @@ template <> struct hash<sparkle::RHISampler::SamplerAttribute>
         return k.GetHash();
     }
 };
+
+template <> struct hash<sparkle::RHIImage::Attribute>
+{
+    size_t operator()(const sparkle::RHIImage::Attribute &k) const
+    {
+        return k.GetHashForShader();
+    }
+};
 } // namespace std
