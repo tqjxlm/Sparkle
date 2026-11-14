@@ -255,6 +255,13 @@ void GPURenderer::Update()
         camera->MarkPixelDirty();
     }
 
+    // samples taken with and without next event estimation must not share one accumulation
+    if (render_config_.enable_nee != nee_enabled_)
+    {
+        nee_enabled_ = render_config_.enable_nee;
+        camera->MarkPixelDirty();
+    }
+
     if (scene_render_proxy_->GetBindlessManager()->IsBufferDirty())
     {
         BindBindlessResources();
