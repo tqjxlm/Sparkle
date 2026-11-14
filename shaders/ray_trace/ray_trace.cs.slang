@@ -161,7 +161,8 @@ float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, f
     float3 radiance =
         CalculateDirectLightingSplit(w_o, w_i, light_sample, surface, diffuse_radiance, specular_radiance);
 
-    float weight = SaturateDot(w_i, intersection.normal) / (out_pdf + Eps);
+    // CalculateDirectLightingSplit already applies the cosine
+    float weight = 1.f / (out_pdf + Eps);
     specular_out = specular_radiance * weight;
     return radiance * weight;
 }
@@ -418,11 +419,11 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
         GetIntersection(ray_desc, ray_query, intersection);
         MaterialParameters mat_param = GetMaterial(intersection);
 
-        // terminal condition: emissive
+        // terminal condition: emissive. next event estimation never samples emitters, so they take no MIS weight
         float3 emissive_color = SampleEmissive(intersection, mat_param);
         if (dot(emissive_color, emissive_color) > Eps * Eps)
         {
-            float3 contribution = emissive_color * throughput * bsdf_mis_weight;
+            float3 contribution = emissive_color * throughput;
             pixel_color += contribution;
             if (bounce > 0 && primary_specular)
             {
