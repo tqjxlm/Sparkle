@@ -97,6 +97,7 @@ private:
     bool denoiser_reset_this_frame_ = false;
     bool final_frame_this_frame_ = false;
     bool scene_ready_last_ = false;
+    bool nee_enabled_ = false;
 
     struct ComputePerformanceRecord
     {
