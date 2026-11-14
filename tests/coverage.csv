@@ -13,6 +13,7 @@ cpu_render_static_64spp,,,,,,x
 gpu_render_static_64spp,,,,,,x
 cpu_resize_64spp,,,,,,x
 gpu_resize_64spp,,,,,,x
+gpu_nee_parity,,,,,,x
 camera_nudge_return,x,x,x,x,x,x
 primitive_move,x,x,x,x,x,x
 usd_round_trip,,x,,,,

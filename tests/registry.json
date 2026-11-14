@@ -84,6 +84,17 @@
         }
     },
     {
+        "name": "gpu_nee_parity",
+        "test_case": "nee_parity",
+        "description": "Turns one mesh into an emitter and renders the gpu path tracer without, then with next event estimation, enabled at runtime; the evaluator requires both frames to carry the same energy, over the whole image and around the emitter, and the case fails when enabling it does not restart the accumulation.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--width", "640", "--height", "360", "--max_spp", "128"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/rendering/nee_parity_test.py",
+            "args": ["--framework", "{framework}"]
+        }
+    },
+    {
         "name": "cpu_resize_64spp",
         "test_case": "resize",
         "description": "The cpu path-tracing pipeline resized at runtime from 640x360 at render_scale 0.5 to 1280x720 at render_scale 1, without recreating the renderer, FLIP-compared after 64 samples per pixel against the converged ground truth.",
