@@ -14,6 +14,9 @@
 * [ ] dynamic scene
 * [ ] the GPU path tracer samples material textures with nearest filtering
 * [ ] GPU path tracer MIS: the NEE weight pairs the light pdf with the pdf of the BSDF's own sampled direction instead of the BSDF pdf at the light direction, so the two strategies' weights do not sum to 1; needs a BSDF pdf evaluation
+* [ ] GPU path tracer NEE lights a dielectric surface as an opaque one (`SampleSkyLight` ignores `eta`), so glass is 3-5% too bright with NEE on
+* [ ] the GPU path tracer traces `bounce + 1` path segments where the CPU path tracer traces `bounce`, so at one `bounce` setting the two differ wherever light arrives after many bounces (contact shadows)
+* [ ] `utilities::VecToColor` truncates instead of rounding, so the CPU path tracer's 8 bit output is up to one level darker than the GPU pipelines'
 
 ## Rasterization Renderers
 
