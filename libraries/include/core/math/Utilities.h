@@ -371,7 +371,7 @@ template <typename T> inline T Rgba2Bgra(const T &value)
 
 inline Color4 VecToColor(const Vector4 &value)
 {
-    return (value * MaxRGB).cast<uint8_t>();
+    return ((value * MaxRGB).array() + 0.5f).matrix().cast<uint8_t>();
 }
 
 inline Vector4 ColorToVec(const Color4 &color)
