@@ -418,8 +418,12 @@ void RHIContext::FlushDeferredDeletions()
     is_deleting_deferred_resources_ = true;
 
     deferred_deletion_outside_frame_.DeleteResources();
-    deferred_deletion_.clear();
-    deferred_deletion_.resize(max_frames_in_flight_);
+
+    // a deletion cascades into the current frame's list, so that list goes last
+    for (auto i = 1u; i <= max_frames_in_flight_; i++)
+    {
+        deferred_deletion_[(frame_index_ + i) % max_frames_in_flight_].DeleteResources();
+    }
 
     is_deleting_deferred_resources_ = false;
 
