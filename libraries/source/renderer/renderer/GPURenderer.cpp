@@ -5,6 +5,7 @@
 #include "renderer/denoiser/Denoiser.h"
 #include "renderer/denoiser/DenoiserFactory.h"
 #include "renderer/graph/RenderGraph.h"
+#include "renderer/pass/MeshPass.h"
 #include "renderer/pass/ToneMappingPass.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
@@ -61,12 +62,6 @@ class RayTracingComputeShader : public RHIShaderInfo
         uint32_t write_gbuffer;
     };
 };
-
-static constexpr RHISampler::SamplerAttribute MaterialTextureSampler{
-    .address_mode = RHISampler::SamplerAddressMode::Repeat,
-    .filtering_method_min = RHISampler::FilteringMethod::Nearest,
-    .filtering_method_mag = RHISampler::FilteringMethod::Nearest,
-    .filtering_method_mipmap = RHISampler::FilteringMethod::Nearest};
 
 GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_context,
                          SceneRenderProxy *scene_render_proxy, RGTexturePool &graph_texture_pool)
@@ -505,7 +500,7 @@ void GPURenderer::InitSceneRenderResources()
     cs_resources->skyMap().BindResource(dummy_texture_cube->GetDefaultView(rhi_));
     cs_resources->skyMapSampler().BindResource(rhi_->GetSampler(SkyRenderProxy::SkyMapSampler));
 
-    cs_resources->materialTextureSampler().BindResource(rhi_->GetSampler(MaterialTextureSampler));
+    cs_resources->materialTextureSampler().BindResource(rhi_->GetSampler(MeshPass::MaterialTextureSampler));
 
     BindBindlessResources();
 }
