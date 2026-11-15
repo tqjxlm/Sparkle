@@ -2,7 +2,7 @@
 
 Unpacks the ShaderMake blob headers NRD generates (thirdparty/NRD/_Shaders/*.cs.spirv.h), filters
 to the permutations the engine uses, and cooks each into the intermediate shader output directory —
-nothing is committed. macos/ios cross-compile to MSL with nrd_msl_cook (host tool); android keeps
+nothing is committed. macos/ios cross-compile to MSL with nrd_msl_cook (host tool); vulkan keeps
 the SPIR-V as-is (the Vulkan backend reflects bindings on device), so only the entry point and
 workgroup size are parsed here. The runtime looks pipelines up by a canonical stem derived from
 nrd::PipelineDesc::shaderIdentifier: "<Blob>.cs.hlsl|<defines sorted by name>", sanitized to
@@ -108,10 +108,12 @@ def downgrade_spirv_to_1_4(spirv, validator):
         return spirv
     downgraded = spirv[:4] + struct.pack("<I", SPIRV_VERSION_1_4) + spirv[8:]
     if validator:
-        with tempfile.NamedTemporaryFile(suffix=".spv") as probe:
-            probe.write(downgraded)
-            probe.flush()
-            result = subprocess.run([validator, "--target-env", "vulkan1.1spv1.4", probe.name],
+        # a closed file in a temporary directory: windows cannot open a NamedTemporaryFile twice
+        with tempfile.TemporaryDirectory() as probe_dir:
+            probe = os.path.join(probe_dir, "probe.spv")
+            with open(probe, "wb") as f:
+                f.write(downgraded)
+            result = subprocess.run([validator, "--target-env", "vulkan1.1spv1.4", probe],
                                     capture_output=True, text=True)
             if result.returncode != 0:
                 raise ValueError(f"SPIR-V 1.4 downgrade failed validation: {result.stderr}")
@@ -153,14 +155,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shaders-dir", required=True, help="NRD _Shaders dir with *.cs.spirv.h")
     parser.add_argument("--tool", help="nrd_msl_cook host binary (macos/ios only)")
-    parser.add_argument("--platform", required=True, choices=["macos", "ios", "android"])
+    parser.add_argument("--platform", required=True, choices=["macos", "ios", "vulkan"])
     parser.add_argument("--nrd-header", required=True, help="NRD.h for the version guard")
     parser.add_argument("--output", required=True)
     parser.add_argument("--blob-prefix", action="append", required=True)
     parser.add_argument("--signal", default="BOTH")
     args = parser.parse_args()
 
-    if args.platform != "android" and not args.tool:
+    if args.platform != "vulkan" and not args.tool:
         parser.error("--tool is required for macos/ios")
 
     out_dir = os.path.join(args.output, args.platform)
@@ -168,7 +170,7 @@ def main():
     os.makedirs(out_dir)
 
     manifest_lines = ["nrd_version " + " ".join(nrd_version(args.nrd_header))]
-    validator = find_spirv_validator() if args.platform == "android" else None
+    validator = find_spirv_validator() if args.platform == "vulkan" else None
     cooked = 0
     for header in sorted(os.listdir(args.shaders_dir)):
         if not header.endswith(".cs.spirv.h"):
@@ -183,12 +185,12 @@ def main():
                     continue
                 stem = stem_of(blob_name, permutation)
                 spv_path = os.path.join(out_dir, stem + ".spv")
-                if args.platform == "android":
+                if args.platform == "vulkan":
                     spirv = strip_compute_derivatives(spirv)
                     spirv = downgrade_spirv_to_1_4(spirv, validator)
                 with open(spv_path, "wb") as f:
                     f.write(spirv)
-                if args.platform == "android":
+                if args.platform == "vulkan":
                     # bindings are reflected on device; only entry + workgroup go in the manifest
                     entry, wg = spirv_entry_and_workgroup(spirv)
                     manifest_lines.append(
