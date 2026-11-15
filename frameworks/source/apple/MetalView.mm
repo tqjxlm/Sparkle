@@ -67,6 +67,19 @@
     }
 }
 
+#if FRAMEWORK_MACOS
+// the scale must be in place before super resizes the drawable, which triggers the frame buffer resize
+- (void)viewDidChangeBackingProperties
+{
+    if (app_ && !app_stopped_)
+    {
+        static_cast<sparkle::AppleNativeView *>(app_->GetNativeView())->UpdateWindowScale();
+    }
+
+    [super viewDidChangeBackingProperties];
+}
+#endif
+
 - (void)stopApp
 {
     if (app_stopped_)
