@@ -35,6 +35,8 @@ public:
 private:
     static void FrameBufferResizeCallback(GLFWwindow *window, int width, int height);
 
+    static void ContentScaleCallback(GLFWwindow *window, float xscale, float yscale);
+
     static void CursorPositionCallback(GLFWwindow *window, double xPos, double yPos);
 
     static void KeyboardCallback(GLFWwindow *window, int key, int scancode, int action, int mods);

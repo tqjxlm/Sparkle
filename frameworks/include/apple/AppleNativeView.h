@@ -35,6 +35,8 @@ public:
 
     void SetMetalView(MetalView *view);
 
+    void UpdateWindowScale();
+
     MetalView *GetMetalView()
     {
         return view_;

@@ -168,6 +168,11 @@ void AppleNativeView::SetMetalView(MetalView *view)
     can_render_ = true;
     is_valid_ = true;
 
+    UpdateWindowScale();
+}
+
+void AppleNativeView::UpdateWindowScale()
+{
 #if FRAMEWORK_MACOS
     auto scale = [view_.window backingScaleFactor];
 #endif

@@ -193,6 +193,7 @@ void GLFWNativeView::InitGUI(AppFramework *app)
     if (config.platform == AppConfig::NativePlatform::MacOS)
     {
         glfwGetWindowContentScale(view_, &window_scale_.x(), &window_scale_.y());
+        glfwSetWindowContentScaleCallback(view_, ContentScaleCallback);
     }
 
     Log(Info, "content scale: {}, {}", window_scale_.x(), window_scale_.y());
@@ -248,6 +249,14 @@ void GLFWNativeView::FrameBufferResizeCallback(GLFWwindow *window, int width, in
 {
     auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
     app->FrameBufferResizeCallback(width, height);
+}
+
+// glfw reports a new content scale before the frame buffer resize it causes
+void GLFWNativeView::ContentScaleCallback(GLFWwindow *window, float xscale, float yscale)
+{
+    auto *app = reinterpret_cast<AppFramework *>(glfwGetWindowUserPointer(window));
+    static_cast<GLFWNativeView *>(app->GetNativeView())->window_scale_ = Vector2(xscale, yscale);
+    Log(Info, "content scale: {}, {}", xscale, yscale);
 }
 
 void GLFWNativeView::CursorPositionCallback(GLFWwindow *window, double xPos, double yPos)
