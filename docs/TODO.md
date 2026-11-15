@@ -27,7 +27,6 @@
 
 * [ ] a Vulkan present on a lost or out-of-date surface waits on a per-image semaphore that `VulkanContext::ReleaseRenderResources` destroys right after `vkDeviceWaitIdle`, which does not cover the presentation engine's waits; `VK_KHR_swapchain_maintenance1` present fences would tell when the semaphore is free
 * [ ] `MetalResourceArray::Bind` patches the bindless argument buffer in place while frames in flight may still read it
-* [ ] Metal frame GPU time (`GPUEndTime - GPUStartTime` of the frame's last command buffer) undercounts when a TLAS build commits the frame mid-way
 * [ ] three `VkSampler`s leak at `vkDestroyDevice`
 
 ## IO

@@ -191,8 +191,15 @@ void MetalRHI::EndFrameInternal()
         auto frame_index = GetFrameIndex();
         auto *command_context = context->GetCommandContext();
         ASSERT_F(command_context, "the frame ends outside its command buffer");
+        // command buffers of one queue complete in order, so the earlier ones have their times by now
+        auto committed_command_buffers = context->GetFrameCommittedCommandBuffers();
         [command_context->GetCommandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
-          frame_stats_[frame_index].elapsed_time_ms = (command_buffer.GPUEndTime - command_buffer.GPUStartTime) * 1e3f;
+          auto gpu_time = command_buffer.GPUEndTime - command_buffer.GPUStartTime;
+          for (id<MTLCommandBuffer> committed : committed_command_buffers)
+          {
+              gpu_time += committed.GPUEndTime - committed.GPUStartTime;
+          }
+          frame_stats_[frame_index].elapsed_time_ms = static_cast<float>(gpu_time * 1e3);
         }];
     }
 

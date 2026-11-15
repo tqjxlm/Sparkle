@@ -82,6 +82,7 @@ void MetalContext::BeginFrame()
         BeginFrameCapture();
     }
 
+    frame_committed_command_buffers_.clear();
     BeginCommandBuffer();
 }
 
@@ -180,6 +181,7 @@ void MetalContext::SubmitCommandBuffer()
     last_command_buffer_ = command_context_.GetCommandBuffer();
     command_context_.End();
     [last_command_buffer_ commit];
+    frame_committed_command_buffers_.push_back(last_command_buffer_);
 }
 
 void MetalContext::BeginCommandBuffer()

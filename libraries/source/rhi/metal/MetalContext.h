@@ -48,6 +48,12 @@ public:
         return command_context_.GetCommandBuffer() != nil;
     }
 
+    // a frame may commit several command buffers before its last one (e.g. an acceleration structure build)
+    [[nodiscard]] const std::vector<id<MTLCommandBuffer>> &GetFrameCommittedCommandBuffers() const
+    {
+        return frame_committed_command_buffers_;
+    }
+
     [[nodiscard]] MetalView *GetView() const
     {
         return view_;
@@ -101,6 +107,7 @@ private:
     id<CAMetalDrawable> current_drawable_;
     MetalCommandContext command_context_;
     id<MTLCommandBuffer> last_command_buffer_;
+    std::vector<id<MTLCommandBuffer>> frame_committed_command_buffers_;
 
     dispatch_semaphore_t frame_throttle_semaphore_ = nullptr;
 
