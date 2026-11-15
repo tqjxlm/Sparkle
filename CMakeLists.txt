@@ -314,6 +314,11 @@ if(ENABLE_VULKAN)
             "${CMAKE_SHARED_LINKER_FLAGS} -u \
             Java_com_google_androidgamesdk_GameActivity_initializeNativeCode")
     elseif(GLFW)
+        # find_package caches Vulkan_LIBRARY, so a different SDK is looked up again only after dropping it
+        if(NOT "$ENV{VULKAN_SDK}" STREQUAL "${SPARKLE_VULKAN_SDK}")
+            unset(Vulkan_LIBRARY CACHE)
+            set(SPARKLE_VULKAN_SDK "$ENV{VULKAN_SDK}" CACHE INTERNAL "the SDK that Vulkan_LIBRARY was found in")
+        endif()
         find_package(Vulkan REQUIRED)
 
         # the loader only: headers come from thirdparty/Vulkan-Headers on every platform
