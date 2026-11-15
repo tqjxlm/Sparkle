@@ -11,11 +11,8 @@
 
 * [ ] vendor-specific denoising and super sampling
 * [ ] dynamic scene
-* [ ] the GPU path tracer samples material textures with nearest filtering
-* [ ] GPU path tracer MIS: the NEE weight pairs the light pdf with the pdf of the BSDF's own sampled direction instead of the BSDF pdf at the light direction, so the two strategies' weights do not sum to 1; needs a BSDF pdf evaluation
-* [ ] GPU path tracer NEE lights a dielectric surface as an opaque one (`SampleSkyLight` ignores `eta`), so glass is 3-5% too bright with NEE on
+* [ ] GPU path tracer MIS: the NEE weight pairs the light pdf with the pdf of the BSDF's own sampled direction instead of the BSDF pdf at the light direction, so the two strategies' weights do not sum to 1; fixing it also needs NEE to evaluate the BSDF that `BxdfMetal` samples instead of `CalculateDirectLightingSplit`, because with weights that sum to 1 the two models' difference shifts the image's energy past the `gpu_nee_parity` gate
 * [ ] the GPU path tracer traces `bounce + 1` path segments where the CPU path tracer traces `bounce`, so at one `bounce` setting the two differ wherever light arrives after many bounces (contact shadows)
-* [ ] `utilities::VecToColor` truncates instead of rounding, so the CPU path tracer's 8 bit output is up to one level darker than the GPU pipelines'
 
 ## Rasterization Renderers
 
@@ -28,7 +25,6 @@
 
 ## RHI
 
-* [ ] the glfw CMake cache keeps `Vulkan_LIBRARY` from the first configure, so after a Vulkan SDK bump an existing build still links (and on macOS bundles MoltenVK from) the old SDK until it is reconfigured from scratch
 * [ ] a Vulkan present on a lost or out-of-date surface waits on a per-image semaphore that `VulkanContext::ReleaseRenderResources` destroys right after `vkDeviceWaitIdle`, which does not cover the presentation engine's waits; `VK_KHR_swapchain_maintenance1` present fences would tell when the semaphore is free
 * [ ] `MetalResourceArray::Bind` patches the bindless argument buffer in place while frames in flight may still read it
 * [ ] Metal frame GPU time (`GPUEndTime - GPUStartTime` of the frame's last command buffer) undercounts when a TLAS build commits the frame mid-way
