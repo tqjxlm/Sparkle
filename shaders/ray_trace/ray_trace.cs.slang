@@ -115,12 +115,19 @@ bool IsRayOccluded(RayDesc ray_desc)
     return ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
+// only consider sky light for now. a perfect dielectric scatters only into its two delta lobes, which a light sample
+// never hits
+bool IsLightSampled(MaterialParameters mat_param)
+{
+    return sky_light.has_sky_map != 0 && mat_param.eta <= 0;
+}
+
 float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf,
                       out float3 specular_out)
 {
     specular_out = (float3)0;
 
-    if (sky_light.has_sky_map == 0)
+    if (!IsLightSampled(mat_param))
     {
         out_pdf = 0;
         return 0;
@@ -174,10 +181,10 @@ float3 SampleLights(Intersection intersection, MaterialParameters mat_param, flo
     return SampleSkyLight(intersection, mat_param, w_o, out_pdf, specular_out);
 }
 
-float GetLightPdf(float3 normal, float3 w_i)
+float GetLightPdf(MaterialParameters mat_param, float3 normal, float3 w_i)
 {
-    // only consider sky light for now. without a sky map no light is sampled, so bsdf samples take the full weight
-    return sky_light.has_sky_map != 0 ? CosineWeightedHemisphere::Pdf(normal, w_i) : 0;
+    // where no light is sampled, bsdf samples take the full weight
+    return IsLightSampled(mat_param) ? CosineWeightedHemisphere::Pdf(normal, w_i) : 0;
 }
 
 float GetMISWeight(float current_pdf, float compensation_pdf)
@@ -466,7 +473,7 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
             }
 
             // update mis weight for next bounce
-            bsdf_mis_weight = GetMISWeight(bsdf_pdf, GetLightPdf(intersection.normal, next_direction));
+            bsdf_mis_weight = GetMISWeight(bsdf_pdf, GetLightPdf(mat_param, intersection.normal, next_direction));
         }
 
         // terminal condition: debug output
