@@ -26,7 +26,6 @@
 ## RHI
 
 * [ ] a Vulkan present on a lost or out-of-date surface waits on a per-image semaphore that `VulkanContext::ReleaseRenderResources` destroys right after `vkDeviceWaitIdle`, which does not cover the presentation engine's waits; `VK_KHR_swapchain_maintenance1` present fences would tell when the semaphore is free
-* [ ] three `VkSampler`s leak at `vkDestroyDevice`
 
 ## IO
 
