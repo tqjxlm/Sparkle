@@ -526,11 +526,9 @@ endif()
 
 add_subdirectory(thirdparty)
 
-# mirrors the NRD cook conditions in shaders/CMakeLists.txt, where cook-nrd-shaders is defined
-if (ENABLE_METAL OR ANDROID)
-    # declared here because the shaders subdirectory is added before thirdparty defines NRDShaders
-    add_dependencies(cook-nrd-shaders NRDShaders)
-endif()
+# declared here because the shaders subdirectory, which defines cook-nrd-shaders, is added before thirdparty defines
+# NRDShaders
+add_dependencies(cook-nrd-shaders NRDShaders)
 
 # ------------------ IDE config ------------------
 

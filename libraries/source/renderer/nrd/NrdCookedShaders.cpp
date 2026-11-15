@@ -14,10 +14,10 @@ namespace
 {
 #if FRAMEWORK_IOS
 constexpr const char *CookedDir = "shaders/nrd/cooked/ios";
-#elif FRAMEWORK_ANDROID
-constexpr const char *CookedDir = "shaders/nrd/cooked/android";
-#else
+#elif FRAMEWORK_MACOS
 constexpr const char *CookedDir = "shaders/nrd/cooked/macos";
+#else
+constexpr const char *CookedDir = "shaders/nrd/cooked/vulkan";
 #endif
 
 // must produce the same stem as shaders/nrd/cook/cook_nrd_shaders.py: defines sorted by name
