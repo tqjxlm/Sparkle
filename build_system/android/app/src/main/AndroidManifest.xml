@@ -4,12 +4,13 @@
     android:icon="@mipmap/ic_launcher"
     android:label="@string/sparkle_activity">
     <profileable android:shell="true" />
+    <!-- configChanges lists every window size change, so one resizes the native window instead of relaunching the activity -->
     <activity android:name="VulkanActivity"
       android:theme="@style/Application.Fullscreen"
       android:launchMode="singleTask"
       android:exported="true"
       android:screenOrientation="sensorLandscape"
-      android:configChanges="orientation|screenSize">
+      android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />

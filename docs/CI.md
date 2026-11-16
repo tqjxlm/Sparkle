@@ -100,7 +100,7 @@ The macOS + GLFW package runs the same Vulkan backend as Windows, but on the run
 python3 dev/run_tests.py --framework glfw --config Release
 ```
 
-The Android cell runs the dedicated x86_64 package on a KVM-accelerated headless emulator, whose guest Vulkan device is llvmpipe — the same software-rasterizer class as the Windows cell (the shipping arm64 apk cannot be emulated on any hosted runner; see the Android section in [Test.md](Test.md)). Its picks include `surface_loss_recovery`, which exercises the Android native-window teardown/recreate path. `--width 1560 --height 720` matches the resolution of the published android ground-truth captures:
+The Android cell runs the dedicated x86_64 package on a KVM-accelerated headless emulator, whose guest Vulkan device is llvmpipe — the same software-rasterizer class as the Windows cell (the shipping arm64 apk cannot be emulated on any hosted runner; see the Android section in [Test.md](Test.md)). Its picks include `surface_loss_recovery` and `window_resize`, which exercise the Android native-window teardown/recreate and resize paths. `--width 1560 --height 720` matches the resolution of the published android ground-truth captures:
 
 ```bash
 python3 dev/run_tests.py --framework android --config Release --width 1560 --height 720

@@ -211,13 +211,18 @@ EMULATOR_API_LEVEL = 35
 # runner-side commands a TestCase may request through a "[TestCaseAction] <name>" log line.
 # cycle_window goes through the home screen rather than the power key: emulators count as
 # permanently charging, and stay-on defaults vary per image, so a sleep keyevent may leave
-# the surface untouched
+# the surface untouched. resize_display overrides the display size, given in its natural
+# orientation, so the landscape window becomes 4:3, an aspect ratio no phone display has;
+# run_test_case resets the override after every attempt
 TEST_CASE_ACTIONS = {
     "cycle_window": (
         ["shell", "am", "start", "-a", "android.intent.action.MAIN",
          "-c", "android.intent.category.HOME"],
         ["shell", "am", "start", "-n",
          "io.tqjxlm.sparkle/io.tqjxlm.sparkle.VulkanActivity"],
+    ),
+    "resize_display": (
+        ["shell", "wm", "size", "480x640"],
     ),
 }
 
@@ -545,6 +550,7 @@ def run_test_case(args):
         adb("shell", "am", "start", "-n", ACTIVITY_NAME)
         code, verdict = watch_test_run(timeout_seconds=900)
         print(f"=== test run: {verdict}")
+        adb("shell", "wm", "size", "reset", check=False)
         if code != 2:
             break
         adb("shell", "am", "force-stop", PACKAGE_NAME)

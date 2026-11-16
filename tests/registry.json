@@ -508,6 +508,11 @@
         }
     },
     {
+        "name": "window_resize",
+        "test_case": "window_resize",
+        "description": "Display resize mid-run (wm size driven by the android runner) gives the native window a new aspect ratio; the output resolution follows it. Android only."
+    },
+    {
         "name": "nrd_probe",
         "test_case": "nrd_probe",
         "description": "Cooked ReBLUR pipelines compile to PSOs on the current GPU. Apple platforms only."

@@ -52,8 +52,6 @@
 
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
 
-* [ ] Android reports no frame buffer resize: a new native window (`APP_CMD_INIT_WINDOW`) recreates the swap chain but keeps the output aspect ratio, which only the landscape orientation lock keeps correct; multi-window and freeform sizes stretch
-
 * [ ] scene replacement has no render-command lifetime fence. Calling
       `SceneManager::LoadScene` while commands for the previous scene generation are
       still queued can invoke a destroyed component; independently destroying a scene
