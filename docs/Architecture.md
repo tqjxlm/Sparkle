@@ -17,6 +17,15 @@
 | `SessionManager`  | [libraries/include/application/SessionManager.h](../libraries/include/application/SessionManager.h) | Save/load session state                        |
 | `InputManager`    | [libraries/include/application/InputManager.h](../libraries/include/application/InputManager.h)     | Input event pipeline, see [Input.md](Input.md) |
 
+## Scene And Render Thread
+
+The main thread works on the scene graph (`Scene`, `SceneNode`, components) and the render thread on the render proxies behind it (`SceneRenderProxy`, with one proxy per renderable component and per material). A component reaches its proxy only through render tasks (`TaskManager::RunInRenderThread`), which capture raw pointers to the component and to the scene render proxy.
+
+* **Frame batches**: render tasks queued during a main thread frame reach the render thread as one batch when the frame ends (`RenderFramework::PushRenderTasks`), in the order they were queued. The render thread runs a batch, then renders its frame; at most one batch waits (`MaxBufferedTaskFrames`), so the main thread runs at most two frames ahead. In a process without a render thread of its own (`render_thread false`, a cook process, shutdown) a render task runs where it is queued.
+* **Drain before destroy**: `TaskManager::FlushRenderThread` hands the render thread the tasks queued so far as a batch of their own and blocks the main thread until they ran. Whatever destroys an object that render tasks capture calls it first, so no caller has to: `Scene::Cleanup` and `SceneNode::RemoveChild` before they destroy components, and `Scene::~Scene` once more before its scene render proxy dies, because the removal tasks of the destroyed components capture it. Only the main thread waits this way: the render thread waits on the main thread for nothing but its next batch.
+* **Detached trees are inert**: a component has a render proxy and its registrations in the scene only while it is attached. Loaders build their trees detached, on their own thread, without touching the scene or the render thread, so dropping a tree that never attached leaves both alone. A camera becomes the main camera when it attaches.
+* **Load generations**: `Scene::Cleanup` retires the scene's generation, which a `SceneAsyncTask` reports through `IsActive` even after the `Scene` is destroyed. `SceneManager::LoadScene` attaches what it loaded, and the defaults the file lacks, only while the generation it started in is active; a load that was superseded reports failure and its tree is dropped.
+
 ## Build System Architecture
 
 The build system uses a factory pattern with abstract `FrameworkBuilder` interface:

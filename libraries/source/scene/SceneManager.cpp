@@ -111,26 +111,48 @@ static std::shared_ptr<OrbitCameraComponent> CreateDefaultCamera()
     return std::make_shared<OrbitCameraComponent>(camera_attribute);
 }
 
-static std::shared_ptr<TaskFuture<bool>> LoadSceneFromFile(Scene *scene, const Path &path)
+// attaches the loaded file and the defaults it lacks. a scene cleaned up or destroyed during the load takes nothing
+// from it, and the load reports failure.
+static std::shared_ptr<TaskFuture<bool>> LoadSceneFromFile(Scene *scene, const Path &path, bool need_default_sky,
+                                                           bool need_default_lighting)
 {
-    return SceneDataFactory::Load(path, scene)->Then([scene, path](const std::shared_ptr<SceneNode> &node) {
-        if (node)
-        {
-            scene->GetRootNode()->AddChild(node);
-            return true;
-        }
+    return SceneDataFactory::Load(path, scene)
+        ->Then([scene, path, need_default_sky, need_default_lighting,
+                load = scene->RegisterAsyncTask()](const std::shared_ptr<SceneNode> &node) {
+            if (!load->IsActive())
+            {
+                return false;
+            }
 
-        Log(Error, "failed to load model {}", path.path.string());
-        return false;
-    });
+            if (node)
+            {
+                scene->GetRootNode()->AddChild(node);
+            }
+            else
+            {
+                Log(Error, "failed to load model {}", path.path.string());
+            }
+
+            if (need_default_lighting && !scene->GetDirectionalLight())
+            {
+                SceneManager::AddDefaultDirectionalLight(scene);
+            }
+
+            if (need_default_sky && !scene->GetSkyLight())
+            {
+                SceneManager::AddDefaultSky(scene)->Forget();
+            }
+
+            load->Complete(node != nullptr);
+
+            return node != nullptr;
+        });
 }
 
 std::shared_ptr<TaskFuture<bool>> SceneManager::LoadScene(Scene *scene, const Path &asset_path, bool need_default_sky,
                                                           bool need_default_lighting)
 {
     PROFILE_SCOPE_LOG("SceneManager::LoadScene");
-
-    // in-flight load/cook tasks racing this teardown are a known issue (docs/TODO.md: scene replacement fence)
 
     Log(Info, "Loading scene... {}", asset_path.path.string());
 
@@ -146,7 +168,6 @@ std::shared_ptr<TaskFuture<bool>> SceneManager::LoadScene(Scene *scene, const Pa
     camera_node->AddComponent(main_camera);
     main_camera->Setup(Zeros, 10.f, 0.f, 0.f);
 
-    scene->SetMainCamera(main_camera);
     scene->GetRootNode()->AddChild(camera_node);
 
     std::shared_ptr<TaskFuture<bool>> load_task;
@@ -156,30 +177,18 @@ std::shared_ptr<TaskFuture<bool>> SceneManager::LoadScene(Scene *scene, const Pa
         // This is the default scene and is exactly what the CI ground-truth images are rendered from.
         // It carries its own sky, lights and camera. See tests/usd/UsdRoundTripTest.cpp for how to
         // regenerate it.
-        load_task = LoadSceneFromFile(scene, Path::Resource(TestSceneFile));
+        load_task = LoadSceneFromFile(scene, Path::Resource(TestSceneFile), need_default_sky, need_default_lighting);
         scene->GetRootNode()->SetName("TestScene");
     }
     else
     {
         // A non-empty `scene` is a model/scene file PATH (e.g. "models/foo.gltf"), NOT a scene name:
         // "TestScene" here would be treated as a file and fail to load.
-        load_task = LoadSceneFromFile(scene, asset_path);
+        load_task = LoadSceneFromFile(scene, asset_path, need_default_sky, need_default_lighting);
         scene->GetRootNode()->SetName(asset_path.path.parent_path().string());
     }
 
-    return load_task->Then([scene, need_default_sky, need_default_lighting](bool succeeded) {
-        if (need_default_lighting && !scene->GetDirectionalLight())
-        {
-            SceneManager::AddDefaultDirectionalLight(scene);
-        }
-
-        if (need_default_sky && !scene->GetSkyLight())
-        {
-            SceneManager::AddDefaultSky(scene)->Forget();
-        }
-
-        return succeeded;
-    });
+    return load_task;
 }
 
 void SceneManager::RemoveLastDebugSphere(Scene *scene)

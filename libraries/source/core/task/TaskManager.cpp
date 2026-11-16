@@ -43,4 +43,19 @@ std::shared_ptr<TaskFuture<>> TaskManager::OnAll(const std::vector<std::shared_p
 
     return future;
 }
+
+void TaskManager::FlushRenderThread()
+{
+    ASSERT(ThreadManager::IsInMainThread());
+
+    // without a thread of its own, a render task runs where it is queued
+    if (ThreadManager::IsInRenderThread())
+    {
+        return;
+    }
+
+    auto fence = RunInRenderThread([] {});
+    TaskDispatcher::Instance().DeliverQueuedTasks(ThreadName::Render);
+    fence->Wait();
+}
 } // namespace sparkle

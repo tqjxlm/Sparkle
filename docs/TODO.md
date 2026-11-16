@@ -48,11 +48,6 @@
 
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
 
-* [ ] scene replacement has no render-command lifetime fence. Calling
-      `SceneManager::LoadScene` while commands for the previous scene generation are
-      still queued can invoke a destroyed component; independently destroying a scene
-      with renderable components can leave removal commands holding its dead
-      `SceneRenderProxy`. Loader callbacks also lack a generation token, so an older
-      load can mutate the replacement scene. Scene/component teardown needs
-      generation-owned render commands or an explicit drain-before-destroy contract;
-      load completion must then use the same generation boundary.
+* [ ] a pipeline switch recreates every render proxy on the render thread by walking the scene graph (`Scene::RecreateRenderProxy`) while the main thread may be changing it, and it replaces the `SceneRenderProxy` that render tasks queued before the switch capture; the main thread has to drive the recreation under `TaskManager::FlushRenderThread`
+
+* [ ] `SceneNode::AddChild` reads the root of the node's `Scene` to tell whether the node is attached, also on a loader thread that builds a detached tree, so a `Scene` destroyed during a load into it (the app exiting mid-load) is read after it is freed

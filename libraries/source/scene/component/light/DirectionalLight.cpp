@@ -30,6 +30,11 @@ void DirectionalLight::SetColor(const Vector3 &color)
 {
     color_ = color;
 
+    if (!is_attached_)
+    {
+        return;
+    }
+
     TaskManager::RunInRenderThread([this, color]() {
         if (!GetRenderProxy())
         {

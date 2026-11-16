@@ -3,6 +3,7 @@
 #include "core/Container.h"
 #include "core/Logger.h"
 #include "core/ThreadManager.h"
+#include "core/task/TaskManager.h"
 #include "scene/Scene.h"
 #include "scene/component/Component.h"
 
@@ -77,6 +78,9 @@ void SceneNode::AddChild(const std::shared_ptr<SceneNode> &child)
 void SceneNode::RemoveChild(SceneNode *child)
 {
     ASSERT_F(ThreadManager::IsInMainThread(), "Scene management should only happen in main thread");
+
+    // the render commands queued so far capture the components destroyed with the child
+    TaskManager::FlushRenderThread();
 
     auto index_to_remove = child->sibling_index_;
     child->sibling_index_ = UINT_MAX;

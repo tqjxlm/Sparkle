@@ -6,7 +6,6 @@
 #include "core/Logger.h"
 #include "io/Mesh.h"
 #include "io/TextureCookJob.h"
-#include "scene/Scene.h"
 #include "scene/SceneNode.h"
 #include "scene/component/camera/OrbitCameraComponent.h"
 #include "scene/component/light/DirectionalLight.h"
@@ -116,12 +115,7 @@ static std::shared_ptr<CameraComponent> LoadCamera(const tinyusdz::tydra::Node &
         attribute.focus_distance = focus_distance;
     }
 
-    auto camera = std::make_shared<OrbitCameraComponent>(attribute);
-
-    // TODO(tqjxlm): this means we can only have one camera. should support multiple cameras in the future.
-    ctx.scene->SetMainCamera(camera);
-
-    return camera;
+    return std::make_shared<OrbitCameraComponent>(attribute);
 }
 
 // missing channels: grey replicates into rgb, alpha becomes 1 in the source texel encoding
