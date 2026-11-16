@@ -69,6 +69,9 @@ public:
 private:
     void Reset(android_app *app_state);
 
+    // the frame buffer is the whole window
+    void UpdateFrameBufferSize();
+
     void HandleInputEvents();
 
     android_app *app_state_ = nullptr;

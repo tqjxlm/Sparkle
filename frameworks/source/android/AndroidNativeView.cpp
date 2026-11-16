@@ -241,6 +241,8 @@ void AndroidNativeView::OnAppCmd(android_app *app_state, int32_t cmd)
             break;
         }
 
+        native_view->UpdateFrameBufferSize();
+
         if (rhi && rhi->IsInitialized())
         {
             TaskManager::RunInRenderThread([rhi]() {
@@ -252,6 +254,15 @@ void AndroidNativeView::OnAppCmd(android_app *app_state, int32_t cmd)
         }
 
         native_view->can_render_ = true;
+
+        break;
+    case APP_CMD_WINDOW_RESIZED:
+        Log(Info, "APP_CMD_WINDOW_RESIZED");
+
+        if (!native_view->IsHeadless())
+        {
+            native_view->UpdateFrameBufferSize();
+        }
 
         break;
     case APP_CMD_TERM_WINDOW:
@@ -310,12 +321,6 @@ void AndroidNativeView::Reset(android_app *app_state)
         view_.reset(app_state_->window);
 
         is_valid_ = headless_ || view_ != nullptr;
-
-        if (view_)
-        {
-            window_width_ = ANativeWindow_getWidth(view_.get());
-            window_height_ = ANativeWindow_getHeight(view_.get());
-        }
     }
 
     if (ui_enabled_)
@@ -323,6 +328,17 @@ void AndroidNativeView::Reset(android_app *app_state)
         // we have to re-init ui system because native window has changed
         InitUiSystem();
     }
+}
+
+void AndroidNativeView::UpdateFrameBufferSize()
+{
+    {
+        std::scoped_lock lock(view_mutex_);
+        window_width_ = ANativeWindow_getWidth(view_.get());
+        window_height_ = ANativeWindow_getHeight(view_.get());
+    }
+
+    app_->FrameBufferResizeCallback(window_width_, window_height_);
 }
 
 void AndroidNativeView::HandleInputEvents()

@@ -57,6 +57,7 @@ gpu_sync_validation,,,,,,x
 gpu_primitive_move_sync_validation,,,,,,x
 cpu_sync_validation,,,,,,x
 surface_loss_recovery,,,,,x,
+window_resize,,,,,x,
 gpu_render_static,,,,,,
 cpu_render_static,,,,,,
 ibl_parity,,,,,,
