@@ -13,7 +13,8 @@ class Scene;
 class SceneNode
 {
 public:
-    explicit SceneNode(Scene *scene, std::string name) : scene_(scene), name_(std::move(name))
+    explicit SceneNode(Scene *scene, std::string name, bool is_scene_root = false)
+        : scene_(scene), name_(std::move(name)), is_scene_root_(is_scene_root)
     {
         ASSERT(!name_.empty());
     }
@@ -162,5 +163,7 @@ private:
     uint32_t sibling_index_ = UINT_MAX;
 
     uint32_t transform_dirty_ : 1 = 1u;
+
+    bool is_scene_root_;
 };
 } // namespace sparkle
