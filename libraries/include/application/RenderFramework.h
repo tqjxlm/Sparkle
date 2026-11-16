@@ -87,6 +87,9 @@ public:
     // called by main thread, run on render thread
     void NewFrame(uint64_t frame_number, const RenderConfig &render_config);
 
+    // called by main thread, run on render thread
+    void RecreateRendererIfNecessary();
+
     void WaitUntilIdle();
 
     void RenderLoop();
@@ -141,8 +144,6 @@ private:
     [[nodiscard]] bool BeginFrame();
 
     void EndFrame();
-
-    void RecreateRendererIfNecessary();
 
     void AdvanceFrame(float render_thread_time);
 

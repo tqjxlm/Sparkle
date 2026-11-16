@@ -172,6 +172,9 @@ private:
     RenderConfig render_config_;
     RHIConfig rhi_config_;
 
+    // the pipeline the render thread was last told to run
+    RenderConfig::Pipeline pushed_pipeline_{};
+
     std::unique_ptr<EventSubscription> renderer_created_subscription_;
     std::vector<std::unique_ptr<EventSubscription>> input_subscriptions_;
 

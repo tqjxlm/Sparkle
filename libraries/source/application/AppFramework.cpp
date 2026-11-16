@@ -215,6 +215,7 @@ bool AppFramework::Init()
     main_scene_ = std::make_unique<Scene>();
 
     render_framework_ = std::make_unique<RenderFramework>(view_, rhi_.get(), ui_manager_.get(), main_scene_.get());
+    pushed_pipeline_ = render_config_.pipeline;
     if (app_config_.render_thread)
     {
         render_framework_->StartRenderThread(render_config_);
@@ -309,6 +310,14 @@ bool AppFramework::MainLoop()
     TaskManager::RunInRenderThread([this, frame_number = frame_number_, render_config = render_config_]() {
         render_framework_->NewFrame(frame_number, render_config);
     });
+
+    // a pipeline switch recreates every render proxy from the scene graph, so the main thread waits for it
+    if (pushed_pipeline_ != render_config_.pipeline)
+    {
+        pushed_pipeline_ = render_config_.pipeline;
+        TaskManager::RunInRenderThread([this]() { render_framework_->RecreateRendererIfNecessary(); });
+        TaskManager::FlushRenderThread();
+    }
 
     {
         PROFILE_SCOPE("MainLoop ConsumeThreadTasks");
