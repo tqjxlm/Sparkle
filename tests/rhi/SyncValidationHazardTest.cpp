@@ -10,8 +10,6 @@
 #include "../../libraries/source/rhi/vulkan/VulkanBuffer.h"
 #include "../../libraries/source/rhi/vulkan/VulkanCommandContext.h"
 
-#include <atomic>
-
 namespace sparkle
 {
 // proves the synchronization gate can fail: two copies into one buffer with no barrier between them are a
@@ -26,49 +24,29 @@ public:
         EnforceConfig("validate_sync", true);
     }
 
+    // the hazard is provoked and accepted within one tick: an error not yet accepted when a tick ends fails the case
     Result OnTick(AppFramework &app) override
     {
-        if (task_pending_.load(std::memory_order_acquire))
+        unsigned provoked = 0;
+        TaskManager::RunInRenderThread([&provoked, rhi = app.GetRHI()] { provoked = RecordHazard(rhi); });
+        TaskManager::FlushRenderThread();
+
+        if (provoked == 0)
         {
-            return Result::Pending;
+            Log(Error, "an unsynchronized write-after-write was not reported");
+            return Result::Fail;
         }
 
-        if (started_)
-        {
-            const auto provoked = provoked_errors_.load(std::memory_order_acquire);
-            if (provoked == 0)
-            {
-                Log(Error, "an unsynchronized write-after-write was not reported");
-                return Result::Fail;
-            }
-
-            Log(Info, "the unsynchronized write-after-write was reported ({} error(s))", provoked);
-            AcceptValidationErrors(provoked);
-            return Result::Pass;
-        }
-
-        started_ = true;
-        task_pending_.store(true, std::memory_order_release);
-
-        auto *rhi = app.GetRHI();
-        TaskManager::RunInRenderThread([this, rhi] {
-            RecordHazard(rhi);
-            task_pending_.store(false, std::memory_order_release);
-        });
-
-        return Result::Pending;
-    }
-
-    [[nodiscard]] uint32_t GetDefaultTimeoutFrames() const override
-    {
-        return 1000;
+        Log(Info, "the unsynchronized write-after-write was reported ({} error(s))", provoked);
+        AcceptValidationErrors(provoked);
+        return Result::Pass;
     }
 
 private:
     static constexpr size_t BufferSize = 256;
 
-    // two raw copies into one buffer, with no barrier between them
-    void RecordHazard(RHIContext *rhi)
+    // two raw copies into one buffer, with no barrier between them. returns the validation errors they raised
+    static unsigned RecordHazard(RHIContext *rhi)
     {
         auto source =
             rhi->CreateBuffer({.size = BufferSize,
@@ -93,12 +71,8 @@ private:
         }
         rhi->SubmitCommandBuffer();
 
-        provoked_errors_.store(rhi->GetValidationErrorCount().value_or(0) - errors_before, std::memory_order_release);
+        return rhi->GetValidationErrorCount().value_or(0) - errors_before;
     }
-
-    bool started_ = false;
-    std::atomic<bool> task_pending_ = false;
-    std::atomic<unsigned> provoked_errors_ = 0;
 };
 
 static TestCaseRegistrar<SyncValidationHazardTest> sync_validation_hazard_test_registrar("sync_validation_hazard");
