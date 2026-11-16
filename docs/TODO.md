@@ -48,6 +48,6 @@
 
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
 
-* [ ] a pipeline switch recreates every render proxy on the render thread by walking the scene graph (`Scene::RecreateRenderProxy`) while the main thread may be changing it, and it replaces the `SceneRenderProxy` that render tasks queued before the switch capture; the main thread has to drive the recreation under `TaskManager::FlushRenderThread`
+* [ ] `MeshPass::UpdateFrameData` resolves a `New` primitive change by its index after later changes of the same frame moved or removed that primitive, so adding and removing primitives within one render frame crashes or binds the wrong mesh
 
-* [ ] `SceneNode::AddChild` reads the root of the node's `Scene` to tell whether the node is attached, also on a loader thread that builds a detached tree, so a `Scene` destroyed during a load into it (the app exiting mid-load) is read after it is freed
+* [ ] render tasks still queued when the render thread stops are discarded, so a material whose removal task is among them keeps its render proxy and trips `ASSERT(!render_proxy_)` in a Debug build

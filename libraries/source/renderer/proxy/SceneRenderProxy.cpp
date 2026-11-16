@@ -6,6 +6,7 @@
 #include "core/math/Intersection.h"
 #include "renderer/BindlessManager.h"
 #include "renderer/proxy/CameraRenderProxy.h"
+#include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/PrimitiveRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
@@ -338,9 +339,19 @@ void SceneRenderProxy::RemoveRenderProxy(RenderProxy *proxy)
         UnregisterPrimitive(primitive_proxy);
     }
 
+    if (proxy == camera_)
+    {
+        camera_ = nullptr;
+    }
+
     if (proxy == sky_proxy_)
     {
         sky_proxy_ = nullptr;
+    }
+
+    if (proxy == directional_light_)
+    {
+        directional_light_ = nullptr;
     }
 
     // collect deleted proxies for deferred deletion

@@ -264,16 +264,20 @@ void SceneManager::AddDefaultDirectionalLight(Scene *scene)
     {
         if (sky_light->HasSkyMap())
         {
-            // the sun is extracted by the async sky cook. weak captures guard against the
-            // scene being cleaned up before delivery; the sky is re-looked-up through the
-            // scene because it lives in the same generation as the captured light.
+            // the sun is extracted by the async sky cook. the scene may be cleaned up or destroyed before
+            // delivery: it is alive while the light is, and its sky lives in the same generation as the light.
             sky_light->OnCooked()->Then(
                 [scene, weak_node = std::weak_ptr<SceneNode>(dir_light_node),
                  weak_light = std::weak_ptr<DirectionalLight>(dir_light)]() {
                     auto node = weak_node.lock();
                     auto light = weak_light.lock();
+                    if (!node || !light)
+                    {
+                        return;
+                    }
+
                     auto *sky = scene->GetSkyLight();
-                    if (!node || !light || (sky == nullptr) || !sky->GetCubeMap())
+                    if ((sky == nullptr) || !sky->GetCubeMap())
                     {
                         return;
                     }

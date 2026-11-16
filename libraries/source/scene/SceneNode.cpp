@@ -94,7 +94,7 @@ void SceneNode::RemoveChild(SceneNode *child)
 
 bool SceneNode::IsInScene() const
 {
-    return GetRootNode() == scene_->GetRootNode();
+    return GetRootNode()->is_scene_root_;
 }
 
 void SceneNode::OnAttachToScene()

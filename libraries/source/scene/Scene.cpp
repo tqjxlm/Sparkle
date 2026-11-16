@@ -56,7 +56,7 @@ bool SceneAsyncTask::IsActive() const
 }
 
 Scene::Scene()
-    : render_proxy_(CreateRenderProxy()), root_node_(std::make_unique<SceneNode>(this, "SceneRoot")),
+    : render_proxy_(CreateRenderProxy()), root_node_(std::make_unique<SceneNode>(this, "SceneRoot", true)),
       async_state_(std::make_shared<SceneAsyncTask::State>())
 {
     input_subscriptions_ = CameraComponent::BindSceneInput(*this);
@@ -219,7 +219,7 @@ void Scene::Cleanup()
     // the render commands queued so far capture the components destroyed here
     TaskManager::FlushRenderThread();
 
-    root_node_ = std::make_unique<SceneNode>(this, "SceneRoot");
+    root_node_ = std::make_unique<SceneNode>(this, "SceneRoot", true);
     sky_light_ = nullptr;
     directional_light_ = nullptr;
     main_camera_ = nullptr;
