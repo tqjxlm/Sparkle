@@ -17,6 +17,9 @@ struct ThreadTaskQueue
     std::vector<std::function<void()>> tasks;
     std::mutex mutex;
 
+    // set by a thread that takes its tasks once per frame: hands it the tasks queued so far
+    std::function<void()> deliver;
+
     std::future<void> AddTask(std::function<void()> &&task);
 
     void RunAll();
@@ -66,6 +69,15 @@ public:
     }
 
     void RunInDedicatedThread(std::function<void()> &&task);
+
+    // hands a named thread the tasks queued for it so far, ahead of its next frame
+    void DeliverQueuedTasks(ThreadName thread)
+    {
+        if (auto queue = task_queues_[thread].lock())
+        {
+            queue->deliver();
+        }
+    }
 
     // drains the queue of a named thread; must be called on that thread
     void RunQueuedTasks(ThreadName thread)

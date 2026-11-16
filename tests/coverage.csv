@@ -28,6 +28,7 @@ usd_loader_semantics,x,x,x,,,x
 usd_loader_semantics_rebuild,,,,,,
 gltf_primitives,,x,,,,x
 scene_load_failure,,x,x,x,,x
+scene_replacement,,x,,,,x
 dynamic_buffer_reuse,x,x,x,x,,x
 vulkan_image_subresources,x,,x,,,x
 pass_timestamps,,x,x,,,x

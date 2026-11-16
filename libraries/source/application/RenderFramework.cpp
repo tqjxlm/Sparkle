@@ -217,6 +217,7 @@ RenderFramework::RenderFramework(NativeView *native_view, RHIContext *rhi, UiMan
 {
     graph_texture_pool_ = std::make_unique<RGTexturePool>(rhi_);
     task_queue_ = std::make_shared<ThreadTaskQueue>();
+    task_queue_->deliver = [this]() { PushRenderTasks(); };
     TaskDispatcher::Instance().RegisterTaskQueue(task_queue_, ThreadName::Render);
 
     if (auto *input_manager = InputManager::Instance())

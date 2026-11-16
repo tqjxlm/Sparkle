@@ -142,6 +142,8 @@ void CameraComponent::OnAttach()
 {
     Component::OnAttach();
 
+    node_->GetScene()->SetMainCamera(this);
+
     TaskManager::RunInRenderThread([this]() { RecreateRenderProxy(); });
 }
 

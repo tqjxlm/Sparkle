@@ -325,6 +325,18 @@
         "description": "Scene async failure propagation for a missing authored sky resource."
     },
     {
+        "name": "scene_replacement",
+        "test_case": "scene_replacement",
+        "description": "The scene reloaded twice in one frame around a newly attached component, so the second load replaces it while the first still runs and render commands of the replaced components are queued, then a second scene destroyed while the render thread holds its proxies. The scene and the render thread must hold what the last load brought and nothing else, and the frame is FLIP-compared against the published ground truth.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/screenshot/static_render_test.py",
+            "args": ["--framework", "{framework}", "--case", "{name}", "--pipeline", "forward"],
+            "scene_args": ["--scene", "{scene_stem}"]
+        }
+    },
+    {
         "name": "dynamic_buffer_reuse",
         "test_case": "dynamic_buffer_reuse",
         "description": "Staged buffer uploads, dynamic suballocation capacity, reuse, and adjacent free-range coalescing."

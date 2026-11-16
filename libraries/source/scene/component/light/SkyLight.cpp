@@ -259,10 +259,7 @@ std::shared_ptr<Image2DCube> MakeCubeFromFaces(const char *face_data, PixelForma
 
 SkyLight::SkyLight() = default;
 
-SkyLight::~SkyLight()
-{
-    node_->GetScene()->GetRenderProxy()->SetSkyLight(nullptr);
-}
+SkyLight::~SkyLight() = default;
 
 CookArtifactKey SkyLight::MasterCookKey(const std::string &sky_map_path)
 {

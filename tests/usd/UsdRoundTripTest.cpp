@@ -37,7 +37,6 @@ static std::shared_ptr<TaskFuture<>> BuildTestScene(Scene *scene)
     camera_node->AddComponent(main_camera);
     main_camera->Setup(Zeros, 25.f, 10.f, -20.f);
 
-    scene->SetMainCamera(main_camera);
     scene_root->AddChild(camera_node);
 
     SceneManager::AddDefaultDirectionalLight(scene);
@@ -130,9 +129,7 @@ public:
                 break;
             }
 
-            // only tear down the app-loaded scene once the renderer has fully synced it:
-            // component attach tasks hold raw component pointers on the render thread, so an
-            // early Cleanup() frees them mid-flight.
+            // the app's own load finishes first: replacing the scene under it makes it report failure
             if (frame_ >= SceneSettleFrames && render_framework->IsReadyForAutoScreenshot())
             {
                 scene_task_succeeded_ = true;

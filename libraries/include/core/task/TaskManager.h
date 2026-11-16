@@ -95,6 +95,10 @@ public:
 
     static std::shared_ptr<TaskFuture<>> OnAll(const std::vector<std::shared_ptr<TaskFuture<>>> &tasks);
 
+    // Blocks the main thread until the render thread has run every task queued so far. Render tasks capture raw
+    // pointers to main thread objects, so the main thread calls this before it destroys one.
+    static void FlushRenderThread();
+
 private:
     template <typename ReturnType, typename Func>
     static std::function<void()> PackageTask(Func &&task, std::shared_ptr<std::promise<ReturnType>> task_promise,

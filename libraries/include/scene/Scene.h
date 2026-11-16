@@ -88,7 +88,10 @@ public:
 
 #pragma region Unique Components
 
-    void SetMainCamera(const std::shared_ptr<CameraComponent> &main_camera);
+    void SetMainCamera(CameraComponent *main_camera)
+    {
+        main_camera_ = main_camera;
+    }
 
     [[nodiscard]] CameraComponent *GetMainCamera() const
     {
@@ -133,7 +136,7 @@ private:
     std::unordered_set<PrimitiveComponent *> primitives_;
     std::unordered_map<Material *, uint32_t> material_usage_;
 
-    // every scene must have a main camera
+    // every scene must have a main camera. the last camera to attach takes the role.
     CameraComponent *main_camera_ = nullptr;
 
     // if multiple directional lights exist, only the first one takes effect.

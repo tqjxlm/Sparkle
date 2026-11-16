@@ -68,6 +68,9 @@ Scene::Scene()
 Scene::~Scene()
 {
     Cleanup();
+
+    // the removal commands of the destroyed components capture the scene render proxy
+    TaskManager::FlushRenderThread();
 }
 
 void Scene::Tick()
@@ -121,11 +124,6 @@ void Scene::ProcessChange()
             }
         }
     }
-}
-
-void Scene::SetMainCamera(const std::shared_ptr<CameraComponent> &main_camera)
-{
-    main_camera_ = main_camera.get();
 }
 
 void Scene::RecreateRenderProxy()
@@ -217,6 +215,9 @@ void Scene::Cleanup()
 {
     async_state_->active.store(false);
     async_state_ = std::make_shared<SceneAsyncTask::State>();
+
+    // the render commands queued so far capture the components destroyed here
+    TaskManager::FlushRenderThread();
 
     root_node_ = std::make_unique<SceneNode>(this, "SceneRoot");
     sky_light_ = nullptr;

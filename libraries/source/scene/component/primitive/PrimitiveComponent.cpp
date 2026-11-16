@@ -14,6 +14,11 @@ PrimitiveComponent::PrimitiveComponent(const Vector3 &center, const Vector3 &siz
 
 PrimitiveComponent::~PrimitiveComponent()
 {
+    if (!is_attached_)
+    {
+        return;
+    }
+
     auto *scene = node_->GetScene();
 
     if (material_)
@@ -59,11 +64,11 @@ void PrimitiveComponent::SetMaterial(const std::shared_ptr<Material> &material)
         return;
     }
 
-    if (!node_)
+    if (!is_attached_)
     {
         material_ = material;
 
-        // if this component has not been attached to a node yet, there is no need refresh rendering resources
+        // a component that is not attached to a scene has no rendering resources to refresh
         return;
     }
 

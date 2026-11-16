@@ -338,6 +338,11 @@ void SceneRenderProxy::RemoveRenderProxy(RenderProxy *proxy)
         UnregisterPrimitive(primitive_proxy);
     }
 
+    if (proxy == sky_proxy_)
+    {
+        sky_proxy_ = nullptr;
+    }
+
     // collect deleted proxies for deferred deletion
     deleted_proxies_.emplace_back(std::move(proxies_[index]));
 
