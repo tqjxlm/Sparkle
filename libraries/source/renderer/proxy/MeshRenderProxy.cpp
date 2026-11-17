@@ -6,6 +6,7 @@
 #include "core/math/Ray.h"
 #include "core/math/Utilities.h"
 #include "io/Mesh.h"
+#include "renderer/RenderConfig.h"
 #include "renderer/proxy/MaterialRenderProxy.h"
 #include "renderer/proxy/PrimitiveRenderProxy.h"
 #include "rhi/RHI.h"

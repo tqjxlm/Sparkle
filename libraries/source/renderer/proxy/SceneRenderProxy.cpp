@@ -5,6 +5,7 @@
 #include "core/math/BVH.h"
 #include "core/math/Intersection.h"
 #include "renderer/BindlessManager.h"
+#include "renderer/RenderConfig.h"
 #include "renderer/proxy/CameraRenderProxy.h"
 #include "renderer/proxy/DirectionalLightRenderProxy.h"
 #include "renderer/proxy/MaterialRenderProxy.h"

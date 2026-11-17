@@ -15,6 +15,7 @@
 #include "MetalUi.h"
 #include "apple/AppleNativeView.h"
 #include "core/Logger.h"
+#include "rhi/RHIConfig.h"
 
 namespace sparkle
 {

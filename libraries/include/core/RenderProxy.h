@@ -2,12 +2,11 @@
 
 #include "core/math/Transform.h"
 
-#include "renderer/RenderConfig.h"
-
 namespace sparkle
 {
 class CameraRenderProxy;
 class RHIContext;
+struct RenderConfig;
 
 class RenderProxy
 {

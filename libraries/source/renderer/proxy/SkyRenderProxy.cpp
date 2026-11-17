@@ -2,6 +2,7 @@
 
 #include "core/math/Ray.h"
 #include "io/Image.h"
+#include "renderer/RenderConfig.h"
 #include "renderer/resource/ImageBasedLighting.h"
 #include "rhi/RHI.h"
 

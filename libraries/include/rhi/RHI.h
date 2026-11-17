@@ -7,19 +7,16 @@
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHICommandContext.h"
 #include "rhi/RHIComputePass.h"
-#include "rhi/RHIConfig.h"
 #include "rhi/RHIImage.h"
-#include "rhi/RHINrdBackend.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIPass.h"
-#include "rhi/RHIRayTracing.h"
 #include "rhi/RHIResource.h"
 #include "rhi/RHIResourceArray.h"
 #include "rhi/RHIShader.h"
 #include "rhi/RHITimer.h"
-#include "rhi/RHIUiHandler.h"
 
 #include <optional>
+#include <unordered_set>
 
 namespace sparkle
 {
@@ -27,6 +24,11 @@ class NativeView;
 class MeshRenderProxy;
 class Image2D;
 class Image2DCube;
+struct RHIConfig;
+class RHIBLAS;
+class RHITLAS;
+class RHINrdBackend;
+class RHIUiHandler;
 
 class RHIContext
 {
@@ -242,24 +244,14 @@ public:
 
     // NVIDIA NRD backend (Metal only): compiles NRD's SPIR-V shaders and drives its dispatches. Null on
     // backends without an NRD path.
-    virtual std::unique_ptr<RHINrdBackend> CreateNrdBackend()
-    {
-        return nullptr;
-    }
+    virtual std::unique_ptr<RHINrdBackend> CreateNrdBackend();
 
     [[nodiscard]] const auto &GetFrameStats(unsigned frame_index) const
     {
         return frame_stats_[frame_index];
     }
 
-    [[nodiscard]] RHIResourceRef<RHIUiHandler> GetUiHandler()
-    {
-        if (!ui_handler_instance_)
-        {
-            ui_handler_instance_ = CreateUiHandler();
-        }
-        return ui_handler_instance_;
-    }
+    [[nodiscard]] RHIResourceRef<RHIUiHandler> GetUiHandler();
 
     RHIResourceRef<RHISampler> GetSampler(RHISampler::SamplerAttribute attribute);
 

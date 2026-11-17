@@ -2,6 +2,8 @@
 
 #include "VulkanFunctionLoader.h"
 
+#include "rhi/RHIConfig.h"
+
 #if VULKAN_USE_VOLK
 #define VOLK_IMPLEMENTATION
 #include <volk.h>

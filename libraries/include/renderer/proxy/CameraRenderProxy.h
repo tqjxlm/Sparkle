@@ -2,6 +2,7 @@
 
 #include "core/RenderProxy.h"
 
+#include "renderer/RenderConfig.h"
 #include "rhi/RHIBuffer.h"
 
 namespace sparkle

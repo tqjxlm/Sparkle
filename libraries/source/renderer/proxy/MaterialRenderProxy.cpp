@@ -2,6 +2,7 @@
 
 #include "io/Material.h"
 #include "renderer/BindlessManager.h"
+#include "renderer/RenderConfig.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "rhi/RHI.h"
 

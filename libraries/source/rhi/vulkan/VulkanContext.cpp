@@ -9,6 +9,7 @@
 #include "VulkanImage.h"
 #include "VulkanSwapChain.h"
 #include "application/NativeView.h"
+#include "rhi/RHIConfig.h"
 
 #include <algorithm>
 #include <array>

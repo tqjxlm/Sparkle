@@ -16,6 +16,7 @@
 #include "VulkanUi.h"
 #include "application/NativeView.h"
 #include "core/Logger.h"
+#include "rhi/RHIConfig.h"
 
 #include <string_view>
 
