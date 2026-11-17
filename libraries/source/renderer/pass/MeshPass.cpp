@@ -5,18 +5,27 @@
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "rhi/RHI.h"
 
+#include <algorithm>
+
 namespace sparkle
 {
 void MeshPass::UpdateFrameData(const RenderConfig &, SceneRenderProxy *scene)
 {
     if (initialized_)
     {
+        // pipeline_states_ follows the changes in order: each index names a slot as it was at the time of its change
         for (const auto &[type, primitive, from, to] : scene->GetPrimitiveChangeList())
         {
             switch (type)
             {
             case SceneRenderProxy::PrimitiveChangeType::New:
-                HandleNewPrimitive(to);
+                pipeline_states_.resize(std::max(pipeline_states_.size(), static_cast<size_t>(to) + 1));
+                // a primitive removed again in the same frame never initialized its render resources: its slot stays
+                // empty until a later change of the frame fills or vacates it
+                if (primitive->GetPrimitiveIndex() != UINT_MAX)
+                {
+                    HandleNewPrimitive(primitive->As<MeshRenderProxy>(), to);
+                }
                 break;
             case SceneRenderProxy::PrimitiveChangeType::Remove:
                 HandleRemovedPrimitive(from);
@@ -35,9 +44,12 @@ void MeshPass::UpdateFrameData(const RenderConfig &, SceneRenderProxy *scene)
     }
     else
     {
-        for (auto *primitive : scene->GetPrimitives())
+        const auto &primitives = scene->GetPrimitives();
+        pipeline_states_.resize(primitives.size());
+
+        for (auto *primitive : primitives)
         {
-            HandleNewPrimitive(primitive->GetPrimitiveIndex());
+            HandleNewPrimitive(primitive->As<MeshRenderProxy>(), primitive->GetPrimitiveIndex());
         }
 
         initialized_ = true;

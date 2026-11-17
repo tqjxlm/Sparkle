@@ -261,6 +261,39 @@
         }
     },
     {
+        "name": "primitive_churn",
+        "test_case": "primitive_churn",
+        "description": "Adds and removes spheres within one render frame, so a removal swaps a sphere added in that frame into its slot and a sphere is added and removed again, on the forward pipeline; the evaluator requires the frame to match the same scene rebuilt over separate frames.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "forward"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/scene/primitive_churn_test.py",
+            "args": ["--framework", "{framework}"]
+        }
+    },
+    {
+        "name": "deferred_primitive_churn",
+        "test_case": "primitive_churn",
+        "description": "primitive_churn on the deferred pipeline, whose G-buffer pass and shadow pass follow the same primitive changes.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/scene/primitive_churn_test.py",
+            "args": ["--framework", "{framework}"]
+        }
+    },
+    {
+        "name": "gpu_primitive_churn",
+        "test_case": "primitive_churn",
+        "description": "primitive_churn on the gpu pipeline, whose acceleration structure and bindless material ids follow the primitive changes; path tracing noise keeps its two screenshots apart, so the case asserts the change list, a clean validation layer and that the gpu pipeline ran.",
+        "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--max_spp", "4"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/rendering/effective_pipeline_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "Gpu"]
+        }
+    },
+    {
         "name": "usd_round_trip",
         "test_case": "usd_round_trip",
         "description": "Render, export to USD, reload and re-render; the evaluator FLIP-compares the two screenshots.",

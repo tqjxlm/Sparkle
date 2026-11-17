@@ -164,13 +164,15 @@ void BindlessManager::UpdateFrameData(RHIContext *rhi)
             case SceneRenderProxy::PrimitiveChangeType::New:
             case SceneRenderProxy::PrimitiveChangeType::Move: {
                 // we treat new primitives and updated primitives in exactly the same way,
-                // as we do not care about empty or stale ids which will not be referenced anyway
+                // as we do not care about empty or stale ids which will not be referenced anyway.
+                // a later change of the frame may have moved the primitive away from `to`, so it is written where it
+                // is now: one dispatch writes all ids, and two values for one id would race
                 if (primitive->GetPrimitiveIndex() != UINT_MAX)
                 {
                     UpdatePrimitive(primitive);
 
                     data_to_update.push_back(primitive->GetMaterialRenderProxy()->GetRenderIndex());
-                    id_to_update.push_back(to);
+                    id_to_update.push_back(primitive->GetPrimitiveIndex());
                 }
             }
             break;

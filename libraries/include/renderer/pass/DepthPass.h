@@ -16,7 +16,7 @@ public:
 
     void InitRenderResources(const RenderConfig &config) override;
 
-    void HandleNewPrimitive(uint32_t primitive_id) override;
+    void HandleNewPrimitive(MeshRenderProxy *mesh_proxy, uint32_t primitive_id) override;
 
     void HandleUpdatedPrimitive([[maybe_unused]] uint32_t primitive_id) override
     {
