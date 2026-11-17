@@ -255,18 +255,14 @@ void RenderFramework::RenderThreadMain()
     while (!should_stop_)
     {
         RenderLoop();
-        end_of_frame_signal_.notify_all();
     }
 
-    // discard all remaining tasks as we are going to exit
+    // what the main thread handed over before the stop still runs, without a frame: the scene it destroys next expects
+    // its tasks to have run, e.g. the removal of a material in the last frame. nothing arrives after the stop.
+    while (!tasks_per_frame_.empty())
     {
-        std::unique_lock<std::mutex> lock(task_queue_mutex_);
-        while (!tasks_per_frame_.empty())
-        {
-            tasks_per_frame_.pop();
-        }
+        ConsumeRenderThreadTasks();
     }
-    end_of_frame_signal_.notify_all();
 
     Log(Info, "Render thread about to exit.");
 
@@ -401,23 +397,19 @@ void RenderFramework::StartRenderThread(const RenderConfig &render_config)
     render_thread_started_.wait(lock, [this]() { return render_loop_started_; });
 }
 
-void RenderFramework::WaitUntilIdle()
-{
-    std::unique_lock<std::mutex> lock(task_queue_mutex_);
-
-    end_of_frame_signal_.wait(lock, [this]() { return tasks_per_frame_.empty(); });
-}
-
 void RenderFramework::StopRenderThread()
 {
     Log(Info, "Wait for render thread to stop");
 
-    should_stop_ = true;
+    {
+        std::scoped_lock<std::mutex> lock(task_queue_mutex_);
 
-    // in case the render thread is waiting for new tasks
+        // the tasks queued so far are handed over in one step with the stop, so the render thread runs them but renders
+        // no frame for them
+        tasks_per_frame_.push(task_queue_->PopTasks());
+        should_stop_ = true;
+    }
     new_task_pushed_.notify_all();
-
-    WaitUntilIdle();
 
     render_thread_.join();
 

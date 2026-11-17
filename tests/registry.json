@@ -370,6 +370,16 @@
         }
     },
     {
+        "name": "render_thread_stop",
+        "test_case": "render_thread_stop",
+        "description": "A sphere switches material in the last frame while the render thread still runs the frame before, so the task that removes the previous material from the render thread is queued when the render thread stops. The render thread must run it before it exits: the material, whose last reference that task holds, checks at its destruction that its render proxy was released, and the evaluator requires that check in the log after the verdict.",
+        "app_args": ["--pipeline", "forward"],
+        "evaluator": {
+            "script": "tests/application/shutdown_expectations_test.py",
+            "args": ["--framework", "{framework}", "--case", "{name}"]
+        }
+    },
+    {
         "name": "dynamic_buffer_reuse",
         "test_case": "dynamic_buffer_reuse",
         "description": "Staged buffer uploads, dynamic suballocation capacity, reuse, and adjacent free-range coalescing."

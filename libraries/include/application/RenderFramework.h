@@ -75,7 +75,7 @@ public:
 
     void StartRenderThread(const RenderConfig &render_config);
 
-    // called by main thread, run on main thread
+    // called by main thread, run on main thread. the render thread runs every task queued so far, then exits.
     void StopRenderThread();
 
     // called by main thread, run on main thread
@@ -89,8 +89,6 @@ public:
 
     // called by main thread, run on render thread
     void RecreateRendererIfNecessary();
-
-    void WaitUntilIdle();
 
     void RenderLoop();
 
@@ -165,10 +163,9 @@ private:
 
     std::condition_variable new_task_pushed_;
     std::condition_variable can_push_new_tasks_;
-    std::condition_variable end_of_frame_signal_;
     std::condition_variable render_thread_started_;
 
-    bool should_stop_ = false;
+    std::atomic<bool> should_stop_{false};
     bool render_loop_started_ = false;
 
     std::mutex task_queue_mutex_;
