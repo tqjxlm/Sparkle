@@ -46,4 +46,5 @@
 
 ## Known Issues
 
+* [ ] `scene_replacement` times out after its 3000-frame budget on a local macOS Release run on an M5 Max, about 0.3 s after its first check passes, while it passes on the CI runners; the budget counts frames, not time
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
