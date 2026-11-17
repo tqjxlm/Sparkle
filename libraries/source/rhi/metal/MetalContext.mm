@@ -64,7 +64,7 @@ MetalContext::MetalContext(MetalRHI *context, MetalView *mtk_view, bool is_headl
     rhi_->SetMaxFramesInFlight([view_ getMaxFrameInFlight]);
 }
 
-void MetalContext::BeginFrame()
+bool MetalContext::BeginFrame()
 {
     // cpu-gpu frame sync
     if (headless_)
@@ -73,7 +73,14 @@ void MetalContext::BeginFrame()
     }
     else
     {
+        // a windowed frame holds a frame in flight through its drawable, see MetalView waitForNextDrawable. a frame
+        // without one is skipped rather than waited for: the main thread acquires the next one only in its next frame,
+        // and may be blocked on the render thread before that (TaskManager::FlushRenderThread).
         current_drawable_ = [view_ getNextDrawable];
+        if (!current_drawable_)
+        {
+            return false;
+        }
         SwapBuffer();
     }
 
@@ -84,6 +91,7 @@ void MetalContext::BeginFrame()
 
     frame_committed_command_buffers_.clear();
     BeginCommandBuffer();
+    return true;
 }
 
 void MetalContext::EndFrame()

@@ -11,9 +11,14 @@
 #include "core/Logger.h"
 #include "core/Profiler.h"
 
+#include <mutex>
+#include <queue>
+
 @implementation MetalView
 {
     dispatch_semaphore_t frames_in_flight_semaphore_;
+    // pushed by the main thread, taken by the render thread
+    std::mutex free_drawables_mutex_;
     std::queue<id<CAMetalDrawable>> free_drawables_;
     BOOL app_stopped_;
 }
@@ -114,13 +119,20 @@
     // with frames_in_flight_semaphore_, we should never get a nil drawable
     ASSERT(next_drawable);
 
+    std::scoped_lock<std::mutex> lock(free_drawables_mutex_);
     free_drawables_.push(next_drawable);
 }
 
 - (id<CAMetalDrawable>)getNextDrawable
 {
-    // with frames_in_flight_semaphore_, we should always have a drawable
-    ASSERT(!free_drawables_.empty());
+    std::scoped_lock<std::mutex> lock(free_drawables_mutex_);
+
+    // the main thread acquires one drawable per main loop frame, but the render thread renders a frame for every batch
+    // it runs, so a frame can find none, e.g. after the batch of a TaskManager::FlushRenderThread
+    if (free_drawables_.empty())
+    {
+        return nil;
+    }
 
     auto next_drawable = free_drawables_.front();
     free_drawables_.pop();

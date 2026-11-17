@@ -82,7 +82,8 @@ public:
 
     void SwapBuffer();
 
-    void BeginFrame();
+    // false when the frame has no drawable to present into, and is skipped
+    [[nodiscard]] bool BeginFrame();
 
     void EndFrame();
 
