@@ -47,5 +47,3 @@
 ## Known Issues
 
 * [ ] MoltenVK's 16x anisotropic sampling is not deterministic from frame to frame on the Apple Paravirtual GPU, so a rare frame samples mip-mapped materials slightly differently; the merge-parity cases run with sampler anisotropy off
-
-* [ ] render tasks still queued when the render thread stops are discarded, so a material whose removal task is among them keeps its render proxy and trips `ASSERT(!render_proxy_)` in a Debug build
