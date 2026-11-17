@@ -180,8 +180,7 @@ bool MetalRHI::SupportsLinearFiltering(PixelFormat format)
 
 bool MetalRHI::BeginFrameInternal()
 {
-    context->BeginFrame();
-    return true;
+    return context->BeginFrame();
 }
 
 void MetalRHI::EndFrameInternal()
