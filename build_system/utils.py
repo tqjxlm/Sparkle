@@ -209,3 +209,10 @@ def robust_rmtree(path, max_retries=3, retry_delay=1.0):
                 print(
                     f"Failed to remove {path} after {max_retries} attempts: {e}")
                 raise
+
+
+def ccache_launcher_args():
+    """CMake arguments that compile C and C++ through ccache when it is installed.
+    Without it the launcher is passed empty, which clears one an earlier configure cached."""
+    launcher = "ccache" if shutil.which("ccache") else ""
+    return [f"-DCMAKE_{language}_COMPILER_LAUNCHER={launcher}" for language in ("C", "CXX")]

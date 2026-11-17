@@ -11,7 +11,7 @@ import urllib.request
 import platform
 from pathlib import Path
 
-from build_system.utils import run_command_with_logging, download_file, extract_zip, robust_rmtree
+from build_system.utils import ccache_launcher_args, run_command_with_logging, download_file, extract_zip, robust_rmtree
 from build_system.builder_interface import FrameworkBuilder
 from build_system.prerequisites import find_or_install_ninja, load_prerequisites_versions, setup_android_validation
 
@@ -620,7 +620,8 @@ def gradle_abi_properties(args):
 def gradle_cmake_property(args):
     """The SDK CMake package bundles ninja 1.10, which CMake rejects for the C++20
     module sources cpptrace declares; ninja 1.11+ is required."""
-    cmake_args = [f"-DCMAKE_MAKE_PROGRAM={find_or_install_ninja()}"] + args["cmake_options"]
+    cmake_args = ([f"-DCMAKE_MAKE_PROGRAM={find_or_install_ninja()}"] + ccache_launcher_args()
+                  + args["cmake_options"])
     return f"-PcmakeArgs={' '.join(cmake_args)}"
 
 

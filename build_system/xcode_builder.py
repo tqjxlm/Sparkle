@@ -3,6 +3,8 @@ Shared CMake-through-Xcode driver for the Apple frameworks.
 """
 
 import os
+import shutil
+import subprocess
 
 from build_system.builder_interface import FrameworkBuilder
 from build_system.utils import run_checked, run_command_with_logging, robust_rmtree
@@ -48,6 +50,31 @@ class XcodeBuilder(FrameworkBuilder):
         """Arguments appended after the cmake --build command line."""
         return []
 
+    def ccache_cmake_args(self):
+        """The Xcode generator ignores compiler launchers, so when ccache is installed the
+        toolchain is wrapped in shims that the project uses as its compiler and linker.
+        Without it the settings are unset, which clears those an earlier generation cached."""
+        tools = {"CC": "clang", "CXX": "clang++", "LD": "clang", "LDPLUSPLUS": "clang++"}
+        settings = {name: f"CMAKE_XCODE_ATTRIBUTE_{name}" for name in tools}
+        # the index store output makes compilations uncacheable
+        index_store = "CMAKE_XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE"
+
+        ccache = shutil.which("ccache")
+        if not ccache:
+            return [f"-U{setting}" for setting in [*settings.values(), index_store]]
+
+        shim_dir = os.path.join(self.get_project_dir(), "ccache")
+        os.makedirs(shim_dir, exist_ok=True)
+        for tool in set(tools.values()):
+            compiler = subprocess.check_output(["xcrun", "-f", tool], text=True).strip()
+            shim = os.path.join(shim_dir, tool)
+            with open(shim, "w", encoding="utf-8") as file:
+                file.write(f'#!/bin/sh\nexec "{ccache}" "{compiler}" "$@"\n')
+            os.chmod(shim, 0o755)
+
+        return ([f"-D{settings[name]}={os.path.join(shim_dir, tool)}" for name, tool in tools.items()]
+                + [f"-D{index_store}=NO"])
+
     def prepare_project_dir(self, args):
         """Bring the project directory into the state the generation expects."""
         if args.get("clean", False):
@@ -84,7 +111,8 @@ class XcodeBuilder(FrameworkBuilder):
             args["cmake_executable"],
             "../../..",
             "-G Xcode",
-        ] + args["cmake_options"] + self.platform_cmake_args(args) + self.project_cmake_args(args)
+        ] + args["cmake_options"] + self.platform_cmake_args(args) + self.project_cmake_args(args) \
+            + self.ccache_cmake_args()
 
         run_checked(cmake_cmd, "CMake project generation failed.",
                     f"Generating {self.framework_name} Xcode project")

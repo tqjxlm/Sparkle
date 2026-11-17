@@ -138,21 +138,10 @@ runs:
       with:
         xcode-version: latest-stable
 
-    # the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so the compiler is routed
-    # through ccache with wrapper scripts wired into Xcode build settings (CC/CXX/LD/LDPLUSPLUS).
-    # must run after Setup Xcode so xcrun resolves the selected toolchain.
-    - name: Setup ccache for Xcode (macOS/iOS)
+    - name: Install ccache (macOS/iOS)
       if: inputs.framework == 'macos' || inputs.framework == 'ios'
       shell: bash
-      run: |
-        command -v ccache || HOMEBREW_NO_AUTO_UPDATE=1 brew install ccache
-        CCACHE="$(command -v ccache)"
-        SHIM_DIR="${{ github.workspace }}/.ccache-shims"
-        mkdir -p "${SHIM_DIR}"
-        printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "${CCACHE}" "$(xcrun -f clang)" > "${SHIM_DIR}/clang"
-        printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "${CCACHE}" "$(xcrun -f clang++)" > "${SHIM_DIR}/clang++"
-        chmod +x "${SHIM_DIR}/clang" "${SHIM_DIR}/clang++"
-        echo "CCACHE_SHIM_DIR=${SHIM_DIR}" >> $GITHUB_ENV
+      run: command -v ccache || HOMEBREW_NO_AUTO_UPDATE=1 brew install ccache
 
     - name: Set build arguments
       id: set-build-args
@@ -160,31 +149,13 @@ runs:
       run: |
         EXTRA_CMAKE_ARGS=""
 
-        if [[ "${{ inputs.framework }}" == "glfw" || "${{ inputs.framework }}" == "android" ]]; then
-          EXTRA_CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
-        fi
-
-        if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"windows"* ]]; then
-          # ccache cannot cache /Zi (separate .pdb writes); store debug info in the objects (/Z7)
-          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
-        fi
-
         if [[ "${{ inputs.framework }}" == "glfw" && "${{ inputs.os }}" == *"macos"* ]]; then
           # brew --prefix answers where llvm would live, installed or not, and the runner image
           # builds against Xcode clang instead. an absent prefix only earns ld search-path warnings
           LLVM_PREFIX=$(brew --prefix llvm)
           if [ -d "${LLVM_PREFIX}/lib" ]; then
-            EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\""
+            EXTRA_CMAKE_ARGS="-DCMAKE_EXE_LINKER_FLAGS=\"-L${LLVM_PREFIX}/lib/c++ -L${LLVM_PREFIX}/lib -lc++abi\""
           fi
-        fi
-
-        if [[ "${{ inputs.framework }}" == "macos" || "${{ inputs.framework }}" == "ios" ]]; then
-          EXTRA_CMAKE_ARGS="-DCMAKE_XCODE_ATTRIBUTE_CC=${CCACHE_SHIM_DIR}/clang"
-          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_CXX=${CCACHE_SHIM_DIR}/clang++"
-          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_LD=${CCACHE_SHIM_DIR}/clang"
-          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_LDPLUSPLUS=${CCACHE_SHIM_DIR}/clang++"
-          # the index store output makes compilations uncacheable, and CI has no use for it
-          EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE=NO"
         fi
 
         echo "args=--cmake-args='${EXTRA_CMAKE_ARGS}'" >> $GITHUB_OUTPUT

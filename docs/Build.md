@@ -38,6 +38,14 @@ These libraries should be installed via an installer or package manager (apt, br
   sudo apt install libglfw3-dev # Linux
   ```
 
+* **ccache** (optional): when it is on `PATH`, every framework compiles through it, so a clean rebuild or a switch back to code that was built before reuses the cached objects. Code that changed compiles at the usual cost. The Xcode frameworks build with the index-while-building store disabled, because its output makes compilations uncacheable.
+
+  ``` shell
+  brew install ccache # MacOS
+  choco install ccache # Windows
+  sudo apt install ccache # Linux
+  ```
+
 * **CMake**: 3.30+
 
   ``` shell

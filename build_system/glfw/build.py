@@ -1,9 +1,10 @@
 import os
+import shutil
 import subprocess
 import platform
 
 from build_system.prerequisites import find_llvm_path, find_or_install_ninja, find_visual_studio_path, find_vcpkg, install_glfw
-from build_system.utils import compress_zip, robust_rmtree, run_checked
+from build_system.utils import ccache_launcher_args, compress_zip, robust_rmtree, run_checked
 from build_system.builder_interface import FrameworkBuilder
 
 SCRIPT = os.path.abspath(__file__)
@@ -83,6 +84,10 @@ def configure(args, is_generate_sln):
 
         compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl",
                          "-DCMAKE_C_COMPILER=clang-cl"]
+        if shutil.which("ccache"):
+            # ccache cannot cache /Zi (separate .pdb writes); store debug info in the objects (/Z7)
+            compiler_args += ["-DCMAKE_POLICY_DEFAULT_CMP0141=NEW",
+                              "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"]
         generator_args = [
             "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
     else:
@@ -108,6 +113,9 @@ def configure(args, is_generate_sln):
 
         generator_args = [
             "-G Ninja", f"-DCMAKE_BUILD_TYPE={args['config']}", f"-DCMAKE_MAKE_PROGRAM={ninja_path}"]
+
+    if not is_generate_sln:
+        compiler_args += ccache_launcher_args()
 
     cmake_cmd = [
         args["cmake_executable"],
