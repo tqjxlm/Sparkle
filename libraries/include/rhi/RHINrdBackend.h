@@ -35,8 +35,8 @@ public:
 
     [[nodiscard]] virtual uint32_t GetPipelineCount() const = 0;
 
-    // One NRD pool texture request. `format` carries an nrd::Format value as a plain int so this header,
-    // which RHI.h includes transitively, stays free of NRD headers.
+    // One NRD pool texture request. `format` carries an nrd::Format value as a plain int so this header stays free
+    // of NRD headers.
     struct PoolTexture
     {
         uint32_t format;

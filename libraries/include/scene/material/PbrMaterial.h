@@ -2,8 +2,6 @@
 
 #include "scene/material/Material.h"
 
-#include "renderer/proxy/PbrMaterialRenderProxy.h"
-
 namespace sparkle
 {
 class PbrMaterial : public Material
@@ -15,9 +13,6 @@ public:
     }
 
 protected:
-    std::unique_ptr<MaterialRenderProxy> CreateRenderProxyInternal() override
-    {
-        return std::make_unique<PbrMaterialRenderProxy>(raw_material_);
-    }
+    std::unique_ptr<MaterialRenderProxy> CreateRenderProxyInternal() override;
 };
 } // namespace sparkle

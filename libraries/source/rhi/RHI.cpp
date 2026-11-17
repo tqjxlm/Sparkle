@@ -4,6 +4,9 @@
 #include "core/Exception.h"
 #include "core/Profiler.h"
 #include "io/Image.h"
+#include "rhi/RHIConfig.h"
+#include "rhi/RHINrdBackend.h"
+#include "rhi/RHIUiHandler.h"
 
 #if FRAMEWORK_APPLE
 #include "rhi/MetalRHI.h"
@@ -107,6 +110,20 @@ RHIResourceRef<RHISampler> RHIContext::GetSampler(RHISampler::SamplerAttribute a
 RHIResourceRef<RHIPass> RHIContext::CreateRenderPass(const std::string &name, bool need_timestamp)
 {
     return CreateResource<RHIPass>(this, need_timestamp, name);
+}
+
+std::unique_ptr<RHINrdBackend> RHIContext::CreateNrdBackend()
+{
+    return nullptr;
+}
+
+RHIResourceRef<RHIUiHandler> RHIContext::GetUiHandler()
+{
+    if (!ui_handler_instance_)
+    {
+        ui_handler_instance_ = CreateUiHandler();
+    }
+    return ui_handler_instance_;
 }
 
 RHIResourceRef<RHIImage> RHIContext::CreateTexture(const Image2D *image, const std::string &name)

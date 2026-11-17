@@ -1,6 +1,7 @@
 #include "scene/material/MaterialManager.h"
 
 #include "core/Logger.h"
+#include "core/math/Sampler.h"
 #include "scene/material/LambertianMaterial.h"
 #include "scene/material/Material.h"
 #include "scene/material/MetalMaterial.h"

@@ -7,6 +7,7 @@
 #include "application/NativeView.h"
 #include "core/Exception.h"
 #include "core/math/Utilities.h"
+#include "rhi/RHIConfig.h"
 
 #include <algorithm>
 
