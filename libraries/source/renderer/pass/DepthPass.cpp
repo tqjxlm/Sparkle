@@ -37,11 +37,8 @@ void DepthPass::InitRenderResources(const RenderConfig &)
                                       "ForwardRendererViewUniformBuffer");
 }
 
-void DepthPass::HandleNewPrimitive(uint32_t primitive_id)
+void DepthPass::HandleNewPrimitive(MeshRenderProxy *mesh_proxy, uint32_t primitive_id)
 {
-    auto *primitive = scene_proxy_->GetPrimitive(primitive_id);
-
-    auto *mesh_proxy = primitive->As<MeshRenderProxy>();
     const RHIResourceRef<RHIPipelineState> pso =
         rhi_->CreatePipelineState(RHIPipelineState::PipelineType::Graphics, "DepthDrawPipelineState");
 
@@ -66,7 +63,6 @@ void DepthPass::HandleNewPrimitive(uint32_t primitive_id)
     vs_resources->view().BindResource(view_buffer_);
     vs_resources->mesh().BindResource(mesh_proxy->GetUniformBuffer());
 
-    pipeline_states_.resize(std::max(pipeline_states_.size(), static_cast<size_t>(primitive_id + 1)));
     pipeline_states_[primitive_id] = pso;
 }
 

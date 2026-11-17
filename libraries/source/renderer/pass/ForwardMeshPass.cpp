@@ -171,14 +171,8 @@ void ForwardMeshPass::BindPassResources(const RHIResourceRef<RHIPipelineState> &
     ps_resources->ubo().BindResource(uniform_buffer_);
 }
 
-void ForwardMeshPass::HandleNewPrimitive(uint32_t primitive_id)
+void ForwardMeshPass::HandleNewPrimitive(MeshRenderProxy *mesh_proxy, uint32_t primitive_id)
 {
-    auto *primitive = scene_proxy_->GetPrimitive(primitive_id);
-
-    auto *mesh_proxy = primitive->As<MeshRenderProxy>();
-
-    pipeline_states_.resize(std::max(pipeline_states_.size(), static_cast<size_t>(primitive_id + 1)));
-
     ASSERT_F(pipeline_states_[primitive_id] == nullptr,
              "do not overwrite an existing primitive. remove or move it first!");
 

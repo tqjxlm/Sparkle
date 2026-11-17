@@ -19,7 +19,7 @@ public:
 
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
-    void HandleNewPrimitive(uint32_t primitive_id) override;
+    void HandleNewPrimitive(MeshRenderProxy *mesh_proxy, uint32_t primitive_id) override;
 
     void HandleUpdatedPrimitive(uint32_t primitive_id) override;
 

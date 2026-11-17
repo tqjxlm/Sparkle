@@ -6,6 +6,7 @@
 
 namespace sparkle
 {
+class MeshRenderProxy;
 class RGRasterContext;
 
 class MeshPass : public PipelinePass
@@ -26,7 +27,8 @@ public:
 
     void UpdateFrameData(const RenderConfig &config, SceneRenderProxy *scene) override;
 
-    virtual void HandleNewPrimitive(uint32_t primitive_id) = 0;
+    // fills the empty slot `primitive_id` of pipeline_states_, which UpdateFrameData sizes to cover it
+    virtual void HandleNewPrimitive(MeshRenderProxy *mesh_proxy, uint32_t primitive_id) = 0;
 
     virtual void HandleUpdatedPrimitive(uint32_t primitive_id) = 0;
 

@@ -53,7 +53,10 @@ public:
         return primitives_;
     }
 
-    // get the change list this frame. it is guaranteed to be valid for only one frame.
+    // the primitive changes of this frame in the order they happened, valid until EndUpdate. an index names a slot as
+    // it was at the time of its change: a later change of the frame may move or remove the primitive again, so a
+    // consumer replays the list in order or reads the primitive's current index. a removed primitive stays alive until
+    // EndUpdate with UINT_MAX as its index, and one added and removed in the same frame has no render resources.
     [[nodiscard]] const auto &GetPrimitiveChangeList() const
     {
         return primitive_changes_;

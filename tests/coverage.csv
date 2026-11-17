@@ -16,6 +16,9 @@ gpu_resize_64spp,,,,,,x
 gpu_nee_parity,,,,,,x
 camera_nudge_return,x,x,x,x,x,x
 primitive_move,x,x,x,x,x,x
+primitive_churn,,x,,,,x
+deferred_primitive_churn,,,,,,x
+gpu_primitive_churn,,,,,,x
 usd_round_trip,,x,,,,
 input_injection,x,x,x,x,x,x
 cook_targets,x,x,x,x,x,x
