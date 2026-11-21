@@ -196,6 +196,22 @@ class RunTestsCommandTest(unittest.TestCase):
             self.assertEqual(run_tests.current_triplet(COVERAGE, "glfw", "Release"),
                              "macos-glfw-release")
 
+    def test_ground_truth_url_is_shared_across_platforms(self):
+        spec = importlib.util.spec_from_file_location(
+            "static_render_reference",
+            os.path.join(PROJECT_ROOT, "tests", "screenshot", "static_render_reference.py"))
+        reference = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reference)
+
+        with patch("build_system.utils.download_file") as mock_download:
+            destination = reference.download_ground_truth("TestScene", "forward")
+
+        mock_download.assert_called_once_with(
+            f"{reference.GROUND_TRUTH_URL_BASE}/TestScene_forward.png",
+            destination,
+        )
+        self.assertTrue(destination.endswith("sparkle_ground_truth_TestScene_forward.png"))
+
 
 if __name__ == "__main__":
     unittest.main()

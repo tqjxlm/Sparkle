@@ -9,11 +9,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 GROUND_TRUTH_URL_BASE = "https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle"
 DEFAULT_SCENE = "TestScene"
-FLIP_THRESHOLD = 0.02
+# cross-family HDR compression (BC6H vs ASTC-HDR) can cross an 8-bit rounding boundary on
+# smooth surfaces, adding ~0.014 FLIP over the ~0.006 cross-driver baseline
+FLIP_THRESHOLD = 0.025
 
 
-def download_ground_truth(framework, scene, pipeline):
-    filename = f"{scene}_{pipeline}_{framework}.png"
+def download_ground_truth(scene, pipeline):
+    filename = f"{scene}_{pipeline}.png"
     url = f"{GROUND_TRUTH_URL_BASE}/{filename}"
 
     sys.path.insert(0, PROJECT_ROOT)
