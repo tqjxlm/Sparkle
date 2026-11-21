@@ -286,6 +286,7 @@ jobs:
           framework: android
           os: ubuntu-latest
           build-type: Debug
+          compiler-cache: false
 
   build-ubuntu-android-release:
     name: build (ubuntu-latest, android, Release)
@@ -876,8 +877,8 @@ jobs:
           ios-appstore-key-id: ${{ secrets.APPSTORE_KEY_ID }}
           ios-appstore-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
 
-  test-ubuntu-glfw:
-    name: test (ubuntu-latest, glfw, Release)
+  test-ubuntu-glfw-1:
+    name: test (ubuntu-latest, glfw, Release, 1/2)
     needs: release-ubuntu-glfw
     runs-on: ubuntu-latest
     steps:
@@ -954,7 +955,7 @@ jobs:
           # the suite nests python processes whose block-buffered output would otherwise
           # reach the live log minutes late and out of order
           PYTHONUNBUFFERED: 1
-        run: python3 dev/run_tests.py --framework glfw --config Release --software
+        run: python3 dev/run_tests.py --framework glfw --config Release --software --shard 1/2
 
       - name: Dump app logs
         if: failure()
@@ -968,7 +969,102 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-screenshots-glfw-ubuntu-latest
+          name: test-screenshots-glfw-ubuntu-latest-1
+          path: build_system/glfw/output/build/generated/screenshots/
+
+  test-ubuntu-glfw-2:
+    name: test (ubuntu-latest, glfw, Release, 2/2)
+    needs: release-ubuntu-glfw
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Fetch elkjs
+        run: git submodule update --init --depth 1 thirdparty/elkjs
+
+      - name: Setup Mesa Lavapipe
+        uses: ./.github/actions/setup-mesa
+
+      # the released linux binary links libglfw at runtime even in headless mode
+      - name: Install GLFW runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libglfw3
+
+      - name: Restore Vulkan SDK
+        uses: actions/cache/restore@v6
+        with:
+          path: ./build_cache
+          key: ubuntu-latest-build_cache-${{ hashFiles('./build_system/prerequisites.py', './prerequisites.json') }}
+          restore-keys: |
+            ubuntu-latest-build_cache-
+
+      - name: Register Vulkan validation layer
+        shell: bash
+        run: |
+          sdk="$PWD/build_cache/VulkanSDK/$(python3 -c "import json; print(json.load(open('prerequisites.json'))['VulkanSDK'])")"
+          layer_dir="$RUNNER_TEMP/vulkan_layers"
+          mkdir -p "$layer_dir"
+          python3 - "$sdk" "$layer_dir" <<'PY'
+          import json, os, sys
+          sdk, layer_dir = sys.argv[1:]
+          library = os.path.join(sdk, "lib", "libVkLayer_khronos_validation.so")
+          manifest_path = os.path.join(sdk, "share", "vulkan", "explicit_layer.d", "VkLayer_khronos_validation.json")
+          missing = [path for path in (manifest_path, library) if not os.path.isfile(path)]
+          if missing:
+              sys.exit(f"validation layer missing (the build_cache restore missed this SDK): {', '.join(missing)}")
+          with open(manifest_path) as source:
+              manifest = json.load(source)
+          manifest["layer"]["library_path"] = library
+          with open(os.path.join(layer_dir, "VkLayer_khronos_validation.json"), "w") as target:
+              json.dump(manifest, target)
+          PY
+          echo "VK_ADD_LAYER_PATH=$layer_dir" >> "$GITHUB_ENV"
+
+      # the release package already carries the cooked content in its packed resources
+      - name: Download app
+        uses: actions/download-artifact@v8
+        with:
+          name: release-glfw-ubuntu-latest-Release
+          path: build_system/glfw/product
+
+      # extraction must preserve the executable bit of the binary, which python's zipfile
+      # drops; only the windows runner, whose filesystem carries no such bit, may use it
+      - name: Extract app
+        shell: bash
+        run: |
+          mkdir -p build_system/glfw/output
+          unzip -q build_system/glfw/product/linux-glfw-Release.zip -d build_system/glfw/output/
+
+      # the step timeout bounds a hung app; the log dump below then still runs
+      - name: Run Tests
+        timeout-minutes: 120
+        shell: bash
+        env:
+          # the hosted macos runners' paravirtual GPU silently renders MTLHeap-placed resources
+          # as solid magenta through MoltenVK; force dedicated allocations instead. no effect on
+          # cells that do not run MoltenVK
+          MVK_CONFIG_USE_MTLHEAP: 0
+          # the suite nests python processes whose block-buffered output would otherwise
+          # reach the live log minutes late and out of order
+          PYTHONUNBUFFERED: 1
+        run: python3 dev/run_tests.py --framework glfw --config Release --software --shard 2/2
+
+      - name: Dump app logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== app logs ==="
+          cat ~/Documents/sparkle/logs/*.log 2>/dev/null || true
+          cat build_system/glfw/output/build/generated/logs/*.log 2>/dev/null || true
+
+      - name: Upload Test Screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-screenshots-glfw-ubuntu-latest-2
           path: build_system/glfw/output/build/generated/screenshots/
 
   release-ubuntu-android:
@@ -1119,7 +1215,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, cook-bc, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
+    needs: [changes, format, tidy, build-macos-macos-debug, build-macos-macos-release, build-macos-ios-debug, build-macos-ios-release, build-macos-ios-simulator-release, build-macos-glfw-release, build-windows-glfw-debug, build-windows-glfw-release, build-ubuntu-glfw-debug, build-ubuntu-glfw-release, build-ubuntu-android-debug, build-ubuntu-android-release, build-ubuntu-android-x86_64-release, cook, cook-bc, release-macos-macos, test-macos-macos, release-macos-ios, release-macos-ios-simulator, test-macos-ios-simulator, release-macos-glfw, test-macos-glfw, release-windows-glfw, test-windows-glfw, release-ubuntu-glfw, test-ubuntu-glfw-1, test-ubuntu-glfw-2, release-ubuntu-android, release-ubuntu-android-x86_64, test-ubuntu-android-x86_64, github-release]
     runs-on: ubuntu-latest
     steps:
       - run: exit 1

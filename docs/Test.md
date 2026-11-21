@@ -24,6 +24,7 @@ python3 dev/run_tests.py --framework glfw --config Release --software   # Mesa L
 * Every case runs headless. A coverage run is cook-gated: a case that cooks an asset at runtime instead of using cooked content fails.
 * `--case <name>` (repeatable) runs registry cases by name regardless of coverage and without the cook gate, e.g. `--case forward_render_static`.
 * `--scene <path>` runs the cases on another scene; its file name selects the ground truth.
+* `--shard K/N` keeps every N-th selected case, starting at the K-th, so N parallel runs split the suite; CI uses it for its longest column.
 
 A single test case also runs directly in the app, without the registry:
 
@@ -89,7 +90,7 @@ TestCase support is compiled in by default (`ENABLE_TEST_CASES=1`); `build.py --
 * `evaluator`: an optional Python script, with its own `args` / `scene_args`.
 * `recooks`: the case cooks at runtime on purpose, so coverage runs skip it and it runs only with `--case`.
 
-[tests/coverage.csv](../tests/coverage.csv) has one row per registry case, in execution order, and one column per CI triplet, with an `x` where that triplet runs the case. [dev/ci_matrix.py](../dev/ci_matrix.py) generates one CI test job per column. Registry cases without a row are development-only. Unit tests under `tests/build_system/` keep the two tables consistent with each other, with the `TestCaseRegistrar` names, the evaluators and the CI runners.
+[tests/coverage.csv](../tests/coverage.csv) has one row per registry case, in execution order, and one column per CI triplet, with an `x` where that triplet runs the case. [dev/ci_matrix.py](../dev/ci_matrix.py) generates one CI test job per column, or several parallel shards of it (see [CI.md](CI.md#pipeline)). Registry cases without a row are development-only. Unit tests under `tests/build_system/` keep the two tables consistent with each other, with the `TestCaseRegistrar` names, the evaluators and the CI runners.
 
 What each triplet adds when choosing columns for a case:
 

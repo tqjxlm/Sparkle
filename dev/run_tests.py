@@ -5,7 +5,8 @@ exact arguments to run it with, and an optional Python evaluator. tests/coverage
 assigns each CI triplet (host-framework-config) the registry cases it must run, in
 row order. The suite runs the current triplet's assignment headless and cook-gated:
 any on-the-fly cook fails the run, so recooking cases are dropped. --case runs
-registry cases by name regardless of coverage, without the cook gate.
+registry cases by name regardless of coverage, without the cook gate. --shard K/N
+keeps every N-th selected case, so N parallel runs split the suite.
 """
 
 import argparse
@@ -199,7 +200,17 @@ def parse_args():
     parser.add_argument("--case", dest="cases", action="append",
                         help="run only the named registry cases regardless of coverage;"
                         " repeat to select multiple")
+    parser.add_argument("--shard", type=parse_shard, metavar="K/N",
+                        help="run every N-th selected case starting at the K-th (1-based),"
+                        " so N parallel runs split the suite")
     return parser.parse_known_args()
+
+
+def parse_shard(value):
+    index, _, count = value.partition("/")
+    if not (index.isdigit() and count.isdigit() and 1 <= int(index) <= int(count)):
+        raise argparse.ArgumentTypeError(f"expected K/N with 1 <= K <= N, got {value!r}")
+    return int(index), int(count)
 
 
 def select_cases(registry, coverage, args):
@@ -223,6 +234,11 @@ def select_cases(registry, coverage, args):
         if recooking:
             print(f"skipping {recooking}: their deliberate recook would trip the cook gate")
             cases = [case for case in cases if not case.get("recooks")]
+
+    if args.shard:
+        index, count = args.shard
+        cases = cases[index - 1::count]
+        print(f"=== shard {index}/{count}: {[case['name'] for case in cases]}")
 
     if not cases:
         print("ERROR: no test cases left to run")

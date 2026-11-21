@@ -37,7 +37,12 @@ PRODUCTS = (
     {"os": "macos-latest", "framework": "glfw", "build_types": ("Release",)},
     {"os": "windows-latest", "framework": "glfw"},
     {"os": "ubuntu-latest", "framework": "glfw"},
-    {"os": "ubuntu-latest", "framework": "android"},
+    # `uncached` configs keep no compiler cache: this Debug gate holds one of the largest
+    # entries (~0.5GB) while no job waits on it, and a cold build (~16 min) still finishes
+    # before the test stage. the other Debug gates stay cached: a cold macos one holds a
+    # scarce macos runner long enough to queue the products behind it, and a cold
+    # windows-glfw or ubuntu-glfw one takes about as long as the whole pipeline
+    {"os": "ubuntu-latest", "framework": "android", "uncached": ("Debug",)},
     {"os": "ubuntu-latest", "framework": "android", "abi": "x86_64",
      "build_types": ("Release",)},
 )
@@ -52,10 +57,13 @@ TEST_RUNNERS = {
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
     # the linux product, validated under software vulkan like windows (hosted
-    # ubuntu runners have no GPU); same registry cases as macos-macos-release
+    # ubuntu runners have no GPU); same registry cases as macos-macos-release.
+    # it carries the shared software-rendering load, the longest suite of the
+    # pipeline, so its cases split across parallel jobs
     "ubuntu-glfw-release": {
         "suite_args": "--software",
         "suite_timeout": 120,
+        "shards": 2,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
     # physical Metal GPU (the runner class the cook stage relies on). its
@@ -338,7 +346,7 @@ RELEASE_JOB = """
 
 TEST_JOB_HEAD = """
   @id@:
-    name: test (@os@, @framework@, Release@name_abi@)
+    name: test (@os@, @framework@, Release@name_abi@@name_shard@)
     needs: @release_id@
     runs-on: @os@
     steps:
@@ -516,7 +524,7 @@ STEP_UPLOAD_SCREENSHOTS = """
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-screenshots-@framework@-@os@
+          name: test-screenshots-@framework@-@os@@artifact_shard@
           path: @screenshots@
 """
 
@@ -725,6 +733,8 @@ def build_job(product, config):
     # the simulator product builds unsigned, so it needs no signing secrets
     if product["framework"] == "ios" and "abi" not in product:
         extras += BUILD_IOS_SECRETS
+    if config in product.get("uncached", ()):
+        extras += "          compiler-cache: false\n"
     condition = "needs.changes.outputs.code == 'true'"
     if config == "Debug":
         condition += " && github.ref_type != 'tag'"
@@ -743,11 +753,26 @@ def release_job(product):
                   runs_on="macos-latest" if apple else "ubuntu-latest", extras=extras)
 
 
-def test_job(product, runner):
+def test_jobs(product, runner):
+    """(id, text) of each job running a share of the product's suite."""
+    count = runner.get("shards", 1)
+    shards = range(1, count + 1) if count > 1 else (None,)
+    return [test_job(product, runner, shard) for shard in shards]
+
+
+def test_job(product, runner, shard):
     framework, os_name = product["framework"], product["os"]
     linux_glfw = framework == "glfw" and os_name == "ubuntu-latest"
-    text = render(TEST_JOB_HEAD, id=slug("test", product), os=os_name,
-                  framework=framework, name_abi=name_abi(product),
+    job_id = slug("test", product)
+    suite_args = f" {runner['suite_args']}" if runner["suite_args"] else ""
+    name_shard = artifact_shard = ""
+    if shard:
+        job_id += f"-{shard}"
+        suite_args += f" --shard {shard}/{runner['shards']}"
+        name_shard = f", {shard}/{runner['shards']}"
+        artifact_shard = f"-{shard}"
+    text = render(TEST_JOB_HEAD, id=job_id, os=os_name,
+                  framework=framework, name_abi=name_abi(product), name_shard=name_shard,
                   release_id=slug("release", product))
     if renders_graph_pages(tested_triplet(product)):
         text += STEP_ELKJS
@@ -763,7 +788,6 @@ def test_job(product, runner):
                    artifact_abi=f"-{product['abi']}" if "abi" in product else "")
     if framework in ("glfw", "macos"):
         text += extract_step(product)
-    suite_args = f" {runner['suite_args']}" if runner["suite_args"] else ""
     text += render(STEP_RUN_TESTS, suite_timeout=runner["suite_timeout"],
                    framework=framework, suite_args=suite_args)
     if framework == "android":
@@ -776,8 +800,8 @@ def test_job(product, runner):
         if os_name == "macos-latest":
             text += STEP_DUMP_CRASH
     text += render(STEP_UPLOAD_SCREENSHOTS, framework=framework, os=os_name,
-                   screenshots=runner["screenshots"])
-    return text
+                   artifact_shard=artifact_shard, screenshots=runner["screenshots"])
+    return job_id, text
 
 
 def suite_runner(product):
@@ -812,7 +836,7 @@ def jobs():
         generated.append((slug("release", product), release_job(product)))
         runner = suite_runner(product)
         if runner:
-            generated.append((slug("test", product), test_job(product, runner)))
+            generated += test_jobs(product, runner)
             tested.add(tested_triplet(product))
     untested = set(covered_triplets()) - tested
     if untested:

@@ -33,8 +33,8 @@ def suite_steps(triplet, scene=None):
     )
 
 
-def select(cases=None, triplet="macos-macos-release"):
-    args = argparse.Namespace(cases=cases, framework="macos", config="Release")
+def select(cases=None, triplet="macos-macos-release", shard=None):
+    args = argparse.Namespace(cases=cases, framework="macos", config="Release", shard=shard)
     with patch.object(run_tests, "current_triplet", return_value=triplet), \
             contextlib.redirect_stdout(io.StringIO()):
         return run_tests.select_cases(REGISTRY, COVERAGE, args)
@@ -179,6 +179,20 @@ class RunTestsCommandTest(unittest.TestCase):
         self.assertEqual([case["name"] for case in select(cases=["smoke"])],
                          ["smoke"])
         self.assertIsNone(select(cases=["no_such_case"]))
+
+    def test_shards_partition_the_selection_in_order(self):
+        names = [case["name"] for case in select()]
+        shards = [[case["name"] for case in select(shard=(index, 3))] for index in (1, 2, 3)]
+
+        self.assertEqual(sorted(sum(shards, [])), sorted(names))
+        for shard in shards:
+            self.assertEqual(shard, [name for name in names if name in shard])
+
+    def test_shard_argument_is_validated(self):
+        self.assertEqual(run_tests.parse_shard("2/3"), (2, 3))
+        for value in ("0/2", "3/2", "2", "a/b", "1/0"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                run_tests.parse_shard(value)
 
     def test_uncovered_triplet_is_rejected(self):
         self.assertIsNone(select(triplet="macos-glfw-debug"))
