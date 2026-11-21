@@ -1,78 +1,70 @@
-# Run The App
+# Run the App
+
+`run.py` is the development entry point: it runs the [pipeline stages](Build.md#pipeline-stages) a launch consumes, then launches the app. Use it instead of launching built binaries directly.
 
 ## Launching
 
-Always run the app through `run.py` during development for robustness; do not run built binaries directly. See [Build.md](Build.md) for build and run commands.
+``` shell
+python3 run.py --framework=<framework> [build options] [app options]
+```
 
-## File System
+Build options go to `build.py`; every other option goes to the app as a config value (see [Config System](#config-system)).
 
-There are three types of files:
+* Desktop runs build and cook, and the app reads the cook output from the build tree.
+* Device runs (`android`, `ios`) also package, then install the product on a connected device, which only receives cooked content through its package. The android run reports the device's cook activity after pulling its log.
+* `--skip_build` runs no stage and launches the existing binary; on a device it installs the raw build output, which cooks on the fly.
 
-* Packaged files. Mostly assets. Not intended for user access.
-* Internal files. Runtime caches. Not intended for user access.
-* External files. Runtime products (user configs, screenshots, and logs). Can be accessed by user. See below.
+``` shell
+# Android debug build on a connected device
+python3 run.py --framework android
 
-### External Storage Paths
+# iOS release build on a connected device, gpu path tracer
+export APPLE_DEVELOPER_TEAM_ID=ABC123DEF4
+python3 run.py --framework ios --apple_auto_sign --config Release --pipeline gpu
+```
 
-The base storage path varies by platform:
+## Storage
 
-| Platform | Path                                                                                                          |
-| -------- | ------------------------------------------------------------------------------------------------------------- |
-| Windows  | executable directory (e.g. `build_system/glfw/output/build/generated`)                                        |
-| macOS    | `~/Documents/sparkle/`                                                                                        |
-| iOS      | App's Document Directory (simulator test runs copy logs and screenshots to `build_system/ios/output/device/`) |
-| Android  | `/sdcard/Android/data/io.tqjxlm.sparkle/files/` (use `adb` to access)                                         |
+The app sees three kinds of files: packaged files (assets), internal files (runtime caches such as cook artifacts) and external files (user config, screenshots and logs), which are the only ones meant for users. External files live under a per-platform base path:
+
+| Platform | External storage path                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------ |
+| Windows  | executable directory (e.g. `build_system/glfw/output/build/generated`)                                             |
+| macOS    | `~/Documents/sparkle/`                                                                                             |
+| iOS      | the app's Documents directory (simulator test runs copy logs and screenshots to `build_system/ios/output/device/`) |
+| Android  | `/sdcard/Android/data/io.tqjxlm.sparkle/files/` (use `adb` to access)                                              |
+
+* `logs/output.log` holds the latest run's log, next to backups of earlier runs. Command-line runs also log to the console.
+* `config/config.json` is the user config.
+* `screenshots/` receives screenshots and render graph dumps.
 
 ## Config System
 
-* We adopt a Unreal-like console variable (cvar) system. For each cvar, the override rule is: code default->packaged config->user config->last session (with `--load_last_session`)->commandline argument.
-* Use `--[cvar_name]` to set a cvar in command line. Example: `--pipeline gpu --max_spp 512 --scene models/mymodel.usd`
-* For platforms that cannot use commandline arguments (i.e. mobile platforms), you must use config files to control cvars.
-* Not all cvar can be toggled at runtime.
-* Use `--help` to show all cvar.
+Settings are console variables (cvars), declared in code as `ConfigValue`. Each cvar resolves in this order, later overriding earlier: code default, packaged config ([resources/packed/config/config.json](../resources/packed/config/config.json)), user config (created on first run), last session (with `--load_last_session`), command line.
 
-### Config File
+* Set a cvar on the command line with `--<name> <value>`, e.g. `--pipeline gpu --max_spp 512 --scene models/mymodel.usd`.
+* Mobile platforms take no command line: edit the user config instead.
+* Not every cvar can change at runtime.
+* `--help` lists every cvar.
 
-* Default config: copied from resources/packed/config/config.json to final package on every build.
-* User config: generated at `<external-storage-path>/config/config.json` on first run of the built package. It overrides the default config. See [External Storage Paths](#external-storage-paths) for the platform-specific base path.
+### General Settings
 
-### Important Configs
+| cvar                   | default    | description                                                                                                                                                             |
+| ---------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pipeline`             | `forward`  | rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                                                                                                 |
+| `scene`                | *(empty)*  | scene file under `resources/`; empty loads the packaged [TestScene](Test.md#ground-truth). A value that is no file path logs an error and renders an empty scene        |
+| `headless`             | false      | run without a window and without input. On iOS it applies only to processes launched with arguments, e.g. by the simulator test runner                                  |
+| `width` / `height`     | 1280 / 720 | output resolution. A window resize sets it: the window size in UI coordinates on desktop, `height` at the window's aspect ratio on mobile                               |
+| `render_scale`         | 1.0        | scene render resolution as a fraction of the output resolution, `(0, 1]`; the scene is upsampled before UI and present                                                  |
+| `debug_mode`           | `Color`    | renderer debug output, one of `RenderConfig::DebugMode` (enum values parse case-insensitively)                                                                          |
+| `validation`           | false      | Vulkan validation layer (the packaged config turns it on, see [Test.md](Test.md#validation-layer))                                                                      |
+| `validate_sync`        | false      | Vulkan synchronization validation; needs `validation`                                                                                                                   |
+| `sampler_anisotropy`   | true       | off creates every sampler without anisotropic filtering                                                                                                                 |
+| `vulkan.upload_replay` | `auto`     | copy each upload into a new read-only texture again after its frame: `on`, `off`, `auto` (on for the Apple Paravirtual device, see [CI.md](CI.md#hosted-runner-quirks)) |
+| `screen_log`           | true       | on-screen log overlay                                                                                                                                                   |
+| `load_last_session`    | false      | restore the last session (camera, config) on startup                                                                                                                    |
+| `clear_screenshots`    | false      | clear old screenshots before taking a new one                                                                                                                           |
+| `rebuild_cache`        | false      | ignore internal cook artifacts and recook (see [Cooking.md](Cooking.md#artifacts))                                                                                      |
+| `test_case`            | *(empty)*  | run a test case (see [Test.md](Test.md))                                                                                                                                |
 
-| cvar                          | type   | default    | pipelines   | description                                                                                                                                                           |
-| ----------------------------- | ------ | ---------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pipeline`                    | string | `forward`  | all         | Rendering pipeline: `cpu`, `gpu`, `forward`, `deferred`                                                                                                               |
-| `headless`                    | bool   | false      | all         | Run without creating a window and without input. On iOS it applies only to processes launched with arguments, e.g. the simulator test runner (see [Test.md](Test.md)) |
-| `scene`                       | string | *(empty)*  | all         | Scene to render. Empty = packaged **TestScene** (the default; also the CI ground-truth scene). Other values = model/scene file path under `resources/models/`         |
-| `width` / `height`            | uint   | 1280 / 720 | all         | Output resolution. A window resize sets it: the window size in UI coordinates on desktop, `height` at the window's aspect ratio on mobile                             |
-| `render_scale`                | float  | 1.0        | all         | Scene render resolution as a fraction of output resolution, `(0, 1]`. The scene is upsampled to `width`x`height` before UI and present                                |
-| `validation`                  | bool   | false      | vulkan only | Enable Vulkan validation layers                                                                                                                                       |
-| `validate_sync`               | bool   | false      | vulkan only | Also run synchronization validation (hazards between GPU accesses); needs `validation`. See [Test.md](Test.md#validation-layer)                                       |
-| `debug_mode`                  | string | *(empty)*  | all         | Renderer debug output mode                                                                                                                                            |
-| `render_graph_view`           | string | *(empty)*  | all         | Render graph texture to show in place of the frame, e.g. `SceneDepth`; empty = the frame. See [RenderGraph.md](RenderGraph.md#viewing-a-texture)                      |
-| `render_graph_cull`           | bool   | true       | all         | Cull render graph passes whose outputs no live pass reads. See [RenderGraph.md](RenderGraph.md#knobs)                                                                 |
-| `render_graph_merge`          | bool   | true       | all         | Merge consecutive render graph raster passes into one render pass where the graph allows it. See [RenderGraph.md](RenderGraph.md#knobs)                               |
-| `render_graph_memoryless`     | bool   | true       | all         | Keep render graph transients that live within one render pass in tile memory where the device allows it. See [RenderGraph.md](RenderGraph.md#knobs)                   |
-| `render_graph_pixel_local`    | bool   | true       | all         | Let a render graph pass read what an earlier pass of its render pass wrote at the same pixel where the device allows it. See [RenderGraph.md](RenderGraph.md#knobs)   |
-| `render_graph_full_barriers`  | bool   | false      | vulkan only | Debug: each render graph physical pass also waits for every earlier command, for bisecting synchronization bugs. See [RenderGraph.md](RenderGraph.md#knobs)           |
-| `render_graph_export`         | bool   | false      | all         | Export the render graph to `screenshots/render_graph_export.json` once the scene is ready for a screenshot. See [RenderGraph.md](RenderGraph.md#exporting-the-graph)  |
-| `render_graph_profile_frames` | uint   | 0          | all         | Consecutive frames of one graph whose timings each render graph export aggregates; 0 = one frame's. See [RenderGraph.md](RenderGraph.md#exporting-the-graph)          |
-| `sampler_anisotropy`          | bool   | true       | all         | Debug: off creates every sampler without anisotropic filtering                                                                                                        |
-| `vulkan.upload_replay`        | string | `auto`     | vulkan only | Copies each upload into a new read-only texture again after its frame: `on`, `off`, `auto` (`on` on the Apple Paravirtual device)                                     |
-| `thread`                      | uint   | 64         | cpu         | Max threads for CPU path tracer                                                                                                                                       |
-| `bounce`                      | uint   | 8          | cpu, gpu    | Path segments per path tracer sample (see [PathTracer.md](PathTracer.md))                                                                                             |
-| `enable_nee`                  | bool   | true       | gpu         | Next event estimation with MIS (see [PathTracer.md](PathTracer.md#next-event-estimation))                                                                             |
-| `denoiser`                    | string | `off`      | gpu         | Path-tracing denoiser: `off`, `auto`, `nrd`, or `metalfx`. `auto` prefers MetalFX and falls back to NRD (see [Denoiser.md](Denoiser.md))                              |
-| `nrd_radiance_fp16`           | bool   | true       | gpu         | Use RGBA16F shared noisy-radiance inputs instead of RGBA32F. Applies to every denoiser and requires renderer recreation                                               |
-| `metalfx_sync_init`           | bool   | false      | gpu         | Compile the MetalFX denoiser synchronously during renderer initialization                                                                                             |
-| `screen_log`                  | bool   | true       | all         | On-screen log overlay                                                                                                                                                 |
-| `target_framerate`            | float  | 60         | gpu         | Target FPS for dynamic SPP                                                                                                                                            |
-| `load_last_session`           | bool   | false      | all         | Restore last session (camera, config) on startup                                                                                                                      |
-| `clear_screenshots`           | bool   | false      | all         | Clear old screenshots in the screenshots directory before taking a new screenshot                                                                                     |
-| `rebuild_cache`               | bool   | false      | all         | Force rebuild all cook caches                                                                                                                                         |
-
-Search across the project for keyword "ConfigValue" for more available configs.
-
-## Logs
-
-* For latest running logs, see `<external-storage-path>/logs/output.log`. Backup logs from previous runs are also stored there. See [External Storage Paths](#external-storage-paths) for platform-specific base paths.
-* Logs will also be redirected to console when running from command line.
+Subsystems document their own settings: [path tracers](PathTracer.md#settings), [denoisers](Denoiser.md#settings), [render graph](RenderGraph.md#knobs).

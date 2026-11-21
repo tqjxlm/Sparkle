@@ -1,67 +1,69 @@
-# How to Contribute
+# Contributing
 
-## CI/CD
+## Workflow
 
-You must conform to CI/CD requirements. See [CI.md](CI.md) for details.
+* A change is ready when the [validation gates](#validation-gates) pass locally; [CI](CI.md) then repeats them across every platform before merge.
+* Add a test case that exercises the new feature or reproduces the bug, or improve an existing one (see [Test.md](Test.md)).
+* Fix every crash or error you hit before continuing. Report one unrelated to your change and record it in [TODO.md](TODO.md).
+* Update the docs in the same change that alters the behavior they describe.
 
-A code change is not ready until the local validation gates pass. Run them in the fail-fast order documented under [Local Validation Gates](CI.md#local-validation-gates): format, clang-tidy, then the complete `run_tests.py` suite. Do not substitute a focused test for the complete suite when declaring work finished.
+## Validation Gates
 
-## Writing Tests
+Run them in this fail-fast order, cheap deterministic checks first:
 
-Use the TestCase system for in-process functional verification. See [Test.md](Test.md) for how to write test cases and run them locally before pushing.
+```bash
+python3 dev/check_format.py     # formatting
+python3 dev/ci_matrix.py        # ci.yml matches its generator
+python3 build.py --framework glfw --config Release --clangd    # build and compile database
+python3 dev/check_tidy.py       # clang-tidy
+python3 dev/run_tests.py --framework <framework> --config Release    # test suite
+```
 
-* Create new test cases that exactly test a new feature or reproduce a bug. Improve existing test cases when necessary.
-* Do not ignore any crashes or errors. Fix them before continuing; if one is unrelated to the current task, report it and record it in [TODO.md](TODO.md).
+* `check_format.py --fix` and `ci_matrix.py --fix` rewrite files in place; rerun the check-only commands for the gate.
+* The suite tests an existing build: `glfw` on Windows and Linux, adding `--software` without a physical GPU; `macos` on macOS, built first with `python3 build.py --framework macos --config Release`.
+* A focused `--case` run helps during development but does not replace the full suite when declaring a change complete.
+* Requirements: `pip install clang-format==22.1.5 clang-tidy==22.1.7 autopep8` and Node.js (markdownlint runs via npx). clang-format majors 18 to 22 format this codebase identically; clang-tidy majors differ, and CI enforces 22.
 
 ## Coding Style
 
-Follow the coding style already used in the codebase.
+Follow the style already used in the codebase.
 
-* **Modern C++20**: Use newest features (concepts, ranges, std::format, etc.)
-* **Self-documenting code**: Avoid comments for obvious code; comment only structural design, algorithms, and non-obvious caveats. Comments state present facts, never narrate changes or history. If code needs a comment to be understood, reconsider the implementation first.
-* **No dead code**: Remove unused code, arguments, variables, includes immediately
-* **Clean design**: Prefer simplicity and readability over cleverness
-* **No over-engineering**: Only implement what's requested; avoid speculative abstractions
-* **Don't repeat yourself**: Reuse existing code where possible; when a snippet appears twice, extract a shared function. Prefer calling a high-level wrapper over its low-level internals.
-* **Surgical changes**: Every changed line should trace to the task at hand. Do not reformat or restyle code beyond your change.
-* **Cross-platform paths**: Use the `FileManager` abstraction, never raw path separators
-* **RHI resources**: Use the deferred deletion pattern for GPU resource cleanup
+* **Modern C++20**: use current features (concepts, ranges, `std::format`, etc.).
+* **Self-documenting code**: comment only structure, algorithms and non-obvious caveats. Comments state present facts, never history. If code needs a comment to be understood, reconsider the code first.
+* **No dead code**: remove unused code, arguments, variables and includes immediately.
+* **Simplicity**: prefer readability over cleverness; implement only what is needed, without speculative abstractions.
+* **Don't repeat yourself**: reuse existing code; extract a function when a snippet appears twice; call a high-level wrapper rather than its internals.
+* **Surgical changes**: every changed line traces to the task. Do not reformat code beyond your change.
+* **Cross-platform paths**: use the `FileManager` and `Path` abstractions, never raw path separators.
+* **RHI resources**: release GPU resources through the deferred deletion pattern.
 
-### Formatters
+### Formatting and Linting
 
-Always use formatters in the environment or IDE to format code and documents after edit; do not format manually. Read diagnostic errors/warnings from the IDE.
+Format with the tools, never by hand:
 
-* c++/objc/slang: `.clang-format` (clang-format)
-* markdown: `.markdownlint.json` (markdownlint)
-* python: PEP8 (autopep8, configured in `pyproject.toml`)
-* All code must pass clang-tidy with the project's [.clang-tidy](../.clang-tidy) configuration. All warnings are treated as errors (`WarningsAsErrors: "*"`).
-
-CI enforces formatting on every push and PR, and clang-tidy on every push and PR that touches code. See [CI.md](CI.md) for the matching local commands.
-
-### Naming Conventions
-
-All C++ code must follow the `.clang-tidy` naming rules. Key conventions:
+* C++, Objective-C++, Slang: clang-format with [.clang-format](../.clang-format).
+* Python: autopep8, configured in [pyproject.toml](../pyproject.toml).
+* Markdown: markdownlint with [.markdownlint.json](../.markdownlint.json).
+* All C++ passes clang-tidy with [.clang-tidy](../.clang-tidy), every warning an error. Its naming rules in short:
 
 | Construct                              | Style                        | Example                 |
 | -------------------------------------- | ---------------------------- | ----------------------- |
 | Namespace                              | `lower_case`                 | `sparkle`               |
 | Class / Struct / Enum                  | `CamelCase`                  | `RenderFramework`       |
 | Function                               | `CamelCase`                  | `BeginFrame()`          |
-| Local variable                         | `lower_case`                 | `frame_count`           |
-| Public member                          | `lower_case`                 | `width`                 |
+| Local variable, public member          | `lower_case`                 | `frame_count`           |
 | Private / protected member             | `lower_case_` (trailing `_`) | `render_thread_`        |
 | `constexpr` / static / global constant | `CamelCase`                  | `MaxBufferedTaskFrames` |
 | Enum constant                          | `CamelCase`                  | `PrimaryLeft`           |
 
-Avoid nested ternary operators (`readability-avoid-nested-conditional-operator`).
-
 ## Documentation
 
-Committed docs are a user manual and a design doc, not a work log. Assume the reader is a user or developer seeing the project for the first time; write only what they would want to know.
+Docs are a user manual and a design doc, not a work log. Write for a user or developer meeting the project for the first time.
 
-* State present-tense facts: available knobs with defaults and tradeoffs, how to measure and debug, and settled design constraints.
-* Never narrate history: no change records, experiment stories, or dates. Write negative results as present constraints ("X cannot help because Y"), not as findings.
+* Lead with intent and usage, then structure, then details. Leave implementation details to the code and link the module instead.
+* State present-tense facts: knobs with defaults and tradeoffs, how to measure and debug, settled design constraints.
+* Never narrate history: no change records, experiment stories or dates. Write negative results as present constraints ("X cannot help because Y").
 * Never reference paths readers cannot see (gitignored or temporary files).
-* Update docs in the same change that alters the behavior they describe.
-* Do not repeat content across docs; keep each topic in a dedicated file and link to it.
-* Do not insert new-lines inside a paragraph.
+* Keep each topic in one file, listed in the [index](README.md), and link to it instead of repeating it.
+* Agent-only procedures go in skills under `.agents/skills/`, indexed in [AGENTS.md](../AGENTS.md); skills link to docs and never copy them.
+* Do not break lines inside a paragraph.

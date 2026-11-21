@@ -1,134 +1,33 @@
-# CI/CD Guide
+# CI
 
-## General Info
+Every push and pull request runs the GitHub Actions pipeline [.github/workflows/ci.yml](../.github/workflows/ci.yml) ([runs](https://github.com/tqjxlm/Sparkle/actions)); pull requests must pass it to merge. Its gates are formatting, clang-tidy, the build matrix, cooking and packaging, and the test suite. Pushing a version tag runs the same pipeline and assembles a GitHub release from the shipped packages (the `github-release` job). Performance testing is not automated.
 
-* A CI pipeline is setup in github [actions](https://github.com/tqjxlm/Sparkle/actions) at .github/workflows/ci.yml — a fully generated file, never edited by hand (see [Pipeline Graph](#pipeline-graph)).
-* Pushing a version tag runs the same pipeline and additionally assembles a github release from the shipped packages (the `github-release` job).
-* All PRs are required to pass CI before merging.
-* The required gates are formatting, clang-tidy, the platform build matrix, cooking and package assembly, and the aggregate test suite. Performance testing is not yet automated.
+The same checks run locally as the [validation gates](CONTRIBUTING.md#validation-gates).
 
-## Pipeline Graph
+## Pipeline
 
-[.github/workflows/ci.yml](../.github/workflows/ci.yml) runs four stages:
+* **format**: every push and pull request, whatever changed. Also fails when ci.yml is stale.
+* **clang-tidy**: every push and pull request that touches code, over every first-party source in the glfw compile database, so platform-exclusive code such as Metal is not covered.
+* **build**: every product (framework × config) in parallel; no build waits for anything. Debug cells are compile gates only and ship nothing, and a product whose Debug gate another cell covers builds Release only (`build_types` in `PRODUCTS`, [dev/ci_matrix.py](../dev/ci_matrix.py)). [ccache](https://ccache.dev) caches objects per os, framework and config (.github/actions/setup-environment); each job's `Compiler cache stats` step reports its own hit rate.
+* **cook**: two nodes split by texture family, because only the fp16 masters need a GPU. The macos node cooks the masters on the runner's Metal GPU plus the ASTC targets and publishes the artifact pool; the ubuntu node seeds its storage from that pool, so it only encodes the BC targets. Each target's content image is its own `cooked-image-<target>` artifact (see [Cooking.md](Cooking.md#content-images-and-packaging)).
+* **release**: every released product swaps in its own target's content image and is re-signed where the rewrite breaks the signature (apk: zipalign and apksigner with the debug key; ios: codesign; macos: sign and notarize). Each release node waits only on its own build and its family's cook.
+* **test**: one job per [coverage column](Test.md#registry-and-coverage), running the suite on the released package in Release mode. The linux job runs every case under core and synchronization validation, using the SDK validation layer the build jobs keep in `build_cache` (a cache miss fails the job); the macos-glfw job runs under core validation through `run.py`, and the android package ships the layer. The windows job has no validation layer. Test jobs check out without submodules, except `thirdparty/elkjs` for a column with a graph shape case (see [RenderGraph.md](RenderGraph.md#viewer)).
 
-* **build**: every product (framework × config) in parallel; builds are the heavy nodes and none of them waits for anything. Debug cells are compile gates only: they ship no release package and therefore run no release or test node, and a product whose Debug gate is already covered by another cell builds Release only (`build_types` in the `PRODUCTS` table of [dev/ci_matrix.py](../dev/ci_matrix.py)).
-* **cook**: two nodes, split by texture family. The macos-release node cooks every fp16 master on the runner's Metal GPU plus the ASTC targets, and publishes the artifact pool alongside them; the ubuntu node seeds that pool, so every master is a cache hit and the BC targets need no GPU. Each target's content image is its own `cooked-image-<target>` artifact, and a release node waits only on its own family's cook (see [Cooking.md](Cooking.md)).
-* **release**: every released product: replaces each build product's packed content with its own target's image and re-signs where the rewrite breaks the signature (apk: zipalign + apksigner with the debug key; ios: re-codesign; macos: sign-and-notarize).
-* **test**: the coverage table ([tests/coverage.csv](../tests/coverage.csv)) decides which released products run the aggregate suite and which registry cases they run; each of its columns becomes a test job. Currently enabled: windows-glfw-release and ubuntu-glfw-release under lavapipe, macos-macos-release on the runner's physical Metal GPU, macos-glfw-release exercising the Vulkan backend on that GPU through MoltenVK, macos-ios-release inside the iOS Simulator (a dedicated unsigned simulator package), and ubuntu-android-release on a KVM-accelerated emulator (a dedicated x86_64 package; see [Test.md](Test.md)). A product without a column ships untested — no runner can drive it yet. How to maintain the registry and coverage tables is documented in [Test.md](Test.md); the CI-side half of a new triplet is its `TEST_RUNNERS` suite invocation in [dev/ci_matrix.py](../dev/ci_matrix.py). Test jobs check out without submodules, except that a job whose column runs a graph shape case fetches `thirdparty/elkjs`, which the evaluator's pages inline (see [RenderGraph.md](RenderGraph.md#viewer)).
+Build artifacts of successful runs can be downloaded from the runs page. Only download artifacts from runs you triggered yourself. iOS artifacts are signed for the maintainer's devices; build with your own developer account to install them.
 
-ci.yml is a fully generated file: GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot express the per-product edges (release → its own build, test → its own release) without runners idling in polling loops. [dev/ci_matrix.py](../dev/ci_matrix.py) owns the product table and the per-triplet suite invocations, and unrolls them into explicit jobs: every edge is a real `needs`, no runner is ever requested before its dependencies are done, and every node renders flat as `stage (os, framework, config[, abi])`. Never edit ci.yml by hand — change the generator, then regenerate with `python3 dev/ci_matrix.py --fix`. Two gates enforce byte-exact freshness: a pre-commit hook (`.githooks/`, wired automatically by any `build.py` run) rejects the commit, and the format job fails the push.
+When judging build speed, compare step durations, not job durations: jobs can queue a long time for a free runner, especially the macOS jobs, which outnumber GitHub's concurrent macOS runners.
 
-## Local Validation Gates
+## Generated Workflow
 
-Run the same validation classes locally in fail-fast order. The cheap, deterministic checks go first so they reject a change before a build or render test spends time:
+ci.yml is fully generated by [dev/ci_matrix.py](../dev/ci_matrix.py) and never edited by hand. GitHub's `needs` cannot target a single matrix cell, so a runtime matrix cannot express per-product edges (release → its own build, test → its own release) without idle polling runners. The generator owns the product table and the per-triplet suite invocations (`TEST_RUNNERS`) and unrolls them into explicit jobs, each named `stage (os, framework, config[, abi])`.
 
-```bash
-python3 dev/check_format.py
-python3 dev/ci_matrix.py
-python3 build.py --framework glfw --config Release --clangd
-python3 dev/check_tidy.py
-python3 dev/run_tests.py --framework macos --config Release
-```
+Change the generator, then run `python3 dev/ci_matrix.py --fix`. A pre-commit hook in `.githooks/`, wired by any `build.py` run, rejects a stale ci.yml, and the format job fails the push.
 
-On Windows or Linux, use the GLFW suite with software Vulkan when no physical GPU is available:
+## Hosted Runner Quirks
 
-```bash
-python3 dev/run_tests.py --framework glfw --config Release --software
-```
-
-Use `dev/check_format.py --fix` while editing, but rerun the check-only command for the gate. The suite tests an existing build, so build first; a focused test is useful during development but does not replace this sequence when declaring a change complete.
-
-## Format Check
-
-* Format check is run on every push and PR, regardless of which files changed.
-* It verifies that all tracked and untracked, non-ignored source files (thirdparty excluded) match the output of the project formatters:
-  * c++/objc/slang: clang-format with [.clang-format](../.clang-format)
-  * python: autopep8, configured in [pyproject.toml](../pyproject.toml)
-  * markdown: markdownlint with [.markdownlint.json](../.markdownlint.json)
-* Run it locally before pushing:
-
-```bash
-python3 dev/check_format.py          # check only
-python3 dev/check_format.py --fix    # rewrite files in place
-```
-
-* Requirements: `pip install clang-format==22.1.5 autopep8` and Node.js (markdownlint runs via npx). clang-format majors 18-22 all produce identical results on this codebase; CI pins 22.1.5.
-
-## Clang-Tidy Check
-
-* Clang-tidy is run on every push and PR that touches code, with [.clang-tidy](../.clang-tidy). All warnings are treated as errors.
-* It checks every first-party source file in the glfw compile database, so platform-exclusive code (e.g. metal) is not covered.
-* Run it locally before pushing:
-
-```bash
-python3 build.py --framework glfw --clangd   # generate the compile database (once)
-python3 dev/check_tidy.py                    # check all first-party sources
-```
-
-* Requirements: `pip install clang-tidy==22.1.7`. Unlike clang-format, majors are not interchangeable; CI enforces major 22.
-
-## Build Test
-
-* Build test is run on every push and PR. It builds the project with different frameworks and pipelines.
-* Compiled objects are cached across CI runs with [ccache](https://ccache.dev), keyed per os/framework/config (see .github/actions/setup-environment). A warm run only recompiles files affected by the change; a cold cache (first run, or after a toolchain update) pays the full build cost once. Each build resets the restored cache's counters before compiling, so the `Compiler cache stats` step reports that job's hit rate rather than cumulative history.
-* When judging build speed, compare step durations rather than total job time: a job can sit queued for a long time waiting for a free runner before its first step starts. This especially affects the macOS jobs, which outnumber the concurrent macOS runners GitHub provides and therefore partly serialize.
-* Archived builds will be uploaded on successful runs. You can download them from the [actions](https://github.com/tqjxlm/Sparkle/actions) page.
-  * NOTICE: only download artifacts from workflow triggered by yourself. Security cannot be guaranteed for artifacts generated by untrusted developers.
-  * NOTICE: due to certificate limitation, iOS artifacts cannot be installed on your machine. Please build with your own developer account to test them. Or you can ask me to register your device in my provisioning profile.
-
-## Aggregate Test Suite
-
-`dev/run_tests.py` is the single general test orchestrator; [Test.md](Test.md) documents the suite contents, the TestCase system and focused-test commands. CI runs the suite against every released package the coverage table names, all in Release mode. The suite is always headless and cook-gated: it fails if a test cooks an asset at runtime instead of using the package's cooked content (`ibl_parity` is excluded: it recooks by design and is deliberately not a CI gate, see [Cooking.md](Cooking.md)).
-
-The Windows + GLFW package runs under [Mesa Lavapipe](https://github.com/pal1000/mesa-dist-win):
-
-```bash
-python3 dev/run_tests.py --framework glfw --config Release --software
-```
-
-The Linux + GLFW job registers the validation layer of the Vulkan SDK that the build jobs keep in `build_cache`, through `VK_ADD_LAYER_PATH` and a copy of the layer manifest that names the library by absolute path; a cache miss fails the job before the suite runs. Every case on that cell therefore runs under core validation, and its synchronization validation cases `forward_sync_validation`, `deferred_sync_validation`, `gpu_sync_validation`, `gpu_primitive_move_sync_validation`, `cpu_sync_validation`, `render_graph_sync_validation` and `render_graph_merge_parity_sync_validation` gate GPU hazards, with `sync_validation_hazard` proving the gate can fail (see [Test.md](Test.md#validation-layer)). The macOS + GLFW job also runs under core validation, because `run.py` puts the SDK's layer on the path, and so does the Android job, whose package ships the layer. The Windows job has no validation layer.
-
-The macOS package runs the forward and deferred pipelines on the runner's physical Metal GPU:
-
-```bash
-python3 dev/run_tests.py --framework macos --config Release
-```
-
-The macOS + GLFW package runs the same Vulkan backend as Windows, but on the runner's physical Metal GPU through MoltenVK:
-
-```bash
-python3 dev/run_tests.py --framework glfw --config Release
-```
-
-The Android cell runs the dedicated x86_64 package on a KVM-accelerated headless emulator, whose guest Vulkan device is llvmpipe — the same software-rasterizer class as the Windows cell (the shipping arm64 apk cannot be emulated on any hosted runner; see the Android section in [Test.md](Test.md)). Its picks include `surface_loss_recovery` and `window_resize`, which exercise the Android native-window teardown/recreate and resize paths:
-
-```bash
-python3 dev/run_tests.py --framework android --config Release
-```
-
-The iOS cell runs the dedicated unsigned simulator package as spawned headless processes inside the iOS Simulator (the shipping ipa targets physical devices, which no hosted runner can drive; see the iOS section in [Test.md](Test.md)):
-
-```bash
-python3 dev/run_tests.py --framework ios --config Release
-```
-
-The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the denoiser gate suite (see [Denoiser.md](Denoiser.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.
-
-The paravirtual device also renders MTLHeap-placed resources as solid magenta through MoltenVK without reporting any error, so the test job runs with `MVK_CONFIG_USE_MTLHEAP=0` (dedicated allocations). Real GPUs render identically either way; if a macos-glfw cell ever regresses to uniform magenta screenshots, suspect this class of paravirtual quirk first.
-
-On the paravirtual device, MoltenVK can also lose a texture uploaded in the frame that creates it: from that frame's first render pass on, an occasional launch sampled the decoded sky cube map as all zeros (a black sky). A copy submitted after that frame is kept, so there every upload into a new read-only texture is copied again from its staging buffer in a submission of its own right after the frame's (`vulkan.upload_replay`, see [Run.md](Run.md)). Consumers see no difference: the texture is valid from its frame on, and the replay repairs a lost copy before the next frame. Real GPUs upload once.
-
-## Screenshot Ground Truth
-
-The suite compares auto-generated screenshots with the published ground truth. CI coverage spans forward and deferred, plus cpu and gpu on `ubuntu-glfw-release`, where lavapipe runs the path tracer's ray queries in software (`cpu_render_static_64spp` and `gpu_render_static_64spp` stop at 64 samples per pixel, so they gate with a FLIP threshold that allows for the remaining noise); pass `--case forward_render_static`, for example, to focus one pipeline during development. `forward_render_static_sampled` and `deferred_render_static_sampled` gate forward and deferred on `ubuntu-glfw-release` with the render graph's pixel-local reads off, the path the android emulator and the iOS simulator take anyway (see [RenderGraph.md](RenderGraph.md#golden-graph-shapes)). `TestScene` is the packaged default scene (`resources/packed/TestScene.usda`, see [USD.md](USD.md)) and is loaded when no `--scene` override is present. Ground-truth images are updated manually.
-
-### TestScene
-
-All platforms compare headless 1280x720 captures against one shared ground truth per pipeline:
-
-| pipeline | ground truth                                                                                   |
-| -------- | ---------------------------------------------------------------------------------------------- |
-| cpu      | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_cpu.png)      |
-| gpu      | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu.png)      |
-| forward  | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_forward.png)  |
-| deferred | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred.png) |
+* **No hardware ray tracing anywhere.** The macOS runners are VMs whose paravirtualized Metal device reports no ray tracing, so the gpu pipeline falls back to forward there. CI therefore runs the path tracers only on `ubuntu-glfw-release`, where lavapipe runs ray queries in software at 64 spp; converged gpu renders and the [denoiser gates](Denoiser.md#tests) stay local.
+* **Software Vulkan is slow.** Hosted Windows and Linux runners have no GPU and render with lavapipe; the windows suite can take close to an hour.
+* **Paravirtual Metal through MoltenVK** renders MTLHeap-placed resources as solid magenta without an error, so the macos-glfw test job sets `MVK_CONFIG_USE_MTLHEAP=0`. If that cell regresses to uniform magenta screenshots, suspect this class of quirk first. It can also lose a texture uploaded in the frame that creates it (a black sky), which `vulkan.upload_replay` repairs by copying every such upload again after its frame.
+* **Android runs an x86_64 package** on a KVM-accelerated emulator: no hosted runner can emulate the shipping arm64 apk (no linux-arm64 emulator exists, x86 hosts reject arm64 images, Apple-silicon runners lack nested virtualization).
+* **iOS runs a simulator package**, because no hosted runner can drive a physical device.
+* `SPARKLE_BUILD_JOBS` is 8, because hosted runners have about 4 vCPUs and oversubscribing them can starve the runner agent.

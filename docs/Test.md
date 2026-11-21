@@ -1,162 +1,47 @@
-# Test Guide
+# Testing
 
-## Visual Test
+Tests run inside the real app. A C++ test case drives the running app and returns a verdict; Python evaluators judge its output afterwards; one orchestrator runs the suite on every platform, locally and in CI.
 
-* Use `--test_case screenshot` to take a screenshot after the scene is fully loaded and a frame is fully rendered.
-* Use `--test_case multi_frame_screenshot` to take 5 frames of screenshots after the scene is fully loaded and a frame is fully rendered. This is useful for temporal analysis.
-* Screenshot test cases work with `--headless true`, so it is suitable for commandline use.
-* Screenshots are saved to [external-storage-path]/screenshots/. For `--test_case screenshot`, the file is named `screenshot.png`. For `--test_case multi_frame_screenshot`, files are named `multi_frame_N.png` where `N` is the frame index. The UI "Save Screenshot" button names files with the scene name, pipeline, and timestamp. For [external-storage-path], refer to [Run.md](Run.md).
-* Ground truth images can be found in [CI.md](CI.md). But if you are working on a feature that is meant to change the final image output, you should not rely on the ground truth images.
+```text
+TestCase (tests/**/*.cpp)      C++ class running in the app after the scene loads; its verdict is the exit code
+tests/registry.json            pins a TestCase to exact arguments and an optional evaluator: one suite case
+tests/coverage.csv             which CI triplet runs which suite case
+dev/run_tests.py               runs the current triplet's cases (or named ones), headless and cook-gated
+evaluators (tests/<feature>/)  Python scripts judging logs and screenshots after a case
+```
 
-### Confirm you are looking at the right output first
+## Running Tests
 
-* With **no `--scene`**, the app loads the packaged **TestScene** (`resources/packed/TestScene.usda`: a floor, several spheres, and glTF models against a sky map) — the scene the CI ground truth is rendered from. `--scene <path>` loads a model/scene **file path** instead. A name that is not a real path (e.g. `--scene TestScene`) silently logs an error, renders an **empty default-sky scene**, and still exits `0`. Before analysing anything, **verify the expected geometry is actually in the frame** — it is easy to spend a long time analysing a blank or wrong render.
-* Likewise confirm the intended pipeline / debug view / cvars actually took effect (check the image, not just the command line).
-
-### Comparing and diffing renders
-
-How to compare a render against the ground truth — signed per-pixel diffs, 1:1 crops, scanline profiles, and why aggregate metrics (FLIP / PSNR) or blurred diffs must never be the detector — is methodology, covered in [RenderingValidation.md](RenderingValidation.md).
-
-## Python Test Scripts
-
-* When possible, always use python scripts to perform tests.
-* Add Python test dependencies to `tests/requirements.txt`.
-* `dev/run_tests.py` is the single general test orchestrator. Do not add another script that builds or sequences the general test suite.
-* Focused test implementations, evaluators, and reusable test helpers belong under `tests/`, next to the feature they validate.
-* If Python is not sufficient, combine a focused script under `tests/` with the TestCase system below.
-
-## Test Registry
-
-[tests/registry.json](../tests/registry.json) lists the runnable suite cases. Versatile test cases (e.g. `screenshot`) never appear here bare; each entry pins one to specific arguments (e.g. `forward_render_static` is `screenshot` with `--pipeline forward` plus its ground-truth evaluator), so a case name always identifies one exact, reproducible run.
-
-A case carries:
-
-* `test_case`: the C++ `TestCase` it runs.
-* `app_args` / `scene_args`: cvar arguments for the app run; `scene_args` apply only when the suite is given `--scene`. `{name}` (the case name), `{framework}`, `{scene}` and `{scene_stem}` expand at run time, also in evaluator arguments.
-* `evaluator`: an optional Python script (with its own `args` / `scene_args`) that judges the app output afterwards.
-* `recooks`: marks a case whose deliberate runtime cook would trip the suite's cook gate; coverage runs drop it, so it runs only via `--case`.
-
-## Test Coverage
-
-[tests/coverage.csv](../tests/coverage.csv) is the coverage table: one row per registry case, one column per CI triplet (`host-framework-config`, e.g. `macos-macos-release`), and an `x` wherever a triplet must run a case. Row order is the suite execution order. The table decides which triplets CI tests: [dev/ci_matrix.py](../dev/ci_matrix.py) generates a test job for each of its columns. A triplet without a column ships untested — currently `macos-macos-release`, `macos-glfw-release`, `macos-ios-release` (the simulator, see [iOS](#ios)), `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` (an emulator, see [Android](#android)) have capable runners. Registry cases without a row (or with an empty row) are development-only, run via `--case`.
-
-What each triplet is worth, when deciding which columns a new case needs:
-
-* `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` all render on the **same driver** — Mesa lavapipe (`llvmpipe`), the android one inside an x86_64 emulator — so a case whose subject is GPU or driver behaviour learns nothing from the second and third copy. What is unique to them is the host runtime: the MSVC-built binary and Win32 file/path semantics, the Linux binary, and the Android app lifecycle, asset plumbing and surface handling. `ubuntu-glfw-release` is the cheapest of the three per case, so it carries the shared software-rendering and x86 load.
-* `macos-macos-release` (Metal) and `macos-glfw-release` (Vulkan through MoltenVK) are the only triplets on a physical GPU, and with `macos-ios-release` the only ARM ones. Anything arch-sensitive needs one of them plus one x86 column: astcenc, for instance, is built NEON on ARM and SSE4.1 elsewhere ([thirdparty/CMakeLists.txt](../thirdparty/CMakeLists.txt)), so `texture_compression` runs on both sides of that split and nowhere else.
-* Marking a case everywhere is rarely right and never free: a case costs about 24s on the android emulator and 14s on windows before its body runs at all (install, launch, log capture), against ~1s on `macos-macos-release`.
-
-Maintaining the two tables:
-
-* Adding a test case: append a [tests/registry.json](../tests/registry.json) entry (unique `name`, the C++ `test_case` it pins, `app_args`, optional evaluator) and a [tests/coverage.csv](../tests/coverage.csv) row at its execution-order position, marking every triplet that must run it. Development-only cases need no row; every row must name a registry case.
-* Adding a platform: add a triplet column to [tests/coverage.csv](../tests/coverage.csv), mark its picks, give the triplet a suite invocation in `TEST_RUNNERS` in [dev/ci_matrix.py](../dev/ci_matrix.py), and regenerate the pipeline with `python3 dev/ci_matrix.py --fix`.
-* Retiring a case or platform: remove both sides (registry entry and coverage row, or column and `TEST_RUNNERS` entry).
-
-Unit tests under `tests/build_system/` enforce consistency: unique registry names, test cases that resolve to real `TestCaseRegistrar` registrations, existing evaluators and graph shape goldens, coverage rows picking only registry cases, and a `TEST_RUNNERS` entry for every covered triplet.
-
-## Test Orchestration
-
-`dev/run_tests.py` runs the Python unit tests as a fail-fast preflight, derives the current triplet from the host OS and the `--framework` / `--config` arguments, and runs the cases [tests/coverage.csv](../tests/coverage.csv) assigns to it. The application suite runs to completion and reports all failures together.
+The suite tests an existing build and never builds:
 
 ```bash
+python3 build.py --framework macos --config Release
 python3 dev/run_tests.py --framework macos --config Release
-python3 dev/run_tests.py --framework glfw --config Release --software   # on Windows
+python3 dev/run_tests.py --framework glfw --config Release --software   # Mesa Lavapipe, no GPU needed
 ```
 
-The suite never builds: it tests the existing build (produce one first, e.g. `python3 build.py --framework macos --config Release`). Every case runs headless — a case that needs a window overrides that itself through `OnEnforceConfigs()` — and coverage runs are cook-gated: any on-the-fly cook fails the run. Use `--case <name>` (repeatable) to run registry cases by name regardless of coverage — e.g. `--case forward_render_static` to focus one pipeline, or `--case gpu_render_static` for a development-only case; `--case` runs skip the cook gate, which is how deliberately recooking cases like `ibl_parity` run. CI runs the packaged Windows and Linux builds under Lavapipe with `--software`, and the packaged macOS builds (both the macos framework and the glfw/Vulkan one via MoltenVK) on a physical Metal GPU. See [CI.md](CI.md) for the exact commands and which gpu pipeline cases stay local-only.
+* `run_tests.py` first runs the Python unit tests as a fail-fast preflight, then derives the triplet (`host-framework-config`) from the host and its arguments and runs the cases [tests/coverage.csv](../tests/coverage.csv) assigns to it. It runs every case and reports all failures together.
+* Every case runs headless. A coverage run is cook-gated: a case that cooks an asset at runtime instead of using cooked content fails.
+* `--case <name>` (repeatable) runs registry cases by name regardless of coverage and without the cook gate, e.g. `--case forward_render_static`.
+* `--scene <path>` runs the cases on another scene; its file name selects the ground truth.
 
-Evaluators live under `tests/` next to the feature they judge, and each registry case names its own, e.g. the static-render evaluator [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py), the USD evaluator [tests/usd/usd_roundtrip_test.py](../tests/usd/usd_roundtrip_test.py), the render graph shape evaluator [tests/render_graph/graph_shape_test.py](../tests/render_graph/graph_shape_test.py) (see [RenderGraph.md](RenderGraph.md#golden-graph-shapes)), [tests/rendering/effective_pipeline_test.py](../tests/rendering/effective_pipeline_test.py), which checks the app log for the pipeline that actually ran, and [tests/application/shutdown_expectations_test.py](../tests/application/shutdown_expectations_test.py), which checks the app log for the expectations a case checks while the app shuts down, after the verdict that sets the exit code. They own specialized assertions; they do not orchestrate the general suite. Shared framework, dependency and image mechanics live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py), so one evaluator never serves as another evaluator's utility layer.
-
-## Android
-
-The suite runs on a device or emulator through the android runner in [build_system/android/build.py](../build_system/android/build.py). Android has no argv or exit-code channel, so the runner delivers cvars as the runtime config file (`<external-storage-path>/config/config.json`, see [Run.md](Run.md)), starts the activity, and reads the verdict from the `Test case '<name>' passed/failed` logcat markers. After each case it pulls the app log and screenshots to `build_system/android/output/device/`, where the suite's cook gate and the Python evaluators expect them.
-
-* If no device is connected, the runner boots the `sparkle_test` AVD headless (arm64, like every shipped apk), installing the system image and creating the AVD on first use. It needs the SDK `cmdline-tools` package (`sdkmanager`/`avdmanager`).
-* First use also seeds a quickboot snapshot (cold boot, settle, clean shutdown); every later boot resumes from it in seconds. CI caches the AVD directory between runs, so only cache-miss runs pay the cold boot.
-* The config push requires `adb root` (available on emulator `google_apis` images): files a non-root shell creates under `Android/data` are invisible to the app through FUSE. On a non-rootable physical device the push may still work depending on the vendor's FUSE behavior.
-* A `TestCase` can ask the runner for device-level actions by logging `[TestCaseAction] <name>`; `surface_loss_recovery` uses the `cycle_window` action (screen off/on) to destroy and restore the native window mid-run, and `window_resize` uses the `resize_display` action (`wm size`) to resize the window to a new aspect ratio. The runner resets the display size after every attempt.
-* Render cases run headless at the default 1280x720 resolution and compare against the shared per-pipeline ground truth.
-* A coverage run (no `--case`) runs the `ubuntu-android-release` column from any host, because the device, not the host, runs the app; the same holds for the ios column.
-* CI covers the `ubuntu-android-release` triplet with a dedicated x86_64 package (`--android_abi x86_64`, a product that exists only for this cell) on a KVM-accelerated emulator, because no hosted runner can emulate the shipping arm64 apk: Google publishes no linux-arm64 emulator, x86 hosts reject arm64 system images, and GitHub's Apple-silicon runners expose no nested virtualization. The emulator image ABI follows the host, so local runs on Apple silicon test the arm64 apk itself.
+A single test case also runs directly in the app, without the registry:
 
 ```bash
-# package once, then run cases on a local emulator (boots one if no device is attached)
-python3 build.py --framework android --config Release
-python3 dev/run_tests.py --framework android --config Release --case smoke
+python3 run.py --framework macos --headless true --test_case smoke [--test_timeout <frames>]
 ```
 
-## iOS
+The exit code is 0 when the case passes, and 1 when it fails or is not registered. `--test_timeout` fails a case that has not finished within that many frames (default 0, no limit). Other cvars work alongside as usual.
 
-The suite runs inside the iOS Simulator through the ios runner in [build_system/ios/build.py](../build_system/ios/build.py). It needs a `--ios_platform simulator` package: the shipping ipa targets physical devices, which no automated runner can drive. Unlike Android, the simulator needs no install or log scraping — the app binary from the packaged ipa runs as a plain headless process via `simctl spawn`, so cvars pass through as arguments and the process exit code is the TestCase verdict.
+## Writing Tests
 
-* The runner boots the `sparkle_test` simulator on first use, creating it from the newest installed iPhone device type. The simulated screen is irrelevant: runs are headless at the configured resolution, so any iPhone model works.
-* After each case the runner copies the app log and screenshots to `build_system/ios/output/device/`, where the suite's cook gate and the Python evaluators expect them.
-* Render cases run headless at the default 1280x720 resolution and compare against the shared per-pipeline ground truth.
-* The simulator's Metal implementation rejects shared-storage textures, so the Metal backend keeps every texture private there and stages uploads through a buffer blit (see MetalImage). It also reports no ray-tracing support, so the gpu pipeline stays local-only.
+Write a test case that exercises the new feature or reproduces the bug, or improve an existing one.
 
-```bash
-# package once, then run cases in the simulator (boots one on first use)
-python3 build.py --framework ios --config Release --ios_platform simulator
-python3 dev/run_tests.py --framework ios --config Release --case smoke
-```
-
-## TestCase System
-
-* A `TestCase` is a C++ class that runs inside the app after the scene finishes loading.
-* Before render and RHI config init, the selected test case may override config values via `OnEnforceConfigs()`.
-* Each frame, `AppFramework` calls `Tick()`. When `Tick()` returns `Pass` or `Fail` the app exits with code `0` or `1` respectively.
-
-### Build
-
-TestCase support is compiled in by default (`ENABLE_TEST_CASES=1`). Use `--strip_test` to exclude it from the binary for production builds:
-
-```bash
-# Build without TestCase support (production)
-python3 build.py --framework [glfw, macos] --strip_test
-```
-
-### Run
-
-* Test cases are selected at runtime via the `test_case` cvar.
-* It is usually recommended to run test cases in headless mode.
-
-```bash
-# Build & Run the smoke test (exits 0 on pass, 1 on fail)
-python3 run.py --framework [glfw, macos] --test_case smoke --headless true
-echo "Exit code: $?"
-```
-
-The `--test_case <name>` argument is passed straight through to the app's config system. Any other cvars (e.g. `--scene`, `--pipeline`) work alongside it as normal.
-
-Use `--test_timeout <frames>` to set a frame budget for the test. If the test does not finish within the given number of frames it is reported as `Fail`. Default is `0` (no limit).
-
-### Exit Codes
-
-| Code | Meaning                                           |
-| ---- | ------------------------------------------------- |
-| `0`  | `TestCase::Result::Pass` — test passed            |
-| `1`  | `TestCase::Result::Fail` — test failed            |
-| `1`  | Named test case was not registered (init failure) |
-
-### Validation Layer
-
-Once scene loading completes, every validation-type error the Vulkan validation layer has reported fails the running test case; warnings are only logged. The layer is active when `validation` is on (the packaged config enables it) and the loader finds `VK_LAYER_KHRONOS_validation`; otherwise validation stays off silently, except that a run with `validate_sync true` fails unless synchronization validation is actually active, so the synchronization gate can never pass vacuously. Errors reported after the verdict (e.g. objects leaked at device destruction) do not change it. A test that provokes errors on purpose accepts that many through `TestCase::AcceptValidationErrors`.
-
-`validate_sync` adds synchronization validation, which reports hazards between GPU accesses that no barrier orders (read-after-write, write-after-read, write-after-write), including across submits. It is slow, so only dedicated registry cases turn it on (their arguments are in [tests/registry.json](../tests/registry.json)): `forward_sync_validation`, `deferred_sync_validation`, `gpu_sync_validation` and `cpu_sync_validation` render a still frame of each pipeline with it, and the gpu case also fails when a device without ray query support falls back to forward; `gpu_primitive_move_sync_validation` moves a mesh under the gpu pipeline, so the acceleration structure refit and its instance update run with it; `render_graph_sync_validation` runs the synthetic render graphs of `render_graph_compile` with it, and `render_graph_merge_parity_sync_validation` and `render_graph_merge_parity_deferred_sync_validation` a Forward and a Deferred frame with and without pass merging, memoryless transients and pixel-local reads (see [RenderGraph.md](RenderGraph.md#tests)); and `sync_validation_hazard` records an unsynchronized write-after-write and expects it to be reported, proving the gate can fail. CI runs them on `ubuntu-glfw-release` (see [CI.md](CI.md#aggregate-test-suite)); locally they need the layer on the loader's search path:
-
-```bash
-python3 dev/run_tests.py --framework glfw --config Release --case sync_validation_hazard --case forward_sync_validation --case deferred_sync_validation --case gpu_sync_validation --case cpu_sync_validation --case render_graph_sync_validation --case render_graph_merge_parity_sync_validation --case render_graph_merge_parity_deferred_sync_validation
-```
-
-## Writing a Test Case
-
-1. Create a `.cpp` file anywhere under `tests/`.
-2. Subclass `sparkle::TestCase` and implement `OnTick()`.
-3. If the test needs fixed runtime config, optionally override `OnEnforceConfigs()`.
-4. Register with `TestCaseRegistrar<T>` using a unique name string.
-5. If the suite should run it, add a [tests/registry.json](../tests/registry.json) entry with the exact arguments and mark its [tests/coverage.csv](../tests/coverage.csv) row for the triplets that must run it (see [Test Coverage](#test-coverage) for how to maintain both tables). Cases without a registry entry still run directly via `--test_case`.
-
-The registered name is injected into the test instance and available via `TestCase::GetName()`, so log messages do not need to duplicate it manually.
+1. Create a `.cpp` file under `tests/`, next to the feature it covers.
+2. Subclass `sparkle::TestCase` and implement `OnTick()`, which runs every frame and returns `Pending`, `Pass` or `Fail`.
+3. Optionally override `OnEnforceConfigs()` to fix config values before render and RHI init, e.g. to force a window in a headless run.
+4. Register it with `TestCaseRegistrar<T>` under a name unique across `tests/`; a duplicate is logged at startup and the first registration wins. `TestCase::GetName()` returns it, so logs need not repeat it.
+5. If the suite should run it, add a registry entry and a coverage row (see [Registry and Coverage](#registry-and-coverage)).
 
 ```cpp
 // tests/my_feature/MyFeatureTest.cpp
@@ -175,12 +60,10 @@ public:
 
     Result OnTick(AppFramework &app) override
     {
-        // Inspect app state each frame. Return Pending to keep running.
         if (frame_ < 10)
         {
             return Result::Pending;
         }
-        // Evaluate your condition here.
         return Result::Pass;
     }
 };
@@ -189,16 +72,83 @@ static TestCaseRegistrar<MyFeatureTest> my_feature_test_registrar("my_feature");
 } // namespace sparkle
 ```
 
-Then run it:
+Prefer Python for anything that can be judged from outside the app:
+
+* An evaluator lives under `tests/` next to the feature it judges and owns only its assertions, e.g. [tests/screenshot/static_render_test.py](../tests/screenshot/static_render_test.py) or [tests/rendering/effective_pipeline_test.py](../tests/rendering/effective_pipeline_test.py), which checks the log for the pipeline that actually ran. Shared framework, dependency and image helpers live in [tests/rendering/render_test_support.py](../tests/rendering/render_test_support.py); no evaluator serves as another's utility layer.
+* `dev/run_tests.py` is the only script that builds or sequences the general suite.
+* Python test dependencies go in [tests/requirements.txt](../tests/requirements.txt).
+
+TestCase support is compiled in by default (`ENABLE_TEST_CASES=1`); `build.py --strip_test` removes it from production builds.
+
+## Registry and Coverage
+
+[tests/registry.json](../tests/registry.json) lists the suite cases. A versatile test case such as `screenshot` never appears bare: each entry pins it to arguments (e.g. `forward_render_static` is `screenshot` with `--pipeline forward` plus its ground-truth evaluator), so a case name identifies one reproducible run. An entry carries:
+
+* `test_case`: the C++ `TestCase` it runs.
+* `app_args` / `scene_args`: app arguments; `scene_args` apply only when the suite gets `--scene`. `{name}`, `{framework}`, `{scene}` and `{scene_stem}` expand at run time, also in evaluator arguments.
+* `evaluator`: an optional Python script, with its own `args` / `scene_args`.
+* `recooks`: the case cooks at runtime on purpose, so coverage runs skip it and it runs only with `--case`.
+
+[tests/coverage.csv](../tests/coverage.csv) has one row per registry case, in execution order, and one column per CI triplet, with an `x` where that triplet runs the case. [dev/ci_matrix.py](../dev/ci_matrix.py) generates one CI test job per column. Registry cases without a row are development-only. Unit tests under `tests/build_system/` keep the two tables consistent with each other, with the `TestCaseRegistrar` names, the evaluators and the CI runners.
+
+What each triplet adds when choosing columns for a case:
+
+* `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` all render with Mesa lavapipe (the android one inside an x86_64 emulator), so a GPU or driver case learns nothing from a second copy. What is unique to each is the host runtime: the MSVC binary and Win32 paths, the Linux binary, the Android lifecycle, assets and surface. `ubuntu-glfw-release` is the cheapest per case and carries the shared software-rendering load.
+* `macos-macos-release` (Metal) and `macos-glfw-release` (Vulkan through MoltenVK) are the only physical GPUs, and with `macos-ios-release` the only ARM triplets. Arch-sensitive code needs one of them plus an x86 column, e.g. astcenc builds NEON on ARM and SSE4.1 elsewhere, so `texture_compression` runs on both sides.
+* Every case has a fixed cost before its body runs: about 24 s on the android emulator, 14 s on windows, 1 s on `macos-macos-release`.
+
+To add a case, append its registry entry and a coverage row at its execution position. To add a platform, add a coverage column, give the triplet a suite invocation in `TEST_RUNNERS` in [dev/ci_matrix.py](../dev/ci_matrix.py) and regenerate CI with `python3 dev/ci_matrix.py --fix`. Retiring either removes both sides.
+
+## Ground Truth
+
+Screenshot cases compare a headless 1280x720 capture with one published image per scene and pipeline, shared by every platform (`FLIP_THRESHOLD` in [tests/screenshot/static_render_reference.py](../tests/screenshot/static_render_reference.py)). The reference scene is **TestScene**, the packaged default scene that loads when `--scene` is empty: a floor, spheres, glTF models and a sky map ([resources/packed/TestScene.usda](../resources/packed/TestScene.usda), produced as described in [USD.md](USD.md#packaged-testscene)).
+
+| pipeline | ground truth                                                                                   |
+| -------- | ---------------------------------------------------------------------------------------------- |
+| cpu      | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_cpu.png)      |
+| gpu      | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu.png)      |
+| forward  | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_forward.png)  |
+| deferred | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred.png) |
+
+* `--test_case screenshot` writes `screenshots/screenshot.png` under the [external storage path](Run.md#storage) once the scene is loaded and a frame is complete; `multi_frame_screenshot` writes five consecutive frames as `multi_frame_<N>.png`. The UI's Save Screenshot button names files by scene, pipeline and time.
+* `cpu_render_static_64spp` and `gpu_render_static_64spp` stop at 64 samples per pixel so lavapipe can run them in CI, with a threshold that allows for the remaining noise; the converged `cpu_render_static` and `gpu_render_static` are development-only.
+* The maintainer publishes ground truth by uploading `TestScene_<pipeline>.png` captures. A change meant to alter the image fails these cases until then.
+
+## Validation Layer
+
+Once the scene has loaded, every error the Vulkan validation layer reports fails the running test case; warnings are only logged. The layer is active when `validation` is on (the packaged config turns it on) and the loader finds `VK_LAYER_KHRONOS_validation`; otherwise validation is silently off. Errors after the verdict, e.g. objects leaked at device destruction, do not change it. A test that provokes errors on purpose accepts them through `TestCase::AcceptValidationErrors`.
+
+`validate_sync` adds synchronization validation, which reports GPU accesses no barrier orders, also across submits. It is slow, so only the registry cases named `*_sync_validation` turn it on, one per pipeline and per render graph feature, and `sync_validation_hazard` records an unsynchronized write to prove the gate can fail. A run with `validate_sync true` fails unless synchronization validation is actually active, so the gate never passes vacuously. Run them locally with `--case` on a glfw build whose loader finds the layer.
+
+## Platform Runners
+
+### Android
+
+The runner in [build_system/android/build.py](../build_system/android/build.py) drives a device or emulator. Android has no argv or exit code, so the runner writes cvars to the user config, starts the activity and reads the verdict from the `Test case '<name>' passed/failed` logcat markers. After each case it pulls the log and screenshots to `build_system/android/output/device/`, where the cook gate and the evaluators read them.
 
 ```bash
-python3 run.py --framework macos --test_case my_feature
+python3 build.py --framework android --config Release
+python3 dev/run_tests.py --framework android --config Release --case smoke   # boots an emulator if no device is attached
 ```
 
-### Naming Rules
+* Without a device, the runner boots the `sparkle_test` AVD headless, creating it and its system image on first use (needs the SDK `cmdline-tools`). A quickboot snapshot seeded on first use makes later boots take seconds.
+* Pushing the config needs `adb root`, available on emulator `google_apis` images, because files a non-root shell creates under `Android/data` are invisible to the app.
+* A case requests device actions by logging `[TestCaseAction] <name>`: `cycle_window` (screen off and on) destroys and restores the native window, `resize_display` changes the aspect ratio. The display size resets after every attempt.
+* The device runs the app, so a coverage run executes the `ubuntu-android-release` column from any host. The emulator ABI follows the host: Apple silicon tests the arm64 apk, CI's x86 runners an `--android_abi x86_64` package.
 
-Test case names (the string passed to `TestCaseRegistrar`) must be unique across all `.cpp` files under `tests/`. Duplicate names are detected at startup and logged as an error; the first registration wins.
+### iOS
 
-## Built-in Test Cases
+The runner in [build_system/ios/build.py](../build_system/ios/build.py) runs a `--ios_platform simulator` package inside the iOS Simulator. The app binary runs as a plain headless process through `simctl spawn`, so cvars pass as arguments and the exit code is the verdict.
 
-Test cases self-register by name: search `tests/` for `TestCaseRegistrar` to enumerate them. The suite-runnable ones live in [tests/registry.json](../tests/registry.json) with their CI assignment in [tests/coverage.csv](../tests/coverage.csv) (see [Test Registry](#test-registry)); purely development-facing cases (e.g. `multi_frame_screenshot`, `denoiser_sweep`) are documented with the feature they serve.
+```bash
+python3 build.py --framework ios --config Release --ios_platform simulator
+python3 dev/run_tests.py --framework ios --config Release --case smoke
+```
+
+* The runner boots the `sparkle_test` simulator, created from the newest installed iPhone type; runs are headless, so the model does not matter.
+* After each case it copies the log and screenshots to `build_system/ios/output/device/`.
+* The simulator reports no ray tracing, so the gpu pipeline stays local-only, and rejects shared-storage textures, so the Metal backend keeps textures private there (see `MetalImage`).
+
+### Windowed Cases
+
+Suite runs are headless, so cases that need a window have no registry entry: `windowed_flush` (frames keep presenting while the main thread flushes the render thread) and `render_graph_ui` (the UI merges into the screen pass). Run them without `--headless`, e.g. `python3 run.py --framework macos --test_case windowed_flush`.

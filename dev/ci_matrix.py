@@ -45,7 +45,7 @@ PRODUCTS = (
 # must hold every tests/coverage.csv triplet column: that table decides who runs the suite
 TEST_RUNNERS = {
     # no GPU on hosted windows runners: software vulkan via lavapipe, which can
-    # take the suite close to an hour (see TODO.md), hence the generous timeout
+    # take the suite close to an hour, hence the generous timeout
     "windows-glfw-release": {
         "suite_args": "--software",
         "suite_timeout": 120,

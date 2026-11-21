@@ -1,6 +1,6 @@
 # Render Graph
 
-Every renderer records its frame through a render graph. Each GPU pass declares what it reads and writes; the graph derives everything a renderer used to write by hand: which passes run, image layouts and barriers, attachment load/store actions, image usage flags, which raster passes share one hardware render pass, which reads stay in tile memory, and which transients need no memory at all. Every decision is recorded with its reason and can be dumped, viewed and diffed in tests.
+Every renderer records its frame through a render graph. Each GPU pass declares what it reads and writes; the graph derives what renderers would otherwise write by hand: which passes run, image layouts and barriers, attachment load/store actions, image usage flags, which raster passes share one hardware render pass, which reads stay in tile memory, and which transients need no memory at all. Every decision is recorded with its reason and can be dumped, viewed and diffed in tests.
 
 ## Overview
 
@@ -146,7 +146,7 @@ The exact frame of each renderer is in its golden ([tests/render_graph/golden/](
 
 ### Exporting the Graph
 
-* `Save Graph Dump` on the control panel's screenshot page writes the next graph to `screenshots/<scene>_<pipeline>_<time>.json` under the [external storage path](Run.md#external-storage-paths).
+* `Save Graph Dump` on the control panel's screenshot page writes the next graph to `screenshots/<scene>_<pipeline>_<time>.json` under the [external storage path](Run.md#storage).
 * `render_graph_export` writes `screenshots/render_graph_export.json` once per run, for headless, CI and device runs (Android takes it from the config file).
 * With `render_graph_profile_frames` N, an export waits for N consecutive frames of one graph structure and adds the mean, min and max of each pass's CPU time and each physical pass's GPU time.
 
@@ -181,15 +181,13 @@ Declaration and recording mistakes log a message and abort in every build, Relea
 
 * **Apple:** `python3 dev/apple_gpu_traffic.py -- <app arguments>` records the macOS app with `xctrace` and the [Performance Limiters template](../dev/instruments/SparklePerformanceLimiters.tracetemplate), and prints bytes read and written and GPU time per frame per encoder, as a median over runs. Compare configurations, e.g. with and without `--render_graph_merge false`; Apple GPUs compress stored targets, so absolute bytes fall below the dump's `store_bytes`.
 * **Android:** Perfetto's `gpu.counters` gives bandwidth on Adreno; `gpu.renderstages` counts render passes, and needs the profileable app and `debug.graphics.gpu.profiler.perfetto=1`.
-* Against `render_graph_merge false`, merged Deferred frames write 3.9× fewer bytes per fragment on an S25 Ultra (Adreno 830) and 2.1× fewer bytes per frame on an M5 Max; Forward frames 2.1× and 1.5×.
 
 ## Tests
 
-* `render_graph_compile` builds synthetic graphs and checks their plans (culling, aliasing, every break reason, pixel-local lowering, memoryless, barriers, load/store, bindings), executes them and reads the results back. `render_graph_sync_validation` runs it under Vulkan synchronization validation.
-* `render_graph_errors` covers every error check.
-* `render_graph_merge_parity` (and `_deferred`) switches merging, memoryless and pixel-local reads at runtime and requires bit-identical screenshots; the `_sync_validation` variants run it under synchronization validation.
-* `render_graph_pass_timing`, `render_graph_export` (and `_profile`), and `pipeline_switch_pool` cover timing, exports and pool reuse; `forward_render_static_sampled` and `deferred_render_static_sampled` screenshot the sampled fallback.
-* `render_graph_ui` is a windowed development case (no registry entry, since headless runs create no ImGui) that checks the UI merges into the screen pass.
+* `render_graph_compile` builds synthetic graphs and checks their plans (culling, aliasing, every break reason, pixel-local lowering, memoryless, barriers, load/store, bindings), executes them and reads the results back; `render_graph_errors` covers every error check.
+* `render_graph_merge_parity` and `render_graph_merge_parity_deferred` switch merging, memoryless and pixel-local reads at runtime and require bit-identical screenshots.
+* The `_sync_validation` variants of these cases run them under synchronization validation ([Test.md](Test.md#validation-layer)).
+* `render_graph_pass_timing`, `render_graph_export`, `render_graph_export_profile` and `pipeline_switch_pool` cover timing, exports and pool reuse; `forward_render_static_sampled` and `deferred_render_static_sampled` screenshot the sampled fallback.
 * `forward_resize`, `deferred_resize`, `forward_render_scale_change`, `cpu_resize_64spp` and `gpu_resize_64spp` resize at runtime, compare against the static ground truth and require that the renderer is not recreated.
 * [tests/build_system/test_render_graph_viewer.py](../tests/build_system/test_render_graph_viewer.py) unit-tests the viewer and the golden projection.
 
@@ -243,32 +241,3 @@ ImGui:
 
 * ImGui's Vulkan and Metal backends draw inside a rendering with several color attachments (slot 0 against the physical pass's attachment signature) only after v1.92.9b, so `thirdparty/imgui` pins an upstream master commit until a release contains the change.
 * The Vulkan ImGui backend holds one pipeline, which `VulkanUiHandler` recompiles after a device idle when the physical pass's signature changes.
-
-## Opportunities
-
-Found while building the graph; none has a user yet. Each says what would justify it.
-
-Graph features:
-
-* **MSAA:** a `ResolveTo(src, dst)` access lowered to Vulkan resolve attachments and Metal `MultisampleResolve` store actions, with a memoryless MSAA source, once a renderer needs MSAA.
-* **History API:** a keyed `graph.History(key, desc) -> {current, previous}` for the first ping-pong user (TAA, temporal AO); today's temporal users update their imports in place.
-* **Transient mips, layers and cube maps,** and graph buffers beyond copies (uniform, storage, indirect, transient buffers), Copy passes that blit, clear or generate mips, and indirect dispatch, each with its first user.
-* **Heap aliasing** of transients, once dumped transient bytes on mobile justify its aliasing barriers and untracked Metal heaps. Memoryless already removes the largest tiler allocations.
-* **Async compute** as a per-pass attribute scheduled from dependency levels, and **parallel recording** by physical-pass spans into separate command buffers submitted in order, once a profile shows the render thread or a queue idle.
-* **Metal 4 backend:** lower the existing barrier plan to Metal 4 stage barriers over untracked resources.
-* **Compile caching** by graph hash, only if compile time shows up in a profile.
-* `graph.Extract`, mandatory bindings, `NativeAccess` on Compute passes and a pool-reuse kill switch were designed and left out until a user exists.
-
-Synchronization and load/store:
-
-* **Read-only depth:** a `DepthTest` attachment synchronizes as a depth write and stores `DontCare`; a distinct `RHIStoreOp::None` lowering to `STORE_OP_NONE` and a read-only depth layout would let it synchronize as a read.
-* **Unified image layouts:** collapse layouts to `GENERAL` where `VK_KHR_unified_image_layouts` exists (desktop only; Mali's transaction elimination needs precise layouts), and fold later readers of one write into its first barrier.
-* **Foreign writes:** the MetalFX scaler's output carries shader-write usage only so the graph can declare the scaler's write; a builder access for writes outside shaders would remove it.
-* **Common tracked state:** Vulkan `Upload`/`UploadFaces` and `EndFrame`'s present transition change tracked image state in backend code, so tracked states differ between backends until the first graph frame; moving them to common code would make more first barriers backend-independent.
-* **Tile budget on Adreno:** `VK_QCOM_tile_properties` (exposed on the S25 Ultra) or per-vendor hard limits, once on-device measurements with `render_graph_tile_budget_split` show a split wins.
-
-Tooling:
-
-* The viewer joins passes with pass-to-pass edges, which get dense where one resource feeds many passes; resource-version nodes would scale better.
-* Per-pass output thumbnails in the viewer need readback of intermediate images, and memoryless attachments have none to read.
-* A public `ImGui_ImplVulkan_CreatePipeline` upstream would allow a per-signature pipeline cache, if signatures ever alternate from frame to frame.
