@@ -6,7 +6,7 @@ Yet another cross-platform renderer with hardware ray-tracing support. Its main 
 
 It is an experimental demo which aims to be simple and modern, rather than being rich in features or robust for production.
 
-![Failed to load image](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu_glfw.png)
+![Failed to load image](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu.png)
 
 ## Features
 
@@ -85,6 +85,7 @@ For detailed usage of the app, please refer to [docs/Run.md](docs/Run.md).
 * [docs/Cooking.md](docs/Cooking.md) — build-time asset cooking
 * [docs/USD.md](docs/USD.md) — USD import and export
 * [docs/RenderGraph.md](docs/RenderGraph.md) — render graph: declared pass accesses, derived barriers and load/store, dump
+* [docs/PathTracer.md](docs/PathTracer.md) — path tracers: BSDF, light sampling, next event estimation and MIS
 * [docs/Denoiser.md](docs/Denoiser.md) — path-tracing denoisers: NRD and MetalFX integration
 * [docs/RenderingValidation.md](docs/RenderingValidation.md) — rendering validation and debugging methodology
 

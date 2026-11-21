@@ -91,7 +91,7 @@ def main():
     else:
         print("Downloading ground truth...", flush=True)
         ground_truth = static_render_reference.download_ground_truth(
-            args.framework, static_render_reference.DEFAULT_SCENE, args.pipeline)
+            static_render_reference.DEFAULT_SCENE, args.pipeline)
         gt_flip = render_test_support.compare_images(ground_truth, original)
         if gt_flip > static_render_reference.FLIP_THRESHOLD:
             print(f"FAIL: original render vs ground truth mean FLIP error "

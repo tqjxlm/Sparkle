@@ -1,6 +1,7 @@
 #include "renderer/renderer/GPURenderer.h"
 
 #include "core/Profiler.h"
+#include "core/math/AliasTable.h"
 #include "renderer/BindlessManager.h"
 #include "renderer/denoiser/Denoiser.h"
 #include "renderer/denoiser/DenoiserFactory.h"
@@ -12,6 +13,7 @@
 #include "renderer/proxy/MeshRenderProxy.h"
 #include "renderer/proxy/SceneRenderProxy.h"
 #include "renderer/proxy/SkyRenderProxy.h"
+#include "renderer/resource/EmissiveTriangles.h"
 #include "renderer/resource/PathTracingDenoiserInputs.h"
 #include "rhi/RHI.h"
 #include "rhi/RHIRayTracing.h"
@@ -41,6 +43,11 @@ class RayTracingComputeShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(gRadianceSpecular, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(gSpecAlbedo, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
+    USE_SHADER_RESOURCE(skySamplingTable, RHIShaderResourceReflection::ResourceType::StorageBuffer)
+    USE_SHADER_RESOURCE(emissiveTriangles, RHIShaderResourceReflection::ResourceType::StorageBuffer)
+    USE_SHADER_RESOURCE(emissiveSamplingTable, RHIShaderResourceReflection::ResourceType::StorageBuffer)
+    USE_SHADER_RESOURCE(emissiveTriangleOffsets, RHIShaderResourceReflection::ResourceType::StorageBuffer)
+
     USE_SHADER_RESOURCE_BINDLESS(textures, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE_BINDLESS(indexBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
     USE_SHADER_RESOURCE_BINDLESS(vertexAttributeBuffers, RHIShaderResourceReflection::ResourceType::StorageBuffer)
@@ -60,6 +67,8 @@ class RayTracingComputeShader : public RHIShaderInfo
         uint32_t spp;
         uint32_t enable_nee;
         uint32_t write_gbuffer;
+        uint32_t sky_sampling_resolution = 0;
+        uint32_t emissive_triangle_count;
     };
 };
 
@@ -287,6 +296,10 @@ void GPURenderer::Update()
             });
             cs_resources->skyMap().BindResource(dummy_texture->GetDefaultView(rhi_));
         }
+
+        const bool has_sampling_table = sky_light != nullptr && sky_light->GetSamplingTable();
+        cs_resources->skySamplingTable().BindResource(has_sampling_table ? sky_light->GetSamplingTable()
+                                                                         : empty_sky_sampling_table_);
     }
 
     bool need_rebuild_tlas = false;
@@ -329,6 +342,12 @@ void GPURenderer::Update()
             UnImplemented(type);
             break;
         }
+    }
+
+    if (emissive_triangles_->NeedsRebuild(*scene_render_proxy_))
+    {
+        emissive_triangles_->Rebuild(rhi_, *scene_render_proxy_);
+        BindEmissiveTriangles();
     }
 
     // the BuildTLAS pass records the staged build
@@ -427,6 +446,7 @@ void GPURenderer::Update()
         .spp = spp,
         .enable_nee = render_config_.enable_nee ? 1u : 0,
         .write_gbuffer = gbuffer_write_this_frame_ ? 1u : 0u,
+        .emissive_triangle_count = emissive_triangles_->GetCount(),
     };
 
     if (will_dispatch)
@@ -439,6 +459,7 @@ void GPURenderer::Update()
     if (sky_light)
     {
         ubo.sky_light = sky_light->GetRenderData();
+        ubo.sky_sampling_resolution = sky_light->GetSamplingResolution();
     }
     auto *dir_light = scene_render_proxy_->GetDirectionalLight();
     if (dir_light)
@@ -501,6 +522,17 @@ void GPURenderer::InitSceneRenderResources()
     cs_resources->skyMapSampler().BindResource(rhi_->GetSampler(SkyRenderProxy::SkyMapSampler));
 
     cs_resources->materialTextureSampler().BindResource(rhi_->GetSampler(MeshPass::MaterialTextureSampler));
+
+    empty_sky_sampling_table_ =
+        rhi_->CreateBuffer({.size = sizeof(AliasTableEntry),
+                            .usages = RHIBuffer::BufferUsage::StorageBuffer,
+                            .mem_properties = RHIMemoryProperty::HostVisible | RHIMemoryProperty::HostCoherent,
+                            .is_dynamic = false},
+                           "EmptySkySamplingTable");
+    cs_resources->skySamplingTable().BindResource(empty_sky_sampling_table_);
+
+    emissive_triangles_ = std::make_unique<EmissiveTriangles>(rhi_);
+    BindEmissiveTriangles();
 
     BindBindlessResources();
 }
@@ -592,6 +624,14 @@ Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested)
         }
     }
     return nullptr;
+}
+
+void GPURenderer::BindEmissiveTriangles()
+{
+    auto *cs_resources = pipeline_state_->GetShaderResource<RayTracingComputeShader>();
+    cs_resources->emissiveTriangles().BindResource(emissive_triangles_->GetTriangles());
+    cs_resources->emissiveSamplingTable().BindResource(emissive_triangles_->GetSamplingTable());
+    cs_resources->emissiveTriangleOffsets().BindResource(emissive_triangles_->GetPrimitiveOffsets());
 }
 
 void GPURenderer::BindBindlessResources()

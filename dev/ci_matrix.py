@@ -77,10 +77,10 @@ TEST_RUNNERS = {
     # (see build_system/ios/build.py); like the android cell, the tested product
     # exists only for this cell because no hosted runner can drive a physical
     # iphone. the simulated GPU exposes no ray tracing, so the gpu pipeline stays
-    # local-only. 1565x720 matches the published ios ground-truth captures
+    # local-only
     "macos-ios-release": {
         "abi": "simulator",
-        "suite_args": "--width 1565 --height 720",
+        "suite_args": "",
         "suite_timeout": 90,
         "screenshots": "build_system/ios/output/device/screenshots/",
     },
@@ -88,10 +88,10 @@ TEST_RUNNERS = {
     # guest Vulkan device is llvmpipe (the windows cell's driver class): no ray
     # tracing, so the gpu pipeline stays local-only. abi keys the artifact and
     # job names apart from the shipping arm64 product, which no hosted runner
-    # can emulate. 1560x720 matches the published android ground-truth captures
+    # can emulate
     "ubuntu-android-release": {
         "abi": "x86_64",
-        "suite_args": "--width 1560 --height 720",
+        "suite_args": "",
         "suite_timeout": 90,
         "screenshots": "build_system/android/output/device/screenshots/",
     },

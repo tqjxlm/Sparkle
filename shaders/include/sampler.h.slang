@@ -64,7 +64,8 @@ float3 Sample(float3 w_o, float roughness)
 
     float3 v = normalize(float3(w_o.x * a, w_o.y * a, w_o.z));
 
-    float3 t1 = (v.z < 0.999f) ? normalize(cross(v, float3(0, 0, 1))) : float3(1, 0, 0);
+    // t2.z >= 0 so the hemisphere shift below moves toward the upper hemisphere
+    float3 t1 = (v.z < 0.999f) ? normalize(cross(float3(0, 0, 1), v)) : float3(1, 0, 0);
     float3 t2 = cross(v, t1);
 
     float r = sqrt(u1);

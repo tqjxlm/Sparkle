@@ -38,7 +38,7 @@ static ConfigValue<bool> config_spatial_denoise("spatial_denoise", "use spatial 
 static ConfigValue<float> config_target_framerate("target_framerate", "target frame rate", "renderer", 60.f);
 static ConfigValue<float> config_gpu_budget_ratio("gpu_time_budget_ratio", "GPU time budget ratio for ray tracing",
                                                   "renderer", 0.8f);
-static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", false, true);
+static ConfigValue<bool> config_enable_nee("enable_nee", "enable next event estimation", "renderer", true, true);
 static ConfigValue<bool> config_clear_screenshots("clear_screenshots", "clear all existing screenshots", "renderer",
                                                   false);
 static ConfigValue<bool> config_manual_accumulation(

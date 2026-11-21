@@ -35,6 +35,11 @@ public:
 
     void OnTransformDirty(RHIContext *rhi) override;
 
+    [[nodiscard]] const Mesh &GetMesh() const
+    {
+        return *raw_mesh_;
+    }
+
     [[nodiscard]] const RHIResourceRef<RHIBuffer> &GetVertexBuffer() const
     {
         return vertex_buffer_;

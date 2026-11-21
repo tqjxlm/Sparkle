@@ -31,11 +31,18 @@ def get_toolchain_args():
     return []
 
 
+def get_clang_cl_path(vs_path):
+    return os.path.join(vs_path, "VC", "Tools", "Llvm", "x64", "bin", "clang-cl.exe").replace("\\", "/")
+
+
 def get_cmd_with_vcvars(vs_path, cmake_cmd):
     vcvars_path = os.path.join(
         vs_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
     guarded_cmake_cmd = " ".join([f'"{cmd}"' for cmd in cmake_cmd])
-    return f'CALL "{vcvars_path}" && ' + guarded_cmake_cmd
+    # the MSVC STL accepts only the clang it ships with (error STL1000), so the external projects that dependencies
+    # configure on their own during the build also compile with Visual Studio's clang-cl rather than one on PATH
+    clang_cl_path = get_clang_cl_path(vs_path)
+    return f'CALL "{vcvars_path}" && set "CC={clang_cl_path}" && set "CXX={clang_cl_path}" && ' + guarded_cmake_cmd
 
 
 def get_output_dir(is_generate_sln):
@@ -75,15 +82,14 @@ def configure(args, is_generate_sln):
         ninja_path = find_or_install_ninja()
         vs_path = _require_vs_path()
 
-        clang_cl_path = os.path.join(
-            vs_path, "VC", "Tools", "Llvm", "x64", "bin", "clang-cl.exe")
+        clang_cl_path = get_clang_cl_path(vs_path)
         if not os.path.exists(clang_cl_path):
             raise RuntimeError(
                 "clang-cl.exe not found in Visual Studio installation. "
                 "Please install 'C++ Clang Compiler for Windows' component in Visual Studio Installer.")
 
-        compiler_args = ["-DCMAKE_CXX_COMPILER=clang-cl",
-                         "-DCMAKE_C_COMPILER=clang-cl"]
+        compiler_args = [f"-DCMAKE_CXX_COMPILER={clang_cl_path}",
+                         f"-DCMAKE_C_COMPILER={clang_cl_path}"]
         if shutil.which("ccache"):
             # ccache cannot cache /Zi (separate .pdb writes); store debug info in the objects (/Z7)
             compiler_args += ["-DCMAKE_POLICY_DEFAULT_CMP0141=NEW",

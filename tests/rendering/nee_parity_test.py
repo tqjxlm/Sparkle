@@ -22,7 +22,6 @@ NEE_NAME = "nee_parity_on.png"
 BLOCK_SIZE = 16
 # 8 bit levels from here on sit on the tone curve's shoulder, where one level spans too much radiance
 SATURATED = 250 / 255
-# the open NEE items in docs/TODO.md leave about 0.015 and 0.06
 MAX_MEAN_DEVIATION = 0.04
 MAX_LOCAL_DEVIATION = 0.12
 

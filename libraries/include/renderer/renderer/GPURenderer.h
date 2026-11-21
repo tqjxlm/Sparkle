@@ -16,6 +16,7 @@ namespace sparkle
 {
 class SkyRenderProxy;
 class Denoiser;
+class EmissiveTriangles;
 class PathTracingDenoiserInputs;
 
 class GPURenderer : public Renderer
@@ -65,6 +66,8 @@ private:
 
     void BindBindlessResources();
 
+    void BindEmissiveTriangles();
+
     void MeasurePerformance();
 
     [[nodiscard]] bool AccumulationPaused() const
@@ -88,6 +91,11 @@ private:
     RHIResourceRef<RHIPipelineState> pipeline_state_;
 
     SkyRenderProxy *bound_sky_proxy_ = nullptr;
+
+    std::unique_ptr<EmissiveTriangles> emissive_triangles_;
+
+    // bound while the sky has no sampling table, which the tracer then never reads
+    RHIResourceRef<RHIBuffer> empty_sky_sampling_table_;
 
     std::vector<DenoiserSlot> denoiser_slots_;
 

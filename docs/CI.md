@@ -100,16 +100,16 @@ The macOS + GLFW package runs the same Vulkan backend as Windows, but on the run
 python3 dev/run_tests.py --framework glfw --config Release
 ```
 
-The Android cell runs the dedicated x86_64 package on a KVM-accelerated headless emulator, whose guest Vulkan device is llvmpipe — the same software-rasterizer class as the Windows cell (the shipping arm64 apk cannot be emulated on any hosted runner; see the Android section in [Test.md](Test.md)). Its picks include `surface_loss_recovery` and `window_resize`, which exercise the Android native-window teardown/recreate and resize paths. `--width 1560 --height 720` matches the resolution of the published android ground-truth captures:
+The Android cell runs the dedicated x86_64 package on a KVM-accelerated headless emulator, whose guest Vulkan device is llvmpipe — the same software-rasterizer class as the Windows cell (the shipping arm64 apk cannot be emulated on any hosted runner; see the Android section in [Test.md](Test.md)). Its picks include `surface_loss_recovery` and `window_resize`, which exercise the Android native-window teardown/recreate and resize paths:
 
 ```bash
-python3 dev/run_tests.py --framework android --config Release --width 1560 --height 720
+python3 dev/run_tests.py --framework android --config Release
 ```
 
-The iOS cell runs the dedicated unsigned simulator package as spawned headless processes inside the iOS Simulator (the shipping ipa targets physical devices, which no hosted runner can drive; see the iOS section in [Test.md](Test.md)). `--width 1565 --height 720` matches the resolution of the published ios ground-truth captures:
+The iOS cell runs the dedicated unsigned simulator package as spawned headless processes inside the iOS Simulator (the shipping ipa targets physical devices, which no hosted runner can drive; see the iOS section in [Test.md](Test.md)):
 
 ```bash
-python3 dev/run_tests.py --framework ios --config Release --width 1565 --height 720
+python3 dev/run_tests.py --framework ios --config Release
 ```
 
 The hosted macos runners are VMs whose paravirtualized Metal device reports `supportsRaytracing == false`, so the gpu path-tracing pipeline silently falls back to forward rendering there — its screenshot gate (`gpu_render_static`) and the denoiser gate suite (see [Denoiser.md](Denoiser.md)) would be vacuous and stay local-only. Enabling them is a coverage-file change away if a runner with ray tracing (e.g. self-hosted) ever appears.
@@ -124,9 +124,11 @@ The suite compares auto-generated screenshots with the published ground truth. C
 
 ### TestScene
 
-| framework | cpu                                                                                             | gpu                                                                                               | forward                                                                                               | deferred                                                                                               |
-| --------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| glfw      | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_cpu_glfw.png)  | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu_glfw.png)    | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_forward_glfw.png)    | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred_glfw.png)    |
-| macos     | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_cpu_macos.png) | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu_macos.png)   | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_forward_macos.png)   | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred_macos.png)   |
-| ios       | too slow to run                                                                                 | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu_ios.png)     | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_forward_ios.png)     | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred_ios.png)     |
-| android   | too slow to run                                                                                 | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu_android.png) | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_forward_android.png) | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred_android.png) |
+All platforms compare headless 1280x720 captures against one shared ground truth per pipeline:
+
+| pipeline | ground truth                                                                                   |
+| -------- | ---------------------------------------------------------------------------------------------- |
+| cpu      | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_cpu.png)      |
+| gpu      | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_gpu.png)      |
+| forward  | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_forward.png)  |
+| deferred | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred.png) |
