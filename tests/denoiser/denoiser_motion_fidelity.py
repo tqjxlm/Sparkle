@@ -1,6 +1,6 @@
 """Motion-phase fidelity: systematic error of the NRD output under motion, vs ground truth at the pose.
 
-Methodology (see docs/RenderingValidation.md + the fidelity criterion): a single motion frame is
+Methodology (see .agents/skills/debug-rendering/SKILL.md + the fidelity criterion): a single motion frame is
 noise-confounded, so capture the SAME motion frame (last sweep capture, frame 15) across M seed-offset
 realizations and average; the sweep then holds that exact pose, so a raw converged run provides ground
 truth. Reported per region (spec cluster / floor / whole):

@@ -21,7 +21,7 @@ Events are queued by `Push` (main thread only) and delivered once per frame from
 
 ## Scene gestures
 
-Recognition — which button, which modifier, how many fingers, how long — happens once inside `InputManager`, so no subscriber re-derives it and mouse and touch reach a subscriber through the same event:
+Platforms only convert native events to `PointerEvent`s. Recognition — which button, which modifier, how many fingers, how long — happens once inside `InputManager`, so no subscriber re-derives it and mouse and touch reach a subscriber through the same event:
 
 | scene event | mouse | touch |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ Recognition — which button, which modifier, how many fingers, how long — hap
 | `OnSceneTap(finger_count)` | — | quick tap, no slop |
 | `OnSceneDoubleTap(finger_count)` | double click | double tap |
 
-A drag always ends: `OnSceneDragEnd` fires on release and also when the ui takes the sequence over mid-drag, so an owner that started acting on `Begin` can rely on `End` to stop.
+On touch, a pinch suppresses the drag and lifting back to one finger resumes it, and one-finger taps also drive double-tap detection. A drag always ends: `OnSceneDragEnd` fires on release and also when the ui takes the sequence over mid-drag, so an owner that started acting on `Begin` can rely on `End` to stop.
 
 ## Key arbitration
 
@@ -68,20 +68,9 @@ Pointer positions are in **ui space**: the space of imgui's `io.DisplaySize` —
 
 ## UI capture
 
-imgui receives every pointer event through the same pipeline (`io.Add*Event`); no platform imgui backend handles pointer input. A pointer sequence that starts on the ui stays on the ui until release (`InputManager::UiCaptureGate`), and scene events are suppressed while imgui wants the pointer or keyboard — on every platform, touch included.
+imgui receives every pointer event through the same pipeline (`io.Add*Event`); no platform imgui backend handles pointer input. A pointer sequence that starts on the ui stays on the ui until release (`InputManager::UiCaptureGate`), and scene events are suppressed while imgui wants the pointer or keyboard — on every platform, touch included. On touch, a single finger emulates an imgui mouse: a short touch clicks, a longer drag scrolls, and hover resets after each sequence.
 
-Desktop keyboards: glfw chains the imgui glfw backend's key/char callbacks for full key coverage; macos maps `NativeKeyboard` unichars to `ImGuiKey` and feeds printable characters as `CharEvent`.
-
-## Touch gestures
-
-Gesture recognition is shared engine code, identical on ios and android (platforms only convert native touches to `PointerEvent`s):
-
-| gesture | scene event |
-| --- | --- |
-| 1-finger drag | `OnSceneDragBegin` / `OnSceneDrag` / `OnSceneDragEnd` |
-| pinch (2 fingers) | `OnSceneZoom` from the pinch length delta; suppresses drag; lifting back to one finger resumes the drag |
-| quick tap, no slop | `OnSceneTap(finger_count)`; 1-finger taps also drive double-tap detection (4-finger tap triggers a frame capture) |
-| touch → ui | single finger emulates an imgui mouse: short = click, longer drag = wheel scroll, hover reset after each sequence |
+Desktop keyboards: glfw chains the imgui glfw backend's key/char callbacks for full key coverage; macos translates key characters to `Key` (`MacOSView`) and feeds printable characters as `CharEvent`; `InputManager` maps `Key` to `ImGuiKey` for imgui.
 
 ## Testing and mocking
 

@@ -1,38 +1,47 @@
-# Development Guide
+# Build
 
-## Dependencies
+`build.py` turns the source tree into a distributable in three stages: build, cook and package. It never launches the app; `run.py` does (see [Run.md](Run.md)). Along the way it installs the prerequisites it can, updates submodules, downloads sample resources, copies VS Code settings and wires the git hooks.
 
-### Compiler
+## Quick Start
 
-| framework                                | windows                 | macos              | linux            | ios                | android               |
-| ---------------------------------------- | ----------------------- | ------------------ | ---------------- | ------------------ | --------------------- |
-| glfw                                     | clang-cl (vs-installer) | apple-llvm (Xcode) | clang 19+ (apt)  | -                  | -                     |
-| glfw (VS solution via `--generate_only`) | msvc (Visual Studio)    | -                  | -                | -                  | -                     |
-| macos                                    | -                       | apple-llvm (Xcode) | -                | -                  | -                     |
-| ios                                      | -                       | -                  | -                | apple-llvm (Xcode) | -                     |
-| android                                  | -                       | -                  | -                | -                  | llvm (Android Studio) |
+``` shell
+# GLFW Windows release build with clang-cl
+$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.363.0'
+$env:VCPKG_PATH='D:/SDKs/vcpkg'
+python3 build.py --framework glfw --config Release
 
-The windows glfw build compiles with the clang-cl bundled in Visual Studio (`VC/Tools/Llvm`), never another clang-cl on `PATH`, including in the external projects that dependencies configure on their own: the MSVC STL accepts only the clang version it ships with (`error STL1000: Unexpected compiler version`).
+# GLFW macOS debug build with llvm
+export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
+python3 build.py --framework glfw
 
-### External Dependencies
+# native macOS app through Xcode, debug
+python3 build.py --framework macos
 
-These libraries should be installed via an installer or package manager (apt, brew, vcpkg).
+# iOS Xcode project without building
+export APPLE_DEVELOPER_TEAM_ID=ABC123DEF4
+python3 build.py --framework ios --apple_auto_sign --generate_only
+```
 
-* **Package Manager**
+## Prerequisites
 
-  ``` shell
-  homebrew # MacOS
-  vcpkg # Windows
-  apt # Linux
-  ```
+### Toolchains
 
-* **Vulkan SDK**: 1.4.363.0+. It provides the Vulkan loader (and MoltenVK on macOS) that glfw builds link, the validation layer and shader tools. No build compiles against its headers: every Vulkan framework (glfw and android) uses the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git) submodule, pinned to the SDK version in [prerequisites.json](../prerequisites.json), so an installed SDK or NDK never changes the Vulkan API a build sees. Bump both together.
+| framework                                | windows                 | macos              | linux           | ios                | android               |
+| ---------------------------------------- | ----------------------- | ------------------ | --------------- | ------------------ | --------------------- |
+| glfw                                     | clang-cl (vs-installer) | apple-llvm (Xcode) | clang 19+ (apt) | -                  | -                     |
+| glfw (VS solution via `--generate_only`) | msvc (Visual Studio)    | -                  | -               | -                  | -                     |
+| macos                                    | -                       | apple-llvm (Xcode) | -               | -                  | -                     |
+| ios                                      | -                       | -                  | -               | apple-llvm (Xcode) | -                     |
+| android                                  | -                       | -                  | -               | -                  | llvm (Android Studio) |
 
-  ``` shell
-  https://vulkan.lunarg.com/sdk/home
-  ```
+The windows glfw build compiles with the clang-cl bundled in Visual Studio (`VC/Tools/Llvm`), never another clang-cl on `PATH`, because the MSVC STL accepts only the clang version it ships with (`error STL1000: Unexpected compiler version`).
 
-* **GLFW** (required for glfw framework only)
+The android build needs Android Studio Quail 4 or newer and JDK 17 or newer (Android Gradle Plugin 9.4).
+
+### Installed Dependencies
+
+* **Vulkan SDK** 1.4.363.0+ from <https://vulkan.lunarg.com/sdk/home>: the Vulkan loader (and MoltenVK on macOS) that glfw builds link, the validation layer and shader tools.
+* **GLFW**, for the glfw framework only:
 
   ``` shell
   brew install glfw # MacOS
@@ -40,7 +49,8 @@ These libraries should be installed via an installer or package manager (apt, br
   sudo apt install libglfw3-dev # Linux
   ```
 
-* **ccache** (optional): when it is on `PATH`, every framework compiles through it, so a clean rebuild or a switch back to code that was built before reuses the cached objects. Code that changed compiles at the usual cost. The Xcode frameworks build with the index-while-building store disabled, because its output makes compilations uncacheable.
+* **CMake** 3.30+: `brew install cmake` on macOS, <https://cmake.org/download/> on Windows.
+* **ccache** (optional): when it is on `PATH`, every framework compiles through it, so rebuilding code that was built before reuses cached objects.
 
   ``` shell
   brew install ccache # MacOS
@@ -48,29 +58,39 @@ These libraries should be installed via an installer or package manager (apt, br
   sudo apt install ccache # Linux
   ```
 
-* **CMake**: 3.30+
+The build finds prerequisites on its own and installs the ones it can. Point it at the rest with environment variables:
 
-  ``` shell
-  brew install cmake # MacOS
-  https://cmake.org/download/ # Windows
-  ```
+| variable     | example                                                      | valid for        | auto-installable                |
+| ------------ | ------------------------------------------------------------ | ---------------- | ------------------------------- |
+| VULKAN_SDK   | /Users/username/VulkanSDK/1.4.363.0                          | all              | yes (requires admin on windows) |
+| CMAKE_PATH   | /opt/homebrew/bin/cmake                                      | all              | yes                             |
+| VCPKG_PATH   | D:/SDKs/vcpkg                                                | all windows      | yes                             |
+| LLVM         | /opt/homebrew/opt/llvm                                       | non-windows glfw | yes                             |
+| ANDROID_HOME | /Users/username/AndroidSDK                                   | android          | no (Android Studio)             |
+| JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home  | android          | no (Android Studio)             |
+| VS_PATH      | C:/Program Files/Microsoft Visual Studio/[version]/[edition] | all windows      | no (vs-installer)               |
+| ISPC         | /Users/username/ispc/bin/ispc                                | glfw, macos      | yes                             |
 
-### Internal Dependencies
+### Pinned Tools
 
-These libraries are managed by git submodules or CMake. They will be set up automatically when you run the build script. (see build.py)
+[prerequisites.json](../prerequisites.json) pins the versions an installed SDK must not change:
+
+* **Vulkan headers**: every Vulkan framework compiles against the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers.git) submodule at the SDK version, never the SDK's or NDK's headers. Bump both together.
+* **slangc**: installed into `build_cache`, replacing any other version there. A version change recompiles every shader.
+* **Android CMake**: the android native build runs the SDK's `cmake;<version>` package at the pinned version, installed through `sdkmanager` when missing, with the pinned ninja (the package's own ninja cannot build C++20 module sources).
+* **ISPC** compiles the cook's block encoder kernels, only for the frameworks that can cook (glfw, macos).
 
 <details>
 
-<summary>Click to expand the list of internal dependencies. Many thanks to them!</summary>
+<summary>Bundled dependencies, set up as git submodules or by CMake. Many thanks to them!</summary>
 
 * [argparse](https://github.com/p-ranav/argparse.git)
 * [bvh](https://github.com/madmann91/bvh.git)
 * [cpptrace](https://github.com/jeremy-rifkin/cpptrace.git)
 * [eigen](https://gitlab.com/libeigen/eigen.git)
-* [fast_float](https://github.com/fastfloat/fast_float.git), the copy bundled with tinyusdz, so both use one version
+* [fast_float](https://github.com/fastfloat/fast_float.git) (the copy bundled with tinyusdz)
 * [hash-library](https://github.com/lazy-eggplant/hash-library.git)
-* [imgui](https://github.com/ocornut/imgui.git), pinned to a master commit after v1.92.9b: the Vulkan and Metal backends of releases up to v1.92.9b cannot draw inside renderings with several color attachments
-* [imgui_club](https://github.com/ocornut/imgui_club.git), for `imgui_threaded_rendering`'s texture queue, which hands ImGui's texture requests from the main thread to the render thread
+* [imgui](https://github.com/ocornut/imgui.git) and [imgui_club](https://github.com/ocornut/imgui_club.git)
 * [ios-cmake](https://github.com/leetal/ios-cmake.git)
 * [json](https://github.com/nlohmann/json.git)
 * [magic_enum](https://github.com/Neargye/magic_enum.git)
@@ -89,210 +109,76 @@ These libraries are managed by git submodules or CMake. They will be set up auto
 
 </details>
 
-### Resources
+## Options
 
-Sample resources will be automatically set up during the first build. (see build.py)
+`python3 build.py --help` lists every option. The common ones:
 
-## Build & Run
+* `--framework=<glfw|macos|ios|android>`: what to build. `glfw` targets the host's desktop OS.
+* `--config=Release`: Release build (default: Debug).
+* `--stage=<build|cook|package|all>`: pipeline stages to run, repeatable (see [Pipeline Stages](#pipeline-stages)).
+* `--cook_targets=<a+b+...>`: cook targets to produce content images for (default: the built framework's own). Known targets: `android`, `ios`, `macos`, `macos-glfw`, `windows-glfw`, `linux-glfw`.
+* `--generate_only`: generate the IDE project without building. `--configure_only` runs the configure step only.
+* `--clangd`: generate `compile_commands.json` for clangd.
+* `--clean`: clean the output directory before configuring, which resolves stale configure state.
+* `--profile`: enable the Tracy client. Connect with the [Tracy](https://github.com/wolfpld/tracy/releases) GUI of the same release as `thirdparty/tracy`; other releases refuse the connection.
+* `--asan`: enable AddressSanitizer.
+* `--strip_test`: compile out TestCase support (see [Test.md](Test.md)).
+* `--apple_auto_sign`: automatic code signing for Apple platforms; needs `APPLE_DEVELOPER_TEAM_ID` ([how to find it](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)).
+* `--ios_platform=<device|simulator>`: `simulator` builds an unsigned package for the host's iOS Simulator; switching resets the iOS project and output trees.
+* `--android_abi=<arm64-v8a|x86_64>`: `x86_64` builds for emulators on x86 hosts.
+* `--cmake-args='...'`: extra CMake arguments, e.g. `-DENABLE_LTO=ON` for link time optimization (off by default: it adds minutes of Release link time).
 
-Before building, make sure you have installed all dependencies.
+`SPARKLE_BUILD_JOBS` overrides the glfw build parallelism (default 64 on windows, 16 elsewhere).
 
-The build system will try to find prerequisites automatically.
+## Pipeline Stages
 
-If it fails, it will try to install when possible.
+The stages always run in the order build → cook → package. A plain `build.py` runs all of them and produces a complete distributable: the built app, cooked content and a product archive in `build_system/<framework>/product/`. `run.py` runs only the stages a launch consumes.
 
-Otherwise, you need to specify them via environment variables. See the table below for details.
+* Each stage is idempotent through its own cache and fails fast when an earlier stage's output is missing; it never runs an upstream stage implicitly. Explicit selections, including `--stage all`, never degrade.
+* **Cook** runs the cooker inside the host framework's binary (`macos` on macOS, `glfw` elsewhere) whatever the target, and fails with a hint when that binary is not built. It writes one content image per cook target; see [Cooking.md](Cooking.md#content-images-and-packaging). Its log goes to `logs/cook.log` under the external log directory.
+* **Package** replaces the archive's assets with the target's content image and re-signs packages whose signature the rewrite breaks. A package without cooked content is an error.
+* Every binary embeds the git commit and branch it was built from ([cmake/GitVersion.cmake](../cmake/GitVersion.cmake)) and logs them at launch, which is how to tell whether a binary, e.g. the host cooker, is stale.
 
-| variable     | example                                                      | valid for        | auto-installable                |
-| ------------ | ------------------------------------------------------------ | ---------------- | ------------------------------- |
-| VULKAN_SDK   | /Users/username/VulkanSDK/1.4.363.0                          | all              | yes (requires admin on windows) |
-| CMAKE_PATH   | /opt/homebrew/bin/cmake                                      | all              | yes                             |
-| VCPKG_PATH   | D:/SDKs/vcpkg                                                | all windows      | yes                             |
-| LLVM         | /opt/homebrew/opt/llvm                                       | non-windows glfw | yes                             |
-| ANDROID_HOME | /Users/username/AndroidSDK                                   | android          | no (Android Studio)             |
-| JAVA_HOME    | /Applications/Android Studio.app/Contents/jbr/Contents/Home  | android          | no (Android Studio)             |
-| VS_PATH      | C:/Program Files/Microsoft Visual Studio/[version]/[edition] | all windows      | no (vs-installer)               |
-| ISPC         | /Users/username/ispc/bin/ispc                                | glfw, macos      | yes                             |
+The host and the target framework are independent, within toolchain limits:
 
-The Slang shader compiler (slangc) is always the version pinned in [prerequisites.json](../prerequisites.json): the build installs it into `build_cache` and replaces any other version it finds there. Every shader depends on the slangc binary, so a version change recompiles them all.
+| target \ host | macOS | Windows | Linux |
+| ------------- | ----- | ------- | ----- |
+| `glfw`        | ✔     | ✔       | ✔     |
+| `macos`       | ✔     | ✗       | ✗     |
+| `ios`         | ✔     | ✗       | ✗     |
+| `android`     | ✔     | ✔       | ✔     |
 
-ISPC compiles the block encoder kernels of the cook. Only the frameworks whose binary can cook (glfw, macos) build them; android and ios build the portable encoder instead, which they never run outside the `texture_compression` test.
+`macos` and `ios` need Xcode. `glfw` has no cross-OS build, so its archives carry the host system in their name (`windows-glfw-Release.zip`); other archives are named by target (`android-Release.apk`, `macos-Release.zip`).
 
-`SPARKLE_BUILD_JOBS` optionally overrides glfw build parallelism (defaults: 64 on windows, 16 elsewhere). CI sets it to 8 because hosted runners only have ~4 vcpus and oversubscribing them can starve the runner agent.
+## IDE
 
-### Quick Start Examples
+### Visual Studio Code
 
-``` shell
-# make a GLFW Windows release build with clang-cl toolchain
-$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.363.0'
-$env:VCPKG_PATH='D:/SDKs/vcpkg'
-python3 build.py --framework glfw --config Release
-```
+The first build copies [ide/.vscode/settings.json](../ide/.vscode/settings.json) and [launch.json](../ide/.vscode/launch.json) to `.vscode/` unless they exist.
 
-``` shell
-# make a GLFW MacOS debug build with llvm toolchain
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
-python3 build.py --framework glfw
-```
+* **Intellisense**: run `python3 build.py --framework=<framework> --clangd`, install the clangd extension, adjust the tool paths in `.vscode/settings.json` and keep the `--compile-commands-dir` line of your framework.
+* **Debugging**: install the CodeLLDB extension and adjust the paths in `.vscode/launch.json` (see the [launch.json reference](https://code.visualstudio.com/docs/cpp/launch-json-reference)).
 
-``` shell
-# generate GLFW Visual Studio solution with msvc toolchain, without building
-$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.363.0'
-$env:VCPKG_PATH='D:/SDKs/vcpkg'
-python3 build.py --framework glfw --generate_only
-```
-
-``` shell
-# make an Android APK debug apk and run on a connected device
-$env:VULKAN_SDK='D:/SDKs/VulkanSDK/1.4.363.0'
-$env:ANDROID_HOME='D:/SDKs/AndroidSDK'
-python3 run.py --framework android
-```
-
-``` shell
-# generate a MacOS Xcode project and build in debug mode
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
-python3 build.py --framework macos
-```
-
-``` shell
-# generate an iOS Xcode project without building
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
-export APPLE_DEVELOPER_TEAM_ID=ABC123DEF4
-python3 build.py --framework ios --apple_auto_sign --generate_only
-```
-
-``` shell
-# make an iOS release build and run on a connected device in ray tracing mode
-export VULKAN_SDK=/Users/username/VulkanSDK/1.4.363.0
-export APPLE_DEVELOPER_TEAM_ID=ABC123DEF4
-python3 run.py --framework ios --apple_auto_sign --pipeline gpu
-```
-
-### Build via Script
-
-**All platforms:**
-
-``` shell
-python3 build.py --framework=<framework> [build-options]   # pipeline: build, cook, package
-python3 run.py --framework=<framework> [build-options] [app-options]   # build for a run, then launch
-```
-
-`build.py` is the pipeline: it produces artifacts and never launches the app. `run.py` is the launcher: it runs the stages a launch consumes (build, cook, and for device frameworks package, whose product the run installs), then launches the app, forwarding unrecognized options to it. `run.py --skip_build` launches the existing binary without running any stage.
-
-**Supported frameworks:**
-
-* `glfw` - Cross-platform GLFW build (Windows/MacOS/Linux)
-* `android` - Android APK with automatic environment setup
-* `macos` - Native MacOS application
-* `ios` - iOS application
-
-**Build support matrix:**
-
-The host machine (where build.py runs) and the target framework (what is built, cooked and packaged) are independent concepts — a target may happen to match the host's platform. Ideally every host could produce every target; toolchain limits constrain it to:
-
-| target \ host    | macOS | Windows | Linux |
-| ---------------- | ----- | ------- | ----- |
-| `glfw`           | ✔     | ✔       | ✔     |
-| `macos`          | ✔     | ✗       | ✗     |
-| `ios`            | ✔     | ✗       | ✗     |
-| `android`        | ✔     | ✔       | ✔     |
-
-* `macos`/`ios` need Xcode, so they build only on a macOS host. `glfw` always targets the host's own desktop OS (there is no cross-OS desktop build), so a Windows glfw package can only come from a Windows host.
-* The cook stage runs on any host through the host's own framework binary (`macos` on macOS, `glfw` on Windows and Linux) regardless of the target — the artifact pool is target-independent, and each target ships its own content image projected from it.
-* Product archives are named by target (`android-Release.apk`, `macos-Release.zip`); only glfw carries the host system in its name (`windows-glfw-Release.zip`, `linux-glfw-Release.zip`), because its target is the host's own desktop OS.
-
-**Pipeline stages:**
-
-The pipeline is three stages, selected with `--stage` (repeatable) and run in canonical order build → cook → package. The default is every stage: a plain `build.py` produces a complete distributable — a built app, cooked content (see [Cooking.md](Cooking.md)), and a product archive whose packed content is the cooked image. Explicit selections (including `--stage all`) never degrade; a missing input fails fast instead. The development loop is `run.py`, which selects only the stages a launch consumes: build + cook (cooked content is always wanted, and a warm cook costs only artifact lookups; desktop runs read the cook output from the build tree directly), plus package for the device frameworks (`android`, `ios`) because a device only receives cooked content through its installed package.
-
-* Each stage is idempotent through its own cache (incremental compile, hit-or-cook artifacts, archive from current inputs) and fails fast when an input from an earlier stage is missing — it never runs an upstream stage implicitly.
-* The artifact pool is shared across targets, and the cooker lives in the sparkle binary — so cooking for a cross-compiled framework (`android`, `ios`) executes the host framework's binary (`macos` on a Mac, `glfw` elsewhere) and fails with a hint if that binary is not built yet.
-* A cook run produces content for a set of cook targets (`--cook_targets`, `'+'`-separated identities like `android` or `windows-glfw`; default: the built framework's own target) and never cooks for targets outside that set. It assembles one self-contained content image per target at `build_system/<cooker>/output/cooked_image/<target>`, projected from the pool by the target's plan (`cooked/cook_products.json`): the image carries exactly the plan's artifacts, every other packed asset passes through as itself, and a source fully replaced by verified artifacts is left out. Each image self-declares its target (`cooked/content_target.json`); the package stage picks up the built framework's own image automatically (`--cooked <dir>` overrides).
-* The cook stage logs to its own file (`logs/cook.log` under the app's external log directory) via the app's `--log_path` argument, so a later run never overwrites the cook log. `--log_path` is honored by desktop builds only.
-* Every binary embeds the git commit (`git describe --dirty`) and branch of the tree it was built from, stamped at build time (`cmake/GitVersion.cmake`), and logs them at launch. There is no version check: the log line is how you tell whether a binary — e.g. the host cooker — is stale relative to your tree.
-* `package` replaces the archive's asset tree with the product's content image (compiled shaders stay build-owned), strips the app's internal runtime state, and asserts the image's self-declared target matches the product. A package without a cooked image is an error: packages always carry cooked content, and the per-job runtime cook path serves runtime-loaded assets, never packaging.
-* Rewriting a signature-sealed package breaks its signature, so the package stage re-signs afterwards: apk with zipalign + apksigner and the debug key gradle signs with, ipa with the identity that signed the build. CI release nodes do the same for their published packages.
-* `run.py` on a device framework installs the product package its own package stage produced; with `--skip_build` it installs the raw build output, which cooks on the fly. The android run reports the device's cook activity after pulling its log.
-
-**Common build options:**
-
-* `--config=Release` - Release build (default: Debug).
-* `--stage=<build|cook|package|all>` - Select pipeline stage(s), see above (build.py only). The package stage's product archive lands in `build_system/<framework>/product`.
-* `--cook_targets=<a+b+...>` - Cook targets the cook stage produces content images for (default: the built framework's own target). Known targets: `android`, `ios`, `macos`, `macos-glfw`, `windows-glfw`, `linux-glfw`.
-* `--generate_only` - Generate IDE project files without building.
-* `--clangd` - Generate compile_commands.json for clangd intellisense support.
-* `--profile` - Enable the Tracy profiler client. Connect to it with the [Tracy](https://github.com/wolfpld/tracy/releases) profiler GUI of the same release as the `thirdparty/tracy` submodule: the network protocol changes between releases, and a mismatched GUI refuses the connection.
-* `--strip_test` - Disable TestCase support (enabled by default). See [Test.md](Test.md) for details.
-* `--asan` - Enable AddressSanitizer.
-* `--clean` - Clean output directory before configure, which resolves some build errors.
-* `--apple_auto_sign` - Enable automatic code signing for Apple platforms. Requires APPLE_DEVELOPER_TEAM_ID to be set. See [this page](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)
-* `--ios_platform=<device|simulator>` - iOS target platform (ios framework only, default device). `simulator` builds an unsigned package for the host's iOS Simulator, which the test suite runs (see [Test.md](Test.md)); switching platforms resets the iOS project and output trees.
-* `--cmake-args='...'` - Pass extra arguments to CMake, e.g. `--cmake-args='-DENABLE_LTO=ON'` to enable link time optimization for a distribution build (off by default: it adds minutes of Release link time).
-* `--help` - Show all usage help.
-* `--skip_build` - (run.py only) Launch the existing binary without running any pipeline stage. For mobile builds, the run installs on a connected device.
-
-### Troubleshooting
-
-* **Android**: Java and NDK are auto-detected from an Android Studio installation; make sure Android Studio is installed.
-* **Shader errors**: Check both the SPIRV compilation and the Metal conversion logs.
-
-## Work with IDE
-
-Sometimes you want better debugging or intellisense support from IDEs. Follow the instructions below to generate IDE project files.
-
-### Visual Studio Code (All platforms)
-
-This project is configured to work with VSCode perfectly (I use it heavily when developing this project). Follow the steps to set up.
-
-#### Intellisense
-
-1. **Install toolchain**: For MacOS and iOS, install Xcode. For Windows, install clang-cl via Visual Studio Installer. For Android, install Android Studio.
-2. **Generate project configuration**:
-
-   ``` shell
-   # a compile_commands.json file will be generated under the project build directory.
-   python3 build.py --framework=<platform> --clangd
-   ```
-
-3. **Install VSCode extensions**: C/C++, clangd.
-4. **Copy IDE config**: Copy `ide/.vscode/settings.json` to `.vscode/settings.json` in project root.
-5. **Configure paths**: Modify paths in `.vscode/settings.json` to match your environment.
-6. **Choose compile commands**: Select one of the "--compile-commands-dir" options and comment out others.
-7. **Reload VSCode**: Reload window for full intellisense support.
-
-#### Debugging
-
-1. **Install toolchain**: For MacOS and iOS, install Xcode. For Windows, install clang-cl via Visual Studio Installer. For Android, Android Studio is required.
-2. **Install VSCode extensions**: CodeLLDB.
-3. **Copy IDE config**: Copy `ide/.vscode/launch.json` to `.vscode/launch.json` in project root.
-4. **Configure paths**: Modify paths in `.vscode/launch.json` to match your environment.
-5. **Start debugging session**: Follow [vscode documentation](<https://code.visualstudio.com/docs/cpp/launch-json-reference>)
-
-### Visual Studio / Rider / Clion (Only for glfw framework on Windows)
+### Visual Studio, Rider, CLion (glfw on Windows)
 
 ``` shell
 python3 build.py --framework=glfw --generate_only
-start build_system/glfw/project/sparkle.sln
-# select sparkle as start up project
+start build_system/glfw/project/sparkle.sln   # start-up project: sparkle
 ```
 
-### Xcode (Only for macos/ios frameworks on MacOS)
+### Xcode (macos and ios)
 
 ``` shell
-python3 build.py --framework=macos --generate_only     # or --framework=ios
-open build_system/macos/project/sparkle.xcodeproj      # or build_system/ios/project/sparkle.xcodeproj
-# select sparkle as start up target
+python3 build.py --framework=macos --generate_only    # or ios
+open build_system/macos/project/sparkle.xcodeproj     # start-up target: sparkle
 ```
 
-### Android Studio (Only for android framework)
+### Android Studio
 
-The project builds with Android Gradle Plugin 9.4, which needs a matching Android Studio (Quail 4 or newer) and JDK 17 or newer to sync.
+Run `python3 build.py --framework=android --generate_only`, open `build_system/android` and pick the build variant in the build configuration panel.
 
-The native build runs the Android SDK's `cmake;<version>` package at the CMake version pinned in [prerequisites.json](../prerequisites.json); `build.py` installs it through the SDK cmdline-tools' `sdkmanager` when it is missing and passes the build the pinned ninja, since the package's bundled ninja 1.10 cannot build C++20 module sources.
+## Build System Internals
 
-``` shell
-python3 build.py --framework=android --generate_only
-# open project folder `build_system/android` in Android Studio
-# select debug or release build in build configuration panel
-```
+* [build.py](../build.py) orchestrates setup and the stages; [build_system/builder_factory.py](../build_system/builder_factory.py) creates the framework's `FrameworkBuilder` ([builder_interface.py](../build_system/builder_interface.py)), implemented in `build_system/<framework>/build.py`.
+* [build_system/prerequisites.py](../build_system/prerequisites.py) finds and installs CMake, Ninja, the Vulkan SDK and the pinned tools.
+* Shaders compile from Slang to SPIR-V for Vulkan and directly to MSL for Metal, except `ray_trace/` shaders, which go through SPIR-V and spirv-cross ([shaders/CMakeLists.txt](../shaders/CMakeLists.txt)). A shader error on Metal can therefore come from either step's log.

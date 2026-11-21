@@ -55,16 +55,14 @@ The `usd_round_trip` test case builds a procedural test scene, renders it, expor
 python3 tests/usd/usd_roundtrip_test.py --framework glfw --headless
 ```
 
-The procedural scene (`BuildTestScene` in [tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)) covers every exportable feature: analytic spheres, mesh primitives, glTF-imported models with full PBR texture sets, dielectric glass, a directional light and a sky light. With an explicit `--scene`, the test round-trips that scene instead (no ground-truth gate). The round trip is platform-independent (export and import both run on the CPU), so CI evaluates it once, on the macos/macos/Release test job (see [tests/coverage.csv](../tests/coverage.csv)). See [Test.md](Test.md) for general test-case mechanics.
+The procedural scene (`BuildTestScene` in [tests/usd/UsdRoundTripTest.cpp](../tests/usd/UsdRoundTripTest.cpp)) covers every exportable feature: analytic spheres, mesh primitives, glTF-imported models with full PBR texture sets, dielectric glass, a directional light and a sky light. With an explicit `--scene`, the test round-trips that scene instead (no ground-truth gate). The round trip is platform-independent (export and import both run on the CPU), so CI runs it on `macos-macos-release` only (see [Test.md](Test.md#registry-and-coverage)).
 
 ## Packaged TestScene
 
-The app's default scene (empty `--scene`) is `resources/packed/TestScene.usda`: the export of the round-trip test's procedural scene, with texture references re-pointed at the packaged originals (the exporter writes verbatim texture copies, so this is lossless). It must stay at the resource root: asset paths resolve relative to the USD file and tinyusdz rejects `..` in them, so the shared `models/...` and `skymap/...` files are only reachable from there.
+The app's default scene and the [ground truth](Test.md#ground-truth) scene, `resources/packed/TestScene.usda`, is the export of the round-trip test's procedural scene, with texture references re-pointed at the packaged originals (the exporter writes verbatim texture copies, so this is lossless). It must stay at the resource root: asset paths resolve relative to the USD file and tinyusdz rejects `..` in them, so the shared `models/...` and `skymap/...` files are only reachable from there.
 
 To regenerate it after changing `BuildTestScene`, the exporter or the loader:
 
 1. Run the round-trip test (above). It validates the procedural scene against the ground truth and writes the export to `usd_export/scene.usda` in internal storage (`build/generated/usd_export/` under the glfw output directory, `sparkle.app/Contents/SharedSupport/usd_export/` for macos).
 2. Copy `usd_export/scene.usda` over `resources/packed/TestScene.usda` and replace each `textures/...` asset path with the corresponding packaged file (the sky map under `skymap/`, the glTF textures under `models/`).
 3. Run `dev/run_tests.py --case forward_render_static` without `--scene` to confirm the packaged scene still matches the ground truth.
-
-Since `SpherePrimitive` bakes to a triangle mesh on export, ray-traced pipelines render the packaged scene's spheres as tessellated meshes instead of analytic spheres.

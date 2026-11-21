@@ -12,14 +12,14 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 ### Now Implemented
 
-* CPU path tracer
-* GPU path tracer with bindless
-* rasterization-based renderers (forward and deferred)
+* four rendering pipelines, selected with `--pipeline`: `cpu` and `gpu` path tracers (the gpu one on ray-tracing hardware, with bindless resources and NRD or MetalFX denoising), and `forward` and `deferred` rasterizers
+* a render graph that derives barriers, render pass merging and tile-memory use from declared pass accesses
 * RHI layer supporting Vulkan and Metal
-* shader cross compilation
-* platform-specific wrappers for Windows, Android, MacOS and iOS
-* fully-scripted building system based on CMake
-* data loaders for images(stb), meshes(glTF) and scenes(USD)
+* shader cross compilation from Slang
+* platform-specific wrappers for Windows, Linux, Android, MacOS and iOS
+* fully-scripted build, cook and package pipeline based on CMake
+* build-time asset cooking with block-compressed textures and HDR cube maps
+* data loaders for images(stb), meshes(glTF) and scenes(USD), and USD export
 * native file/asset management
 * stacktrace support (based on cpptrace)
 * logging system (based on spdlog)
@@ -32,15 +32,6 @@ It is an experimental demo which aims to be simple and modern, rather than being
 * editor
 * compatibility for older hardware, systems or compilers
 * gameplay (scripting, audio, network, physics, etc..)
-
-### Rendering Pipeline Support
-
-| pipeline | feature                                     |
-| -------- | ------------------------------------------- |
-| cpu      | Path tracer on CPU                          |
-| gpu      | Path tracer on raytracing hardware          |
-| forward  | Forward pipeline on rasterization hardware  |
-| deferred | Deferred pipeline on rasterization hardware |
 
 ### Framework Support
 
@@ -71,28 +62,8 @@ The Vulkan backend requires a Vulkan 1.3 device.
 
 ## Try it Now
 
-You can try the latest builds on [Github releases](https://github.com/tqjxlm/Sparkle/releases).
+You can try the latest builds on [Github releases](https://github.com/tqjxlm/Sparkle/releases). See [docs/Run.md](docs/Run.md) for how to use the app.
 
-For detailed usage of the app, please refer to [docs/Run.md](docs/Run.md).
+## Documentation
 
-## Development Guide
-
-* [docs/Build.md](docs/Build.md) — dependencies, build commands, IDE setup
-* [docs/Architecture.md](docs/Architecture.md) — key entry points and repository structure
-* [docs/Run.md](docs/Run.md) — config system, storage paths, logs
-* [docs/Test.md](docs/Test.md) — test cases and visual tests
-* [docs/CI.md](docs/CI.md) — CI gates and local validation
-* [docs/Cooking.md](docs/Cooking.md) — build-time asset cooking
-* [docs/USD.md](docs/USD.md) — USD import and export
-* [docs/RenderGraph.md](docs/RenderGraph.md) — render graph: declared pass accesses, derived barriers and load/store, dump
-* [docs/PathTracer.md](docs/PathTracer.md) — path tracers: BSDF, light sampling, next event estimation and MIS
-* [docs/Denoiser.md](docs/Denoiser.md) — path-tracing denoisers: NRD and MetalFX integration
-* [docs/RenderingValidation.md](docs/RenderingValidation.md) — rendering validation and debugging methodology
-
-## Todo List & Known Issues
-
-For todo list and known issues, please refer to [docs/TODO.md](docs/TODO.md).
-
-## Contributing
-
-For how to contribute to the project, please refer to [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+[docs/README.md](docs/README.md) indexes the docs: building, running, testing, architecture and subsystem design. Contributions follow [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md); planned work and known issues are in [docs/TODO.md](docs/TODO.md).

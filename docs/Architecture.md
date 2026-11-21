@@ -1,75 +1,62 @@
 # Architecture
 
-## Key Entry Points
+Sparkle builds one app per platform framework. A thin framework layer hosts a shared engine library: the main thread runs the scene, a render thread renders it through one of four pipelines, and an RHI abstracts Vulkan and Metal.
 
-| Component         | Location                                                                                            | Description                                    |
-| ----------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `AppFramework`    | [libraries/source/application/](../libraries/source/application/)                                   | Main application base class                    |
-| `RenderFramework` | [libraries/source/application/](../libraries/source/application/)                                   | Rendering pipeline lifecycle                   |
-| `NativeView`      | [frameworks/source/](../frameworks/source/)                                                         | Platform windowing/input interface             |
-| `RHI`             | [libraries/include/rhi/](../libraries/include/rhi/)                                                 | Graphics API abstraction singleton             |
-| `TaskManager`     | [libraries/include/core/task/](../libraries/include/core/task/)                                     | Async task scheduling                          |
-| `Scene`           | [libraries/source/scene/](../libraries/source/scene/)                                               | Scene graph root; owns all components          |
-| `Renderer`        | [libraries/include/renderer/](../libraries/include/renderer/)                                       | Abstract base for all pipeline renderers       |
-| `RHIContext`      | [libraries/include/rhi/RHI.h](../libraries/include/rhi/RHI.h)                                       | Per-device render context (Vulkan or Metal)    |
-| `ConfigManager`   | [libraries/include/core/ConfigManager.h](../libraries/include/core/ConfigManager.h)                 | Config system registry (cvar registration)     |
-| `MaterialManager` | [libraries/include/scene/material/](../libraries/include/scene/material/)                           | Material lifecycle and lookup                  |
-| `SessionManager`  | [libraries/include/application/SessionManager.h](../libraries/include/application/SessionManager.h) | Save/load session state                        |
-| `InputManager`    | [libraries/include/application/InputManager.h](../libraries/include/application/InputManager.h)     | Input event pipeline, see [Input.md](Input.md) |
+## Modules
 
-## Scene And Render Thread
+A frame flows top to bottom: the framework drives the application's main loop, which updates the scene on the main thread and hands render tasks to the render thread, where the renderer records a render graph and the RHI submits it.
 
-The main thread works on the scene graph (`Scene`, `SceneNode`, components) and the render thread on the render proxies behind it (`SceneRenderProxy`, with one proxy per renderable component and per material). A component reaches its proxy only through render tasks (`TaskManager::RunInRenderThread`), which capture raw pointers to the component and to the scene render proxy.
+| module        | role                                                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `frameworks`  | per-platform entry point, window and native input (glfw, macos, ios, android), behind `NativeView`                     |
+| `application` | `AppFramework` main loop, `RenderFramework` render thread, `InputManager`, `SessionManager`, `TestCase`, cook pipeline |
+| `scene`       | scene graph, components and materials; `SceneManager` loads scenes                                                     |
+| `renderer`    | one `Renderer` per pipeline over render proxies that mirror the scene; render graph, passes, denoisers                 |
+| `rhi`         | `RHIContext` over Vulkan or Metal                                                                                      |
+| `io`          | image, glTF and USD loading, USD export, texture compression                                                           |
+| `core`        | tasks, config, files and paths, logging, events, the cook artifact store                                               |
 
-* **Frame batches**: render tasks queued during a main thread frame reach the render thread as one batch when the frame ends (`RenderFramework::PushRenderTasks`), in the order they were queued. The render thread runs a batch, then renders its frame; at most one batch waits (`MaxBufferedTaskFrames`), so the main thread runs at most two frames ahead. In a process without a render thread of its own (`render_thread false`, a cook process, shutdown) a render task runs where it is queued.
-* **Drain before destroy**: `TaskManager::FlushRenderThread` hands the render thread the tasks queued so far as a batch of their own and blocks the main thread until they ran. Whatever destroys an object that render tasks capture calls it first, so no caller has to: `Scene::Cleanup` and `SceneNode::RemoveChild` before they destroy components, and `Scene::~Scene` once more before its scene render proxy dies, because the removal tasks of the destroyed components capture it. A pipeline switch recreates every render proxy by walking the scene graph on the render thread, so `AppFramework::MainLoop` queues the recreation and waits for it the same way. Stopping the render thread drains it as well: `RenderFramework::StopRenderThread` hands over the tasks queued so far together with the stop, and the render thread runs every batch it was handed, without rendering a frame for them, before it destroys the renderer; the scene render proxy and the RHI outlive it, so a material removed in the last frame still releases its render proxy. Only the main thread waits this way: the render thread waits on the main thread for nothing but its next batch.
-* **Windowed Metal drawables**: the main thread acquires a drawable at the start of each of its frames (`AppleViewController`), which also bounds the frames in flight, and the render thread takes them in order (`MetalView`). A frame that finds none is skipped rather than waited for, since the render thread never waits on the main thread for anything but its next batch: a main thread frame that calls `FlushRenderThread` hands over two batches but acquires one drawable, so one of their frames usually finds none. The windowed development case `windowed_flush` flushes twice in each of several frames and checks that the frames go on presenting. It has no registry entry because suite runs are headless, and the Apple entry point picks the windowless path from argv before a test case can ask for a window; run it without `--headless`, e.g. `python3 run.py --framework macos --test_case windowed_flush`.
-* **Detached trees are inert**: a component has a render proxy and its registrations in the scene only while it is attached. Loaders build their trees detached, on their own thread, without reading the scene or touching the render thread, so dropping a tree that never attached leaves both alone. A camera becomes the main camera when it attaches.
-* **Load generations**: `Scene::Cleanup` retires the scene's generation, which a `SceneAsyncTask` reports through `IsActive` even after the `Scene` is destroyed. `SceneManager::LoadScene` attaches what it loaded, and the defaults the file lacks, only while the generation it started in is active; a load that was superseded reports failure and its tree is dropped.
+Subsystems have their own docs, listed in the [index](README.md#subsystems).
 
-## Build System Architecture
-
-The build system uses a factory pattern with abstract `FrameworkBuilder` interface:
-
-* [build.py](../build.py) - Main entry point, orchestrates setup and build
-* [build_system/builder_interface.py](../build_system/builder_interface.py) - Abstract `FrameworkBuilder` base class
-* [build_system/builder_factory.py](../build_system/builder_factory.py) - Creates platform-specific builders
-* [build_system/prerequisites.py](../build_system/prerequisites.py) - Auto-installs CMake, Ninja, Vulkan SDK
-* Platform builders: `glfw/build.py`, `macos/build.py`, `ios/build.py`, `android/build.py`
-
-**Build output:** `build_system/<platform>/output/` (artifacts), `project/` (IDE), `product/` (archives)
-
-## Shader Architecture
-
-**Pipeline:** Slang (`.slang`) → SPIR-V for Vulkan; Metal is emitted directly from Slang, except `ray_trace/` shaders which go SPIR-V → MSL via spirv-cross (see [shaders/CMakeLists.txt](../shaders/CMakeLists.txt)).
-
-## Repository Structure
+## Repository Map
 
 ```text
-sparkle/
-├── build.py              # Main build entry point
-├── build_system/         # Per-platform build scripts and output artifacts
-│   └── <platform>/       # glfw, macos, ios, android — build output here
-├── libraries/            # Core engine libraries
-│   ├── include/          # Public headers (consumed by all targets)
-│   │   ├── application/  # App lifecycle (AppFramework, RenderFramework, NativeView…)
-│   │   ├── core/         # Utilities (TaskManager, ConfigManager, FileManager…)
-│   │   ├── rhi/          # Graphics API abstraction (RHIContext, RHI…)
-│   │   ├── renderer/     # Render passes and scene render proxies
-│   │   ├── scene/        # Scene graph (components, materials)
-│   │   └── io/           # Data loaders (glTF, USD, images)
-│   └── source/           # Implementations
-├── frameworks/source/    # Platform wrappers (glfw, macos, ios, android)
-├── shaders/              # Slang shader source
-│   ├── include/          # Shared shader headers
-│   ├── nrd/              # NRD shader cook (see Denoiser.md)
-│   ├── ray_trace/        # Path tracer compute shaders
-│   ├── screen/           # Post-processing shaders
-│   ├── standard/         # Vertex/pixel shaders
-│   └── utilities/        # Utility compute shaders
-├── resources/            # Assets: models, textures, default config
-├── dev/                  # Developer entry points and validation orchestrator
-├── tests/                # Focused test cases, evaluators, and test helpers
-├── ide/                  # IDE config templates (.vscode, launch configs)
-└── thirdparty/           # Third-party dependencies (git submodules)
+build.py, run.py          build pipeline and launcher entry points (see Build.md, Run.md)
+build_system/<framework>/ per-framework builders; build output in output/, IDE projects in project/, archives in product/
+libraries/include/        engine headers, one directory per layer above
+libraries/source/         engine sources, plus platform/ for OS-specific code
+frameworks/source/        framework layer (apple/ is shared by macos and ios)
+shaders/                  Slang sources: standard/ raster, ray_trace/ path tracer, screen/ post and cook,
+                          utilities/ compute helpers, include/ shared headers, nrd/ the NRD shader cook
+resources/                packaged assets (packed/) and default config
+tests/                    test cases, evaluators, registry.json and coverage.csv (see Test.md)
+dev/                      validation, CI generator and developer tools
+ide/                      IDE config templates
+thirdparty/               dependencies as git submodules
 ```
+
+## Key Entry Points
+
+| Component         | Location                                                                                            | Role                                        |
+| ----------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `AppFramework`    | [libraries/source/application/](../libraries/source/application/)                                   | application base class and main loop        |
+| `RenderFramework` | [libraries/source/application/](../libraries/source/application/)                                   | render thread and renderer lifecycle        |
+| `NativeView`      | [frameworks/source/](../frameworks/source/)                                                         | platform window and input interface         |
+| `RHIContext`      | [libraries/include/rhi/RHI.h](../libraries/include/rhi/RHI.h)                                       | per-device render context (Vulkan or Metal) |
+| `TaskManager`     | [libraries/include/core/task/](../libraries/include/core/task/)                                     | thread pool and cross-thread tasks          |
+| `ConfigManager`   | [libraries/include/core/ConfigManager.h](../libraries/include/core/ConfigManager.h)                 | config value registry (see Run.md)          |
+| `Scene`           | [libraries/include/scene/Scene.h](../libraries/include/scene/Scene.h)                               | scene graph root; owns all components       |
+| `MaterialManager` | [libraries/include/scene/material/](../libraries/include/scene/material/)                           | material lifecycle and lookup               |
+| `Renderer`        | [libraries/include/renderer/renderer/](../libraries/include/renderer/renderer/)                     | base of the pipeline renderers              |
+| `SessionManager`  | [libraries/include/application/SessionManager.h](../libraries/include/application/SessionManager.h) | save and load session state                 |
+| `InputManager`    | [libraries/include/application/InputManager.h](../libraries/include/application/InputManager.h)     | input pipeline (see Input.md)               |
+
+## Threading
+
+The main thread owns the scene graph (`Scene`, `SceneNode`, components) and the render thread owns the render proxies behind it (`SceneRenderProxy`, with one proxy per renderable component and per material). A component reaches its proxy only through render tasks (`TaskManager::RunInRenderThread`), which capture raw pointers to the component and to the scene render proxy. These rules keep those pointers valid:
+
+* **Frame batches**: render tasks queued during a main thread frame reach the render thread as one batch when the frame ends (`RenderFramework::PushRenderTasks`), in queue order. The render thread runs a batch, then renders its frame; at most one batch waits (`MaxBufferedTaskFrames`), so the main thread runs at most two frames ahead. Without a render thread of its own (`render_thread false`, a cook process, shutdown) a render task runs where it is queued.
+* **Drain before destroy**: `TaskManager::FlushRenderThread` hands the render thread the tasks queued so far as a batch of their own and blocks until they ran. Whatever destroys an object that render tasks capture calls it first: `Scene::Cleanup` and `SceneNode::RemoveChild` before destroying components, and `Scene::~Scene` again before its scene render proxy dies, because the removal tasks of destroyed components capture it. A pipeline switch recreates every render proxy on the render thread, so `AppFramework::MainLoop` queues the recreation and waits the same way. `RenderFramework::StopRenderThread` hands over the remaining tasks with the stop; the render thread runs every batch without rendering, then destroys the renderer, while the scene render proxy and the RHI outlive it. Only the main thread waits: the render thread waits on the main thread for nothing but its next batch.
+* **Windowed Metal drawables**: the main thread acquires a drawable at the start of each frame (`AppleViewController`), which also bounds the frames in flight, and the render thread takes them in order (`MetalView`). A render frame that finds no drawable is skipped rather than waited for, since a main thread frame that flushes hands over two batches but acquires one drawable.
+* **Detached trees are inert**: a component has a render proxy and scene registrations only while attached. Loaders build their trees detached on their own thread, without touching the scene or the render thread, so dropping a tree that never attached has no effect. A camera becomes the main camera when it attaches.
+* **Load generations**: `Scene::Cleanup` retires the scene's generation, which a `SceneAsyncTask` reports through `IsActive` even after the `Scene` is destroyed. `SceneManager::LoadScene` attaches what it loaded only while the generation it started in is active; a superseded load reports failure and drops its tree.
