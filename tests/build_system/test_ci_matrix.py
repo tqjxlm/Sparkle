@@ -21,6 +21,13 @@ def release_products():
             if "Release" in product.get("build_types", ("Release",))]
 
 
+def suite_jobs(product):
+    """(id, text) of the product's generated test jobs."""
+    runner = ci_matrix.suite_runner(product)
+    shards = ci_matrix.test_jobs(product, runner) if runner else []
+    return [(job_id, JOBS[job_id]) for job_id, _ in shards]
+
+
 class CiPipelineTest(unittest.TestCase):
 
     def test_workflow_matches_its_generator(self):
@@ -42,6 +49,13 @@ class CiPipelineTest(unittest.TestCase):
         self.assertEqual(len([job_id for job_id in JOBS
                               if job_id.startswith("release-")]),
                          len(release_products()))
+
+    def test_only_uncached_configs_skip_the_compiler_cache(self):
+        for product in ci_matrix.PRODUCTS:
+            for config in product.get("build_types", ("Debug", "Release")):
+                text = JOBS[ci_matrix.slug("build", product, config)]
+                self.assertEqual("compiler-cache: false" in text,
+                                 config in product.get("uncached", ()))
 
     def test_cook_needs_the_macos_release_build(self):
         self.assertIn("needs: build-macos-macos-release", JOBS["cook"])
@@ -82,18 +96,32 @@ class CiPipelineTest(unittest.TestCase):
             if not runner:
                 self.assertNotIn(ci_matrix.slug("test", product), JOBS)
                 continue
-            text = JOBS[ci_matrix.slug("test", product)]
-            self.assertIn(f"needs: {ci_matrix.slug('release', product)}", text)
-            self.assertIn(f"timeout-minutes: {runner['suite_timeout']}", text)
-            if runner["suite_args"]:
-                self.assertIn(runner["suite_args"], text)
-            self.assertIn(runner["screenshots"], text)
+            for _, text in suite_jobs(product):
+                self.assertIn(f"needs: {ci_matrix.slug('release', product)}", text)
+                self.assertIn(f"timeout-minutes: {runner['suite_timeout']}", text)
+                if runner["suite_args"]:
+                    self.assertIn(runner["suite_args"], text)
+                self.assertIn(runner["screenshots"], text)
             tested.add(ci_matrix.tested_triplet(product))
         self.assertEqual(tested, set(ci_matrix.covered_triplets()))
 
+    # each shard runs its own share of the suite and uploads its screenshots apart
+    def test_sharded_suites_split_into_distinct_jobs(self):
+        sharded = [product for product in release_products()
+                   if (ci_matrix.suite_runner(product) or {}).get("shards", 1) > 1]
+        self.assertTrue(sharded)
+        for product in sharded:
+            count = ci_matrix.suite_runner(product)["shards"]
+            texts = [text for _, text in suite_jobs(product)]
+            self.assertEqual(len(texts), count)
+            for index, text in enumerate(texts, 1):
+                self.assertIn(f"--shard {index}/{count}", text)
+                self.assertIn(f"name: test-screenshots-{product['framework']}-{product['os']}-{index}\n",
+                              text)
+
     def test_test_jobs_rendering_graph_pages_fetch_elkjs(self):
         fetching = {ci_matrix.tested_triplet(product) for product in release_products()
-                    if "thirdparty/elkjs" in JOBS.get(ci_matrix.slug("test", product), "")}
+                    if any("thirdparty/elkjs" in text for _, text in suite_jobs(product))}
         rendering = {triplet for triplet in ci_matrix.covered_triplets() if ci_matrix.renders_graph_pages(triplet)}
 
         self.assertTrue(rendering)
