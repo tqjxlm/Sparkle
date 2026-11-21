@@ -102,8 +102,8 @@ class RunTestsCommandTest(unittest.TestCase):
     def test_evaluator_arguments_expand_the_case_name(self):
         commands = dict(suite_steps("macos-glfw-release"))
 
-        command = commands["forward_render_static_halfres (compare)"]
-        self.assertEqual(command[command.index("--case") + 1], "forward_render_static_halfres")
+        command = commands["forward_render_scale_change (compare)"]
+        self.assertEqual(command[command.index("--case") + 1], "forward_render_scale_change")
 
     def test_suite_checks_scene_load_failure_propagation(self):
         self.assertIn("scene_load_failure", dict(suite_steps("macos-macos-release")))
@@ -112,8 +112,8 @@ class RunTestsCommandTest(unittest.TestCase):
         scene = os.path.join("resources", "custom", "Atrium.usda")
         commands = dict(suite_steps("macos-macos-release", scene=scene))
 
-        self.assertIn(scene, commands["forward_render_static"])
-        self.assertEqual(commands["forward_render_static (compare)"][-2:], [
+        self.assertIn(scene, commands["forward_resize"])
+        self.assertEqual(commands["forward_resize (compare)"][-2:], [
             "--scene", "Atrium"])
         self.assertIn(scene, commands["usd_round_trip"])
         self.assertEqual(commands["usd_round_trip (compare)"][-2:], [

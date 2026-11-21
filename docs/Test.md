@@ -97,6 +97,7 @@ What each triplet adds when choosing columns for a case:
 * `windows-glfw-release`, `ubuntu-glfw-release` and `ubuntu-android-release` all render with Mesa lavapipe (the android one inside an x86_64 emulator), so a GPU or driver case learns nothing from a second copy. What is unique to each is the host runtime: the MSVC binary and Win32 paths, the Linux binary, the Android lifecycle, assets and surface. `ubuntu-glfw-release` is the cheapest per case and carries the shared software-rendering load.
 * `macos-macos-release` (Metal) and `macos-glfw-release` (Vulkan through MoltenVK) are the only physical GPUs, and with `macos-ios-release` the only ARM triplets. Arch-sensitive code needs one of them plus an x86 column, e.g. astcenc builds NEON on ARM and SSE4.1 elsewhere, so `texture_compression` runs on both sides.
 * Every case has a fixed cost before its body runs: about 24 s on the android emulator, 14 s on windows, 1 s on `macos-macos-release`.
+* A column skips a case that another of its cases contains. Screenshot cases compare against the same per-pipeline ground truth, so `forward_resize` and `cpu_resize_64spp` end on the frame `forward_render_static` and `cpu_render_static_64spp` check, and `forward_render_scale_change` on the one `forward_render_static_halfres` checks; a `*_sync_validation` case that renders a pipeline's default frame covers that pipeline.
 
 To add a case, append its registry entry and a coverage row at its execution position. To add a platform, add a coverage column, give the triplet a suite invocation in `TEST_RUNNERS` in [dev/ci_matrix.py](../dev/ci_matrix.py) and regenerate CI with `python3 dev/ci_matrix.py --fix`. Retiring either removes both sides.
 
@@ -112,14 +113,14 @@ Screenshot cases compare a headless 1280x720 capture with one published image pe
 | deferred | [external](https://pub-70861c9d28254fff97386336cba96153.r2.dev/sparkle/TestScene_deferred.png) |
 
 * `--test_case screenshot` writes `screenshots/screenshot.png` under the [external storage path](Run.md#storage) once the scene is loaded and a frame is complete; `multi_frame_screenshot` writes five consecutive frames as `multi_frame_<N>.png`. The UI's Save Screenshot button names files by scene, pipeline and time.
-* `cpu_render_static_64spp` and `gpu_render_static_64spp` stop at 64 samples per pixel so lavapipe can run them in CI, with a threshold that allows for the remaining noise; the converged `cpu_render_static` and `gpu_render_static` are development-only.
+* The path tracer cases (`*_64spp`) stop at 64 samples per pixel so lavapipe can run them in CI, with a threshold that allows for the remaining noise; the converged `cpu_render_static` and `gpu_render_static` are development-only.
 * The maintainer publishes ground truth by uploading `TestScene_<pipeline>.png` captures. A change meant to alter the image fails these cases until then.
 
 ## Validation Layer
 
 Once the scene has loaded, every error the Vulkan validation layer reports fails the running test case; warnings are only logged. The layer is active when `validation` is on (the packaged config turns it on) and the loader finds `VK_LAYER_KHRONOS_validation`; otherwise validation is silently off. Errors after the verdict, e.g. objects leaked at device destruction, do not change it. A test that provokes errors on purpose accepts them through `TestCase::AcceptValidationErrors`.
 
-`validate_sync` adds synchronization validation, which reports GPU accesses no barrier orders, also across submits. It is slow, so only the registry cases named `*_sync_validation` turn it on, one per pipeline and per render graph feature, and `sync_validation_hazard` records an unsynchronized write to prove the gate can fail. A run with `validate_sync true` fails unless synchronization validation is actually active, so the gate never passes vacuously. Run them locally with `--case` on a glfw build whose loader finds the layer.
+`validate_sync` adds synchronization validation, which reports GPU accesses no barrier orders, also across submits. It is slow, so only the registry cases named `*_sync_validation` turn it on, and CI runs one per pipeline and per render graph feature: the merge parity variants cover the forward and deferred frames, `gpu_primitive_move_sync_validation` the gpu one. `sync_validation_hazard` records an unsynchronized write to prove the gate can fail. A run with `validate_sync true` fails unless synchronization validation is actually active, so the gate never passes vacuously. Run them locally with `--case` on a glfw build whose loader finds the layer.
 
 ## Platform Runners
 
