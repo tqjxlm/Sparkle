@@ -134,16 +134,9 @@ static void CollectDescriptorUpdate(const RHIShaderResourceBinding *binding, uns
 VkDescriptorSet VulkanDescriptorSetManager::AllocateDescriptorSet(VkDescriptorSetLayout layout,
                                                                   const RHIShaderResourceSet &resource_set)
 {
-    bool is_bindless = false;
-
     for (const auto *binding : resource_set.GetBindings())
     {
         ASSERT_F(binding && binding->GetResource(), "resource not bound {}", binding->GetReflection()->name);
-
-        if (binding->GetResource()->IsBindless())
-        {
-            is_bindless = true;
-        }
     }
 
     VkDescriptorSetAllocateInfo alloc_info = {};
@@ -152,19 +145,6 @@ VkDescriptorSet VulkanDescriptorSetManager::AllocateDescriptorSet(VkDescriptorSe
     alloc_info.descriptorPool = descriptor_pool_;
     alloc_info.descriptorSetCount = 1;
     alloc_info.pSetLayouts = &layout;
-
-    if (is_bindless)
-    {
-        // allow this descriptor to contain sub-resources
-        auto &count_info =
-            *context->GetRHI()->AllocateOneFrameMemory<VkDescriptorSetVariableDescriptorCountAllocateInfo>();
-        count_info = {};
-
-        count_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-        count_info.descriptorSetCount = 1;
-        count_info.pDescriptorCounts = &RHIShaderResourceBinding::MaxBindlessResources;
-        alloc_info.pNext = &count_info;
-    }
 
     VkDescriptorSet descriptor_set;
     CHECK_VK_ERROR(vkAllocateDescriptorSets(context->GetDevice(), &alloc_info, &descriptor_set));
