@@ -12,6 +12,8 @@
 | ios                                      | -                       | -                  | -                | apple-llvm (Xcode) | -                     |
 | android                                  | -                       | -                  | -                | -                  | llvm (Android Studio) |
 
+The windows glfw build compiles with the clang-cl bundled in Visual Studio (`VC/Tools/Llvm`), never another clang-cl on `PATH`, including in the external projects that dependencies configure on their own: the MSVC STL accepts only the clang version it ships with (`error STL1000: Unexpected compiler version`).
+
 ### External Dependencies
 
 These libraries should be installed via an installer or package manager (apt, brew, vcpkg).
