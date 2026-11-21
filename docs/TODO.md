@@ -11,8 +11,7 @@
 
 * [ ] vendor-specific denoising and super sampling
 * [ ] dynamic scene
-* [ ] GPU path tracer MIS: the NEE weight pairs the light pdf with the pdf of the BSDF's own sampled direction instead of the BSDF pdf at the light direction, so the two strategies' weights do not sum to 1; fixing it also needs NEE to evaluate the BSDF that `BxdfMetal` samples instead of `CalculateDirectLightingSplit`, because with weights that sum to 1 the two models' difference shifts the image's energy past the `gpu_nee_parity` gate
-* [ ] the GPU path tracer traces `bounce + 1` path segments where the CPU path tracer traces `bounce`, so at one `bounce` setting the two differ wherever light arrives after many bounces (contact shadows)
+* [ ] directional light: neither path tracer renders it, since only next event estimation can reach a delta light and the cpu path tracer has none
 
 ## Rasterization Renderers
 

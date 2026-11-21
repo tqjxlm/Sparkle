@@ -1,5 +1,6 @@
 #include "ray_trace.h.slang"
 
+#include "cubemap.h.slang"
 #include "debug.h.slang"
 #include "directional_light.h.slang"
 #include "pbr.h.slang"
@@ -38,6 +39,8 @@ struct Camera
     uint spp;
     uint enable_nee;
     uint write_gbuffer;
+    uint sky_sampling_resolution;
+    uint emissive_triangle_count;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
@@ -56,6 +59,22 @@ struct Camera
 [[vk::binding(11, 1)]] RWTexture2D<float4> gRadianceSpecular; // rgb: this-frame specular-lobe radiance
 [[vk::binding(12, 1)]] RWTexture2D<float4> gSpecAlbedo;       // rgb: pre-integrated specular BRDF (demod factor)
 
+// must match EmissiveTriangles::Triangle
+struct EmissiveTriangle
+{
+    float4 vertices[3]; // world space. w: unused
+    float pdf_area;     // the probability of sampling this triangle over its area
+    uint instance_id;
+    uint triangle_id;
+};
+
+// next event estimation: an alias table over the sky's cube map texels (sky_sampling_resolution^2 per face), and one
+// over the scene's emissive triangles, with each instance's first triangle in it (UINT_MAX if it emits nothing)
+[[vk::binding(13, 1)]] StructuredBuffer<AliasTableEntry> skySamplingTable;
+[[vk::binding(14, 1)]] StructuredBuffer<EmissiveTriangle> emissiveTriangles;
+[[vk::binding(15, 1)]] StructuredBuffer<AliasTableEntry> emissiveSamplingTable;
+[[vk::binding(16, 1)]] StructuredBuffer<uint> emissiveTriangleOffsets;
+
 // set 2: bindless resources, shared by the whole scene
 [[vk::binding(0, 2)]] Texture2D textures[];
 [[vk::binding(1, 2)]] StructuredBuffer<uint> indexBuffers[];
@@ -72,16 +91,14 @@ float3 SampleSkyLight(float3 direction)
     {
         float3 light = skyMap.SampleLevel(skyMapSampler, direction, 0).rgb;
 
-        return light;
+        return clamp(light, 0.f, output_limit);
     }
 
     return 0;
 }
 
-float3 SampleEmissive(inout Intersection intersection, MaterialParameters mat_param)
+float3 SampleEmissive(float2 tex_coord, MaterialParameters mat_param)
 {
-    float2 tex_coord = intersection.texCoord;
-
     float3 emissive_color_sampled =
         mat_param.emissive_texture >= 0
             ? textures[mat_param.emissive_texture].SampleLevel(materialTextureSampler, tex_coord, 0).rgb
@@ -98,7 +115,7 @@ float3 SampleSurface(Intersection intersection, MaterialParameters mat_param, fl
     }
     else
     {
-        return BxdfMetal(w_o, w_i, out_pdf, is_specular_lobe, mat_param, intersection);
+        return SamplePbrBsdf(w_o, w_i, out_pdf, is_specular_lobe, mat_param, intersection);
     }
 }
 
@@ -115,88 +132,191 @@ bool IsRayOccluded(RayDesc ray_desc)
     return ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
-// only consider sky light for now. a perfect dielectric scatters only into its two delta lobes, which a light sample
-// never hits
-bool IsLightSampled(MaterialParameters mat_param)
+#define BaryLerp(v0, v1, v2, uv) (v0 + (v1 - v0) * uv.x + (v2 - v0) * uv.y)
+
+#define AccessFaceAttribute(triangle_id, buf, vertex_idx) (buf[triangle_id * 3 + vertex_idx])
+
+VertexAttribute GetCornerAttribute(uint instance_id, uint triangle_id, uint corner)
 {
-    return sky_light.has_sky_map != 0 && mat_param.eta <= 0;
+    return vertexAttributeBuffers[instance_id][AccessFaceAttribute(triangle_id, indexBuffers[instance_id], corner)];
 }
 
-float3 SampleSkyLight(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf,
-                      out float3 specular_out)
+float2 GetTexCoord(uint instance_id, uint triangle_id, float2 barycentrics)
+{
+    return BaryLerp(GetCornerAttribute(instance_id, triangle_id, 0).texCoord,
+                    GetCornerAttribute(instance_id, triangle_id, 1).texCoord,
+                    GetCornerAttribute(instance_id, triangle_id, 2).texCoord, barycentrics);
+}
+
+// a light sample for next event estimation. pdf is over solid angle and includes the choice of the light
+struct LightSample
+{
+    float3 radiance;
+    float3 direction;
+    float distance;
+    float pdf;
+};
+
+bool HasSkySampling()
+{
+    return sky_light.has_sky_map != 0 && sky_sampling_resolution > 0;
+}
+
+// next event estimation picks the sky or an emissive triangle, half and half when the scene has both
+float SkySelectionProbability()
+{
+    if (!HasSkySampling())
+    {
+        return 0;
+    }
+
+    return emissive_triangle_count > 0 ? 0.5f : 1.f;
+}
+
+// a perfect dielectric scatters only into its two delta lobes, which a light sample never hits
+bool IsLightSampled(MaterialParameters mat_param)
+{
+    return enable_nee != 0 && mat_param.eta <= 0 && (HasSkySampling() || emissive_triangle_count > 0);
+}
+
+// the solid angle density at uv of a point uniform within its cube map texel
+float CubeMapTexelDensity(float2 uv)
+{
+    float2 st = uv * 2 - 1;
+    float resolution = sky_sampling_resolution;
+    return pow(1 + dot(st, st), 1.5f) * resolution * resolution * 0.25f;
+}
+
+LightSample SampleSkyDirection()
+{
+    const uint resolution = sky_sampling_resolution;
+    const uint face_size = resolution * resolution;
+
+    float probability;
+    uint texel = SampleAliasTable(skySamplingTable, face_size * 6, probability);
+    uint face_id = texel / face_size;
+    uint2 xy = uint2(texel % resolution, (texel % face_size) / resolution);
+    float2 uv = (float2(xy) + float2(RandomUnit(), RandomUnit())) / resolution;
+
+    LightSample light;
+    light.direction = GetDirectionFromCubeMapUV(uv, face_id);
+    light.radiance = SampleSkyLight(light.direction);
+    light.distance = 1000.0;
+    light.pdf = SkySelectionProbability() * probability * CubeMapTexelDensity(uv);
+    return light;
+}
+
+// the pdf of SampleSkyDirection choosing a direction an escaped ray took
+float SkyLightPdf(float3 direction)
+{
+    if (!HasSkySampling())
+    {
+        return 0;
+    }
+
+    const uint resolution = sky_sampling_resolution;
+    uint face_id;
+    float2 uv = GetCubeMapUVFromDirection(direction, face_id);
+    uint2 xy = min(uint2(uv * resolution), resolution - 1);
+    float probability = skySamplingTable[(face_id * resolution + xy.y) * resolution + xy.x].probability;
+    return SkySelectionProbability() * probability * CubeMapTexelDensity(uv);
+}
+
+// converts a triangle's area density at a point to solid angle density as seen from distance squared away
+float AreaToSolidAngle(EmissiveTriangle emitter, float3 direction, float distance_squared)
+{
+    float3 normal =
+        cross(emitter.vertices[1].xyz - emitter.vertices[0].xyz, emitter.vertices[2].xyz - emitter.vertices[0].xyz);
+    // emitters are two-sided
+    float cos_light = abs(dot(normal, direction)) / length(normal);
+    return emitter.pdf_area * distance_squared / max(cos_light, Eps);
+}
+
+LightSample SampleEmissivePoint(float3 position)
+{
+    float probability;
+    EmissiveTriangle emitter =
+        emissiveTriangles[SampleAliasTable(emissiveSamplingTable, emissive_triangle_count, probability)];
+
+    // uniform on the triangle: the weights of vertex 1 and 2
+    float r = sqrt(RandomUnit());
+    float u = RandomUnit();
+    float2 barycentrics = float2(u * r, (1 - u) * r);
+    float3 light_position =
+        BaryLerp(emitter.vertices[0].xyz, emitter.vertices[1].xyz, emitter.vertices[2].xyz, barycentrics);
+
+    float3 to_light = light_position - position;
+    float distance_squared = dot(to_light, to_light);
+
+    LightSample light;
+    light.distance = sqrt(distance_squared);
+    light.direction = to_light / light.distance;
+    MaterialParameters mat_param = materialBuffer[materialIdBuffer[emitter.instance_id]];
+    light.radiance = SampleEmissive(GetTexCoord(emitter.instance_id, emitter.triangle_id, barycentrics), mat_param);
+    light.pdf = (1 - SkySelectionProbability()) * AreaToSolidAngle(emitter, light.direction, distance_squared);
+    return light;
+}
+
+// the pdf of SampleEmissivePoint choosing the emitter point a ray from origin hit
+float EmissiveLightPdf(float3 origin, Intersection intersection)
+{
+    if (emissive_triangle_count == 0)
+    {
+        return 0;
+    }
+
+    uint offset = emissiveTriangleOffsets[intersection.primitiveId];
+    if (offset == 0xFFFFFFFFu)
+    {
+        return 0;
+    }
+
+    float3 to_light = intersection.position - origin;
+    float distance_squared = dot(to_light, to_light);
+    return (1 - SkySelectionProbability()) * AreaToSolidAngle(emissiveTriangles[offset + intersection.triangleId],
+                                                              to_light * rsqrt(distance_squared), distance_squared);
+}
+
+// the power heuristic weight of a strategy with pdf > 0 against another strategy for the same sample
+float PowerHeuristic(float pdf, float other_pdf)
+{
+    if (other_pdf > pdf)
+    {
+        float ratio = pdf / other_pdf;
+        float r2 = ratio * ratio;
+        return r2 / (1 + r2);
+    }
+
+    float ratio = other_pdf / pdf;
+    return 1 / (1 + ratio * ratio);
+}
+
+// next event estimation: one light sample, weighted against BSDF sampling. specular_out is its specular-lobe part
+float3 EstimateDirectLight(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float3 specular_out)
 {
     specular_out = (float3)0;
 
-    if (!IsLightSampled(mat_param))
+    LightSample light =
+        RandomUnit() < SkySelectionProbability() ? SampleSkyDirection() : SampleEmissivePoint(intersection.position);
+    PbrBsdfValue bsdf = EvaluatePbrBsdf(intersection.normal, w_o, light.direction, mat_param);
+    if (bsdf.pdf <= 0 || light.pdf <= 0 || light.distance <= 2 * Tolerance || all(light.radiance == 0))
     {
-        out_pdf = 0;
         return 0;
     }
 
-    // TODO(tqjxlm): sample direction according to luminance distribution
-    float3 sample_direction = CosineWeightedHemisphere::Sample();
-
-    float3 w_i = TransformBasisToWorld(sample_direction, intersection.normal, intersection.tangent.xyz);
-
-    // shadow ray
     RayDesc ray_desc;
     ray_desc.Origin = intersection.position;
-    ray_desc.Direction = w_i;
+    ray_desc.Direction = light.direction;
     ray_desc.TMin = Tolerance;
-    ray_desc.TMax = 1000.0;
+    ray_desc.TMax = light.distance - Tolerance;
     if (IsRayOccluded(ray_desc))
     {
-        // do not sample
-        out_pdf = 0;
         return 0;
     }
 
-    out_pdf = CosineWeightedHemisphere::Pdf(sample_direction);
-
-    float3 light_sample = skyMap.SampleLevel(skyMapSampler, w_i, 0).rgb;
-
-    SurfaceAttributes surface;
-    surface.normal = intersection.normal;
-    surface.albedo = mat_param.base_color;
-    surface.roughness = mat_param.roughness;
-    surface.metallic = mat_param.metallic;
-    surface.emissive = mat_param.emissive_color;
-
-    // evaluate brdf, split into diffuse/specular lobes (the denoiser demodulates them separately)
-    float3 diffuse_radiance;
-    float3 specular_radiance;
-    float3 radiance =
-        CalculateDirectLightingSplit(w_o, w_i, light_sample, surface, diffuse_radiance, specular_radiance);
-
-    // CalculateDirectLightingSplit already applies the cosine
-    float weight = 1.f / (out_pdf + Eps);
-    specular_out = specular_radiance * weight;
-    return radiance * weight;
-}
-
-float3 SampleLights(Intersection intersection, MaterialParameters mat_param, float3 w_o, out float out_pdf,
-                    out float3 specular_out)
-{
-    // only consider sky light for now
-    return SampleSkyLight(intersection, mat_param, w_o, out_pdf, specular_out);
-}
-
-float GetLightPdf(MaterialParameters mat_param, float3 normal, float3 w_i)
-{
-    // where no light is sampled, bsdf samples take the full weight
-    return IsLightSampled(mat_param) ? CosineWeightedHemisphere::Pdf(normal, w_i) : 0;
-}
-
-float GetMISWeight(float current_pdf, float compensation_pdf)
-{
-    if (current_pdf < Eps || compensation_pdf < Eps)
-    {
-        return 1.f;
-    }
-
-    float current_pdf_sqr = current_pdf * current_pdf;
-    float compensation_pdf_sqr = compensation_pdf * compensation_pdf;
-    return current_pdf_sqr / (compensation_pdf_sqr + current_pdf_sqr + Eps);
+    float3 weighted_radiance = light.radiance * (PowerHeuristic(light.pdf, bsdf.pdf) / light.pdf);
+    specular_out = bsdf.specular * weighted_radiance;
+    return (bsdf.specular + bsdf.diffuse) * weighted_radiance;
 }
 
 MaterialParameters GetMaterial(inout Intersection intersection)
@@ -242,15 +362,6 @@ MaterialParameters GetMaterial(inout Intersection intersection)
     return mat_param;
 }
 
-#define BaryLerp(v0, v1, v2, uv) (v0 + (v1 - v0) * uv.x + (v2 - v0) * uv.y)
-
-#define AccessFaceAttribute(triangle_id, buf, vertex_idx) (buf[triangle_id * 3 + vertex_idx])
-
-VertexAttribute GetVertexAttribute(uint instance_id, uint index)
-{
-    return vertexAttributeBuffers[instance_id][index];
-}
-
 void GetIntersection(RayDesc ray_desc, RayQuery<CLOSEST_HIT_FLAGS> ray_query, out Intersection intersection)
 {
     const float2 intersection_uv = ray_query.CommittedTriangleBarycentrics();
@@ -258,13 +369,9 @@ void GetIntersection(RayDesc ray_desc, RayQuery<CLOSEST_HIT_FLAGS> ray_query, ou
     const uint triangle_id = ray_query.CommittedPrimitiveIndex();
     const float4x3 inv_transform = ray_query.CommittedWorldToObject4x3();
 
-    uint index0 = AccessFaceAttribute(triangle_id, indexBuffers[instance_id], 0);
-    uint index1 = AccessFaceAttribute(triangle_id, indexBuffers[instance_id], 1);
-    uint index2 = AccessFaceAttribute(triangle_id, indexBuffers[instance_id], 2);
-
-    const VertexAttribute va0 = GetVertexAttribute(instance_id, index0);
-    const VertexAttribute va1 = GetVertexAttribute(instance_id, index1);
-    const VertexAttribute va2 = GetVertexAttribute(instance_id, index2);
+    const VertexAttribute va0 = GetCornerAttribute(instance_id, triangle_id, 0);
+    const VertexAttribute va1 = GetCornerAttribute(instance_id, triangle_id, 1);
+    const VertexAttribute va2 = GetCornerAttribute(instance_id, triangle_id, 2);
 
     // parametric hit position: CommittedObjectToWorld4x3 is unreliable on some drivers (Adreno)
     intersection.position = ray_desc.Origin + ray_desc.Direction * ray_query.CommittedRayT();
@@ -274,6 +381,7 @@ void GetIntersection(RayDesc ray_desc, RayQuery<CLOSEST_HIT_FLAGS> ray_query, ou
     intersection.texCoord = BaryLerp(va0.texCoord, va1.texCoord, va2.texCoord, intersection_uv);
     intersection.materialId = materialIdBuffer[instance_id];
     intersection.primitiveId = instance_id;
+    intersection.triangleId = triangle_id;
 }
 
 // Karis' analytic split-sum environment BRDF approximation (no LUT). Returns (scale, bias) so the
@@ -354,7 +462,7 @@ void WritePrimaryHitGBuffer(uint2 pixel)
 
         // 2 = primary-hit emissive: terminal and deterministic (the accumulator equals it exactly),
         // so the NRD chain bypasses it instead of blurring its texture detail (see nrd_pack/nrd_resolve).
-        float3 emissive = SampleEmissive(intersection, mat_param);
+        float3 emissive = SampleEmissive(intersection.texCoord, mat_param);
         is_hit = dot(emissive, emissive) > Eps * Eps ? 2.f : 1.f;
     }
 
@@ -388,10 +496,12 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
     float3 specular_color = float3(0, 0, 0);
     bool primary_specular = false;
 
-    // When we introduce NEE, non-NEE paths should be weighted down
-    float bsdf_mis_weight = 1.f;
+    // the pdf of the BSDF sample that set the ray's direction, which MIS weighs against light sampling where the ray
+    // hits a light. a camera ray or a ray after a vertex without light sampling takes the light's full weight
+    float bsdf_pdf = 0.f;
+    bool light_sampled = false;
 
-    [loop] for (bounce = 0; bounce <= camera.max_bounce; bounce++)
+    [loop] for (bounce = 0; bounce < camera.max_bounce; bounce++)
     {
         // initialize ray query
         ray_query.TraceRayInline(tlas, CLOSEST_HIT_FLAGS, 0xFF, ray_desc);
@@ -411,7 +521,8 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
         if (ray_query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
         {
             float3 sky_light = SampleSkyLight(ray_desc.Direction);
-            float3 contribution = sky_light * throughput * bsdf_mis_weight;
+            float mis_weight = light_sampled ? PowerHeuristic(bsdf_pdf, SkyLightPdf(ray_desc.Direction)) : 1.f;
+            float3 contribution = sky_light * throughput * mis_weight;
             pixel_color += contribution;
             // primary ray seeing the environment directly stays on the diffuse channel (bounce 0);
             // deeper bounces inherit the primary lobe's channel.
@@ -426,11 +537,13 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
         GetIntersection(ray_desc, ray_query, intersection);
         MaterialParameters mat_param = GetMaterial(intersection);
 
-        // terminal condition: emissive. next event estimation never samples emitters, so they take no MIS weight
-        float3 emissive_color = SampleEmissive(intersection, mat_param);
+        // terminal condition: emissive
+        float3 emissive_color = SampleEmissive(intersection.texCoord, mat_param);
         if (dot(emissive_color, emissive_color) > Eps * Eps)
         {
-            float3 contribution = emissive_color * throughput;
+            float mis_weight =
+                light_sampled ? PowerHeuristic(bsdf_pdf, EmissiveLightPdf(ray_desc.Origin, intersection)) : 1.f;
+            float3 contribution = emissive_color * throughput * mis_weight;
             pixel_color += contribution;
             if (bounce > 0 && primary_specular)
             {
@@ -441,39 +554,15 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
 
         // core function: surface sampling
         float3 next_direction;
-        float bsdf_pdf = 1.f;
+        float next_bsdf_pdf = 0.f;
         bool is_specular_lobe = false;
-        float3 this_throughput =
-            SampleSurface(intersection, mat_param, -ray_desc.Direction, next_direction, bsdf_pdf, is_specular_lobe);
+        float3 this_throughput = SampleSurface(intersection, mat_param, -ray_desc.Direction, next_direction,
+                                               next_bsdf_pdf, is_specular_lobe);
 
         // the primary bounce's lobe selects which channel all subsequent (indirect) radiance lands on.
         if (bounce == 0)
         {
             primary_specular = is_specular_lobe;
-        }
-
-        if (enable_nee != 0)
-        {
-            // next event estimation: explicitly sample light sources every bounce
-            float light_pdf = 0.f;
-            float3 nee_specular = float3(0, 0, 0);
-            float3 nee_radiance = SampleLights(intersection, mat_param, -ray_desc.Direction, light_pdf, nee_specular);
-            float light_mis_weight = GetMISWeight(light_pdf, bsdf_pdf);
-            pixel_color += nee_radiance * throughput * light_mis_weight;
-
-            // at the primary hit, split the direct light by its own lobes; deeper hits are already on the
-            // primary lobe's channel, so the whole indirect NEE contribution inherits it.
-            if (bounce == 0)
-            {
-                specular_color += nee_specular * throughput * light_mis_weight;
-            }
-            else if (primary_specular)
-            {
-                specular_color += nee_radiance * throughput * light_mis_weight;
-            }
-
-            // update mis weight for next bounce
-            bsdf_mis_weight = GetMISWeight(bsdf_pdf, GetLightPdf(mat_param, intersection.normal, next_direction));
         }
 
         // terminal condition: debug output
@@ -498,6 +587,32 @@ float3 SamplePixel(RayDesc ray_desc, out float3 out_specular, out float out_diff
         default:
             break;
         }
+
+        // a light reached from here would end a path one segment longer than max_bounce allows
+        if (bounce + 1 == camera.max_bounce)
+        {
+            break;
+        }
+
+        light_sampled = IsLightSampled(mat_param);
+        if (light_sampled)
+        {
+            float3 nee_specular;
+            float3 nee_radiance = EstimateDirectLight(intersection, mat_param, -ray_desc.Direction, nee_specular);
+            pixel_color += nee_radiance * throughput;
+
+            // at the primary hit, split the direct light by its own lobes; deeper hits are already on the
+            // primary lobe's channel, so the whole indirect NEE contribution inherits it.
+            if (bounce == 0)
+            {
+                specular_color += nee_specular * throughput;
+            }
+            else if (primary_specular)
+            {
+                specular_color += nee_radiance * throughput;
+            }
+        }
+        bsdf_pdf = next_bsdf_pdf;
 
         throughput *= this_throughput;
 

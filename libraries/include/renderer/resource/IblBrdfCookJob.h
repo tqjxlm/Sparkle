@@ -14,7 +14,7 @@ class IblBrdfCookJob : public CookJob
 {
 public:
     static constexpr const char *Type = "ibl_brdf";
-    static constexpr uint32_t Version = 2;
+    static constexpr uint32_t Version = 3;
     static constexpr uint32_t MapSize = IblSettings::BrdfMapSize;
     static constexpr uint32_t TargetSampleCount = IblSettings::TargetSampleCount;
 

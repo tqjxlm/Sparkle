@@ -46,6 +46,18 @@ public:
         return image_based_lighting_.get();
     }
 
+    // the gpu path tracer's alias table over the sky map's luminance, with GetSamplingResolution()^2 texels per cube
+    // face in face order. null, at resolution 0, without a lit sky map or outside the gpu pipeline
+    [[nodiscard]] const RHIResourceRef<RHIBuffer> &GetSamplingTable() const
+    {
+        return sampling_table_;
+    }
+
+    [[nodiscard]] uint32_t GetSamplingResolution() const
+    {
+        return sampling_resolution_;
+    }
+
     void SetData(const Vector3 &color)
     {
         ubo_.color = color;
@@ -69,6 +81,8 @@ public:
 #pragma endregion
 
 private:
+    void CreateSamplingTable(RHIContext *rhi);
+
     UniformBufferData ubo_;
 
     RHIResourceRef<RHIImage> sky_map_;
@@ -76,5 +90,8 @@ private:
     std::shared_ptr<const Image2DCube> sky_map_raw_;
 
     std::unique_ptr<ImageBasedLighting> image_based_lighting_;
+
+    RHIResourceRef<RHIBuffer> sampling_table_;
+    uint32_t sampling_resolution_ = 0;
 };
 } // namespace sparkle

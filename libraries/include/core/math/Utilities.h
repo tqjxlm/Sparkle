@@ -431,6 +431,12 @@ inline Vector4 SRGBtoLinear(const Vector4 &srgba)
     return ConcatVector(SRGBtoLinear(srgb), srgba.w());
 }
 
+// Rec. 709 relative luminance of a linear color
+inline Scalar Luminance(const Vector3 &linear_color)
+{
+    return linear_color.dot(Vector3(0.2126f, 0.7152f, 0.0722f));
+}
+
 inline Scalar SmithGGXCorrelated(float cos_o, float cos_i, Scalar roughness)
 {
     auto a = roughness * roughness;

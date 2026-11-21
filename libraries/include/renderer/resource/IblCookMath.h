@@ -102,7 +102,7 @@ inline Vector3 SampleMicroFacetNormal(ShaderRandom &rng, const Vector3 &w_o, flo
 
     Vector3 v = Vector3(w_o.x() * a, w_o.y() * a, w_o.z()).normalized();
 
-    Vector3 t1 = (v.z() < 0.999f) ? Vector3(v.cross(Vector3(0.f, 0.f, 1.f))).normalized() : Vector3(1.f, 0.f, 0.f);
+    Vector3 t1 = (v.z() < 0.999f) ? Vector3(Vector3(0.f, 0.f, 1.f).cross(v)).normalized() : Vector3(1.f, 0.f, 0.f);
     Vector3 t2 = v.cross(t1);
 
     float r = std::sqrt(u1);
