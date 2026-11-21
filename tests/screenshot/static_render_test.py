@@ -42,8 +42,7 @@ def main():
         shutil.copy(screenshot, os.path.join(
             get_captures_dir(args.framework), f"{args.case}_capture.png"))
         print("Downloading ground truth...", flush=True)
-        ground_truth = download_ground_truth(
-            args.framework, args.scene, args.pipeline)
+        ground_truth = download_ground_truth(args.scene, args.pipeline)
         print(f"Ground truth downloaded to: {ground_truth}", flush=True)
         mean_flip = compare_images(ground_truth, screenshot)
     except (FileNotFoundError, ValueError) as error:

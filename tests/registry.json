@@ -26,7 +26,7 @@
     {
         "name": "deferred_render_static_emulated",
         "test_case": "screenshot",
-        "description": "The deferred still frame on the android emulator, which renders through the host's software rasterizer and cannot sample ASTC-HDR (textures take the CPU-decode fallback). Its output legitimately sits ~0.022 mean FLIP from the device-captured ground truth (0.007 before HDR compression), so the gate widens to 0.03 - still far below any pipeline breakage.",
+        "description": "The deferred still frame on the android emulator, which renders through the host's software rasterizer and cannot sample ASTC-HDR (textures take the CPU-decode fallback). Its output legitimately sits above the default FLIP gate against the shared ground truth, so the gate widens to 0.03 - still far below any pipeline breakage.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "deferred"],
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {

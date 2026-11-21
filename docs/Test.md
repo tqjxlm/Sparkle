@@ -75,7 +75,7 @@ The suite runs on a device or emulator through the android runner in [build_syst
 * First use also seeds a quickboot snapshot (cold boot, settle, clean shutdown); every later boot resumes from it in seconds. CI caches the AVD directory between runs, so only cache-miss runs pay the cold boot.
 * The config push requires `adb root` (available on emulator `google_apis` images): files a non-root shell creates under `Android/data` are invisible to the app through FUSE. On a non-rootable physical device the push may still work depending on the vendor's FUSE behavior.
 * A `TestCase` can ask the runner for device-level actions by logging `[TestCaseAction] <name>`; `surface_loss_recovery` uses the `cycle_window` action (screen off/on) to destroy and restore the native window mid-run, and `window_resize` uses the `resize_display` action (`wm size`) to resize the window to a new aspect ratio. The runner resets the display size after every attempt.
-* Render cases compare against the published android ground truth, which is captured at 1560x720; pass `--width 1560 --height 720` so headless screenshots match.
+* Render cases run headless at the default 1280x720 resolution and compare against the shared per-pipeline ground truth.
 * A coverage run (no `--case`) runs the `ubuntu-android-release` column from any host, because the device, not the host, runs the app; the same holds for the ios column.
 * CI covers the `ubuntu-android-release` triplet with a dedicated x86_64 package (`--android_abi x86_64`, a product that exists only for this cell) on a KVM-accelerated emulator, because no hosted runner can emulate the shipping arm64 apk: Google publishes no linux-arm64 emulator, x86 hosts reject arm64 system images, and GitHub's Apple-silicon runners expose no nested virtualization. The emulator image ABI follows the host, so local runs on Apple silicon test the arm64 apk itself.
 
@@ -91,7 +91,7 @@ The suite runs inside the iOS Simulator through the ios runner in [build_system/
 
 * The runner boots the `sparkle_test` simulator on first use, creating it from the newest installed iPhone device type. The simulated screen is irrelevant: runs are headless at the configured resolution, so any iPhone model works.
 * After each case the runner copies the app log and screenshots to `build_system/ios/output/device/`, where the suite's cook gate and the Python evaluators expect them.
-* Render cases compare against the published ios ground truth; CI passes `--width 1565 --height 720` to match it.
+* Render cases run headless at the default 1280x720 resolution and compare against the shared per-pipeline ground truth.
 * The simulator's Metal implementation rejects shared-storage textures, so the Metal backend keeps every texture private there and stages uploads through a buffer blit (see MetalImage). It also reports no ray-tracing support, so the gpu pipeline stays local-only.
 
 ```bash
