@@ -547,7 +547,8 @@ bool EncodeAstcHdrMip(const Half *fp16, unsigned width, unsigned height, astcenc
 {
     void *slice = const_cast<Half *>(fp16);
     astcenc_image image{.dim_x = width, .dim_y = height, .dim_z = 1, .data_type = ASTCENC_TYPE_F16, .data = &slice};
-    const astcenc_swizzle swizzle{ASTCENC_SWZ_R, ASTCENC_SWZ_G, ASTCENC_SWZ_B, ASTCENC_SWZ_A};
+    // HDR cubes carry 3-channel radiance; GPU IBL cooks leave producer-dependent sample counts in alpha
+    const astcenc_swizzle swizzle{ASTCENC_SWZ_R, ASTCENC_SWZ_G, ASTCENC_SWZ_B, ASTCENC_SWZ_1};
 
     const auto status = astcenc_compress_image(context, &image, &swizzle, out, out_size, 0);
     if (status != ASTCENC_SUCCESS)

@@ -259,6 +259,17 @@ class TextureCompressionTest : public TestCase
             return false;
         }
 
+        // GPU IBL cooks accumulate sample counts in the unused alpha channel; HDR encoding must ignore it
+        std::vector<uint8_t> noisy_raw(source.GetRawData(), source.GetRawData() + source.GetStorageSize());
+        auto *texels = reinterpret_cast<Half *>(noisy_raw.data());
+        for (size_t i = 0; i < static_cast<size_t>(Width) * Height; i++)
+        {
+            texels[i * 4 + 3] = Half(2048.f);
+        }
+        const Image2D noisy_alpha(Width, Height, PixelFormat::RGBAFloat16, noisy_raw);
+        success &= Expect(TextureCompression::EncodeHdrFace(noisy_alpha, target) == bytes,
+                          (std::string(label) + ": HDR encode ignores unused alpha").c_str());
+
         const Image2D compressed(Width, Height, target, 1, bytes, "hdr_test");
         const Vector3 direct_sample = compressed.AccessPixel(Width / 2, Height / 2).head<3>();
         const Image2D decoded = TextureCompression::Decode(compressed, 0);
