@@ -12,6 +12,12 @@ float SaturateDot(float3 a, float3 b)
     return max(dot(a, b), 0);
 }
 
+// Rec. 709 relative luminance of a linear color
+float Luminance(float3 color)
+{
+    return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
 float3 TransformPoint(float3 p, float4x3 m)
 {
     return mul(transpose(m), float4(p, 1));

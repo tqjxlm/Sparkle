@@ -29,83 +29,73 @@ public:
     // use TransformBasisToWorld and TransformBasisToLocal to transform light directions
 };
 
-class LambertianBxDF : public BxDF
+// the metallic-roughness BSDF of SamplePbrBsdf in shaders/include/ray_trace.h.slang: a GGX specular lobe with Schlick
+// fresnel, and a lambertian lobe for the light that the fresnel transmits into a dielectric
+class PbrBxDF : public BxDF
 {
 public:
-    static SampleResult Sample(const Vector3 & /*w_o*/, const SurfaceAttribute &surface)
+    // picks one lobe to sample from, and weights it by both lobes over their mixed pdf
+    static SampleResult Sample(const Vector3 &local_w_o, const SurfaceAttribute &surface)
     {
-        SampleResult result;
-        result.is_valid = true;
-        auto local_w_i = sampler::CosineWeightedHemiSphere::Sample();
-        result.local_w_i = local_w_i;
+        const Vector3 f0 = utilities::Lerp(Vector3(Ones * DielectricF0), surface.base_color, surface.metallic);
 
-        result.throughput = surface.base_color;
+        SampleResult result;
+        if (sampler::RandomUnit() < SpecularLobeProbability(local_w_o, surface, f0))
+        {
+            const float roughness = std::max(surface.roughness, MinRoughness);
+            result.local_w_i = utilities::Reflect(local_w_o, sampler::SampleMicroFacetNormal(local_w_o, roughness));
+        }
+        else
+        {
+            result.local_w_i = sampler::CosineWeightedHemiSphere::Sample();
+        }
+
+        const auto [value, pdf] = Evaluate(local_w_o, result.local_w_i, surface, f0);
+        result.is_valid = pdf > 0.f;
+        result.throughput = result.is_valid ? Vector3(value / pdf) : Zeros;
 
         return result;
     }
-};
 
-class SpecularBxDF : public BxDF
-{
-public:
-    static SampleResult Sample(const Vector3 &local_w_o, const SurfaceAttribute &surface)
+private:
+    // GGX roughness below this overflows the distribution's peak in fp32; it still renders as a mirror
+    static constexpr float MinRoughness = 0.08f;
+
+    static constexpr float DielectricF0 = 0.04f;
+
+    static float SpecularLobeProbability(const Vector3 &local_w_o, const SurfaceAttribute &surface, const Vector3 &f0)
     {
-        SampleResult result;
+        const auto specular = utilities::Luminance(utilities::SchlickApproximation(local_w_o.z(), f0));
+        const auto diffuse = (1.f - surface.metallic) * utilities::Luminance(surface.base_color) * (1.f - specular);
+        return specular / (specular + diffuse + Eps);
+    }
 
-        // enter tangent space
-
-        const auto &local_w_m = sampler::SampleMicroFacetNormal(local_w_o, surface.roughness);
-        Vector3 local_w_i = utilities::Reflect(local_w_o, local_w_m);
-
-        Vector3 fresnel_color;
-
-        auto cos_o = utilities::SaturatedCosTheta(local_w_o);
-        auto cos_i = utilities::SaturatedCosTheta(local_w_i);
-        auto cos_m = utilities::SaturatedCosTheta(local_w_m);
-        auto local_cos_i = local_w_i.dot(local_w_m);
-
-        if (cos_o > Eps && cos_i > Eps && cos_m > Eps)
+    // f * cos_i of both lobes, and the pdf of Sample generating local_w_i
+    static std::pair<Vector3, float> Evaluate(const Vector3 &local_w_o, const Vector3 &local_w_i,
+                                              const SurfaceAttribute &surface, const Vector3 &f0)
+    {
+        const auto cos_o = local_w_o.z();
+        const auto cos_i = local_w_i.z();
+        if (cos_o <= Eps || cos_i <= Eps)
         {
-            // we want to sample only one light per run, even if the surface is hybrid.
-            // by doing this, there's no need to account for metallic term later.
-            if (sampler::RandomUnit() < surface.metallic)
-            {
-                // if metal, all light is reflected
-
-                // fresnel tells how reflected light lerps between color of the metal or color of the incoming light
-                fresnel_color = utilities::SchlickApproximation(local_cos_i, surface.base_color);
-                result.is_valid = true;
-            }
-            else
-            {
-                // if non-metal, fresnel tells how much light is reflected
-
-                // F0: reflection rate when view direction is parallel to the surface (fully reflective).
-                // this value is empirical and widely adopted.
-                static const Scalar F0 = 0.04f;
-                auto fresnel = utilities::SchlickApproximation(local_cos_i, F0);
-
-                // we want to sample only one light per run, even if specular and diffuse reflection coexists.
-                // by doing this, there's no need to account for ks and kd later.
-                if (sampler::RandomUnit() < fresnel)
-                {
-                    fresnel_color = Ones;
-                    result.is_valid = true;
-                }
-            }
+            return {Zeros, 0.f};
         }
 
-        if (!result.is_valid)
-        {
-            return result;
-        }
+        const auto roughness = std::max(surface.roughness, MinRoughness);
+        const Vector3 w_m = (local_w_o + local_w_i).normalized();
+        const Vector3 fresnel = utilities::SchlickApproximation(local_w_o.dot(w_m), f0);
+        const auto ndf = sampler::DistributionGGX::Ndf(w_m.z(), roughness);
 
-        auto occlusion = utilities::SmithGGXCorrelated(cos_o, cos_i, surface.roughness);
-        auto normalizer = utilities::GeometrySchlickGGX(cos_o, surface.roughness) + Eps;
-        result.throughput = fresnel_color * occlusion / normalizer;
-        result.local_w_i = local_w_i;
+        const Vector3 specular =
+            fresnel * (ndf * utilities::SmithGGXCorrelated(cos_o, cos_i, roughness) / (4.f * cos_o));
+        const Vector3 diffuse =
+            (Ones - fresnel).cwiseProduct(surface.base_color) * ((1.f - surface.metallic) * InvPi * cos_i);
 
-        return result;
+        // the VNDF pdf of w_m times the jacobian 1 / (4 * dot(w_o, w_m)) of the reflection
+        const auto specular_pdf = utilities::GeometrySchlickGGX(cos_o, roughness) * ndf / (4.f * cos_o);
+        const auto pdf = utilities::Lerp(cos_i * InvPi, specular_pdf, SpecularLobeProbability(local_w_o, surface, f0));
+
+        return {specular + diffuse, pdf};
     }
 };
 

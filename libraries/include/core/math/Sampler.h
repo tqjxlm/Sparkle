@@ -143,8 +143,8 @@ struct DistributionVn
         // -- roughness==1
         Vector3 v = Vector3(w_o.x() * a, w_o.y() * a, w_o.z()).normalized();
 
-        // -- Build an orthonormal basis with v, t1, and t2
-        Vector3 t1 = (v.z() < 0.999f) ? v.cross(Up).normalized() : Right;
+        // -- Build an orthonormal basis with v, t1, and t2 (t2.z >= 0 for the upper-hemisphere shift below)
+        Vector3 t1 = (v.z() < 0.999f) ? Up.cross(v).normalized() : Right;
         Vector3 t2 = v.cross(t1);
 
         // -- Choose a point on a disk with each half of the disk weighted
