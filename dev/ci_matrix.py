@@ -59,11 +59,12 @@ TEST_RUNNERS = {
     # the linux product, validated under software vulkan like windows (hosted
     # ubuntu runners have no GPU); same registry cases as macos-macos-release.
     # it carries the shared software-rendering load, the longest suite of the
-    # pipeline, so its cases split across parallel jobs
+    # pipeline, so its cases split across parallel jobs: enough that the slowest
+    # shard ends before the ios simulator job, which sets the pipeline's length
     "ubuntu-glfw-release": {
         "suite_args": "--software",
         "suite_timeout": 120,
-        "shards": 2,
+        "shards": 4,
         "screenshots": "build_system/glfw/output/build/generated/screenshots/",
     },
     # physical Metal GPU (the runner class the cook stage relies on). its
