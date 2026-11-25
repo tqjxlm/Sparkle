@@ -49,6 +49,7 @@ Each item waits for its first user or for a profile that justifies it.
 ## Cook
 
 * [ ] standalone shader compiler
+* [ ] arbitrary shader bindings: the RHI takes binding slots from the compiled shader and requires them dense per set, so the FSR passes compile at `-O0` with `-preserve-params` to keep unused resources. layouts built from the compiler's reflection, with sparse slots, would let them compile optimized; the standalone shader compiler is a natural place to emit that reflection
 * [ ] drop the NRD cook's SPIR-V 1.5 to 1.4 version rewrite and its `vulkan1.1spv1.4` validation target ([cook_nrd_shaders.py](../shaders/nrd/cook/cook_nrd_shaders.py)) at the next NRD recook
 * [ ] compile `ray_trace` shaders from Slang to Metal directly and drop spirv-cross, blocked on Slang emitting invalid MSL for bindless resource arrays ([slang#11970](https://github.com/shader-slang/slang/issues/11970)) and an entry-point out-parameter ICE ([slang#11969](https://github.com/shader-slang/slang/issues/11969))
 
