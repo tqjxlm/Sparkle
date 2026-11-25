@@ -3,19 +3,22 @@
 #include "renderer/renderer/Renderer.h"
 
 #include "core/Timer.h"
-#include "renderer/denoiser/DenoiserConfig.h"
+#include "renderer/denoiser/ProviderCache.h"
+#include "renderer/denoiser/Reconstruction.h"
 #include "rhi/RHIComputePass.h"
 #include "rhi/RHIPIpelineState.h"
 #include "rhi/RHIRayTracing.h"
 #include "rhi/RHIShader.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace sparkle
 {
 class SkyRenderProxy;
 class Denoiser;
+class Upscaler;
 class EmissiveTriangles;
 class PathTracingDenoiserInputs;
 
@@ -37,15 +40,6 @@ public:
     ~GPURenderer() override;
 
 private:
-    // one entry per concrete provider, in the order Auto prefers them. a provider is
-    // constructed on first use and never retried once it has failed
-    struct DenoiserSlot
-    {
-        DenoiserProvider provider;
-        std::unique_ptr<Denoiser> denoiser;
-        bool failed = false;
-    };
-
     void Update() override;
 
     void OnResize() override;
@@ -58,11 +52,11 @@ private:
 
     void BindDenoiserInputs();
 
-    [[nodiscard]] DenoiserSlot *FindDenoiserSlot(DenoiserProvider provider);
+    [[nodiscard]] Denoiser *GetDenoiser(DenoiserProvider provider);
 
-    [[nodiscard]] Denoiser *GetOrCreateDenoiser(DenoiserProvider provider);
+    [[nodiscard]] Upscaler *GetUpscaler(UpscalerProvider provider);
 
-    [[nodiscard]] Denoiser *SelectDenoiser(DenoiserProvider requested);
+    [[nodiscard]] std::pair<Denoiser *, Upscaler *> SelectReconstruction(const ReconstructionPlan &plan);
 
     void BindBindlessResources();
 
@@ -85,7 +79,7 @@ private:
     RHIResourceRef<RHIImage> scene_texture_;
     std::unique_ptr<PathTracingDenoiserInputs> denoiser_inputs_;
 
-    // what tone mapping displayed last: the accumulator or a denoiser's output
+    // what tone mapping displayed last: the accumulator, a denoiser's or an upscaler's output
     RHIResourceRef<RHIImage> displayed_image_;
 
     RHIResourceRef<RHIPipelineState> pipeline_state_;
@@ -97,10 +91,13 @@ private:
     // bound while the sky has no sampling table, which the tracer then never reads
     RHIResourceRef<RHIBuffer> empty_sky_sampling_table_;
 
-    std::vector<DenoiserSlot> denoiser_slots_;
+    ProviderCache<DenoiserProvider, Denoiser> denoisers_{"denoiser"};
+    ProviderCache<UpscalerProvider, Upscaler> upscalers_{"upscaler"};
 
     Denoiser *frame_denoiser_ = nullptr;
-    DenoiserProvider requested_provider_ = DenoiserProvider::Off;
+    Upscaler *frame_upscaler_ = nullptr;
+    ReconstructionPlan plan_;
+    uint32_t jitter_index_ = 0;
     bool gbuffer_write_this_frame_ = false;
     bool denoiser_reset_this_frame_ = false;
     bool final_frame_this_frame_ = false;

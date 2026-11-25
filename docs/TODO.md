@@ -8,7 +8,8 @@
 
 ## Path Tracing Renderers
 
-* [ ] vendor-specific denoising and super sampling
+* [ ] DLSS Ray Reconstruction as an integrated provider on NVIDIA RTX GPUs, through NGX on Vulkan
+* [ ] FSR quality gates and per-pass timing: `run_denoiser_gates.py` and `denoiser_compare.py` take no upscaler, and FSR logs no `PassTimingAggregator` stages
 * [ ] dynamic scene
 * [ ] directional light: neither path tracer renders it, since only next event estimation can reach a delta light and the cpu path tracer has none
 

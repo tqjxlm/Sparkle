@@ -350,6 +350,8 @@ void NrdDenoiser::UpdateFrameData(const DenoiserFrameData &frame)
     delta_time_ = frame.delta_time;
     view_matrix_ = frame.view;
     projection_matrix_ = frame.projection;
+    jitter_ = frame.jitter;
+    upscaled_ = frame.upscaled;
     cumulated_samples_ = frame.accumulated_samples;
     max_sample_per_pixel_ = frame.maximum_samples;
     reset_history_ = reset_history_ || frame.reset_history;
@@ -413,8 +415,10 @@ void NrdDenoiser::Encode(RGExternalContext &context, const DenoiserInputs &input
 
     // The EMA must also die out with the ReBLUR contribution it smooths: its lag otherwise keeps the
     // display on an older, more-ReBLUR-flavored mix than handoff_weight says, and the final resolve
-    // (beta pinned to 0) would release that lag as a visible pop right at the freeze.
-    const float stabilization_beta = std::clamp(1.f - stabilization_rate, 0.f, 0.99f) * (1.f - handoff_weight);
+    // (beta pinned to 0) would release that lag as a visible pop right at the freeze. An upscaler that
+    // follows stabilizes over time itself, and an EMA across jittered frames would blur its input.
+    const float stabilization_beta =
+        upscaled_ ? 0.f : std::clamp(1.f - stabilization_rate, 0.f, 0.99f) * (1.f - handoff_weight);
 
     // fully handed off to the accumulator: the ReBLUR result is weighted by zero, so skip its ~1.7 ms of
     // dispatches and run only the resolve (composite + stabilization). ReBLUR's history stays valid — the
@@ -428,6 +432,7 @@ void NrdDenoiser::Encode(RGExternalContext &context, const DenoiserInputs &input
     {
         prev_view_matrix_ = view_matrix_;
         prev_projection_matrix_ = projection_matrix_;
+        prev_jitter_ = jitter_;
     }
 
     if (run_reblur)
@@ -461,6 +466,7 @@ void NrdDenoiser::Encode(RGExternalContext &context, const DenoiserInputs &input
 
     prev_view_matrix_ = view_matrix_;
     prev_projection_matrix_ = projection_matrix_;
+    prev_jitter_ = jitter_;
     reset_history_ = false;
 }
 
@@ -513,6 +519,10 @@ void NrdDenoiser::RenderReblur(RHICommandContext &command_context, const Vector3
     CopyMatrix(cs.viewToClipMatrixPrev, view_to_clip_prev);
     CopyMatrix(cs.worldToViewMatrix, view_matrix_);
     CopyMatrix(cs.worldToViewMatrixPrev, prev_view_matrix_);
+    cs.cameraJitter[0] = jitter_.x();
+    cs.cameraJitter[1] = jitter_.y();
+    cs.cameraJitterPrev[0] = prev_jitter_.x();
+    cs.cameraJitterPrev[1] = prev_jitter_.y();
     cs.motionVectorScale[0] = 1.f;
     cs.motionVectorScale[1] = 1.f;
     cs.motionVectorScale[2] = 0.f;

@@ -5,6 +5,7 @@
 #include "renderer/BindlessManager.h"
 #include "renderer/denoiser/Denoiser.h"
 #include "renderer/denoiser/DenoiserFactory.h"
+#include "renderer/denoiser/DenoiserHandoff.h"
 #include "renderer/graph/RenderGraph.h"
 #include "renderer/pass/MeshPass.h"
 #include "renderer/pass/ToneMappingPass.h"
@@ -15,6 +16,8 @@
 #include "renderer/proxy/SkyRenderProxy.h"
 #include "renderer/resource/EmissiveTriangles.h"
 #include "renderer/resource/PathTracingDenoiserInputs.h"
+#include "renderer/upscaler/Upscaler.h"
+#include "renderer/upscaler/UpscalerFactory.h"
 #include "rhi/RHI.h"
 #include "rhi/RHIRayTracing.h"
 
@@ -69,6 +72,8 @@ class RayTracingComputeShader : public RHIShaderInfo
         uint32_t write_gbuffer;
         uint32_t sky_sampling_resolution = 0;
         uint32_t emissive_triangle_count;
+        Vector2 jitter;
+        uint32_t jitter_enabled;
     };
 };
 
@@ -80,11 +85,6 @@ GPURenderer::GPURenderer(const RenderConfig &render_config, RHIContext *rhi_cont
     ASSERT_EQUAL(render_config.pipeline, RenderConfig::Pipeline::Gpu);
 
     ASSERT(rhi_->SupportsHardwareRayTracing());
-
-    // preference order: MetalFX runs on the platform's own scaler where it exists, NRD is the
-    // portable fallback. CreateDenoiser returns null for a provider this build cannot serve
-    denoiser_slots_.push_back({.provider = DenoiserProvider::MetalFx, .denoiser = nullptr, .failed = false});
-    denoiser_slots_.push_back({.provider = DenoiserProvider::Nrd, .denoiser = nullptr, .failed = false});
 }
 
 void GPURenderer::InitRenderResources()
@@ -130,15 +130,8 @@ void GPURenderer::OnResize()
 
     denoiser_inputs_->Resize(resolution_.scene);
 
-    // a provider that could not serve the previous extents is tried again at the new ones
-    for (auto &slot : denoiser_slots_)
-    {
-        if (slot.denoiser)
-        {
-            slot.denoiser->Resize(resolution_.scene, resolution_.output);
-        }
-        slot.failed = slot.denoiser && !slot.denoiser->IsReady();
-    }
+    denoisers_.Resize(resolution_.scene, resolution_.output);
+    upscalers_.Resize(resolution_.scene, resolution_.output);
 }
 
 RGTexture GPURenderer::BuildGraph(RenderGraph &graph)
@@ -208,16 +201,29 @@ RGTexture GPURenderer::BuildGraph(RenderGraph &graph)
                 };
             });
 
+        displayed_image_ = scene_texture_;
+
         // an encoded frame is displayed as-is even when it completes max_spp: the max_spp=1 motion
         // harnesses film the denoiser, and NRD's final resolve equals the accumulator bit-exactly
         if (gbuffer_write_this_frame_ && denoiser_inputs)
         {
-            tone_mapping_input = frame_denoiser_->AddTo(graph, *denoiser_inputs);
-            displayed_image_ = tone_mapping_input == accumulator ? scene_texture_ : frame_denoiser_->GetOutput();
-        }
-        else
-        {
-            displayed_image_ = scene_texture_;
+            if (frame_denoiser_ && frame_denoiser_->NeedsInputs())
+            {
+                tone_mapping_input = frame_denoiser_->AddTo(graph, *denoiser_inputs);
+                if (tone_mapping_input != accumulator)
+                {
+                    displayed_image_ = frame_denoiser_->GetOutput();
+                }
+            }
+
+            if (frame_upscaler_)
+            {
+                tone_mapping_input =
+                    frame_upscaler_->AddTo(graph, {.color = tone_mapping_input,
+                                                   .normal_view_depth = denoiser_inputs->normal_view_depth,
+                                                   .motion_hit_metallic = denoiser_inputs->motion_hit_metallic});
+                displayed_image_ = frame_upscaler_->GetOutput();
+            }
         }
     }
     else if (displayed_image_ != scene_texture_)
@@ -242,15 +248,17 @@ void GPURenderer::Update()
     PROFILE_SCOPE("GPURenderer::Update");
 
     auto *camera = scene_render_proxy_->GetCamera();
-    const DenoiserProvider requested = DenoiserConfig::Get().provider;
-    Denoiser *selected_denoiser = SelectDenoiser(requested);
+    const DenoiserConfig &config = DenoiserConfig::Get();
+    const ReconstructionPlan plan = PlanReconstruction(config.provider, config.upscaler);
+    const auto [denoiser, upscaler] = SelectReconstruction(plan);
 
-    const bool selection_changed = requested != requested_provider_ || selected_denoiser != frame_denoiser_;
-    requested_provider_ = requested;
-    frame_denoiser_ = selected_denoiser;
+    const bool selection_changed = plan != plan_ || denoiser != frame_denoiser_ || upscaler != frame_upscaler_;
+    plan_ = plan;
+    frame_denoiser_ = denoiser;
+    frame_upscaler_ = upscaler;
     denoiser_reset_this_frame_ = selection_changed;
 
-    if (requested == DenoiserProvider::Off)
+    if (!frame_denoiser_ && !frame_upscaler_)
     {
         displayed_image_ = scene_texture_;
     }
@@ -413,8 +421,15 @@ void GPURenderer::Update()
     // recorded regardless of mode so toggling dynamic_spp never pairs a timestamp with the wrong spp
     performance_history_[frame_index].spp = will_dispatch ? spp : 0;
 
-    final_frame_this_frame_ =
-        will_dispatch && camera->GetCumulatedSampleCount() + spp >= render_config_.max_sample_per_pixel;
+    const uint32_t post_dispatch_samples = camera->GetCumulatedSampleCount() + spp;
+    final_frame_this_frame_ = will_dispatch && post_dispatch_samples >= render_config_.max_sample_per_pixel;
+
+    // a split upscaler reconstructs detail from jittered samples, which a denoiser before it passes through. without a
+    // denoiser it upscales the accumulator, which averages the jitter out
+    const bool jitter_enabled = will_dispatch && frame_upscaler_ != nullptr && frame_denoiser_ != nullptr;
+    const Vector2 jitter =
+        jitter_enabled ? ComputeJitter(jitter_index_++, resolution_.scene, resolution_.output) : Vector2::Zero();
+
     if (frame_denoiser_)
     {
         frame_denoiser_->UpdateFrameData({
@@ -423,13 +438,35 @@ void GPURenderer::Update()
             .exposure = camera->GetAttribute().exposure,
             .far_plane = camera->GetFar(),
             .delta_time = render_config_.delta_time,
+            .jitter = jitter,
             .accumulated_samples = camera->GetCumulatedSampleCount(),
             .maximum_samples = render_config_.max_sample_per_pixel,
             .reset_history = denoiser_reset_this_frame_ || !scene_ready,
             .final_frame = final_frame_this_frame_,
+            .upscaled = frame_upscaler_ != nullptr,
         });
     }
-    gbuffer_write_this_frame_ = will_dispatch && frame_denoiser_ != nullptr && frame_denoiser_->NeedsInputs();
+
+    if (frame_upscaler_)
+    {
+        // the upscaler's input mixes the denoiser's jittered output into the unjittered accumulator by the handoff
+        // weight, so its effective jitter shrinks with that weight
+        const float accumulator_weight =
+            frame_denoiser_ ? DenoiserHandoff(render_config_.max_sample_per_pixel)
+                                  .ComputeWeight(static_cast<float>(post_dispatch_samples), final_frame_this_frame_)
+                            : 1.f;
+        frame_upscaler_->UpdateFrameData({
+            .projection = camera->GetProjectionMatrix(),
+            .jitter = jitter * (1.f - accumulator_weight),
+            .near_plane = camera->GetNear(),
+            .far_plane = camera->GetFar(),
+            .delta_time = render_config_.delta_time,
+            .reset_history = denoiser_reset_this_frame_ || !scene_ready,
+        });
+    }
+
+    gbuffer_write_this_frame_ =
+        will_dispatch && ((frame_denoiser_ != nullptr && frame_denoiser_->NeedsInputs()) || frame_upscaler_ != nullptr);
 
     if (gbuffer_write_this_frame_)
     {
@@ -447,6 +484,8 @@ void GPURenderer::Update()
         .enable_nee = render_config_.enable_nee ? 1u : 0,
         .write_gbuffer = gbuffer_write_this_frame_ ? 1u : 0u,
         .emissive_triangle_count = emissive_triangles_->GetCount(),
+        .jitter = jitter,
+        .jitter_enabled = jitter_enabled ? 1u : 0u,
     };
 
     if (will_dispatch)
@@ -549,81 +588,52 @@ void GPURenderer::BindDenoiserInputs()
     cs_resources->gSpecAlbedo().BindResource(denoiser_inputs_->GetSpecularAlbedoRoughness()->GetDefaultView(rhi_));
 }
 
-GPURenderer::DenoiserSlot *GPURenderer::FindDenoiserSlot(DenoiserProvider provider)
+Denoiser *GPURenderer::GetDenoiser(DenoiserProvider provider)
 {
-    auto slot = std::ranges::find_if(
-        denoiser_slots_, [provider](const DenoiserSlot &candidate) { return candidate.provider == provider; });
-    return slot == denoiser_slots_.end() ? nullptr : &*slot;
-}
-
-Denoiser *GPURenderer::GetOrCreateDenoiser(DenoiserProvider provider)
-{
-    DenoiserSlot *slot = FindDenoiserSlot(provider);
-    if (!slot || slot->failed)
-    {
-        return nullptr;
-    }
-
-    if (slot->denoiser && !slot->denoiser->IsReady())
-    {
-        slot->failed = true;
-        Log(Error, "Denoiser {} failed while encoding; selecting a fallback", slot->denoiser->GetName());
-        return nullptr;
-    }
-
-    if (!slot->denoiser)
-    {
+    return denoisers_.Get(provider, [this](DenoiserProvider created) {
         const DenoiserConfig &config = DenoiserConfig::Get();
-        DenoiserDesc desc{
-            .input_size = resolution_.scene,
-            .output_size = resolution_.output,
-            .radiance_format = config.radiance_fp16 ? PixelFormat::RGBAFloat16 : PixelFormat::RGBAFloat,
-            .accumulator_format = scene_texture_->GetAttributes().format,
-            .max_frames_in_flight = rhi_->GetMaxFramesInFlight(),
-            .synchronous_initialization = config.metalfx_sync_init,
-        };
-        slot->denoiser = CreateDenoiser(provider, desc, rhi_);
-        if (!slot->denoiser || !slot->denoiser->IsReady())
-        {
-            slot->failed = true;
-            Log(Warn, "Denoiser provider {} is unavailable for {}x{} -> {}x{}", Enum2Str(provider), desc.input_size.x(),
-                desc.input_size.y(), desc.output_size.x(), desc.output_size.y());
-            slot->denoiser.reset();
-            return nullptr;
-        }
-    }
-    return slot->denoiser.get();
+        return CreateDenoiser(
+            created,
+            {
+                .input_size = resolution_.scene,
+                .output_size = resolution_.output,
+                .radiance_format = config.radiance_fp16 ? PixelFormat::RGBAFloat16 : PixelFormat::RGBAFloat,
+                .accumulator_format = scene_texture_->GetAttributes().format,
+                .max_frames_in_flight = rhi_->GetMaxFramesInFlight(),
+                .synchronous_initialization = config.metalfx_sync_init,
+            },
+            rhi_);
+    });
 }
 
-Denoiser *GPURenderer::SelectDenoiser(DenoiserProvider requested)
+Upscaler *GPURenderer::GetUpscaler(UpscalerProvider provider)
 {
-    if (requested == DenoiserProvider::Off)
-    {
-        return nullptr;
-    }
+    return upscalers_.Get(provider, [this](UpscalerProvider created) {
+        return CreateUpscaler(created,
+                              {
+                                  .input_size = resolution_.scene,
+                                  .output_size = resolution_.output,
+                                  .output_format = scene_texture_->GetAttributes().format,
+                              },
+                              rhi_);
+    });
+}
 
-    // Auto starts at the most preferred provider; an explicit request starts at itself and
-    // still falls back down the preference order when it is unavailable
-    size_t begin = 0;
-    if (requested != DenoiserProvider::Auto)
+std::pair<Denoiser *, Upscaler *> GPURenderer::SelectReconstruction(const ReconstructionPlan &plan)
+{
+    if (plan.integrated)
     {
-        const DenoiserSlot *slot = FindDenoiserSlot(requested);
-        if (!slot)
+        if (Denoiser *integrated = GetDenoiser(DenoiserProvider::MetalFx))
         {
-            return nullptr;
-        }
-        begin = static_cast<size_t>(slot - denoiser_slots_.data());
-    }
-
-    for (size_t index = begin; index < denoiser_slots_.size(); index++)
-    {
-        const DenoiserProvider provider = denoiser_slots_[index].provider;
-        if (Denoiser *denoiser = GetOrCreateDenoiser(provider))
-        {
-            return denoiser;
+            return {integrated, nullptr};
         }
     }
-    return nullptr;
+
+    Denoiser *denoiser = plan.denoiser == DenoiserProvider::Off ? nullptr : GetDenoiser(plan.denoiser);
+    // a split upscaler runs only when there is something to upscale
+    Upscaler *upscaler =
+        plan.upscaler == UpscalerProvider::Off || !resolution_.NeedUpsample() ? nullptr : GetUpscaler(plan.upscaler);
+    return {denoiser, upscaler};
 }
 
 void GPURenderer::BindEmissiveTriangles()

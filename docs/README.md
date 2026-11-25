@@ -20,7 +20,7 @@ Start with [Architecture](Architecture.md) for how the code is laid out, then pi
 | ------------------------------ | --------------------------------------------------------------------- |
 | [Render Graph](RenderGraph.md) | how renderers record frames: passes, derived barriers, merging, dumps |
 | [Path Tracer](PathTracer.md)   | the cpu and gpu path tracers: BSDF, next event estimation, settings   |
-| [Denoiser](Denoiser.md)        | NRD and MetalFX denoising for the gpu path tracer                     |
+| [Denoiser](Denoiser.md)        | denoising and upscaling for the gpu path tracer                       |
 | [Cooking](Cooking.md)          | build-time asset processing, artifacts, content images, compression   |
 | [Input](Input.md)              | the input pipeline, gestures and key arbitration                      |
 | [USD](USD.md)                  | USD import and export, the packaged TestScene                         |

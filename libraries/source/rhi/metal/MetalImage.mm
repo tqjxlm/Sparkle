@@ -12,7 +12,7 @@
 
 namespace sparkle
 {
-static MTLTextureUsage GetMetalTextureUsage(RHIImage::ImageUsage usage)
+static MTLTextureUsage GetMetalTextureUsage(RHIImage::ImageUsage usage, PixelFormat format)
 {
     NSUInteger metal_usage = MTLTextureUsageUnknown;
 
@@ -29,6 +29,12 @@ static MTLTextureUsage GetMetalTextureUsage(RHIImage::ImageUsage usage)
     if (usage & RHIImage::ImageUsage::UAV)
     {
         metal_usage |= MTLTextureUsageShaderWrite;
+    }
+
+    // shaders count through 32-bit unsigned storage images atomically
+    if (usage & RHIImage::ImageUsage::UAV && format == PixelFormat::R32UInt)
+    {
+        metal_usage |= MTLTextureUsageShaderAtomic;
     }
 
     return metal_usage;
@@ -143,7 +149,7 @@ MetalImage::MetalImage(const Attribute &attributes, const std::string &name) : R
     texture_descriptor.width = attributes.width;
     texture_descriptor.height = attributes.height;
     texture_descriptor.mipmapLevelCount = attributes.mip_levels;
-    texture_descriptor.usage = GetMetalTextureUsage(attributes.usages);
+    texture_descriptor.usage = GetMetalTextureUsage(attributes.usages, attributes.format);
 #if TARGET_OS_SIMULATOR
     // the simulator's Metal implementation rejects shared-storage textures; every texture
     // stays private and uploads go through a staging blit (see UploadStaged)

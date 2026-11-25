@@ -7,6 +7,8 @@ namespace sparkle
 {
 static ConfigValue<std::string> config_denoiser("denoiser", "gpu path-tracer denoiser: off, auto, nrd, or metalfx",
                                                 "denoiser", Enum2Str<DenoiserProvider::Off>(), true);
+static ConfigValue<std::string> config_upscaler("upscaler", "gpu path-tracer upscaler: off, auto, fsr, or metalfx",
+                                                "denoiser", Enum2Str<UpscalerProvider::Off>(), true);
 static ConfigValue<bool> config_nrd_radiance_fp16(
     "nrd_radiance_fp16", "RGBA16F shared noisy-radiance inputs (half the bandwidth; init-time)", "denoiser", true);
 static ConfigValue<bool> config_metalfx_sync_init(
@@ -23,6 +25,7 @@ DenoiserConfig &DenoiserConfig::Get()
 void DenoiserConfig::Init()
 {
     ConfigCollectionHelper::RegisterConfig(this, config_denoiser, provider);
+    ConfigCollectionHelper::RegisterConfig(this, config_upscaler, upscaler);
     ConfigCollectionHelper::RegisterConfig(this, config_nrd_radiance_fp16, radiance_fp16);
     ConfigCollectionHelper::RegisterConfig(this, config_metalfx_sync_init, metalfx_sync_init);
 }

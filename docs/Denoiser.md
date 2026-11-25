@@ -1,12 +1,25 @@
 # Path-Tracing Denoisers
 
-The gpu path tracer can denoise its frame with NVIDIA NRD (ReBLUR) or Apple's MetalFX temporal denoised scaler, behind the provider-neutral `Denoiser` interface. `--denoiser auto` prefers MetalFX where the platform and device support it, then NRD. A provider that fails falls back to NRD, then to the plain progressive accumulator; providers are never chained.
+The gpu path tracer can denoise its frame with NVIDIA NRD (ReBLUR) or Apple's MetalFX temporal denoised scaler, behind the provider-neutral `Denoiser` interface, and upscale it to output resolution with AMD FSR 3.1, behind the `Upscaler` interface. `--denoiser auto` prefers MetalFX where the platform and device support it, then NRD. A provider that fails falls back to NRD, then to the plain progressive accumulator.
+
+## Reconstruction Providers
+
+A provider that denoises and upscales in one step (MetalFX) is integrated: it serves both stages, so naming it in either `denoiser` or `upscaler` selects it for both. Otherwise the stages are split: a denoiser at scene resolution, then an upscaler from scene to output resolution. [PlanReconstruction](../libraries/include/renderer/denoiser/Reconstruction.h) turns the two settings into the providers to try:
+
+* MetalFX is tried first when either setting names `metalfx`, or when `denoiser` is `auto` and `upscaler` is not `fsr`.
+* The split stages are NRD when `denoiser` is not `off`, and FSR when `upscaler` is not `off`. They also serve as MetalFX's fallback.
+* A split upscaler runs only when `render_scale` < 1. At native resolution there is nothing to upscale.
+* Each split stage falls back on its own: an unavailable denoiser leaves the upscaler on the accumulator, and an unavailable upscaler leaves tone mapping to upsample.
+* While a split upscaler follows a denoiser, the path tracer jitters every sample and the primary-hit guides of a frame by one sub-pixel offset from a Halton(2, 3) sequence ([ComputeJitter](../libraries/include/renderer/denoiser/Reconstruction.h)), whose period grows with the square of the upscale factor. The accumulator averages the jitter out over frames, so it still converges to an anti-aliased image. Without a denoiser the upscaler reads the accumulator and nothing is jittered.
+* The denoiser passes the jitter through and leaves temporal stabilization to the upscaler, so NRD's output-side moving average is off. The upscaler is told the jitter scaled by one minus the [handoff](#display-handoff) weight, because its input mixes the jittered denoiser output into the unjittered accumulator by that weight.
+* The upscaler keeps running after the handoff, fed the accumulator: the converged frame is FSR's temporal output of the converged accumulator.
 
 ## Settings
 
 | cvar                | default | effect                                                                                                                                        |
 | ------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `denoiser`          | `off`   | `off`, `auto`, `nrd` or `metalfx`                                                                                                             |
+| `upscaler`          | `off`   | `off`, `auto`, `fsr` or `metalfx`; a split upscaler needs `render_scale` < 1                                                                  |
 | `nrd_radiance_fp16` | true    | RGBA16F noisy-radiance inputs for every provider, half the bandwidth of RGBA32F; turn off to rule out quantization. Needs renderer recreation |
 | `nrd_stabilization` | true    | ReBLUR's temporal stabilization pass; off saves one full-resolution pass at the cost of noisier motion                                        |
 | `nrd_debug`         | `None`  | NRD channel to visualize instead of the frame                                                                                                 |
@@ -21,19 +34,20 @@ ray_trace.cs.slang         noisy radiance plus noise-free primary-hit auxiliary 
         |
 PathTracingDenoiserInputs  owns the six input textures, allocated only while a provider needs them
         |
-GPURenderer                selects and keeps the effective Denoiser provider
+GPURenderer                selects and keeps the effective providers
         +-- NrdDenoiser       nrd_pack -> ReBLUR -> nrd_resolve
+        |     +-- FsrUpscaler   depth preparation -> FSR 3.1 passes
         +-- MetalFxDenoiser   input preparation -> temporal denoised scaler -> resolve
         |
-ToneMappingPass            displays the provider's output, then screenshots, UI and present
+ToneMappingPass            displays the last provider's output, then screenshots, UI and present
 ```
 
-* Each provider owns its output, temporal history, intermediates and SDK objects, and adds its frame to the gpu renderer's [render graph](RenderGraph.md#renderers) as one External pass (`Denoiser::AddTo`). Its internal textures stay private to the pass and keep their own transitions.
-* Provider changes are frame-coherent: a new provider's output shows only in a frame whose trace wrote every input it needs. Turning the denoiser off returns to the accumulator immediately. A provider that cannot encode a frame adds no pass, shows the accumulator and stops being ready, so the next frame selects the fallback.
+* Each provider owns its output, temporal history, intermediates and SDK objects, and adds its frame to the gpu renderer's [render graph](RenderGraph.md#renderers) as one External pass (`Denoiser::AddTo`, `Upscaler::AddTo`). Its internal textures stay private to the pass and keep their own transitions.
+* Provider changes are frame-coherent: a new provider's output shows only in a frame whose trace wrote every input it needs. Turning every provider off returns to the accumulator immediately. A denoiser that cannot encode a frame adds no pass and shows the accumulator; any provider that fails stops being ready, so the next frame selects the fallback.
 * A resolution change resizes each provider in place (`Denoiser::Resize`) and restarts its history. A provider that cannot serve the new size, or failed to construct, is retried at the next resize.
-* Per-stage GPU times go through `PassTimingAggregator` and appear in the log under each provider's tag, e.g. `[NrdPerf]`.
+* NRD's and MetalFX's per-stage GPU times go through `PassTimingAggregator` and appear in the log under each provider's tag, e.g. `[NrdPerf]`. FSR's passes are not timed.
 
-Key files: [Denoiser](../libraries/include/renderer/denoiser/Denoiser.h), [DenoiserFactory](../libraries/include/renderer/denoiser/DenoiserFactory.h), [PathTracingDenoiserInputs](../libraries/include/renderer/resource/PathTracingDenoiserInputs.h).
+Key files: [Denoiser](../libraries/include/renderer/denoiser/Denoiser.h), [DenoiserFactory](../libraries/include/renderer/denoiser/DenoiserFactory.h), [Upscaler](../libraries/include/renderer/upscaler/Upscaler.h), [UpscalerFactory](../libraries/include/renderer/upscaler/UpscalerFactory.h), [ProviderCache](../libraries/include/renderer/denoiser/ProviderCache.h), [PathTracingDenoiserInputs](../libraries/include/renderer/resource/PathTracingDenoiserInputs.h).
 
 ## Display Handoff
 
@@ -78,6 +92,18 @@ MetalFX denoises and reconstructs to output resolution in one step, replacing NR
 * Scene changes reset its history; deforming-geometry motion is not supported. A render scale or resolution change recreates the scaler.
 * It is available only on the native Metal RHI, when the build SDK has the temporal denoised scaler API and the OS, device, input scale, formats and scaler creation pass the RHI's checks. It is unavailable on the iOS Simulator.
 
+## FSR
+
+FSR 3.1 upscales a split denoiser's output, or the accumulator without one, from scene to output resolution. AMD's host code ([thirdparty/FidelityFX](../thirdparty/FidelityFX/README.md)) drives it through [FfxBackend](../libraries/include/renderer/upscaler/FfxBackend.h), which executes FidelityFX effects with the engine's RHI, so one implementation serves Vulkan and Metal. Only the Vulkan path runs in CI.
+
+* The passes compile in the engine's shader build from AMD's HLSL ([shaders/fsr/](../shaders/fsr/)), once each, with the options in [fsr3upscaler.h.slang](../shaders/include/fsr3upscaler.h.slang): HDR color, render-resolution motion vectors without jitter, depth that grows away from the camera, 32-bit math, and a luma pyramid that synchronizes through groupshared memory. The context flags and the device capabilities FfxBackend reports select exactly that permutation; a pass asking for another fails context creation. Sharpening, reactive mask generation and the debug view are not compiled.
+* Each pass's resource table lists every resource its HLSL declares, and `-preserve-params` keeps them all in the compiled shader, so the bindings stay dense. FfxBackend reports the tables' names to FSR, which matches its resources to them.
+* FfxBackend creates FSR's resources as RHI images. A format the RHI lacks (8-bit single and dual channel, 16-bit snorm, packed 11-11-10, two-channel 32-bit) becomes the closest wider float format. Every job transitions the images it touches to the layout of that use, and clears run as compute dispatches.
+* The inputs are the color, device depth that `fsr_prepare_depth` derives from the guides' view distance, and the guides' motion vectors, which run from the current to the previous position in uv; sky pixels carry the motion of camera rotation alone. FSR places a pixel's sample at its center minus the jitter, so it receives the jitter negated.
+* A resolution or render scale change recreates the FSR context, which restarts its history.
+
+Key files: [FsrUpscaler](../libraries/include/renderer/upscaler/FsrUpscaler.h), [FfxBackend](../libraries/include/renderer/upscaler/FfxBackend.h).
+
 ## Tests
 
 No CI runner has hardware ray tracing ([CI.md](CI.md#hosted-runner-quirks)), so these run locally before pushing a denoiser change.
@@ -85,4 +111,5 @@ No CI runner has hardware ray tracing ([CI.md](CI.md#hosted-runner-quirks)), so 
 * [tests/denoiser/run_denoiser_gates.py](../tests/denoiser/run_denoiser_gates.py) runs the gates in one command: converged flicker, fireflies, and motion noise on yaw and pitch. Every gate takes `--denoiser nrd|metalfx` (default `nrd`).
 * [tests/denoiser/denoiser_compare.py](../tests/denoiser/denoiser_compare.py) renders a side-by-side provider table (static noise, flicker and FLIP against a converged reference, motion noise, per-frame cost); `--render_scale` covers reconstruction.
 * The scripts require the `effective pipeline: Gpu` log marker, because a GPU without ray tracing falls back to forward and still exits 0. Motion gates require pairwise distinct captures, so a frozen or black sequence cannot pass.
-* `nrd_probe` checks that every ReBLUR pipeline compiles through `MetalNrdBackend`; `denoiser_handoff` checks the handoff schedule as pure arithmetic, so it runs on every triplet.
+* `nrd_probe` checks that every ReBLUR pipeline compiles through `MetalNrdBackend`; `denoiser_handoff` checks the handoff schedule and `reconstruction_plan` the provider pairing and jitter sequence as pure logic, so they run on every triplet.
+* `gpu_nrd_fsr_sync_validation` runs NRD followed by FSR under synchronization validation on the software Vulkan runner. It proves the split path encodes cleanly, not that its image is good: judge FSR's quality locally, e.g. `--denoiser nrd --upscaler fsr --render_scale 0.5`.

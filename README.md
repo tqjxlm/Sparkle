@@ -12,7 +12,7 @@ It is an experimental demo which aims to be simple and modern, rather than being
 
 ### Now Implemented
 
-* four rendering pipelines, selected with `--pipeline`: `cpu` and `gpu` path tracers (the gpu one on ray-tracing hardware, with bindless resources and NRD or MetalFX denoising), and `forward` and `deferred` rasterizers
+* four rendering pipelines, selected with `--pipeline`: `cpu` and `gpu` path tracers (the gpu one on ray-tracing hardware, with bindless resources, NRD or MetalFX denoising and FSR upscaling), and `forward` and `deferred` rasterizers
 * a render graph that derives barriers, render pass merging and tile-memory use from declared pass accesses
 * RHI layer supporting Vulkan and Metal
 * shader cross compilation from Slang
