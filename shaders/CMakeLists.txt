@@ -36,6 +36,7 @@ file(GLOB_RECURSE SLANG_INCLUDE_FILES CONFIGURE_DEPENDS
 
 # the FSR 3.1 upscaler passes (shaders/fsr) compile AMD's HLSL. for SPIR-V, -preserve-params keeps every resource it
 # declares, so the bindings stay dense and match the passes' resource tables even where an option leaves one unused.
+# it needs -O0: slang's SPIR-V optimizer strips unused resources regardless, and the driver optimizes the shaders anyway.
 # Metal binds by name and needs no density, and slangc crashes on -preserve-params for the metal target.
 set(FFX_SHADER_DIRECTORY ${CMAKE_SOURCE_DIR}/thirdparty/FidelityFX)
 file(GLOB_RECURSE FFX_SHADER_FILES CONFIGURE_DEPENDS
@@ -57,7 +58,7 @@ macro(get_shader_directory_flags SUB_PATH_NAME)
         set(SLANG_DIRECTORY_SPIRV_FLAGS -capability spvRayQueryKHR)
     elseif ("${SUB_PATH_NAME}" STREQUAL "fsr")
         set(SLANG_DIRECTORY_FLAGS ${FFX_SLANGC_FLAGS})
-        set(SLANG_DIRECTORY_SPIRV_FLAGS -preserve-params)
+        set(SLANG_DIRECTORY_SPIRV_FLAGS -preserve-params -O0)
         set(SLANG_DIRECTORY_DEPENDS ${FFX_SHADER_FILES})
     endif()
 endmacro()
