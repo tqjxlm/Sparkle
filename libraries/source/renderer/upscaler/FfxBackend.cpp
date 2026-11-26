@@ -57,7 +57,7 @@ class FfxClearUintShader : public RHIShaderInfo
 
 const Vector3UInt ClearThreadGroupSize{8u, 8u, 1u};
 
-// the RHI has no 8-bit single and dual channel, 16-bit snorm, packed 11-11-10 or two-channel 32-bit formats; those
+// the RHI has no 8-bit dual channel, 16-bit snorm, packed 11-11-10 or two-channel 32-bit formats; those
 // resources use the closest wider float format, which holds every value they would
 PixelFormat ToPixelFormat(uint32_t format)
 {
@@ -74,8 +74,9 @@ PixelFormat ToPixelFormat(uint32_t format)
         return PixelFormat::RGFloat16;
     case FFX_API_SURFACE_FORMAT_R16_FLOAT:
     case FFX_API_SURFACE_FORMAT_R16_SNORM:
-    case FFX_API_SURFACE_FORMAT_R8_UNORM:
         return PixelFormat::R16Float;
+    case FFX_API_SURFACE_FORMAT_R8_UNORM:
+        return PixelFormat::R8Unorm;
     case FFX_API_SURFACE_FORMAT_R32_FLOAT:
         return PixelFormat::R32Float;
     case FFX_API_SURFACE_FORMAT_R32_UINT:
@@ -101,6 +102,8 @@ uint32_t ToFfxFormat(PixelFormat format)
         return FFX_API_SURFACE_FORMAT_R16G16_FLOAT;
     case PixelFormat::R16Float:
         return FFX_API_SURFACE_FORMAT_R16_FLOAT;
+    case PixelFormat::R8Unorm:
+        return FFX_API_SURFACE_FORMAT_R8_UNORM;
     case PixelFormat::R32Float:
         return FFX_API_SURFACE_FORMAT_R32_FLOAT;
     case PixelFormat::R32UInt:
@@ -120,9 +123,6 @@ Vector4 DecodeTexel(uint32_t format, const uint8_t *texel)
     Vector4 value = Vector4::Zero();
     switch (format)
     {
-    case FFX_API_SURFACE_FORMAT_R8_UNORM:
-        value.x() = static_cast<float>(texel[0]) / 255.f;
-        break;
     case FFX_API_SURFACE_FORMAT_R8G8_UNORM:
         value.x() = static_cast<float>(texel[0]) / 255.f;
         value.y() = static_cast<float>(texel[1]) / 255.f;

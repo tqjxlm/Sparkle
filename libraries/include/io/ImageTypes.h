@@ -29,6 +29,7 @@ enum class PixelFormat : uint8_t
     RGFloat16,
     BC6HUfloat,
     ASTC4x4HDR,
+    R8Unorm,
     Count
 };
 
@@ -118,6 +119,7 @@ constexpr unsigned GetFormatChannelCount(PixelFormat format)
     case PixelFormat::R32UInt:
     case PixelFormat::R32Float:
     case PixelFormat::R16Float:
+    case PixelFormat::R8Unorm:
         return 1;
     case PixelFormat::RGFloat16:
         return 2;
@@ -145,6 +147,8 @@ constexpr unsigned GetPixelSize(PixelFormat format)
         return sizeof(uint32_t);
     case PixelFormat::R16Float:
         return sizeof(Half);
+    case PixelFormat::R8Unorm:
+        return sizeof(uint8_t);
     case PixelFormat::RGFloat16:
         return sizeof(Half) * 2;
     case PixelFormat::RGBAFloat:
@@ -200,6 +204,7 @@ constexpr bool IsSRGBFormat(PixelFormat pixel_format)
     case PixelFormat::R32UInt:
     case PixelFormat::R32Float:
     case PixelFormat::R16Float:
+    case PixelFormat::R8Unorm:
     case PixelFormat::RGFloat16:
     case PixelFormat::RGBAUInt32:
     case PixelFormat::ASTC4x4Unorm:
@@ -233,6 +238,7 @@ constexpr bool IsSwizzeldFormat(PixelFormat pixel_format)
     case PixelFormat::R32UInt:
     case PixelFormat::R32Float:
     case PixelFormat::R16Float:
+    case PixelFormat::R8Unorm:
     case PixelFormat::RGFloat16:
     case PixelFormat::RGBAUInt32:
     case PixelFormat::ASTC4x4Srgb:
