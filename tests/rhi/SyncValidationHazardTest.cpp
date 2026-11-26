@@ -13,8 +13,8 @@
 namespace sparkle
 {
 // proves the synchronization gate can fail: two copies into one buffer with no barrier between them are a
-// write-after-write hazard, which synchronization validation must report. the case accepts exactly the errors it
-// provoked, so any other validation error still fails it.
+// write-after-write hazard, which synchronization validation must report. the case accepts exactly the issues it
+// provoked, so any other validation issue still fails it.
 class SyncValidationHazardTest : public TestCase
 {
 public:
@@ -37,15 +37,15 @@ public:
             return Result::Fail;
         }
 
-        Log(Info, "the unsynchronized write-after-write was reported ({} error(s))", provoked);
-        AcceptValidationErrors(provoked);
+        Log(Info, "the unsynchronized write-after-write was reported ({} issue(s))", provoked);
+        AcceptValidationIssues(provoked);
         return Result::Pass;
     }
 
 private:
     static constexpr size_t BufferSize = 256;
 
-    // two raw copies into one buffer, with no barrier between them. returns the validation errors they raised
+    // two raw copies into one buffer, with no barrier between them. returns the validation issues they raised
     static unsigned RecordHazard(RHIContext *rhi)
     {
         auto source =
@@ -60,7 +60,7 @@ private:
                                               .is_dynamic = false},
                                              "SyncValidationHazardDestination");
 
-        const auto errors_before = rhi->GetValidationErrorCount().value_or(0);
+        const auto issues_before = rhi->GetValidationIssueCount().value_or(0);
 
         auto *command_buffer = static_cast<VulkanCommandContext &>(rhi->BeginCommandBuffer()).GetCommandBuffer();
         const VkBufferCopy region{.srcOffset = 0, .dstOffset = 0, .size = BufferSize};
@@ -71,7 +71,7 @@ private:
         }
         rhi->SubmitCommandBuffer();
 
-        return rhi->GetValidationErrorCount().value_or(0) - errors_before;
+        return rhi->GetValidationIssueCount().value_or(0) - issues_before;
     }
 };
 

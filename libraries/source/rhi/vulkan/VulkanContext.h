@@ -145,14 +145,14 @@ public:
         return timestamp_valid_bits_;
     }
 
-    // see RHIContext::GetValidationErrorCount
-    [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const
+    // see RHIContext::GetValidationIssueCount
+    [[nodiscard]] std::optional<unsigned> GetValidationIssueCount() const
     {
         if (!enable_validation_)
         {
             return std::nullopt;
         }
-        return validation_error_count_.load(std::memory_order_relaxed);
+        return validation_issue_count_.load(std::memory_order_relaxed);
     }
 
     // see RHIContext::IsSyncValidationActive
@@ -261,7 +261,7 @@ private:
     bool enable_validation_ = false;
     bool enable_sync_validation_ = false;
     // the messenger callback runs on whichever thread made the reported call
-    std::atomic<unsigned> validation_error_count_ = 0;
+    std::atomic<unsigned> validation_issue_count_ = 0;
     bool supports_debug_utils_ = false;
 
     bool enable_ray_tracing_ = false;

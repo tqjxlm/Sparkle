@@ -71,7 +71,7 @@ public:
 
     bool SupportsLinearFiltering(PixelFormat format) override;
 
-    [[nodiscard]] std::optional<unsigned> GetValidationErrorCount() const override;
+    [[nodiscard]] std::optional<unsigned> GetValidationIssueCount() const override;
 
     [[nodiscard]] bool IsSyncValidationActive() const override;
 
