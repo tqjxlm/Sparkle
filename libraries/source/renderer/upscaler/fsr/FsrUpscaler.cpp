@@ -1,7 +1,7 @@
-#include "renderer/upscaler/FsrUpscaler.h"
+#include "renderer/upscaler/fsr/FsrUpscaler.h"
 
 #include "core/Logger.h"
-#include "renderer/upscaler/FfxBackend.h"
+#include "renderer/upscaler/fsr/FfxBackend.h"
 #include "rhi/RHI.h"
 #include "rhi/RHIBuffer.h"
 #include "rhi/RHIComputePass.h"
@@ -182,7 +182,7 @@ class Fsr3UpscalerAccumulateShader : public RHIShaderInfo
 
 namespace
 {
-// the engine compiles each pass once, with the options of shaders/include/fsr3upscaler.h.slang. the context flags and
+// the engine compiles each pass once, with the options of shaders/fsr/fsr3upscaler.h.slang. the context flags and
 // device capabilities FfxBackend reports select exactly that permutation
 constexpr uint32_t ContextFlags = FFX_FSR3UPSCALER_ENABLE_HIGH_DYNAMIC_RANGE;
 constexpr uint32_t CompiledPermutation =

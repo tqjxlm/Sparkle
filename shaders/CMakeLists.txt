@@ -29,6 +29,11 @@ file(GLOB_RECURSE SLANG_SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.vs.slang"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cs.slang"
 )
+if (NOT ENABLE_FSR)
+    list(FILTER SLANG_SOURCE_FILES EXCLUDE REGEX "/fsr/")
+    # the output directory outlives configurations, and the package copies all of it
+    file(REMOVE_RECURSE "${OUTPUT_SHADER_DIRECTORY}/fsr")
+endif()
 
 file(GLOB_RECURSE SLANG_INCLUDE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h.slang"
@@ -43,6 +48,7 @@ file(GLOB_RECURSE FFX_SHADER_FILES CONFIGURE_DEPENDS
     "${FFX_SHADER_DIRECTORY}/api/internal/gpu/*.h"
     "${FFX_SHADER_DIRECTORY}/upscalers/fsr3/include/gpu/*.h"
     "${FFX_SHADER_DIRECTORY}/*.hlsl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fsr/*.h.slang"
 )
 set(FFX_SLANGC_FLAGS -I ${FFX_SHADER_DIRECTORY}/upscalers/fsr3/internal/shaders
     -I ${FFX_SHADER_DIRECTORY}/upscalers/fsr3/include/gpu)

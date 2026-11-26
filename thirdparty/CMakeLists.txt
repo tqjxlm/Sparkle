@@ -328,27 +328,29 @@ target_include_directories(sparkle_thirdparty SYSTEM PUBLIC NRD/Include)
 
 # AMD's host code for the FSR 3.1 upscaler; the engine's FfxBackend executes it and its shaders are compiled with the
 # engine's (shaders/fsr). See FidelityFX/README.md for the vendored subset and its local changes.
-add_library(FidelityFX STATIC
-    FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
-    FidelityFX/api/internal/ffx_object_management.cpp
-    FidelityFX/api/internal/ffx_assert.cpp
-    FidelityFX/api/internal/ffx_message.cpp
-)
-target_include_directories(FidelityFX SYSTEM PUBLIC
-    FidelityFX/api/include
-    FidelityFX/api/internal
-    FidelityFX/upscalers/fsr3/include
-    FidelityFX/upscalers/fsr3/internal
-)
-target_include_directories(FidelityFX PRIVATE FidelityFX/sparkle)
-if(MSVC)
-    target_compile_options(FidelityFX PRIVATE /FI${CMAKE_CURRENT_SOURCE_DIR}/FidelityFX/sparkle/ffx_compat.h)
-else()
-    target_compile_options(FidelityFX PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/FidelityFX/sparkle/ffx_compat.h)
+if(ENABLE_FSR)
+    add_library(FidelityFX STATIC
+        FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
+        FidelityFX/api/internal/ffx_object_management.cpp
+        FidelityFX/api/internal/ffx_assert.cpp
+        FidelityFX/api/internal/ffx_message.cpp
+    )
+    target_include_directories(FidelityFX SYSTEM PUBLIC
+        FidelityFX/api/include
+        FidelityFX/api/internal
+        FidelityFX/upscalers/fsr3/include
+        FidelityFX/upscalers/fsr3/internal
+    )
+    target_include_directories(FidelityFX PRIVATE FidelityFX/sparkle)
+    if(MSVC)
+        target_compile_options(FidelityFX PRIVATE /FI${CMAKE_CURRENT_SOURCE_DIR}/FidelityFX/sparkle/ffx_compat.h)
+    else()
+        target_compile_options(FidelityFX PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/FidelityFX/sparkle/ffx_compat.h)
+    endif()
+    set_target_properties(FidelityFX PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    suppress_warnings(FidelityFX)
+    target_link_libraries(sparkle_thirdparty PUBLIC FidelityFX)
 endif()
-set_target_properties(FidelityFX PROPERTIES POSITION_INDEPENDENT_CODE ON)
-suppress_warnings(FidelityFX)
-target_link_libraries(sparkle_thirdparty PUBLIC FidelityFX)
 
 # ------------------ finalize ------------------
 

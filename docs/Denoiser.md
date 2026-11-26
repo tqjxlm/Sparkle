@@ -94,16 +94,18 @@ MetalFX denoises and reconstructs to output resolution in one step, replacing NR
 
 ## FSR
 
-FSR 3.1 upscales a split denoiser's output, or the accumulator without one, from scene to output resolution. AMD's host code ([thirdparty/FidelityFX](../thirdparty/FidelityFX/README.md)) drives it through [FfxBackend](../libraries/include/renderer/upscaler/FfxBackend.h), which executes FidelityFX effects with the engine's RHI, so one implementation serves Vulkan and Metal. Only the Vulkan path runs in CI.
+FSR 3.1 upscales a split denoiser's output, or the accumulator without one, from scene to output resolution. AMD's host code ([thirdparty/FidelityFX](../thirdparty/FidelityFX/README.md)) drives it through [FfxBackend](../libraries/include/renderer/upscaler/fsr/FfxBackend.h), which executes FidelityFX effects with the engine's RHI, so one implementation serves Vulkan and Metal. Only the Vulkan path runs in CI.
 
-* The passes compile in the engine's shader build from AMD's HLSL ([shaders/fsr/](../shaders/fsr/)), once each, with the options in [fsr3upscaler.h.slang](../shaders/include/fsr3upscaler.h.slang): HDR color, render-resolution motion vectors without jitter, depth that grows away from the camera, 32-bit math, and a luma pyramid that synchronizes through groupshared memory. The context flags and the device capabilities FfxBackend reports select exactly that permutation; a pass asking for another fails context creation. Sharpening, reactive mask generation and the debug view are not compiled.
+FSR is optional: it is built by default, and `build.py --strip_fsr` (CMake `ENABLE_FSR=OFF`) leaves out FidelityFX, the FSR sources under `renderer/upscaler/fsr/` and the passes in `shaders/fsr/`. Without it, a split upscaler (`upscaler fsr`, or `auto` where MetalFX does not serve) logs that FSR is not part of the build and the frame is not upscaled; the FSR test cases need a build that includes it.
+
+* The passes compile in the engine's shader build from AMD's HLSL ([shaders/fsr/](../shaders/fsr/)), once each, with the options in [fsr3upscaler.h.slang](../shaders/fsr/fsr3upscaler.h.slang): HDR color, render-resolution motion vectors without jitter, depth that grows away from the camera, 32-bit math, and a luma pyramid that synchronizes through groupshared memory. The context flags and the device capabilities FfxBackend reports select exactly that permutation; a pass asking for another fails context creation. Sharpening, reactive mask generation and the debug view are not compiled.
 * Each pass's resource table lists every resource its HLSL declares. For SPIR-V, `-preserve-params` with `-O0` keeps them all in the compiled shader, so the bindings stay dense (slang's SPIR-V optimizer strips unused resources despite the flag); Metal binds by name and needs no density, and slangc crashes on that flag for the metal target. FfxBackend reports the tables' names to FSR, which matches its resources to them.
 * On Metal, a kernel takes at most 8 read_write textures, and the passes' texture atomics need MSL 3.1 and an Apple6 GPU. AMD's luma pyramid pass binds all six SPD mips but touches only the last one, so [its entry](../shaders/fsr/fsr3upscaler_luma_pyramid.cs.slang) replaces AMD's pass file and declares mip 5 alone; slang would otherwise keep the five unreachable ones.
 * FfxBackend creates FSR's resources as RHI images. A format the RHI lacks (8-bit dual channel, 16-bit snorm, packed 11-11-10, two-channel 32-bit) becomes the closest wider float format. Every job transitions the images it touches to the layout of that use, and clears run as compute dispatches.
 * The inputs are the color, device depth that `fsr_prepare_depth` derives from the guides' view distance, and the guides' motion vectors, which run from the current to the previous position in uv; sky pixels carry the motion of camera rotation alone. FSR places a pixel's sample at its center minus the jitter, so it receives the jitter negated.
 * A resolution or render scale change recreates the FSR context, which restarts its history.
 
-Key files: [FsrUpscaler](../libraries/include/renderer/upscaler/FsrUpscaler.h), [FfxBackend](../libraries/include/renderer/upscaler/FfxBackend.h).
+Key files: [FsrUpscaler](../libraries/include/renderer/upscaler/fsr/FsrUpscaler.h), [FfxBackend](../libraries/include/renderer/upscaler/fsr/FfxBackend.h).
 
 ## Tests
 

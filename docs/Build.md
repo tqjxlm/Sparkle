@@ -123,6 +123,7 @@ The build finds prerequisites on its own and installs the ones it can. Point it 
 * `--profile`: enable the Tracy client. Connect with the [Tracy](https://github.com/wolfpld/tracy/releases) GUI of the same release as `thirdparty/tracy`; other releases refuse the connection.
 * `--asan`: enable AddressSanitizer.
 * `--strip_test`: compile out TestCase support (see [Test.md](Test.md)).
+* `--strip_fsr`: leave out the AMD FSR 3.1 upscaler (see [Denoiser.md](Denoiser.md#fsr)).
 * `--apple_auto_sign`: automatic code signing for Apple platforms; needs `APPLE_DEVELOPER_TEAM_ID` ([how to find it](https://developer.apple.com/help/account/manage-your-team/locate-your-team-id/)).
 * `--ios_platform=<device|simulator>`: `simulator` builds an unsigned package for the host's iOS Simulator; switching resets the iOS project and output trees.
 * `--android_abi=<arm64-v8a|x86_64>`: `x86_64` builds for emulators on x86 hosts.

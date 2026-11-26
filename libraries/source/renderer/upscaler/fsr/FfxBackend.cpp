@@ -1,4 +1,4 @@
-#include "renderer/upscaler/FfxBackend.h"
+#include "renderer/upscaler/fsr/FfxBackend.h"
 
 #include "core/Logger.h"
 #include "rhi/RHI.h"
@@ -252,7 +252,7 @@ FfxBackend::FfxBackend(RHIContext *rhi) : rhi_(rhi), resources_(1)
         return FFX_OK;
     };
     interface_.fpDestroyBackendContext = [](FfxInterface *, FfxUInt32) -> FfxErrorCode { return FFX_OK; };
-    // 32-wide waves without 16-bit math select the passes the engine compiles (shaders/include/fsr3upscaler.h.slang)
+    // 32-wide waves without 16-bit math select the passes the engine compiles (shaders/fsr/fsr3upscaler.h.slang)
     interface_.fpGetDeviceCapabilities = [](FfxInterface *, FfxDeviceCapabilities *capabilities) -> FfxErrorCode {
         *capabilities = {};
         capabilities->maximumSupportedShaderModel = FFX_SHADER_MODEL_6_0;
