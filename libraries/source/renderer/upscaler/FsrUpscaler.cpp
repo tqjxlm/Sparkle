@@ -57,11 +57,6 @@ class Fsr3UpscalerLumaPyramidShader : public RHIShaderInfo
     USE_SHADER_RESOURCE(rw_farthest_depth_mip1, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(r_current_luma, RHIShaderResourceReflection::ResourceType::Texture2D)
     USE_SHADER_RESOURCE(rw_frame_info, RHIShaderResourceReflection::ResourceType::StorageImage2D)
-    USE_SHADER_RESOURCE(rw_spd_mip0, RHIShaderResourceReflection::ResourceType::StorageImage2D)
-    USE_SHADER_RESOURCE(rw_spd_mip1, RHIShaderResourceReflection::ResourceType::StorageImage2D)
-    USE_SHADER_RESOURCE(rw_spd_mip2, RHIShaderResourceReflection::ResourceType::StorageImage2D)
-    USE_SHADER_RESOURCE(rw_spd_mip3, RHIShaderResourceReflection::ResourceType::StorageImage2D)
-    USE_SHADER_RESOURCE(rw_spd_mip4, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(rw_spd_mip5, RHIShaderResourceReflection::ResourceType::StorageImage2D)
     USE_SHADER_RESOURCE(rw_spd_global_atomic, RHIShaderResourceReflection::ResourceType::StorageImage2D)
 
