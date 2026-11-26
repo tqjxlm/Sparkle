@@ -54,10 +54,10 @@ protected:
     void EnforceConfig(const std::string &config_name, float value) const;
     void EnforceConfig(const std::string &config_name, const std::string &value) const;
 
-    // Lets `count` more validation errors pass; for tests that provoke them on purpose.
-    void AcceptValidationErrors(unsigned count)
+    // Lets `count` more validation issues pass; for tests that provoke them on purpose.
+    void AcceptValidationIssues(unsigned count)
     {
-        accepted_validation_errors_ += count;
+        accepted_validation_issues_ += count;
     }
 
     // Logs `what` as passed or failed; a failure is remembered for HasFailed(). Callable from any thread.
@@ -79,7 +79,7 @@ private:
     }
 
     std::string name_;
-    unsigned accepted_validation_errors_ = 0;
+    unsigned accepted_validation_issues_ = 0;
     std::atomic<bool> failed_{false};
 };
 

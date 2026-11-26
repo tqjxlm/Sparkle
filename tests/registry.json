@@ -193,21 +193,21 @@
     {
         "name": "forward_sync_validation",
         "test_case": "screenshot",
-        "description": "Forward still frame under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case.",
+        "description": "Forward still frame under the Vulkan validation layer with synchronization validation; any validation error or warning, or a missing layer, fails the case.",
         "app_args": ["--pipeline", "forward", "--validation", "true", "--validate_sync", "true"],
         "scene_args": ["--scene", "{scene}"]
     },
     {
         "name": "deferred_sync_validation",
         "test_case": "screenshot",
-        "description": "Deferred still frame under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case.",
+        "description": "Deferred still frame under the Vulkan validation layer with synchronization validation; any validation error or warning, or a missing layer, fails the case.",
         "app_args": ["--pipeline", "deferred", "--validation", "true", "--validate_sync", "true"],
         "scene_args": ["--scene", "{scene}"]
     },
     {
         "name": "gpu_sync_validation",
         "test_case": "screenshot",
-        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward, which the evaluator rejects.",
+        "description": "A few path-traced samples under the Vulkan validation layer with synchronization validation; any validation error or warning, or a missing layer, fails the case. Without ray query support the pipeline falls back to forward, which the evaluator rejects.",
         "app_args": ["--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
@@ -216,9 +216,20 @@
         }
     },
     {
+        "name": "gpu_nrd_fsr_sync_validation",
+        "test_case": "screenshot",
+        "description": "The split reconstruction path under the Vulkan validation layer with synchronization validation: NRD denoises jittered path-traced samples at render_scale 0.5 and FSR upscales them to the output, every frame up to the screenshot. Any validation error or warning, an FSR that never became ready or a failed FSR dispatch fails the case.",
+        "app_args": ["--pipeline", "gpu", "--width", "640", "--height", "360", "--render_scale", "0.5", "--max_spp", "8", "--denoiser", "nrd", "--upscaler", "fsr", "--validation", "true", "--validate_sync", "true"],
+        "scene_args": ["--scene", "{scene}"],
+        "evaluator": {
+            "script": "tests/rendering/effective_pipeline_test.py",
+            "args": ["--framework", "{framework}", "--pipeline", "Gpu", "--present", "FSR: upscaler ready", "--absent", "FSR: dispatch failed"]
+        }
+    },
+    {
         "name": "gpu_primitive_move_sync_validation",
         "test_case": "primitive_move",
-        "description": "Moves one mesh under the gpu pipeline with synchronization validation, so the acceleration structure refit and its instance update run under the layer; any validation error, or a missing layer, fails the case, and the evaluator requires a visible difference.",
+        "description": "Moves one mesh under the gpu pipeline with synchronization validation, so the acceleration structure refit and its instance update run under the layer; any validation error or warning, or a missing layer, fails the case, and the evaluator requires a visible difference.",
         "app_args": ["--clear_screenshots", "true", "--pipeline", "gpu", "--max_spp", "4", "--validation", "true", "--validate_sync", "true"],
         "scene_args": ["--scene", "{scene}"],
         "evaluator": {
@@ -229,7 +240,7 @@
     {
         "name": "cpu_sync_validation",
         "test_case": "screenshot",
-        "description": "One cpu path-traced sample under the Vulkan validation layer with synchronization validation, covering the cpu render graph's upload, screenshot readback and present; any validation error, or a missing layer, fails the case.",
+        "description": "One cpu path-traced sample under the Vulkan validation layer with synchronization validation, covering the cpu render graph's upload, screenshot readback and present; any validation error or warning, or a missing layer, fails the case.",
         "app_args": ["--pipeline", "cpu", "--max_spp", "1", "--width", "320", "--height", "180", "--validation", "true", "--validate_sync", "true"],
         "scene_args": ["--scene", "{scene}"]
     },
@@ -576,6 +587,11 @@
         "name": "denoiser_handoff",
         "test_case": "denoiser_handoff",
         "description": "The convergence handoff schedule shared by every denoising provider: window bounds, the linear ramp, the final-frame pin, and the opt-out below the window."
+    },
+    {
+        "name": "reconstruction_plan",
+        "test_case": "reconstruction_plan",
+        "description": "How the denoiser and upscaler settings pair into the providers the gpu path tracer tries (an integrated provider such as MetalFX serves both stages), and the Halton jitter sequence a split upscaler reconstructs from."
     },
     {
         "name": "denoiser_runtime_toggle",

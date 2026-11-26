@@ -217,7 +217,8 @@ def construct_additional_cmake_options(parsed_args, cmake_args=None):
     shader_debug_settings = "-DSHADER_DEBUG=ON" if parsed_args.shader_debug else "-DSHADER_DEBUG=OFF"
     asan_settings = "-DENABLE_ASAN=ON" if parsed_args.asan else "-DENABLE_ASAN=OFF"
     test_settings = "-DENABLE_TEST_CASES=OFF" if parsed_args.strip_test else "-DENABLE_TEST_CASES=ON"
-    cmake_options = [profile_settings, shader_debug_settings, asan_settings, test_settings]
+    fsr_settings = "-DENABLE_FSR=OFF" if parsed_args.strip_fsr else "-DENABLE_FSR=ON"
+    cmake_options = [profile_settings, shader_debug_settings, asan_settings, test_settings, fsr_settings]
 
     # Add additional CMake arguments if provided
     if cmake_args:
@@ -261,6 +262,8 @@ def parse_args(args=None):
                         help="Generate compile_commands.json for clangd")
     parser.add_argument("--strip_test", action="store_true",
                         help="Disable test case support (enabled by default)")
+    parser.add_argument("--strip_fsr", action="store_true",
+                        help="Leave out the AMD FSR 3.1 upscaler (built by default)")
     parser.add_argument("--clean", action="store_true",
                         help="Clean output directory before configure")
     parser.add_argument("--apple_auto_sign", action="store_true",

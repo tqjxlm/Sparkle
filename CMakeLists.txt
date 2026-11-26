@@ -17,6 +17,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(USE_GLFW "Use GLFW instead of the native window system" OFF)
 option(ENABLE_PROFILER "Build with profiler support" OFF)
 option(ENABLE_TEST_CASES "Build with test case support" ON)
+option(ENABLE_FSR "Build the AMD FSR 3.1 upscaler" ON)
 option(ENABLE_APPLE_AUTO_SIGN "Configure xcode project to manage signing automatically" OFF)
 option(ENABLE_LTO "Enable link time optimization for Release builds" OFF)
 
@@ -103,6 +104,14 @@ if(ENABLE_TEST_CASES)
     target_include_directories(sparkle PRIVATE "tests/")
 else()
     target_compile_definitions(sparkle PRIVATE ENABLE_TEST_CASES=0)
+endif()
+
+if(ENABLE_FSR)
+    target_compile_definitions(sparkle PRIVATE ENABLE_FSR=1)
+else()
+    target_compile_definitions(sparkle PRIVATE ENABLE_FSR=0)
+    list(FILTER HEADERS EXCLUDE REGEX "/renderer/upscaler/fsr/")
+    list(FILTER SOURCES EXCLUDE REGEX "/renderer/upscaler/fsr/")
 endif()
 
 # ------------------ git version stamp ------------------

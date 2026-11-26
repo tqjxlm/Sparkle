@@ -90,6 +90,7 @@ private:
     bool enabled_resources_failed_ = false;
     bool needs_inputs_ = true;
     bool reset_history_ = true;
+    bool upscaled_ = false;
     uint32_t frame_index_ = 0;
     uint32_t cumulated_samples_ = 0;
     uint32_t last_cumulated_samples_ = 0;
@@ -101,6 +102,8 @@ private:
     Mat4 projection_matrix_ = Mat4::Identity();
     Mat4 prev_view_matrix_ = Mat4::Identity();
     Mat4 prev_projection_matrix_ = Mat4::Identity();
+    Vector2 jitter_ = Vector2::Zero();
+    Vector2 prev_jitter_ = Vector2::Zero();
 
     RHIResourceRef<RHIImage> output_;
     RHIResourceRef<RHIImage> output_history_;

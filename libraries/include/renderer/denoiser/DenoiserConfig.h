@@ -14,6 +14,14 @@ enum class DenoiserProvider : uint8_t
     MetalFx
 };
 
+enum class UpscalerProvider : uint8_t
+{
+    Off,
+    Auto,
+    Fsr,
+    MetalFx
+};
+
 struct DenoiserConfig : public ConfigCollection
 {
     static DenoiserConfig &Get();
@@ -21,6 +29,7 @@ struct DenoiserConfig : public ConfigCollection
     void Init();
 
     DenoiserProvider provider = DenoiserProvider::Off;
+    UpscalerProvider upscaler = UpscalerProvider::Off;
     bool radiance_fp16 = true;
     bool metalfx_sync_init = false;
 

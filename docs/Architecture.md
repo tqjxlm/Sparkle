@@ -27,12 +27,13 @@ libraries/include/        engine headers, one directory per layer above
 libraries/source/         engine sources, plus platform/ for OS-specific code
 frameworks/source/        framework layer (apple/ is shared by macos and ios)
 shaders/                  Slang sources: standard/ raster, ray_trace/ path tracer, screen/ post and cook,
-                          utilities/ compute helpers, include/ shared headers, nrd/ the NRD shader cook
+                          utilities/ compute helpers, include/ shared headers, nrd/ the NRD shader cook,
+                          metalfx/ and fsr/ the MetalFX and FSR passes
 resources/                packaged assets (packed/) and default config
 tests/                    test cases, evaluators, registry.json and coverage.csv (see Test.md)
 dev/                      validation, CI generator and developer tools
 ide/                      IDE config templates
-thirdparty/               dependencies as git submodules
+thirdparty/               dependencies as git submodules, plus a vendored FidelityFX subset
 ```
 
 ## Key Entry Points

@@ -114,7 +114,7 @@ Every frame ends with the post chain (`PostChain`): the screen pass (`ToneMappin
 
 * **Forward:** `DirectionalShadow` | `BasePass` + `SkyBox` + `ToneMapping` + `Ui` | `Present`, with SceneColor and SceneDepth memoryless.
 * **Deferred:** `DirectionalShadow` | `GBuffer` + `Lighting` + `SkyBox` + `ToneMapping` + `Ui` | `Present`. Lighting reads the GBuffer and a depth copy pixel-locally (Metal cannot fetch depth, so `GBuffer` also writes the device depth to an `R32Float` DepthCopy slot), and GBufferPacked, DepthCopy, SceneDepth and SceneColor are memoryless: 32 B of color per pixel plus depth.
-* **GPU:** `ClearAccumulator` when the camera moved or the scene changed, `BuildTLAS` (Copy), `PathTrace` (Compute), one External pass per denoiser ([Denoiser.md](Denoiser.md)), then the post chain.
+* **GPU:** `ClearAccumulator` when the camera moved or the scene changed, `BuildTLAS` (Copy), `PathTrace` (Compute), one External pass per denoiser and upscaler ([Denoiser.md](Denoiser.md)), then the post chain.
 * **CPU:** an `Upload` Copy pass from the host-tone-mapped buffer into SceneColor, then the post chain.
 * **IBL cook:** while a map cooks on the GPU, `ImageBasedLighting::AddCookPasses` starts the Forward or Deferred graph with one cook step per map; `IblCookAccelerator` runs steps in graphs of their own. The GPU and CPU renderers never sample the IBL, so no map cooks under them; the first Forward or Deferred frame cooks it.
 
@@ -214,7 +214,7 @@ Scope:
 
 * Graph textures are single-sampled; transients are single-mip 2D textures; graph buffers support only copies and host reads (binding one is an error). Imports cover every other case.
 * Merging is greedy in declaration order. One non-raster pass between two raster passes splits them; a screenshot without UI does this on purpose (its readback sits between tone mapping and `Ui`).
-* External passes (the denoisers) never merge. Images internal to NRD and MetalFX are invisible to the graph and keep their own transitions.
+* External passes (the denoisers and upscalers) never merge. Images internal to NRD, MetalFX and FSR are invisible to the graph and keep their own transitions.
 * ImGui leaves its viewport and scissor set, so `Ui` must be the last member of its physical pass; it is, because `Present` attaches the back buffer at Screen's slot.
 * Metal 3 tracks hazards automatically: the plan and the tracked states are computed on Metal too, but barrier batches record nothing there.
 

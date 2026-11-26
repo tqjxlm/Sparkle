@@ -41,6 +41,9 @@ struct Camera
     uint write_gbuffer;
     uint sky_sampling_resolution;
     uint emissive_triangle_count;
+    // the frame's sub-pixel sample offset, in pixels: every sample and the primary-hit G-buffer use it when enabled
+    float2 jitter;
+    uint jitter_enabled;
 };
 
 [[vk::binding(1, 1)]] RWTexture2D<float4> imageData;
@@ -398,13 +401,22 @@ float2 EnvBRDFApprox(float NoV, float roughness)
     return float2(-1.04f, 1.04f) * a004 + r.zw;
 }
 
-// Trace a single noise-free primary ray (pixel center, no anti-aliasing jitter) and emit the
+// where a world position (w = 1) or direction (w = 0) projected last frame, minus this frame, in uv. Both endpoints use
+// the same projection of the same point, so a static camera yields exactly zero motion.
+float2 ScreenMotion(float4 location)
+{
+    float4 prev_clip = mul(prevViewProjection, location);
+    float4 cur_clip = mul(viewProjection, location);
+    return (prev_clip.xy / prev_clip.w - cur_clip.xy / cur_clip.w) * 0.5f;
+}
+
+// Trace a single noise-free primary ray (pixel center plus the frame's jitter) and emit the
 // primary-hit G-buffer. Separate from the noisy path integrator on purpose: the denoiser requires a
 // clean G-buffer.
 void WritePrimaryHitGBuffer(uint2 pixel)
 {
     float2 pixel_size = 1.f / (float2(camera.resolution) - 1);
-    float2 uv = (float2(pixel) + 0.5f) * pixel_size;
+    float2 uv = (float2(pixel) + 0.5f + jitter) * pixel_size;
     uv.y = 1.0f - uv.y;
 
     RayDesc ray_desc;
@@ -451,19 +463,17 @@ void WritePrimaryHitGBuffer(uint2 pixel)
         float3 front = normalize(cross(camera.max_v, camera.max_u));
         linear_z = dot(intersection.position - camera.position, front);
 
-        // screen-space motion vector: where this surface projected last frame, minus this frame.
-        // Both endpoints use the same projection of the same world point, so a static camera yields
-        // exactly zero motion (no per-frame reprojection drift / temporal blur).
-        float4 prev_clip = mul(prevViewProjection, float4(intersection.position, 1.0f));
-        float4 cur_clip = mul(viewProjection, float4(intersection.position, 1.0f));
-        float2 prev_uv = prev_clip.xy / prev_clip.w * 0.5f + 0.5f;
-        float2 cur_uv = cur_clip.xy / cur_clip.w * 0.5f + 0.5f;
-        motion = prev_uv - cur_uv;
+        motion = ScreenMotion(float4(intersection.position, 1.0f));
 
         // 2 = primary-hit emissive: terminal and deterministic (the accumulator equals it exactly),
         // so the NRD chain bypasses it instead of blurring its texture detail (see nrd_pack/nrd_resolve).
         float3 emissive = SampleEmissive(intersection.texCoord, mat_param);
         is_hit = dot(emissive, emissive) > Eps * Eps ? 2.f : 1.f;
+    }
+    else
+    {
+        // the sky lies at infinity, so only camera rotation moves it
+        motion = ScreenMotion(float4(ray_desc.Direction, 0.f));
     }
 
     gNormalDepth[pixel] = float4(normal, linear_z);
@@ -690,8 +700,8 @@ float3 ComputeFrameRadiance(uint2 pixel, uint seed, float2 pixel_size, out float
 
     for (uint i = 0; i < spp; i++)
     {
-        // anti-aliasing
-        float2 antialiasing_noise = float2(RandomUnit(), RandomUnit());
+        // anti-aliasing: a jittered frame samples one sub-pixel position, which the upscaler integrates over frames
+        float2 antialiasing_noise = jitter_enabled != 0 ? 0.5f + jitter : float2(RandomUnit(), RandomUnit());
         float2 uv = (float2(pixel.x, pixel.y) + antialiasing_noise) * pixel_size;
 
         // invert Y

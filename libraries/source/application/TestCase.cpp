@@ -52,11 +52,11 @@ TestCase::Result TestCase::Tick(AppFramework &app)
             Log(Error, "Test case '{}' requested sync validation, but it is not active", GetName());
             return Result::Fail;
         }
-        const auto error_count = app.GetRHI()->GetValidationErrorCount().value_or(0);
-        if (error_count > accepted_validation_errors_)
+        const auto issue_count = app.GetRHI()->GetValidationIssueCount().value_or(0);
+        if (issue_count > accepted_validation_issues_)
         {
-            Log(Error, "Test case '{}' got {} validation error(s)", GetName(),
-                error_count - accepted_validation_errors_);
+            Log(Error, "Test case '{}' got {} validation issue(s)", GetName(),
+                issue_count - accepted_validation_issues_);
             return Result::Fail;
         }
     }

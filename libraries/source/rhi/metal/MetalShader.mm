@@ -23,8 +23,8 @@ void MetalShader::Load()
 
     MTLCompileOptions *compile_option = [[MTLCompileOptions alloc] init];
 
-    // slang-emitted [[vertex]]/[[fragment]]/[[kernel]] attributes need MSL 2.3+; lower versions fail on every shader
-    compile_option.languageVersion = MTLLanguageVersion3_0;
+    // texture atomics, which the FSR passes use, need MSL 3.1
+    compile_option.languageVersion = MTLLanguageVersion3_1;
 
     NSError *error;
     NSString *shader_source = [NSString stringWithCString:shader_data.c_str() encoding:NSASCIIStringEncoding];

@@ -146,8 +146,8 @@ public:
     // whether a sampler with linear filtering may sample an image of the format
     virtual bool SupportsLinearFiltering(PixelFormat format) = 0;
 
-    // errors the API validation layer has reported so far; nullopt when no validation layer is active
-    [[nodiscard]] virtual std::optional<unsigned> GetValidationErrorCount() const
+    // errors and warnings the API validation layer has reported so far; nullopt when no validation layer is active
+    [[nodiscard]] virtual std::optional<unsigned> GetValidationIssueCount() const
     {
         return std::nullopt;
     }

@@ -29,10 +29,45 @@ file(GLOB_RECURSE SLANG_SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.vs.slang"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cs.slang"
 )
+if (NOT ENABLE_FSR)
+    list(FILTER SLANG_SOURCE_FILES EXCLUDE REGEX "/fsr/")
+    # the output directory outlives configurations, and the package copies all of it
+    file(REMOVE_RECURSE "${OUTPUT_SHADER_DIRECTORY}/fsr")
+endif()
 
 file(GLOB_RECURSE SLANG_INCLUDE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h.slang"
 )
+
+# the FSR 3.1 upscaler passes (shaders/fsr) compile AMD's HLSL. for SPIR-V, -preserve-params keeps every resource it
+# declares, so the bindings stay dense and match the passes' resource tables even where an option leaves one unused.
+# it needs -O0: slang's SPIR-V optimizer strips unused resources regardless, and the driver optimizes the shaders anyway.
+# Metal binds by name and needs no density, and slangc crashes on -preserve-params for the metal target.
+set(FFX_SHADER_DIRECTORY ${CMAKE_SOURCE_DIR}/thirdparty/FidelityFX)
+file(GLOB_RECURSE FFX_SHADER_FILES CONFIGURE_DEPENDS
+    "${FFX_SHADER_DIRECTORY}/api/internal/gpu/*.h"
+    "${FFX_SHADER_DIRECTORY}/upscalers/fsr3/include/gpu/*.h"
+    "${FFX_SHADER_DIRECTORY}/*.hlsl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fsr/*.h.slang"
+)
+set(FFX_SLANGC_FLAGS -I ${FFX_SHADER_DIRECTORY}/upscalers/fsr3/internal/shaders
+    -I ${FFX_SHADER_DIRECTORY}/upscalers/fsr3/include/gpu)
+
+# extra slangc flags of the shaders in one subdirectory, for every target and for SPIR-V alone, and their dependencies
+macro(get_shader_directory_flags SUB_PATH_NAME)
+    set(SLANG_DIRECTORY_FLAGS)
+    set(SLANG_DIRECTORY_SPIRV_FLAGS)
+    set(SLANG_DIRECTORY_DEPENDS)
+    if ("${SUB_PATH_NAME}" STREQUAL "ray_trace")
+        # ray query is not part of the base profile, so slang upgrades the profile itself and warns.
+        # requesting the capability explicitly emits the same SPIR-V without the warning.
+        set(SLANG_DIRECTORY_SPIRV_FLAGS -capability spvRayQueryKHR)
+    elseif ("${SUB_PATH_NAME}" STREQUAL "fsr")
+        set(SLANG_DIRECTORY_FLAGS ${FFX_SLANGC_FLAGS})
+        set(SLANG_DIRECTORY_SPIRV_FLAGS -preserve-params -O0)
+        set(SLANG_DIRECTORY_DEPENDS ${FFX_SHADER_FILES})
+    endif()
+endmacro()
 
 # shader variants as <source>:<DEFINE>. a variant compiles its source with -D<DEFINE>=1 into <source>.<DEFINE>.spv (and
 # .metal) next to the base variant; RHIContext::CreateShader<T>("<DEFINE>") loads it.
@@ -87,23 +122,18 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
         message(FATAL_ERROR "Invalid shader file name, please provide a valid shader type (vs, ps, cs): " ${SLANG})
     endif()
 
-    # ray query is not part of the base profile, so slang upgrades the profile itself and warns.
-    # requesting the capability explicitly emits the same SPIR-V without the warning.
     cmake_path(GET SLANG PARENT_PATH SLANG_PARENT_PATH)
     cmake_path(GET SLANG_PARENT_PATH FILENAME SLANG_SUB_PATH_NAME)
-    set(SLANG_CAPABILITIES)
-    if (SLANG_SUB_PATH_NAME STREQUAL "ray_trace")
-        set(SLANG_CAPABILITIES -capability spvRayQueryKHR)
-    endif()
+    get_shader_directory_flags(${SLANG_SUB_PATH_NAME})
 
     foreach(DEFINE "" ${VARIANT_DEFINES})
         get_shader_variant_flags("${DEFINE}")
         set(SPIRV "${OUTPUT_SHADER_DIRECTORY}/${FILE_PATH_RELATIVE}${VARIANT_SUFFIX}.spv")
         add_custom_command(
             OUTPUT ${SPIRV}
-            COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}
-            COMMENT "Compiling ${SHADER_NAME}${VARIANT_SUFFIX} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_CAPABILITIES}"
-            DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC}
+            COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_DIRECTORY_FLAGS} ${SLANG_DIRECTORY_SPIRV_FLAGS}
+            COMMENT "Compiling ${SHADER_NAME}${VARIANT_SUFFIX} to SPIRV: ${SLANGC} ${SLANG} -target spirv -o ${SPIRV} -entry shader_main ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -profile spirv_1_3 ${SLANG_DIRECTORY_FLAGS} ${SLANG_DIRECTORY_SPIRV_FLAGS}"
+            DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC} ${SLANG_DIRECTORY_DEPENDS}
         )
         list(APPEND ALL_SPIRV_OUTPUTS ${SPIRV})
     endforeach()
@@ -139,6 +169,7 @@ if (ENABLE_METAL)
 
         cmake_path(GET SLANG PARENT_PATH PATH_NAME)
         cmake_path(GET PATH_NAME FILENAME SUB_PATH_NAME)
+        get_shader_directory_flags(${SUB_PATH_NAME})
         if (SUB_PATH_NAME STREQUAL "ray_trace")
             # ray trace shaders need bindless
             set(SPIRV_CROSS_FLAGS ${SPIRV_CROSS_FLAGS} --msl-argument-buffer-tier 2 --msl-texture-buffer-native)
@@ -158,9 +189,9 @@ if (ENABLE_METAL)
             else()
                 add_custom_command(
                     OUTPUT ${MSL}
-                    COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include
-                    COMMENT "Compiling ${SHADER_NAME}${VARIANT_SUFFIX} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include"
-                    DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC}
+                    COMMAND ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include ${SLANG_DIRECTORY_FLAGS}
+                    COMMENT "Compiling ${SHADER_NAME}${VARIANT_SUFFIX} to Metal: ${SLANGC} ${SLANG} -target metal -o ${MSL} -entry shader_main -stage ${STAGE} ${SLANGC_FLAGS} ${SHADER_DEFINES} ${VARIANT_FLAG} -I ${CMAKE_CURRENT_SOURCE_DIR}/include ${SLANG_DIRECTORY_FLAGS}"
+                    DEPENDS ${SLANG} ${SLANG_INCLUDE_FILES} ${SLANGC} ${SLANG_DIRECTORY_DEPENDS}
                 )
             endif()
             list(APPEND ALL_MTL_OUTPUTS ${MSL})

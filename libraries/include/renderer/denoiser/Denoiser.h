@@ -39,16 +39,21 @@ struct DenoiserFrameData
     float far_plane = 0.f;
     // seconds since the previous frame
     float delta_time = 0.f;
+    // the sub-pixel offset the frame's inputs were sampled at, in pixels
+    Vector2 jitter = Vector2::Zero();
     uint32_t accumulated_samples = 0;
     uint32_t maximum_samples = 0;
     bool reset_history = false;
     bool final_frame = false;
+    // an upscaler follows and stabilizes the output over time, so the denoiser leaves that to it
+    bool upscaled = false;
 };
 
 // One denoising provider for the GPU path tracer. The provider-neutral path-tracing inputs are
 // borrowed for each frame's pass; an implementation owns only its own resources. Providers whose
 // implementation needs a platform API live with that backend (see MetalFxDenoiser) but still
-// implement this renderer-level interface, so GPURenderer treats every provider alike.
+// implement this renderer-level interface, so GPURenderer treats every provider alike. A provider
+// that also upscales (MetalFX) outputs at output size; the others output at input size.
 class Denoiser
 {
 public:

@@ -15,6 +15,7 @@
 #include <array>
 #include <format>
 #include <span>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -41,17 +42,25 @@ static VkResult CreateDebugUtilsMessengerExt(VkInstance instance, const VkDebugU
     return VK_ERROR_EXTENSION_NOT_PRESENT;
 }
 
+// MoltenVK 1.4.2 reports every attachment whose format cannot blend, even with blending disabled
+static bool IsKnownFalsePositive(std::string_view message)
+{
+    return message.find("Blending is enabled for attachment with format") != std::string_view::npos;
+}
+
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                                     VkDebugUtilsMessageTypeFlagsEXT messageType,
                                                     const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, // NOLINT
                                                     void *pUserData)
 {
+    if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT &&
+        messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT && !IsKnownFalsePositive(pCallbackData->pMessage))
+    {
+        static_cast<std::atomic<unsigned> *>(pUserData)->fetch_add(1, std::memory_order_relaxed);
+    }
+
     if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
-        if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT)
-        {
-            static_cast<std::atomic<unsigned> *>(pUserData)->fetch_add(1, std::memory_order_relaxed);
-        }
         Log(Error, "validation error! {}", pCallbackData->pMessage);
     }
     else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
@@ -70,7 +79,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityF
 }
 
 static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo,
-                                             std::atomic<unsigned> &error_count)
+                                             std::atomic<unsigned> &issue_count)
 {
     createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -81,7 +90,7 @@ static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT 
                              VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = DebugCallback;
-    createInfo.pUserData = &error_count;
+    createInfo.pUserData = &issue_count;
 }
 
 static void DestroyDebugUtilsMessengerExt(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger,
@@ -269,7 +278,7 @@ void VulkanContext::SetupDebugMessenger()
     }
 
     VkDebugUtilsMessengerCreateInfoEXT create_info;
-    PopulateDebugMessengerCreateInfo(create_info, validation_error_count_);
+    PopulateDebugMessengerCreateInfo(create_info, validation_issue_count_);
 
     CHECK_VK_ERROR(CreateDebugUtilsMessengerExt(instance_, &create_info, nullptr, &debug_messenger_));
 }

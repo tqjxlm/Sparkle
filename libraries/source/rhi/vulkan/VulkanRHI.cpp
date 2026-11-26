@@ -211,9 +211,9 @@ std::optional<uint32_t> VulkanRHI::GetTileBudget()
     return std::nullopt;
 }
 
-std::optional<unsigned> VulkanRHI::GetValidationErrorCount() const
+std::optional<unsigned> VulkanRHI::GetValidationIssueCount() const
 {
-    return context->GetValidationErrorCount();
+    return context->GetValidationIssueCount();
 }
 
 bool VulkanRHI::IsSyncValidationActive() const
